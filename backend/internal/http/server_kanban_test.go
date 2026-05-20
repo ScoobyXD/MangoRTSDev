@@ -3,10 +3,13 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -499,5 +502,114 @@ func TestKanbanCardAPIUsesNodeOnlyCardsAndRemovesQueryEndpoint(t *testing.T) {
 	}
 	if moved.ColumnID != doneColumnID || moved.NodeTitle != "Alpha task" {
 		t.Fatalf("moved card = %+v, want column changed without metadata fields", moved)
+	}
+}
+
+type appendForbiddenKanbanRepo struct {
+	*store.MemoryRepo
+	appendCalls int
+}
+
+func (r *appendForbiddenKanbanRepo) AppendDomainEvent(input store.DomainEventInput) (domain.DomainEvent, error) {
+	r.appendCalls++
+	return domain.DomainEvent{}, errors.New("legacy append forbidden")
+}
+
+type failingKanbanCardWorkspaceEventRepo struct {
+	*store.MemoryRepo
+	err error
+}
+
+func (r *failingKanbanCardWorkspaceEventRepo) UpsertKanbanCardWithWorkspaceEvent(input store.KanbanCardMutationInput) (store.KanbanCardWorkspaceEventResult, error) {
+	return store.KanbanCardWorkspaceEventResult{}, r.err
+}
+
+func TestKanbanHTTPPublishesCommittedWorkspaceEventsWithoutLegacyAppend(t *testing.T) {
+	repo := &appendForbiddenKanbanRepo{MemoryRepo: store.NewMemoryRepo()}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "14141414-1414-4141-8141-141414141414"
+	boardID := "http-committed-kanban-events"
+
+	stream := server.hub.subscribe(companyID)
+	defer server.hub.unsubscribe(companyID, stream)
+
+	columnBody, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": boardID, "title": "Ready"})
+	columnReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(columnBody))
+	columnReq.Header.Set("Content-Type", "application/json")
+	columnRec := httptest.NewRecorder()
+	handler.ServeHTTP(columnRec, columnReq)
+	if columnRec.Code != http.StatusCreated {
+		t.Fatalf("POST kanban column status = %d body=%s", columnRec.Code, columnRec.Body.String())
+	}
+	var column struct {
+		ColumnID string `json:"column_id"`
+	}
+	if err := json.NewDecoder(columnRec.Body).Decode(&column); err != nil {
+		t.Fatalf("decode column: %v", err)
+	}
+	columnEvent := readWorkspaceEventForTest(t, stream)
+	if columnEvent.Type != "kanban_column_created" || columnEvent.Data["board_id"] != boardID || columnEvent.Data["column_id"] != column.ColumnID {
+		t.Fatalf("column event = %+v", columnEvent)
+	}
+	if repo.appendCalls != 0 {
+		t.Fatalf("HTTP called legacy AppendDomainEvent %d times, want committed-event publish only", repo.appendCalls)
+	}
+
+	node, err := repo.CreateNode(companyID, "HTTP committed event node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	cardBody, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": boardID, "column_id": column.ColumnID, "node_id": node.NodeID, "node_title": node.Title})
+	cardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(cardBody))
+	cardReq.Header.Set("Content-Type", "application/json")
+	cardRec := httptest.NewRecorder()
+	handler.ServeHTTP(cardRec, cardReq)
+	if cardRec.Code != http.StatusCreated {
+		t.Fatalf("POST kanban card status = %d body=%s", cardRec.Code, cardRec.Body.String())
+	}
+	var card struct {
+		CardID string `json:"card_id"`
+	}
+	if err := json.NewDecoder(cardRec.Body).Decode(&card); err != nil {
+		t.Fatalf("decode card: %v", err)
+	}
+	cardEvent := readWorkspaceEventForTest(t, stream)
+	if cardEvent.Type != "kanban_card_upserted" || cardEvent.Data["board_id"] != boardID || cardEvent.Data["card_id"] != card.CardID {
+		t.Fatalf("card event = %+v", cardEvent)
+	}
+	if repo.appendCalls != 0 {
+		t.Fatalf("HTTP called legacy AppendDomainEvent %d times, want committed-event publish only", repo.appendCalls)
+	}
+
+	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	if len(durable) != 2 || durable[0].Type != "kanban_column_created" || durable[1].Type != "kanban_card_upserted" {
+		t.Fatalf("durable events = %+v, want committed column/card events", durable)
+	}
+}
+
+func TestKanbanHTTPDoesNotPublishHubEventWhenAtomicMutationFails(t *testing.T) {
+	companyID := "15151515-1515-4151-8151-151515151515"
+	repo := &failingKanbanCardWorkspaceEventRepo{MemoryRepo: store.NewMemoryRepo(), err: errors.New("commit failed")}
+	server := NewServer(repo)
+	stream := server.hub.subscribe(companyID)
+	defer server.hub.unsubscribe(companyID, stream)
+
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": "board", "column_id": "column", "node_id": "node", "node_title": "node"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("POST kanban card status = %d body=%s, want 500", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case payload := <-stream:
+		t.Fatalf("hub published payload for failed atomic Kanban mutation: %s", string(payload))
+	case <-time.After(100 * time.Millisecond):
 	}
 }

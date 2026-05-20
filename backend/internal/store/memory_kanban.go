@@ -965,3 +965,361 @@ func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
 	}
 	return nil
 }
+
+type memoryKanbanWorkspaceEventSnapshot struct {
+	nodes                    map[string]domain.Node
+	folderItems              map[string]domain.CompanyExplorerFolderItem
+	kanbanBoards             map[string]domain.KanbanBoard
+	kanbanColumns            map[string][]domain.KanbanColumn
+	kanbanCards              map[string][]domain.KanbanCard
+	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
+	workItemInboxEntries     map[string]memoryWorkItemInboxEntry
+	domainEvents             map[string]domain.DomainEvent
+	workspaceReadVersions    map[string]int64
+}
+
+func (r *MemoryRepo) snapshotKanbanWorkspaceEventStateLocked() memoryKanbanWorkspaceEventSnapshot {
+	return memoryKanbanWorkspaceEventSnapshot{
+		nodes:                    cloneMemoryMap(r.nodes),
+		folderItems:              cloneMemoryMap(r.folderItems),
+		kanbanBoards:             cloneMemoryMap(r.kanbanBoards),
+		kanbanColumns:            cloneMemorySliceMap(r.kanbanColumns),
+		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
+		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
+		workItemInboxEntries:     cloneMemoryMap(r.workItemInboxEntries),
+		domainEvents:             cloneMemoryMap(r.domainEvents),
+		workspaceReadVersions:    cloneMemoryMap(r.workspaceReadVersions),
+	}
+}
+
+func (r *MemoryRepo) restoreKanbanWorkspaceEventStateLocked(snapshot memoryKanbanWorkspaceEventSnapshot) {
+	r.nodes = snapshot.nodes
+	r.folderItems = snapshot.folderItems
+	r.kanbanBoards = snapshot.kanbanBoards
+	r.kanbanColumns = snapshot.kanbanColumns
+	r.kanbanCards = snapshot.kanbanCards
+	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
+	r.workItemInboxEntries = snapshot.workItemInboxEntries
+	r.domainEvents = snapshot.domainEvents
+	r.workspaceReadVersions = snapshot.workspaceReadVersions
+}
+
+func (r *MemoryRepo) kanbanDerivedNodeLocked(card domain.KanbanCard) *domain.Node {
+	if card.LogicGateID == nil {
+		return nil
+	}
+	node, ok := r.nodes[key(card.CompanyID, card.NodeID)]
+	if !ok {
+		return nil
+	}
+	derived := r.withNodeReadModelLocked(node)
+	return &derived
+}
+
+func (r *MemoryRepo) CreateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	if boardID == "" {
+		boardID = newUUIDv7String()
+	}
+	k := boardKey(companyID, boardID)
+	var item domain.KanbanBoard
+	if existing, ok := r.kanbanBoards[k]; ok {
+		if existing.LogicGateID != nil {
+			if logicGate, ok := r.logicGates[key(companyID, *existing.LogicGateID)]; ok {
+				existing.Title = normalizeKanbanBoardTitle(boardID, logicGate.Header)
+			}
+		} else if strings.TrimSpace(title) != "" {
+			existing.Title = normalizeKanbanBoardTitle(boardID, title)
+		}
+		if position > 0 {
+			existing.Position = position
+		}
+		existing.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanBoards[k] = existing
+		item = existing
+	} else {
+		if position <= 0 {
+			position = nextKanbanBoardPosition(r.kanbanBoards, companyID)
+		}
+		now := time.Now().UTC()
+		item = domain.KanbanBoard{
+			CompanyID:        companyID,
+			BoardID:          boardID,
+			LogicGateID:      nil,
+			Title:            normalizeKanbanBoardTitle(boardID, title),
+			Position:         position,
+			CreatedTimestamp: now,
+			UpdatedTimestamp: now,
+		}
+		r.kanbanBoards[k] = item
+	}
+	event, err := r.appendDomainEventLocked(kanbanBoardSavedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	return KanbanBoardWorkspaceEventResult{Board: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *MemoryRepo) UpdateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	k := boardKey(companyID, boardID)
+	item, ok := r.kanbanBoards[k]
+	if !ok {
+		return KanbanBoardWorkspaceEventResult{}, ErrNotFound
+	}
+	if item.LogicGateID != nil {
+		if logicGate, ok := r.logicGates[key(companyID, *item.LogicGateID)]; ok {
+			item.Title = normalizeKanbanBoardTitle(boardID, logicGate.Header)
+		}
+	} else if strings.TrimSpace(title) != "" {
+		item.Title = normalizeKanbanBoardTitle(boardID, title)
+	}
+	if position > 0 {
+		item.Position = position
+	}
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.kanbanBoards[k] = item
+	event, err := r.appendDomainEventLocked(kanbanBoardUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	return KanbanBoardWorkspaceEventResult{Board: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *MemoryRepo) DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID string) (KanbanWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	if err := r.deleteKanbanBoardLocked(companyID, boardID); err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanWorkspaceEventResult{}, err
+	}
+	event, err := r.appendDomainEventLocked(kanbanBoardDeletedWorkspaceEventInput(companyID, boardID))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanWorkspaceEventResult{}, err
+	}
+	return KanbanWorkspaceEventResult{Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *MemoryRepo) CreateKanbanColumnWithWorkspaceEvent(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	k := boardKey(companyID, boardID)
+	r.ensureKanbanBoardLocked(companyID, boardID, boardID)
+	if position <= 0 {
+		position = nextKanbanColumnPosition(r.kanbanColumns[k])
+	}
+	now := time.Now().UTC()
+	item := domain.KanbanColumn{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		ColumnID:         newUUIDv7String(),
+		Title:            title,
+		Position:         position,
+		WidthPx:          normalizeKanbanColumnWidth(widthPx),
+		HeightPx:         normalizeKanbanColumnHeight(heightPx),
+		ItemColor:        normalizeKanbanColumnItemColor(itemColor),
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.kanbanColumns[k] = append(r.kanbanColumns[k], item)
+	event, err := r.appendDomainEventLocked(kanbanColumnCreatedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	return KanbanColumnWorkspaceEventResult{Column: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *MemoryRepo) UpdateKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	k := boardKey(companyID, boardID)
+	for index, column := range r.kanbanColumns[k] {
+		if column.ColumnID != columnID {
+			continue
+		}
+		if title != "" {
+			column.Title = title
+		}
+		if position > 0 {
+			column.Position = position
+		}
+		if widthPx > 0 {
+			column.WidthPx = normalizeKanbanColumnWidth(widthPx)
+		}
+		if heightPx > 0 {
+			column.HeightPx = normalizeKanbanColumnHeight(heightPx)
+		}
+		if strings.TrimSpace(itemColor) != "" {
+			column.ItemColor = normalizeKanbanColumnItemColor(itemColor)
+		}
+		column.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanColumns[k][index] = column
+		event, err := r.appendDomainEventLocked(kanbanColumnUpdatedWorkspaceEventInput(column))
+		if err != nil {
+			r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+			return KanbanColumnWorkspaceEventResult{}, err
+		}
+		return KanbanColumnWorkspaceEventResult{Column: column, Events: []domain.DomainEvent{event}}, nil
+	}
+	return KanbanColumnWorkspaceEventResult{}, ErrNotFound
+}
+
+func (r *MemoryRepo) DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID string) (KanbanWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	k := boardKey(companyID, boardID)
+	columns := r.kanbanColumns[k]
+	found := false
+	for _, column := range columns {
+		if column.ColumnID == columnID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return KanbanWorkspaceEventResult{}, ErrNotFound
+	}
+	for _, card := range r.kanbanCards[k] {
+		if card.ColumnID == columnID && card.LogicGateID != nil {
+			return KanbanWorkspaceEventResult{}, ErrInvalid
+		}
+	}
+	nextColumns := make([]domain.KanbanColumn, 0, len(columns))
+	for _, column := range columns {
+		if column.ColumnID != columnID {
+			nextColumns = append(nextColumns, column)
+		}
+	}
+	r.kanbanColumns[k] = nextColumns
+	nextCards := make([]domain.KanbanCard, 0, len(r.kanbanCards[k]))
+	for _, card := range r.kanbanCards[k] {
+		if card.ColumnID != columnID {
+			nextCards = append(nextCards, card)
+		}
+	}
+	r.kanbanCards[k] = nextCards
+	event, err := r.appendDomainEventLocked(kanbanColumnDeletedWorkspaceEventInput(companyID, boardID, columnID))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanWorkspaceEventResult{}, err
+	}
+	return KanbanWorkspaceEventResult{Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *MemoryRepo) UpsertKanbanCardWithWorkspaceEvent(input KanbanCardMutationInput) (KanbanCardWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	card, err := r.upsertKanbanCardLocked(input)
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	derivedNode := r.kanbanDerivedNodeLocked(card)
+	events, err := r.appendDomainEventsLocked(kanbanCardMutationWorkspaceEventInputs("kanban_card_upserted", card, derivedNode, true))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	return KanbanCardWorkspaceEventResult{Card: card, DerivedNode: derivedNode, Events: events}, nil
+}
+
+func (r *MemoryRepo) MoveKanbanCardWithWorkspaceEvent(input KanbanCardMoveInput) (KanbanCardWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	if input.ColumnID != "" && !r.kanbanColumnExistsLocked(input.CompanyID, input.BoardID, input.ColumnID) {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+	k := boardKey(input.CompanyID, input.BoardID)
+	if input.ColumnID != "" && input.Position <= 0 {
+		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
+	}
+	for index, card := range r.kanbanCards[k] {
+		if card.CardID != input.CardID {
+			continue
+		}
+		now := time.Now().UTC()
+		if input.ColumnID != "" {
+			card.ColumnID = input.ColumnID
+		}
+		if node, ok := r.nodes[key(input.CompanyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
+			card.NodeTitle = node.Title
+		}
+		if input.Position > 0 {
+			card.Position = input.Position
+		}
+		if input.IsIssue != nil {
+			card.IsIssue = *input.IsIssue
+		}
+		card.UpdatedTimestamp = now
+		r.kanbanCards[k][index] = card
+		if card.LogicGateID != nil {
+			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		}
+		r.syncNodeStatusFromKanbanCardLocked(card)
+		derivedNode := r.kanbanDerivedNodeLocked(card)
+		events, err := r.appendDomainEventsLocked(kanbanCardMutationWorkspaceEventInputs("kanban_card_moved", card, derivedNode, true))
+		if err != nil {
+			r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+		return KanbanCardWorkspaceEventResult{Card: card, DerivedNode: derivedNode, Events: events}, nil
+	}
+	return KanbanCardWorkspaceEventResult{}, ErrNotFound
+}
+
+func (r *MemoryRepo) DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID string) (KanbanCardWorkspaceEventResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshot := r.snapshotKanbanWorkspaceEventStateLocked()
+	k := boardKey(companyID, boardID)
+	cards := r.kanbanCards[k]
+	next := make([]domain.KanbanCard, 0, len(cards))
+	deleted := false
+	var deletedCard domain.KanbanCard
+	for _, card := range cards {
+		if card.CardID == cardID {
+			deleted = true
+			deletedCard = card
+			continue
+		}
+		next = append(next, card)
+	}
+	if !deleted {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+	r.kanbanCards[k] = next
+	if deletedCard.LogicGateID != nil {
+		r.deleteNodeLogicGateAssignmentForCardLocked(deletedCard)
+		r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(companyID, deletedCard.NodeID, nil, nil)
+	}
+	derivedNode := r.kanbanDerivedNodeLocked(deletedCard)
+	events, err := r.appendDomainEventsLocked(kanbanCardMutationWorkspaceEventInputs("kanban_card_deleted", deletedCard, derivedNode, false))
+	if err != nil {
+		r.restoreKanbanWorkspaceEventStateLocked(snapshot)
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	return KanbanCardWorkspaceEventResult{Card: deletedCard, DerivedNode: derivedNode, Events: events}, nil
+}

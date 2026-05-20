@@ -1307,3 +1307,570 @@ where company_id=$1 and node_id=$2`, companyID, card.NodeID); err != nil {
 	}
 	return tx.Commit()
 }
+
+func kanbanDerivedNodeTx(ctx context.Context, tx *sql.Tx, card domain.KanbanCard) (*domain.Node, error) {
+	if card.LogicGateID == nil {
+		return nil, nil
+	}
+	node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, card.CompanyID, card.NodeID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
+func (r *PostgresRepo) appendKanbanCardWorkspaceEventsTx(ctx context.Context, tx *sql.Tx, eventType string, card domain.KanbanCard, includeCard bool) (*domain.Node, []domain.DomainEvent, error) {
+	derivedNode, err := kanbanDerivedNodeTx(ctx, tx, card)
+	if err != nil {
+		return nil, nil, err
+	}
+	events, err := r.appendDomainEventsTx(ctx, tx, kanbanCardMutationWorkspaceEventInputs(eventType, card, derivedNode, includeCard))
+	if err != nil {
+		return nil, nil, err
+	}
+	return derivedNode, events, nil
+}
+
+func (r *PostgresRepo) CreateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	if boardID == "" {
+		boardID = newUUIDv7String()
+	}
+	positionWasProvided := position > 0
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_boards
+where company_id=$1`, companyID).Scan(&position); err != nil {
+			return KanbanBoardWorkspaceEventResult{}, err
+		}
+	}
+	item, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
+insert into kanban_boards (company_id, board_id, title, position, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, now(), now())
+on conflict (company_id, board_id)
+do update set
+  title=case
+    when kanban_boards.logic_gate_id is not null then coalesce((
+      select header from logic_gates
+      where company_id=kanban_boards.company_id and logic_gate_id=kanban_boards.logic_gate_id
+    ), kanban_boards.title)
+    else excluded.title
+  end,
+  position=case when $5 then excluded.position else kanban_boards.position end,
+  updated_timestamp=now()
+returning company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp`,
+		companyID, boardID, normalizeKanbanBoardTitle(boardID, title), position, positionWasProvided,
+	))
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanBoardSavedWorkspaceEventInput(item))
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	return KanbanBoardWorkspaceEventResult{Board: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) UpdateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	item, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
+update kanban_boards
+set title=case
+      when logic_gate_id is not null then coalesce((
+        select header from logic_gates
+        where company_id=kanban_boards.company_id and logic_gate_id=kanban_boards.logic_gate_id
+      ), title)
+      else coalesce(nullif($3, ''), title)
+    end,
+    position=case when $4 > 0 then $4 else position end,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2
+returning company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp`,
+		companyID, boardID, strings.TrimSpace(title), position,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KanbanBoardWorkspaceEventResult{}, ErrNotFound
+	}
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanBoardUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanBoardWorkspaceEventResult{}, err
+	}
+	return KanbanBoardWorkspaceEventResult{Board: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID string) (KanbanWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	var attachedLogicGateID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&attachedLogicGateID); errors.Is(err, sql.ErrNoRows) {
+		return KanbanWorkspaceEventResult{}, ErrNotFound
+	} else if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if attachedLogicGateID.Valid {
+		return KanbanWorkspaceEventResult{}, ErrInvalid
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+delete from company_explorer_folder_items
+where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_columns
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	deleted, err := tx.ExecContext(ctx, `
+delete from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID)
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if affected == 0 {
+		return KanbanWorkspaceEventResult{}, ErrNotFound
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanBoardDeletedWorkspaceEventInput(companyID, boardID))
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	return KanbanWorkspaceEventResult{Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) CreateKanbanColumnWithWorkspaceEvent(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	if err := ensureKanbanBoardSQL(ctx, tx, companyID, boardID, boardID); err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_columns
+where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&position); err != nil {
+			return KanbanColumnWorkspaceEventResult{}, err
+		}
+	}
+	widthPx = normalizeKanbanColumnWidth(widthPx)
+	heightPx = normalizeKanbanColumnHeight(heightPx)
+	itemColor = normalizeKanbanColumnItemColor(itemColor)
+	item, err := scanKanbanColumn(tx.QueryRowContext(ctx, `
+insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+returning company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp`,
+		companyID, boardID, newUUIDv7String(), title, position, widthPx, heightPx, itemColor,
+	))
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanColumnCreatedWorkspaceEventInput(item))
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	return KanbanColumnWorkspaceEventResult{Column: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) UpdateKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	if widthPx > 0 {
+		widthPx = normalizeKanbanColumnWidth(widthPx)
+	}
+	if heightPx > 0 {
+		heightPx = normalizeKanbanColumnHeight(heightPx)
+	}
+	if strings.TrimSpace(itemColor) != "" {
+		itemColor = normalizeKanbanColumnItemColor(itemColor)
+	}
+	item, err := scanKanbanColumn(tx.QueryRowContext(ctx, `
+update kanban_columns
+set title=coalesce(nullif($4, ''), title),
+    position=case when $5 > 0 then $5 else position end,
+    width_px=case when $6 > 0 then $6 else width_px end,
+    height_px=case when $7 > 0 then $7 else height_px end,
+    item_color=coalesce(nullif($8, ''), item_color),
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and column_id=$3
+returning company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp`,
+		companyID, boardID, columnID, title, position, widthPx, heightPx, itemColor,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KanbanColumnWorkspaceEventResult{}, ErrNotFound
+	}
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanColumnUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanColumnWorkspaceEventResult{}, err
+	}
+	return KanbanColumnWorkspaceEventResult{Column: item, Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID string) (KanbanWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	var hasAssignment bool
+	if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from node_logic_gate_assignments
+  where company_id=$1
+    and compatibility_board_id=$2
+    and column_id=$3
+)`, companyID, boardID, columnID).Scan(&hasAssignment); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if hasAssignment {
+		return KanbanWorkspaceEventResult{}, ErrInvalid
+	}
+	result, err := tx.ExecContext(ctx, `
+delete from kanban_columns
+where company_id=$1 and board_id=$2 and column_id=$3`,
+		companyID, boardID, columnID,
+	)
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if affected == 0 {
+		return KanbanWorkspaceEventResult{}, ErrNotFound
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, kanbanColumnDeletedWorkspaceEventInput(companyID, boardID, columnID))
+	if err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanWorkspaceEventResult{}, err
+	}
+	return KanbanWorkspaceEventResult{Events: []domain.DomainEvent{event}}, nil
+}
+
+func (r *PostgresRepo) UpsertKanbanCardWithWorkspaceEvent(input KanbanCardMutationInput) (KanbanCardWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+	if err := ensureKanbanBoardSQL(ctx, tx, input.CompanyID, input.BoardID, input.BoardID); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+
+	var boardLogicGateID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kanban_boards
+where company_id=$1 and board_id=$2`,
+		input.CompanyID, input.BoardID).Scan(&boardLogicGateID); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+
+	var columnExists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
+		input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnExists); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if !columnExists {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+
+	var canonicalNodeTitle string
+	if err := tx.QueryRowContext(ctx, `
+select title
+from nodes
+where company_id=$1 and node_id=$2`,
+		input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return KanbanCardWorkspaceEventResult{}, ErrNotFound
+		}
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+
+	if input.Position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.BoardID, input.ColumnID).Scan(&input.Position); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+
+	nodeTitle := strings.TrimSpace(canonicalNodeTitle)
+	if nodeTitle == "" {
+		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
+	}
+	descriptionSnapshot := strings.TrimSpace(input.DescriptionSnapshot)
+	if boardLogicGateID.Valid {
+		if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1
+  and node_id=$2
+  and board_id<>$3
+  and logic_gate_id is not null`,
+			input.CompanyID, input.NodeID, input.BoardID); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+
+	issueValue := false
+	if input.IsIssueSet {
+		issueValue = input.IsIssue
+	}
+	var item domain.KanbanCard
+	item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set column_id=$4,
+    logic_gate_id=$5::uuid,
+    node_title=$6,
+    description_snapshot=case when $7 <> '' then $7 else description_snapshot end,
+    position=$8,
+    is_issue=case when $9 then $10 else is_issue end,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and node_id=$3
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, input.BoardID, input.NodeID, input.ColumnID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position, input.IsIssueSet, issueValue,
+	))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		cardID := strings.TrimSpace(input.CardID)
+		if cardID == "" {
+			cardID = newUUIDv7String()
+		}
+		item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+insert into kanban_cards (
+  company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
+  description_snapshot, is_issue, position, created_timestamp, updated_timestamp
+) values ($1,$2,$3,$4,$5,$6::uuid,$7,$8,$9,$10,now(),now())
+returning `+kanbanCardSelectColumns,
+			input.CompanyID, input.BoardID, cardID, input.ColumnID,
+			input.NodeID, boardLogicGateID, nodeTitle, descriptionSnapshot, issueValue, input.Position,
+		))
+		if err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+	if item.LogicGateID != nil {
+		if _, err := syncNodeLogicGateAssignmentFromCardSQL(ctx, tx, item); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if item.LogicGateID != nil {
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, item.CompanyID, *item.LogicGateID, item.NodeID); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+	derivedNode, events, err := r.appendKanbanCardWorkspaceEventsTx(ctx, tx, "kanban_card_upserted", item, true)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	return KanbanCardWorkspaceEventResult{Card: item, DerivedNode: derivedNode, Events: events}, nil
+}
+
+func (r *PostgresRepo) MoveKanbanCardWithWorkspaceEvent(input KanbanCardMoveInput) (KanbanCardWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	if input.ColumnID != "" {
+		var columnExists bool
+		if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
+			input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnExists); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+		if !columnExists {
+			return KanbanCardWorkspaceEventResult{}, ErrNotFound
+		}
+	}
+	if input.ColumnID != "" && input.Position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.BoardID, input.ColumnID).Scan(&input.Position); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+
+	issueValue := false
+	if input.IsIssue != nil {
+		issueValue = *input.IsIssue
+	}
+	item, err := scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set column_id=coalesce(nullif($4, '')::uuid, column_id),
+    node_title=coalesce((select title from nodes where company_id=$1 and node_id=kanban_cards.node_id), node_title),
+    position=case when $5 > 0 then $5 else position end,
+    is_issue=case when $6 then $7 else is_issue end,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and card_id=$3
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, input.BoardID, input.CardID, input.ColumnID, input.Position, input.IsIssue != nil, issueValue,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if item.LogicGateID != nil {
+		if _, err := syncNodeLogicGateAssignmentFromCardSQL(ctx, tx, item); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	derivedNode, events, err := r.appendKanbanCardWorkspaceEventsTx(ctx, tx, "kanban_card_moved", item, true)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	return KanbanCardWorkspaceEventResult{Card: item, DerivedNode: derivedNode, Events: events}, nil
+}
+
+func (r *PostgresRepo) DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID string) (KanbanCardWorkspaceEventResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	defer tx.Rollback()
+
+	card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
+select `+kanbanCardSelectColumns+`
+from kanban_cards
+where company_id=$1 and board_id=$2 and card_id=$3`, companyID, boardID, cardID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if err := deleteNodeLogicGateAssignmentForCardSQL(ctx, tx, card); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	result, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1 and board_id=$2 and card_id=$3`,
+		companyID, boardID, cardID,
+	)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if affected == 0 {
+		return KanbanCardWorkspaceEventResult{}, ErrNotFound
+	}
+	if card.LogicGateID != nil {
+		if _, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, companyID, card.NodeID, ""); errors.Is(err, ErrNotFound) {
+			if _, err := tx.ExecContext(ctx, `
+update nodes
+set status=null,
+    status_color=null
+where company_id=$1 and node_id=$2`, companyID, card.NodeID); err != nil {
+				return KanbanCardWorkspaceEventResult{}, err
+			}
+		} else if err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
+	derivedNode, events, err := r.appendKanbanCardWorkspaceEventsTx(ctx, tx, "kanban_card_deleted", card, false)
+	if err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KanbanCardWorkspaceEventResult{}, err
+	}
+	return KanbanCardWorkspaceEventResult{Card: card, DerivedNode: derivedNode, Events: events}, nil
+}

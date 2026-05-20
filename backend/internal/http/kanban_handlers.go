@@ -70,14 +70,6 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 	return query, true, ""
 }
 
-func (s *Server) publishKanbanDerivedNodeUpdate(companyID, nodeID string) {
-	node, err := s.repo.GetNode(companyID, nodeID)
-	if err != nil {
-		return
-	}
-	s.publishWorkspaceEvent(companyID, "node_updated", map[string]any{"node_id": node.NodeID, "node": node})
-}
-
 func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
@@ -130,13 +122,13 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	item, err := s.repo.CreateKanbanBoard(req.CompanyID, req.BoardID, req.Title, req.Position)
+	result, err := s.repo.CreateKanbanBoardWithWorkspaceEvent(req.CompanyID, req.BoardID, req.Title, req.Position)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_board")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "kanban_board_saved", map[string]any{"board_id": item.BoardID, "board": item})
-	writeJSON(w, http.StatusCreated, item)
+	s.publishCommittedWorkspaceEvents(result.Events)
+	writeJSON(w, http.StatusCreated, result.Board)
 }
 
 func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +143,7 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		err := s.repo.DeleteKanbanBoard(companyID, boardID)
+		result, err := s.repo.DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_board_not_found")
 			return
@@ -164,7 +156,7 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_board")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": boardID})
+		s.publishCommittedWorkspaceEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -191,7 +183,7 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "kanban_board_update_required")
 		return
 	}
-	item, err := s.repo.UpdateKanbanBoard(req.CompanyID, boardID, req.Title, req.Position)
+	result, err := s.repo.UpdateKanbanBoardWithWorkspaceEvent(req.CompanyID, boardID, req.Title, req.Position)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "kanban_board_not_found")
 		return
@@ -200,8 +192,8 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_update_kanban_board")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "kanban_board_updated", map[string]any{"board_id": item.BoardID, "board": item})
-	writeJSON(w, http.StatusOK, item)
+	s.publishCommittedWorkspaceEvents(result.Events)
+	writeJSON(w, http.StatusOK, result.Board)
 }
 
 func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
@@ -255,17 +247,13 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
 		return
 	}
-	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
+	result, err := s.repo.CreateKanbanColumnWithWorkspaceEvent(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "kanban_column_created", map[string]any{
-		"board_id":  req.BoardID,
-		"column_id": item.ColumnID,
-		"column":    item,
-	})
-	writeJSON(w, http.StatusCreated, item)
+	s.publishCommittedWorkspaceEvents(result.Events)
+	writeJSON(w, http.StatusCreated, result.Column)
 }
 
 func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +283,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
+		result, err := s.repo.UpdateKanbanColumnWithWorkspaceEvent(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
 			return
@@ -304,12 +292,8 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "failed_to_update_kanban_column")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "kanban_column_updated", map[string]any{
-			"board_id":  req.BoardID,
-			"column_id": columnID,
-			"column":    item,
-		})
-		writeJSON(w, http.StatusOK, item)
+		s.publishCommittedWorkspaceEvents(result.Events)
+		writeJSON(w, http.StatusOK, result.Column)
 		return
 	}
 	if r.Method == http.MethodDelete {
@@ -319,7 +303,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		err := s.repo.DeleteKanbanColumn(companyID, boardID, columnID)
+		result, err := s.repo.DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
 			return
@@ -328,10 +312,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_column")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "kanban_column_deleted", map[string]any{
-			"board_id":  boardID,
-			"column_id": columnID,
-		})
+		s.publishCommittedWorkspaceEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -426,14 +407,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_upsert_kanban_card")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "kanban_card_upserted", map[string]any{
-		"board_id": req.BoardID,
-		"card_id":  item.CardID,
-		"card":     item,
-	})
-	if result.DerivedNode != nil {
-		s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": result.DerivedNode.NodeID, "node": result.DerivedNode})
-	}
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -487,18 +461,9 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_move_kanban_card")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "kanban_card_moved", map[string]any{
-			"board_id": req.BoardID,
-			"card_id":  cardID,
-			"card":     item,
-		})
-		if item.LogicGateID != nil {
-			if result.DerivedNode != nil {
-				s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": result.DerivedNode.NodeID, "node": result.DerivedNode})
-			}
-			if hadBeforeCard {
-				s.recordKanbanStateNotification(r, beforeCard, item, columnTitles)
-			}
+		s.publishCommittedWorkspaceEvents(result.Events)
+		if item.LogicGateID != nil && hadBeforeCard {
+			s.recordKanbanStateNotification(r, beforeCard, item, columnTitles)
 		}
 		writeJSON(w, http.StatusOK, item)
 		return
@@ -510,8 +475,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		beforeCard, _, hadBeforeCard := s.kanbanCardNotificationSnapshot(companyID, boardID, cardID)
-		err := s.repo.DeleteKanbanCard(companyID, boardID, cardID)
+		result, err := s.repo.DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_card_not_found")
 			return
@@ -520,13 +484,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_card")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "kanban_card_deleted", map[string]any{
-			"board_id": boardID,
-			"card_id":  cardID,
-		})
-		if hadBeforeCard && beforeCard.LogicGateID != nil {
-			s.publishKanbanDerivedNodeUpdate(companyID, beforeCard.NodeID)
-		}
+		s.publishCommittedWorkspaceEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}

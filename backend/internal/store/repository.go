@@ -167,21 +167,30 @@ type KanbanRepository interface {
 	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
 	EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error)
 	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
+	CreateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error)
 	UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
+	UpdateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error)
 	DeleteKanbanBoard(companyID, boardID string) error
+	DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID string) (KanbanWorkspaceEventResult, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
 	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
+	CreateKanbanColumnWithWorkspaceEvent(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error)
 	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
+	UpdateKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error)
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
+	DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID string) (KanbanWorkspaceEventResult, error)
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
+	UpsertKanbanCardWithWorkspaceEvent(input KanbanCardMutationInput) (KanbanCardWorkspaceEventResult, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
+	MoveKanbanCardWithWorkspaceEvent(input KanbanCardMoveInput) (KanbanCardWorkspaceEventResult, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error)
 	MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error)
 	RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error)
 	SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignmentIssueInput) (LogicGateNodeAssignmentResult, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
+	DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID string) (KanbanCardWorkspaceEventResult, error)
 }
 
 type NotificationRepository interface {
@@ -633,6 +642,26 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	Node       domain.Node                    `json:"node"`
 	Assignment domain.NodeLogicGateAssignment `json:"-"`
 	Events     []domain.DomainEvent           `json:"-"`
+}
+
+type KanbanWorkspaceEventResult struct {
+	Events []domain.DomainEvent `json:"-"`
+}
+
+type KanbanBoardWorkspaceEventResult struct {
+	Board  domain.KanbanBoard   `json:"board"`
+	Events []domain.DomainEvent `json:"-"`
+}
+
+type KanbanColumnWorkspaceEventResult struct {
+	Column domain.KanbanColumn  `json:"column"`
+	Events []domain.DomainEvent `json:"-"`
+}
+
+type KanbanCardWorkspaceEventResult struct {
+	Card        domain.KanbanCard    `json:"card"`
+	DerivedNode *domain.Node         `json:"-"`
+	Events      []domain.DomainEvent `json:"-"`
 }
 
 const NotificationListMaxLimit = 100
