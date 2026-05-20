@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { subscribeWorkspaceStream } from "../../../../frontend/src/modules/workspace/workspaceStream.js";
+import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceStream } from "../../../../frontend/src/modules/workspace/workspaceStream.js";
 
 const encoder = new TextEncoder();
 
@@ -166,6 +166,24 @@ test("duplicate and stale workspace events are ignored", async () => {
   }
 });
 
+test("derives scoped invalidation targets from workspace event types", () => {
+  const nodeScopes = deriveWorkspaceReconciliationScopes({ type: "node_updated", data: { node_id: "node-1" } });
+  assert.equal(nodeScopes.some((scope) => scope.kind === "node_graph" && scope.nodeID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "company_explorer" && scope.itemType === "node" && scope.itemID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "workspace"), false);
+
+  const kanbanScopes = deriveWorkspaceReconciliationScopes({ type: "kanban_card_moved", data: { board_id: "board-A", card_id: "card-A", node_id: "node-A" } });
+  assert.equal(kanbanScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "board-A" && scope.cardID === "card-A"), true);
+  assert.equal(kanbanScopes.some((scope) => scope.kind === "workspace"), false);
+
+  const folderScopes = deriveWorkspaceReconciliationScopes({ type: "company_explorer_folder_item_assigned", data: { folder_id: "folder-1", item_type: "node", item_id: "node-2" } });
+  assert.equal(folderScopes.some((scope) => scope.kind === "company_explorer" && scope.folderID === "folder-1" && scope.itemType === "node"), true);
+  assert.equal(folderScopes.some((scope) => scope.kind === "node_graph" && scope.folderID === "folder-1" && scope.nodeID === "node-2"), true);
+
+  const unknownScopes = deriveWorkspaceReconciliationScopes({ type: "future_workspace_event", data: { id: "unknown" } });
+  assert.deepEqual(unknownScopes, [{ kind: "workspace", eventType: "future_workspace_event" }]);
+});
+
 test("sequence gaps emit scoped reconciliation metadata to subscribers", async () => {
   const previousFetch = globalThis.fetch;
   const globalWithWindow = globalThis as unknown as { window?: unknown };
@@ -210,6 +228,51 @@ test("sequence gaps emit scoped reconciliation metadata to subscribers", async (
     await done;
     assert.deepEqual(gapBoardIDs, ["board-A"]);
     assert.deepEqual(subscriberResponses, ["refresh:board-A"]);
+  } finally {
+    unsubscribe?.();
+    globalThis.fetch = previousFetch;
+    globalWithWindow.window = previousWindow;
+  }
+});
+
+test("sequence gaps fall back to workspace recovery when the received event has no scoped target", async () => {
+  const previousFetch = globalThis.fetch;
+  const globalWithWindow = globalThis as unknown as { window?: unknown };
+  const previousWindow = globalWithWindow.window;
+  let unsubscribe: (() => void) | undefined;
+  const gapScopes: Array<{ kind: string; eventType: string }> = [];
+  const eventScopeLengths: number[] = [];
+
+  const done = new Promise<void>((resolve, reject) => {
+    globalThis.fetch = (async () => new Response(streamFrom([
+      "event: ready\ndata: {\"company_id\":\"company-gap-fallback\",\"after_sequence\":20}\n\n",
+      workspaceEventChunk("22", "editor_collaboration_event", { node_id: "node-editor" }),
+    ]), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    })) as typeof fetch;
+    globalWithWindow.window = {
+      location: { origin: "https://app.example.test" },
+    };
+
+    unsubscribe = subscribeWorkspaceStream("https://api.example.test", "company-gap-fallback", {
+      onGap: (gap) => {
+        gapScopes.push(...gap.scopes.map((scope) => ({ kind: scope.kind, eventType: scope.eventType })));
+      },
+      onEvent: (event, context) => {
+        if (event.id !== "22") return;
+        eventScopeLengths.push(context.scopes.length);
+        unsubscribe?.();
+        resolve();
+      },
+      onError: reject,
+    });
+  });
+
+  try {
+    await done;
+    assert.deepEqual(gapScopes, [{ kind: "workspace", eventType: "workspace_gap_unscoped" }]);
+    assert.deepEqual(eventScopeLengths, [0]);
   } finally {
     unsubscribe?.();
     globalThis.fetch = previousFetch;

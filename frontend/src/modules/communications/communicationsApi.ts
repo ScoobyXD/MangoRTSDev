@@ -1,9 +1,9 @@
 import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
-import type { KanbanBoard, KanbanCard } from "../kanban/shared.js";
+import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
-import { invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../workspace/workspaceSnapshotCache.js";
+import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -479,6 +479,7 @@ export async function updateLogicGateRaciAssignments(
     }),
   });
   invalidateWorkspacePanelCache(companyID);
+  markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
   return cloneLogicGateRaciAssignments(payload.raci_assignments ?? []);
 }
 
@@ -504,6 +505,7 @@ async function commandLogicGateRaciAssignments(
     }),
   });
   invalidateWorkspacePanelCache(companyID);
+  markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
   return cloneLogicGateRaciAssignments(payload.raci_assignments ?? []);
 }
 
@@ -541,6 +543,7 @@ export async function updateNode(companyID: string, nodeID: string, update: Part
     }),
   });
   invalidateWorkspacePanelCache(companyID);
+  markNodeWorkspaceSnapshotScopesStale(companyID);
   return { ...node };
 }
 
@@ -652,6 +655,8 @@ export async function convertTriageMessagesToLogicGate(input: {
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);
+  markNodeWorkspaceSnapshotScopesStale(input.companyID);
+  markKanbanWorkspaceSnapshotScopeStale(input.companyID, logicGateKanbanBoardID(input.logicGateID));
   return result;
 }
 
@@ -679,6 +684,8 @@ export async function revertKanbanCardToMyTriage(input: {
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);
+  markNodeWorkspaceSnapshotScopesStale(input.companyID);
+  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.board_id?.trim() || input.boardID);
   return result;
 }
 
@@ -727,7 +734,7 @@ export function invalidateCommunicationsWorkspacePanelCache(companyID: string): 
 
 export function markCommunicationsWorkspacePanelStale(companyID: string): void {
   const cleanCompanyID = companyID.trim();
-  markWorkspaceSnapshotStale(readAuthConfig().apiBase, cleanCompanyID);
+  if (!cleanCompanyID) return;
   clearWorkspacePanelReadCache(cleanCompanyID);
 }
 
@@ -970,9 +977,33 @@ function clearMessagePageCache(): void {
   messagePageInflight.clear();
 }
 
+function markWorkspacePanelSnapshotScopeStale(companyID: string, options: Parameters<typeof markWorkspaceSnapshotScopeStale>[2]): void {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return;
+  markWorkspaceSnapshotScopeStale(readAuthConfig().apiBase, cleanCompanyID, options);
+}
+
+function markNodeWorkspaceSnapshotScopesStale(companyID: string): void {
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "node_map" });
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
+}
+
+function markLogicGateWorkspaceSnapshotScopesStale(companyID: string, logicGateID: string): void {
+  const cleanLogicGateID = logicGateID.trim();
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "logic_gate_map" });
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
+  if (cleanLogicGateID) markWorkspacePanelSnapshotScopeStale(companyID, { scope: "kanban", boardID: logicGateKanbanBoardID(cleanLogicGateID) });
+}
+
+function markKanbanWorkspaceSnapshotScopeStale(companyID: string, boardID: string): void {
+  const cleanBoardID = boardID.trim();
+  if (!cleanBoardID) return;
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "kanban", boardID: cleanBoardID });
+}
+
 function invalidateWorkspacePanelCache(companyID: string): void {
   const cleanCompanyID = companyID.trim();
-  invalidateWorkspaceSnapshot(readAuthConfig().apiBase, cleanCompanyID);
+  if (!cleanCompanyID) return;
   clearWorkspacePanelReadCache(cleanCompanyID);
 }
 

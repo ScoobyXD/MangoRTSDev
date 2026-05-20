@@ -1,7 +1,7 @@
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import { createRequestJSON } from "../api/requestJSON";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
+import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand, type NodeMapCommandRequest } from "./nodeMapCommands";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph";
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
@@ -139,6 +139,7 @@ export async function createNodeFromSelectionTitle(args: {
   }
   upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, ...position }]);
   primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships }]);
-  invalidateWorkspaceSnapshot(apiBase, companyID);
+  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
+  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "company_explorer" });
   return node;
 }

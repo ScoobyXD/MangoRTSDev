@@ -121,7 +121,7 @@ function markWorkspaceCachesStaleForEvent(event: StreamEvent, apiBase: string, c
 
 function markWorkspaceCachesStaleForGap(gap: WorkspaceStreamGapSignal, apiBase: string, companyID: string): void {
   if (gap.companyID !== companyID) return;
-  markWorkspaceCachesStaleForScopes(gap.scopes, apiBase, companyID);
+  markWorkspaceCachesStaleForScopes(gap.scopes.length > 0 ? gap.scopes : [{ kind: "workspace", eventType: "workspace_gap_unscoped" }], apiBase, companyID);
 }
 
 function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[], apiBase: string, companyID: string): void {

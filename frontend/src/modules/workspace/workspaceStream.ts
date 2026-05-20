@@ -280,8 +280,12 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   return [{ kind: "workspace", eventType: type }];
 }
 
-function fallbackWorkspaceScope(): WorkspaceReconciliationScope[] {
-  return [{ kind: "workspace", eventType: "workspace_unparseable" }];
+function fallbackWorkspaceScope(eventType = "workspace_unparseable"): WorkspaceReconciliationScope[] {
+  return [{ kind: "workspace", eventType }];
+}
+
+function gapRecoveryScopes(scopes: WorkspaceReconciliationScope[]): WorkspaceReconciliationScope[] {
+  return scopes.length > 0 ? scopes : fallbackWorkspaceScope("workspace_gap_unscoped");
 }
 
 function markReadyBoundary(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, event: SseEvent): WorkspaceStreamReplayBoundary | undefined {
@@ -317,7 +321,7 @@ function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, 
       missingTo: sequence - 1,
       event,
       envelope,
-      scopes,
+      scopes: gapRecoveryScopes(scopes),
     }
     : undefined;
   workspaceCursors.set(key, sequence);
