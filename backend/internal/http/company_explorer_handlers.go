@@ -100,6 +100,10 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 				writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 				return
 			}
+			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed_to_assign_shared_inbox_account_email")
 			return
 		}
@@ -200,6 +204,10 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			}
 			if errors.Is(err, store.ErrInvalid) {
 				writeError(w, http.StatusBadRequest, "invalid_shared_inbox_account_email")
+				return
+			}
+			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 				return
 			}
 			if err != nil {

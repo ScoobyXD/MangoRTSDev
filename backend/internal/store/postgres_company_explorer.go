@@ -45,6 +45,35 @@ func scanCompanyExplorerFolder(row companyExplorerFolderScanner) (domain.Company
 	return item, err
 }
 
+func companyExplorerFolderAccountEmailColumn(includeAccountEmail bool, qualifier string) string {
+	if !includeAccountEmail {
+		return "null::text as account_email"
+	}
+	if strings.TrimSpace(qualifier) == "" {
+		return "account_email"
+	}
+	return qualifier + ".account_email"
+}
+
+func (r *PostgresRepo) getCompanyExplorerFolder(ctx context.Context, companyID, folderID string, includeAccountEmail bool) (domain.CompanyExplorerFolder, error) {
+	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
+		 from company_explorer_folders
+		 where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	))
+	if err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.getCompanyExplorerFolder(ctx, companyID, folderID, false)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+}
+
 func (r *PostgresRepo) attachCompanyExplorerFolderMetadata(ctx context.Context, companyID string, item domain.CompanyExplorerFolder) (domain.CompanyExplorerFolder, error) {
 	if item.FolderKind != "communications" {
 		return item, nil
@@ -210,7 +239,7 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 	}
 
 	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and system_key=$2`,
 		companyID, systemKey,
@@ -268,7 +297,7 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		`insert into company_explorer_folders
 		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4, null, $5, $6, now(), now())
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name, item.Position,
 	))
 	if err != nil {
@@ -277,17 +306,21 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, true)
+}
+
+func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
 	var kindParam any
 	if folderKind != "" {
 		kindParam = folderKind
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1
 		   and ($2::text is null or folder_kind=$2)
@@ -296,6 +329,9 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		companyID, kindParam,
 	)
 	if err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
+		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -319,19 +355,23 @@ func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, fol
 		return r.ListCompanyExplorerFolders(companyID, folderKind)
 	}
 	ctx := context.Background()
+	return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, true)
+}
+
+func (r *PostgresRepo) queryCompanyExplorerFolderSubtree(ctx context.Context, companyID, folderID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
 	var kindParam any
 	if strings.TrimSpace(folderKind) != "" {
 		kindParam = strings.TrimSpace(folderKind)
 	}
 	rows, err := r.db.QueryContext(ctx, `
 with recursive subtree as (
-  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
     and ($3::text is null or folder_kind=$3)
   union all
-  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, child.account_email, child.position, child.created_timestamp, child.updated_timestamp
+  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
   join subtree parent
     on child.company_id=parent.company_id
@@ -343,6 +383,9 @@ from subtree
 where system_key is null or system_key <> 'kanban_boards'
 order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(folderID), kindParam)
 	if err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, false)
+		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -455,7 +498,7 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		`update company_explorer_folders
 		 set parent_folder_id=$3, position=$4, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, parent, position,
 	))
 	if err != nil {
@@ -467,7 +510,7 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
 }
 
 func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -493,7 +536,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		`update company_explorer_folders
 		 set name=$3, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, name,
 	))
 	if err != nil {
@@ -502,7 +545,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
 }
 
 func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
@@ -559,6 +602,9 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folde
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		if isPostgresUndefinedColumn(err, "account_email") {
+			return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}

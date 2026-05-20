@@ -4,15 +4,20 @@ import {
   addLogicGateRaciAssignments,
   archiveEmailMessage,
   createFolderQuery,
+  createCommunicationsSharedInbox,
   createMessageQuery,
+  deleteCommunicationsSharedInbox,
   emailMessageMatchesListFilters,
   getEmailMessage,
   invalidateCommunicationsCache,
+  listCommunicationsSharedInboxes,
   listEmailMessages,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   removeLogicGateRaciAssignments,
   unarchiveEmailMessage,
+  updateCommunicationsSharedInbox,
+  updateCommunicationsSharedInboxRaciAssignments,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 
@@ -31,6 +36,82 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("shared inbox helpers use communications shared inbox endpoints", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    calls.push({
+      path,
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (path.startsWith("/v1/communications/shared-inboxes?")) {
+      return jsonResponse({ shared_inboxes: [sharedInbox("shared-1", { name: "Business" })] });
+    }
+    if (path.endsWith("/access")) {
+      return jsonResponse({
+        access_assignments: [
+          {
+            company_id: "company-1",
+            folder_id: "shared-1",
+            role: "responsible",
+            user_id: "user-1",
+            created_timestamp: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+      });
+    }
+    if (init?.method === "DELETE") {
+      return jsonResponse({ status: "deleted" });
+    }
+    return jsonResponse(sharedInbox(path.includes("shared-1") ? "shared-1" : "shared-2", { name: "Business" }));
+  };
+  try {
+    const listed = await listCommunicationsSharedInboxes(" company-1 ");
+    const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
+    const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
+    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "responsible", user_id: "user-1" }]);
+    await deleteCommunicationsSharedInbox("company-1", "shared-1");
+
+    assert.equal(listed[0]?.name, "Business");
+    assert.equal(created.folder_id, "shared-2");
+    assert.equal(updated.folder_id, "shared-1");
+    assert.deepEqual(access.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
+    assert.deepEqual(calls, [
+      {
+        path: "/v1/communications/shared-inboxes?company_id=company-1",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/v1/communications/shared-inboxes",
+        method: "POST",
+        body: { company_id: "company-1", name: "Business", account_email: "shared@example.com" },
+      },
+      {
+        path: "/v1/communications/shared-inboxes/shared-1",
+        method: "PUT",
+        body: { company_id: "company-1", name: "Client Facing" },
+      },
+      {
+        path: "/v1/communications/shared-inboxes/shared-1/access",
+        method: "PUT",
+        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+      },
+      {
+        path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
+        method: "DELETE",
+        body: undefined,
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
 });
 
 test("email address parser supports comma and semicolon lists with display names", () => {
@@ -254,6 +335,19 @@ function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
     folder_ids: patch.folder_ids,
     from: patch.from,
     to: patch.to,
+  };
+}
+
+function sharedInbox(id: string, patch: Record<string, unknown> = {}) {
+  return {
+    company_id: "company-1",
+    folder_id: id,
+    folder_kind: "communications",
+    name: id,
+    position: 1000,
+    created_timestamp: "2026-05-20T00:00:00.000Z",
+    updated_timestamp: "2026-05-20T00:00:00.000Z",
+    ...patch,
   };
 }
 
