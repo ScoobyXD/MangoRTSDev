@@ -7,7 +7,7 @@ import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gat
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR } from "../../modules/kanban/shared.js";
 import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, MAILBOX_OPTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
-import type { AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes.js";
+import type { AciInboxRaciRole, AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HOME_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
@@ -351,13 +351,23 @@ export function buildAciInboxGroupsByCell(
     if (priority === null) continue;
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
+      let matchedAciRole = false;
       for (const column of ACI_COLUMNS) {
+        if (!isAciRaciRole(column.role)) continue;
         if (!logicGateHasRaciRole(logicGate, column.role, currentUserID)) continue;
+        matchedAciRole = true;
         addRaciInboxGroupNode(byCell, aciCellKey(column.role, priority), logicGateID, node.node_id);
+      }
+      if (!matchedAciRole && logicGateHasRaciRole(logicGate, "responsible", currentUserID)) {
+        addRaciInboxGroupNode(byCell, aciCellKey("other", priority), logicGateID, node.node_id);
       }
     }
   }
   return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
+}
+
+function isAciRaciRole(role: AciInboxRole): role is AciInboxRaciRole {
+  return role === "accountable" || role === "consulted" || role === "informed";
 }
 
 export function buildResponsibleInboxGroupsByCell(
@@ -816,8 +826,8 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (viewID === "primary") return "Primary";
   if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Triage";
-  if (viewID === "aci-inbox") return "ACI Inbox";
-  if (viewID === "r-inbox") return "R Inbox";
+  if (viewID === "aci-inbox") return "ACIO Nodes";
+  if (viewID === "r-inbox") return "R Nodes";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
