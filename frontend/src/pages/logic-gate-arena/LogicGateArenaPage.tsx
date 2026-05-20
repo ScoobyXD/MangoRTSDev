@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FrameDataModel } from "../../types";
-import { EditorContent } from "../../modules/editor/EditorContent";
 import { KanbanContent } from "../../modules/kanban/KanbanContent";
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
@@ -36,6 +35,18 @@ type ArenaLogicGateSelection = {
 const SPLITTER_WIDTH_PX = 5;
 const MIN_EDITOR_WIDTH_PX = 300;
 const MIN_KANBAN_WIDTH_PX = 340;
+const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/EditorContent").then((module) => ({
+  default: module.EditorContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    theme?: "mango" | "teal" | "light" | "dark";
+    forcedEntityKind?: "node" | "logic_gate";
+    forcedEntityID?: string;
+    forcedLabel?: string;
+    forcedEmptyMessage?: string;
+  }>,
+})));
+const arenaPanelFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   if (minimum > maximum) return minimum;
@@ -196,15 +207,17 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
       }}
     >
       <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-        <EditorContent
-          accent={editorFrame.accent}
-          widgetId={editorFrame.id}
-          theme={editorFrame.theme}
-          forcedEntityKind="logic_gate"
-          forcedEntityID={selectedLogicGate.id}
-          forcedLabel={selectedLogicGate.label}
-          forcedEmptyMessage={selectedLogicGate.emptyMessage}
-        />
+        <React.Suspense fallback={arenaPanelFallback}>
+          <LazyArenaEditorContent
+            accent={editorFrame.accent}
+            widgetId={editorFrame.id}
+            theme={editorFrame.theme}
+            forcedEntityKind="logic_gate"
+            forcedEntityID={selectedLogicGate.id}
+            forcedLabel={selectedLogicGate.label}
+            forcedEmptyMessage={selectedLogicGate.emptyMessage}
+          />
+        </React.Suspense>
       </section>
       <div
         role="separator"

@@ -1,12 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { NodeMapContent } from "../node-map/NodeMapContent";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { LogicGateMapContent } from "../logic-gate-map/LogicGateMapContent";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../logic-gate-map/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-
-type MapMode = "node" | "logic_gate";
+import { resolveInitialMapMode, resolveMapModeFromLiveSelection, type MapMode } from "./mapMode";
 
 type MapProps = {
   accent: string;
@@ -16,13 +13,21 @@ type MapProps = {
   initialMode?: MapMode;
 };
 
-function contextTimestamp(raw: string | null): number {
-  if (!raw) return 0;
+type MapSurfaceProps = Omit<MapProps, "initialMode">;
+
+const LazyNodeMapContent = React.lazy(() => import("../node-map/NodeMapContent").then((module) => ({
+  default: module.NodeMapContent as React.FC<MapSurfaceProps>,
+})));
+const LazyLogicGateMapContent = React.lazy(() => import("../logic-gate-map/LogicGateMapContent").then((module) => ({
+  default: module.LogicGateMapContent as React.FC<MapSurfaceProps>,
+})));
+const mapSurfaceFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "transparent" }} />;
+
+function readStoredContext(key: string): string | null {
   try {
-    const parsed = JSON.parse(raw) as { ts?: unknown };
-    return typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : 0;
+    return localStorage.getItem(key);
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -31,24 +36,21 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
   const scope = props.widgetId?.trim() ? props.widgetId : "global";
   const nodeContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
   const logicGateContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-  const [mode, setMode] = useState<MapMode>(initialMode);
+  const [mode, setMode] = useState<MapMode>(() => resolveInitialMapMode({
+    initialMode,
+    nodeContextValue: readStoredContext(nodeContextKey),
+    logicGateContextValue: readStoredContext(logicGateContextKey),
+  }));
 
   const applyLiveSelectionMode = (selection: LiveSelectionChange): boolean => {
-    if (selection.companyID !== companyID) return false;
-    const latestExplorerContextTimestamp = Math.max(
-      contextTimestamp(localStorage.getItem(nodeContextKey)),
-      contextTimestamp(localStorage.getItem(logicGateContextKey)),
-    );
-    if (latestExplorerContextTimestamp > 0 && selection.changedAt < latestExplorerContextTimestamp) return false;
-    if (selection.entityKind === "logic_gate" || selection.folderKind === "logic_gate") {
-      setMode("logic_gate");
-      return true;
-    }
-    if (selection.entityKind === "node" || selection.folderKind === "node") {
-      setMode("node");
-      return true;
-    }
-    return false;
+    const nextMode = resolveMapModeFromLiveSelection(selection, {
+      companyID,
+      nodeContextValue: readStoredContext(nodeContextKey),
+      logicGateContextValue: readStoredContext(logicGateContextKey),
+    });
+    if (!nextMode) return false;
+    setMode(nextMode);
+    return true;
   };
 
   useEffect(() => {
@@ -64,15 +66,20 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
         const liveSelectionApplied = applyLiveSelectionMode(liveSelection);
         if (liveSelectionApplied) return;
       }
-      const nodeTs = contextTimestamp(localStorage.getItem(nodeContextKey));
-      const logicGateTs = contextTimestamp(localStorage.getItem(logicGateContextKey));
-      if (logicGateTs <= 0 && nodeTs <= 0) return;
-      setMode(logicGateTs > nodeTs ? "logic_gate" : "node");
+      setMode(resolveInitialMapMode({
+        initialMode,
+        nodeContextValue: readStoredContext(nodeContextKey),
+        logicGateContextValue: readStoredContext(logicGateContextKey),
+      }));
     };
     // Restore the mode after reload/remount only. Live mode switches use the
     // SelectionCoordinator event above and do not read storage snapshots.
     refreshModeFromExplorerContext();
-  }, [logicGateContextKey, nodeContextKey]);
+  }, [initialMode, logicGateContextKey, nodeContextKey]);
 
-  return mode === "logic_gate" ? <LogicGateMapContent {...props} /> : <NodeMapContent {...props} />;
+  return (
+    <React.Suspense fallback={mapSurfaceFallback}>
+      {mode === "logic_gate" ? <LazyLogicGateMapContent {...props} /> : <LazyNodeMapContent {...props} />}
+    </React.Suspense>
+  );
 };

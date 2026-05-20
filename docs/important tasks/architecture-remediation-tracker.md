@@ -24,7 +24,7 @@ Source architecture:
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Postgres `LISTEN/NOTIFY` now provides explicit cross-instance wakeup fanout while polling replay remains the correctness fallback. Remaining mutation families are still follow-ups. |
 | 3. Work Ownership / Commands | Inbox command parity complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, Home node drop/status placement uses the work-item assignment command path, remaining inbox node status/priority placement uses assignment command helpers, bulk Logic Gate RACI uses idempotent add/remove commands, and direct node patching is reserved for non-placement fields or unassigned fallback nodes. |
 | 4. Hot Path Discipline | Hot-path metrics complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; work-item inbox GET handlers now pass request context into context-aware repository/database reads; node and Logic Gate map layout position writes now use set-based Postgres bulk upserts; server middleware now records normalized HTTP latency/status/conditional GET metrics and workspace stream replay/catch-up metrics. |
-| 5. Frontend Structure / API Contract | Scoped invalidation slice complete / yellow | Shared `requestJSON` covers the frontend API contract; workspace stream gap recovery and live freshness now preserve scoped snapshot invalidation for routed events, and Kanban/node-map selection mutations no longer invalidate every workspace snapshot. Large components and lazy split work remain follow-ups. |
+| 5. Frontend Structure / API Contract | Company Explorer controller/store slice complete / yellow | Shared `requestJSON` covers the frontend API contract; workspace stream gap recovery and live freshness preserve scoped snapshot invalidation; heavy map/editor content is split behind lazy entry points; and Company Explorer snapshot, stream, kanban-board, and optimistic entity state now flow through a pure reducer/store slice. Home workflow extraction remains a follow-up. |
 
 ## 1. Read Plane
 
@@ -443,6 +443,28 @@ Migration/backfill/rollback notes:
 - Backfill: none. Existing browser snapshot/read caches retain their keys and refresh on the next scoped stale mark, event replay, or normal reload.
 - Rollback: code can restore the prior broad `invalidateWorkspaceSnapshot`/`markWorkspaceSnapshotStale` calls in Kanban, communications/Home panel freshness, and node-map selection creation. Gap fallback can return to the previous received-event scopes. No database or data rollback is required.
 
+Map/editor lazy split branch:
+`frontend/mapcontent-lazy-split`
+
+Status:
+- 2026-05-20: Complete. Removed static editor/map content imports from the unified map wrapper, Home node editor popup, Kanban node editor overlay, Logic Gate Arena editor panel, and the editor relationships map preview. Authenticated-shell preloading now plans from the active route/tab instead of always warming every hot dashboard surface, preserving route/frame behavior while allowing separate map/editor chunks.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch is frontend-only and does not change backend API response shapes, endpoints, migrations, or schema.
+- Backfill: none. Existing dashboard frame layouts, linked-frame state, sidebar pins, and local map/editor context storage keys remain unchanged.
+- Rollback: code can restore the previous static imports and broad `preloadHotDashboardModules()` call inside `preloadLikelyDashboardModules()`. No data rollback is required; users may only see the previous eager-loading behavior return.
+
+Company Explorer controller/store branch:
+`frontend/company-explorer-controller-store`
+
+Status:
+- 2026-05-20: Complete. Added a pure Company Explorer store reducer for snapshot replacement, workspace stream envelope reconciliation, kanban-board list updates, optimistic folder item/entity upserts, and delete rollback restore state. `CompanyExplorerContent` now dispatches store actions for data ownership while preserving selection sync, drag/drop orchestration, linked-frame context, route/scoped-root behavior, local storage keys, and existing API contracts.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch is frontend-only and does not change backend API response shapes, endpoints, migrations, or schema.
+- Backfill: none. Existing browser snapshot caches, Company Explorer expanded/scroll/root-order local storage, and linked-frame context storage continue using the same keys and payload shapes.
+- Rollback: code can inline the store reducer logic back into `CompanyExplorerContent` state setters and remove `companyExplorerStore.ts` plus its focused node test. No data rollback is required; stream events and snapshot responses retain the same frontend contracts.
+
 Scope:
 - Migrate local `requestJSON` wrappers in Kanban, Editor, Node Map, Logic Gate Map, and Company Explorer to the shared helper.
 - Add explicit auth integration to the helper while keeping the global fetch patch temporarily for compatibility.
@@ -450,8 +472,6 @@ Scope:
 - Do not split giant components in this branch.
 
 Follow-up branches:
-- `frontend/mapcontent-lazy-split`
-- `frontend/company-explorer-controller-store`
 - `frontend/home-workflow-command-migration`
 
 Completion criteria:
@@ -492,10 +512,12 @@ Use this as the default sequencing unless a production incident changes prioriti
 24. `platform/bulk-map-layout-upserts`
 25. `platform/hot-path-metrics`
 26. `frontend/scoped-invalidation-policy`
+27. `frontend/mapcontent-lazy-split`
+28. `frontend/company-explorer-controller-store`
 
 ### Next Roadmap
 
-1. `frontend/mapcontent-lazy-split`
+1. `frontend/home-workflow-command-migration`
 
 ### Work-Items Follow-Ups
 

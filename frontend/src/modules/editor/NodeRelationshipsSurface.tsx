@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { publishLiveSelection } from "../selectionCoordinator";
 import { EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { NodeMapContent } from "../node-map/NodeMapContent";
 import {
   getNodeRelationshipGraphSnapshot,
   subscribeNodeRelationshipGraph,
@@ -21,6 +20,16 @@ const InlineNodeEditorContent = React.lazy(() => import("./EditorContent").then(
     forcedEntityID?: string;
     forcedLabel?: string;
     forcedEmptyMessage?: string;
+  }>,
+})));
+const InlineNodeMapContent = React.lazy(() => import("../node-map/NodeMapContent").then((module) => ({
+  default: module.NodeMapContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    hideTopControls?: boolean;
+    theme?: "mango" | "teal" | "light" | "dark";
+    structureNodeID?: string;
+    initialSelectedNodeID?: string;
   }>,
 })));
 
@@ -439,14 +448,16 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
             }}
           />
           <section style={{ minWidth: 0, minHeight: 0, position: "relative", background: "transparent", overflow: "hidden" }}>
-            <NodeMapContent
-              accent={accent}
-              widgetId={mapWidgetID}
-              hideTopControls
-              theme={theme}
-              structureNodeID={nodeID}
-              initialSelectedNodeID={nodeID}
-            />
+            <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "transparent" }} />}>
+              <InlineNodeMapContent
+                accent={accent}
+                widgetId={mapWidgetID}
+                hideTopControls
+                theme={theme}
+                structureNodeID={nodeID}
+                initialSelectedNodeID={nodeID}
+              />
+            </React.Suspense>
           </section>
         </div>
       </aside>

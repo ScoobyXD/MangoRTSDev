@@ -6,7 +6,6 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import { EditorContent } from "../../modules/editor/EditorContent";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
@@ -24,6 +23,16 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
+const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/EditorContent").then((module) => ({
+  default: module.EditorContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    theme?: "mango" | "teal" | "light" | "dark";
+    forcedEntityKind?: "node" | "logic_gate";
+    forcedEntityID?: string;
+    forcedLabel?: string;
+  }>,
+})));
 
 function promptSharedInboxEmail(defaultEmail = ""): string {
   const raw = window.prompt("Email for shared inbox", defaultEmail.trim().toLowerCase());
@@ -584,14 +593,16 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }:
         >
           X
         </button>
-        <EditorContent
-          accent="#ff8820"
-          widgetId={`communications-node-editor-overlay:${nodeID}`}
-          theme="mango"
-          forcedEntityKind="node"
-          forcedEntityID={nodeID}
-          forcedLabel={nodeTitle}
-        />
+        <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
+          <LazyHomeNodeEditorContent
+            accent="#ff8820"
+            widgetId={`communications-node-editor-overlay:${nodeID}`}
+            theme="mango"
+            forcedEntityKind="node"
+            forcedEntityID={nodeID}
+            forcedLabel={nodeTitle}
+          />
+        </React.Suspense>
       </div>
     </div>
   );

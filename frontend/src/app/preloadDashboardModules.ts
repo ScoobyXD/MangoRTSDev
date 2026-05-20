@@ -2,11 +2,14 @@ import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
 import { preloadHomePage, preloadLogicGateArenaPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
-
-const HOT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor", "kanban", "home"];
-const DEFAULT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor"];
-const LOGIC_GATE_ARENA_MODULE_KINDS = ["company-explorer", "editor", "kanban"];
-const HOME_MODULE_KINDS = ["home"];
+import {
+  DEFAULT_DASHBOARD_MODULE_KINDS,
+  HOME_MODULE_KINDS,
+  HOT_DASHBOARD_MODULE_KINDS,
+  LOGIC_GATE_ARENA_MODULE_KINDS,
+  planLikelyDashboardPreload,
+  type DashboardPreloadPlan,
+} from "./preloadDashboardPlan";
 
 export function preloadHotDashboardModules(): void {
   preloadLogicGateArenaPage();
@@ -32,15 +35,19 @@ export function preloadVisibleFrameModules(frames: Iterable<Pick<FrameDataModel,
   preloadModulesForFrames(frames);
 }
 
+function preloadDashboardPlan(plan: DashboardPreloadPlan): void {
+  for (const surface of plan.routeSurfaces) {
+    if (surface === "logic-gate-arena") preloadLogicGateArenaPage();
+    if (surface === "home") preloadHomePage();
+  }
+  preloadModuleKinds(plan.moduleKinds);
+}
+
 export function preloadLikelyDashboardModules(): void {
-  preloadHotDashboardModules();
   try {
     const views = loadViews();
     const activeTab = views.tabs.find((tab) => tab.id === views.activeId) ?? views.tabs[0];
-    if (!activeTab) return;
-    if (activeTab.page === "logic-gate-arena") preloadLogicGateArenaPage();
-    if (activeTab.page === "home" || activeTab.page === "communications") preloadHomePage();
-    if (activeTab.frames.length > 0) preloadVisibleFrameModules(activeTab.frames);
+    preloadDashboardPlan(planLikelyDashboardPreload(activeTab));
   } catch {
     preloadDefaultDashboardModules();
   }

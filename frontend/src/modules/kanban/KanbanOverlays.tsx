@@ -2,7 +2,6 @@ import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
-import { EditorContent } from "../editor/EditorContent";
 import { normalizeKanbanColumnItemColor, type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
@@ -12,6 +11,17 @@ import {
   type NodeEditorOverlayState,
   type OverlayResizeState,
 } from "./KanbanContentModel";
+
+const LazyKanbanNodeEditorContent = React.lazy(() => import("../editor/EditorContent").then((module) => ({
+  default: module.EditorContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    theme?: "mango" | "teal" | "light" | "dark";
+    forcedEntityKind?: "node" | "logic_gate";
+    forcedEntityID?: string;
+    forcedLabel?: string;
+  }>,
+})));
 
 export function KanbanContextMenus({
   contextColumn,
@@ -198,14 +208,16 @@ export function KanbanNodeEditorOverlay({
       >
         X
       </button>
-      <EditorContent
-        accent={accent}
-        widgetId={`${frameID}:node-editor-overlay:${overlay.nodeID}`}
-        theme={theme}
-        forcedEntityKind="node"
-        forcedEntityID={overlay.nodeID}
-        forcedLabel={overlay.nodeTitle}
-      />
+      <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
+        <LazyKanbanNodeEditorContent
+          accent={accent}
+          widgetId={`${frameID}:node-editor-overlay:${overlay.nodeID}`}
+          theme={theme}
+          forcedEntityKind="node"
+          forcedEntityID={overlay.nodeID}
+          forcedLabel={overlay.nodeTitle}
+        />
+      </React.Suspense>
       {nodeEditorOverlayResizeHandles.map((handle) => (
         <span
           key={handle.key}
