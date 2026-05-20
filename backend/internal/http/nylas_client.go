@@ -185,8 +185,8 @@ type NylasFolder struct {
 	DisplayName  string   `json:"display_name,omitempty"`
 	SystemFolder string   `json:"system_folder,omitempty"`
 	Attributes   []string `json:"attributes,omitempty"`
-	UnreadCount  int      `json:"unread_count,omitempty"`
-	TotalCount   int      `json:"total_count,omitempty"`
+	UnreadCount  *int     `json:"unread_count,omitempty"`
+	TotalCount   *int     `json:"total_count,omitempty"`
 }
 
 func (f *NylasFolder) UnmarshalJSON(raw []byte) error {

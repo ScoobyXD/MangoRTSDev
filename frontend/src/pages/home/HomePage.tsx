@@ -63,7 +63,7 @@ import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, 
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addSharedInboxRaciUserCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciUserCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -99,7 +99,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const apiBase = readAuthConfig().apiBase;
   const notificationSummary = useNotificationSummary(companyID);
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
-  const [, setFolders] = useState<EmailFolder[]>([]);
+  const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
@@ -150,7 +150,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
   const [columnWidths, setColumnWidths] = useState<HomeColumnWidths>(() => readHomeColumnWidths());
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const foldersRequestInFlightRef = useRef(false);
+  const foldersRequestSeqRef = useRef(0);
   const sharedInboxesRequestInFlightRef = useRef(false);
   const logicGatePanelRequestInFlightRef = useRef(false);
   const messageRequestKeyRef = useRef("");
@@ -406,23 +406,26 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setError(formatError(accessError, "Email access expired. Disconnect and reconnect your mailbox."));
   }, [cancelPendingAutoArchiveMessages, loadStatus]);
   const loadFolders = useCallback(async (): Promise<boolean> => {
-    if (foldersRequestInFlightRef.current) return false;
-    foldersRequestInFlightRef.current = true;
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    const requestSeq = foldersRequestSeqRef.current + 1;
+    foldersRequestSeqRef.current = requestSeq;
     try {
-      const next = await listEmailFolders();
-      setFolders(next);
+      const next = await listEmailFolders({
+        companyID: sharedInboxID ? companyID : undefined,
+        sharedInboxID: sharedInboxID || undefined,
+      });
+      if (foldersRequestSeqRef.current === requestSeq) setFolders(next);
       return true;
     } catch (folderError) {
+      if (foldersRequestSeqRef.current !== requestSeq) return false;
       if (isEmailAccessExpiredError(folderError)) {
         await handleEmailAccessExpired(folderError);
         return false;
       }
       setError(formatError(folderError, "Failed to load folders"));
       return false;
-    } finally {
-      foldersRequestInFlightRef.current = false;
     }
-  }, [handleEmailAccessExpired]);
+  }, [companyID, handleEmailAccessExpired]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
     if (sharedInboxesRequestInFlightRef.current) return false;
     sharedInboxesRequestInFlightRef.current = true;
@@ -637,6 +640,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setMessageContextMenu((current) => current && current.messageIDs.includes(messageID) ? null : current);
     }
     void archiveHomeMailMessagesCommand({ companyID, sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current), messageIDs: [messageID] })
+      .then(() => { void loadFolders(); })
       .catch((archiveError) => {
         if (isEmailAccessExpiredError(archiveError)) {
           void handleEmailAccessExpired(archiveError);
@@ -645,9 +649,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(archiveError, "Failed to archive scrolled message"));
         scheduleMessageListRefresh();
       });
-  }, [companyID, handleEmailAccessExpired, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
+  }, [companyID, handleEmailAccessExpired, loadFolders, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
   useEffect(() => { void loadStatus(); }, [loadStatus]);
-  useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
+  useEffect(() => { if (status?.connected && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeViewID, loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { if (status?.connected) void loadCompanyUsers(); }, [loadCompanyUsers, status?.connected]);
   useEffect(() => {
@@ -991,6 +995,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       .then((result) => {
         if (!result) return;
         applyUpdatedMessageToCurrentView({ ...result.message, starred: nextStarred });
+        void loadFolders();
       })
       .catch((starError) => {
         invalidateEmailMessageCache(messageID);
@@ -1001,7 +1006,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(starError, "Failed to update message star"));
         scheduleMessageListRefresh();
       });
-  }, [applyUpdatedMessageToCurrentView, companyID, handleEmailAccessExpired, scheduleMessageListRefresh]);
+  }, [applyUpdatedMessageToCurrentView, companyID, handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -1023,12 +1028,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
       await loadMessages();
+      await loadFolders();
     } catch (archiveError) {
       setError(formatError(archiveError, ids.length === 1 ? "Failed to archive message" : "Failed to archive messages"));
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -1050,12 +1056,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message moved to My Triage." : `${ids.length} messages moved to My Triage.`);
       await loadMessages();
+      await loadFolders();
     } catch (unarchiveError) {
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
     if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
@@ -1764,6 +1771,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const listViewLabel = activeViewID.startsWith("shared:") ? activeViewLabel : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
+  const mailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
   useEffect(() => {
     if (!status?.connected || isInboxMatrixView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
@@ -1942,6 +1950,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             loadingMoreMessages={loadingMoreMessages}
             mailFilterStatus={mailFilterStatus}
             mailbox={mailbox}
+            mailboxCounts={mailboxCounts}
             messageListRef={messageListRef}
             messages={messages}
             notice={notice}

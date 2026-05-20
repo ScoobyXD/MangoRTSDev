@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   addLogicGateRaciAssignments,
   archiveEmailMessage,
+  createFolderQuery,
   createMessageQuery,
   emailMessageMatchesListFilters,
   getEmailMessage,
@@ -25,6 +26,11 @@ test("communications message query omits empty values and encodes filters", () =
   assert.equal(createMessageQuery({ mailbox: "primary", refresh: true }), "?mailbox=primary&refresh=true");
   assert.equal(createMessageQuery({ mailbox: "primary", companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?mailbox=primary&company_id=company-1&shared_inbox_id=shared-1");
   assert.equal(createMessageQuery({ q: "   " }), "");
+});
+
+test("communications folder query scopes shared inbox folder reads", () => {
+  assert.equal(createFolderQuery({}), "");
+  assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
 });
 
 test("email address parser supports comma and semicolon lists with display names", () => {

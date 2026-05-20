@@ -15,6 +15,8 @@ import {
   listHeaderStyle,
   loadingMoreStyle,
   mailArchiveActionButtonStyle,
+  mailArchiveActionCountStyle,
+  mailArchiveActionLabelStyle,
   mailArchiveActionsStyle,
   mailFiltersRowStyle,
   mailListTitleStackStyle,
@@ -43,6 +45,24 @@ import {
   triageSenderStyle,
   triageSubjectStyle,
 } from "./homeStyles";
+
+type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred" | "archive">;
+type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
+
+function formatMailboxCount(count: number | undefined): string {
+  if (typeof count !== "number" || !Number.isFinite(count)) return "";
+  return Math.max(0, Math.floor(count)).toLocaleString();
+}
+
+function MailboxActionContent({ label, count }: { label: string; count?: number }) {
+  const formattedCount = formatMailboxCount(count);
+  return (
+    <>
+      <span style={mailArchiveActionLabelStyle}>{label}</span>
+      {formattedCount && <span style={mailArchiveActionCountStyle}>{formattedCount}</span>}
+    </>
+  );
+}
 
 function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
   if (container.scrollTop <= 0) return [];
@@ -85,6 +105,7 @@ export function HomeMailWorkspace({
   loadingMoreMessages,
   mailFilterStatus,
   mailbox,
+  mailboxCounts,
   messageListRef,
   messages,
   notice,
@@ -137,6 +158,7 @@ export function HomeMailWorkspace({
   loadingMoreMessages: boolean;
   mailFilterStatus: string;
   mailbox: EmailMailbox;
+  mailboxCounts: TriageMailboxCounts;
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
   notice: string;
@@ -207,29 +229,32 @@ export function HomeMailWorkspace({
               <button
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "primary")}
+                title={mailboxCounts.primary === undefined ? "My Triage" : `My Triage (${formatMailboxCount(mailboxCounts.primary)})`}
                 onClick={() => {
                   if (mailbox !== "primary") onOpenPendingMailbox();
                 }}
               >
-                My Triage
+                <MailboxActionContent label="My Triage" count={mailboxCounts.primary} />
               </button>
               <button
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "starred")}
+                title={mailboxCounts.starred === undefined ? "Starred" : `Starred (${formatMailboxCount(mailboxCounts.starred)})`}
                 onClick={() => {
                   if (mailbox !== "starred") onOpenStarredMailbox();
                 }}
               >
-                Starred
+                <MailboxActionContent label="Starred" count={mailboxCounts.starred} />
               </button>
               <button
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "archive")}
+                title={mailboxCounts.archive === undefined ? "Archived" : `Archived (${formatMailboxCount(mailboxCounts.archive)})`}
                 onClick={() => {
                   if (mailbox !== "archive") onOpenArchivedMailbox();
                 }}
               >
-                Archived
+                <MailboxActionContent label="Archived" count={mailboxCounts.archive} />
               </button>
               <button
                 type="button"

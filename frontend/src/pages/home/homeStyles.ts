@@ -1109,8 +1109,11 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     ...smallButtonStyle,
     width: "100%",
     minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
     overflow: "hidden",
-    textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontWeight: 700,
     borderColor: active ? HOME_CYAN : smallButtonStyle.borderColor,
@@ -1118,6 +1121,28 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     color: active ? "#042028" : smallButtonStyle.color,
   };
 }
+
+export const mailArchiveActionLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+export const mailArchiveActionCountStyle: React.CSSProperties = {
+  flexShrink: 0,
+  minWidth: 18,
+  height: 18,
+  display: "inline-grid",
+  placeItems: "center",
+  borderRadius: 9,
+  padding: "0 5px",
+  background: "rgba(15, 169, 192, 0.14)",
+  color: "#0a5260",
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1,
+};
 
 export const mailFiltersRowStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1187,7 +1212,7 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
 export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false): React.CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) 62px",
+    gridTemplateColumns: "20px minmax(0, 1fr) 98px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
@@ -1262,7 +1287,7 @@ export const triageMessageMetaStyle: React.CSSProperties = {
   justifyItems: "end",
   alignContent: "start",
   gap: 6,
-  minWidth: 58,
+  minWidth: 94,
 };
 
 export function messageStarButtonStyle(active: boolean): React.CSSProperties {

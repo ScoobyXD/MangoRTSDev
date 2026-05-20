@@ -1,4 +1,4 @@
-import type { CommunicationsSharedInbox, EmailAddress, EmailMailbox, EmailMessage, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox, EmailMessage, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
@@ -838,6 +838,17 @@ export function mailboxLabel(mailbox: EmailMailbox): string {
   return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
 }
 
+export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred" | "archive">, number>>;
+
+export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMap {
+  const primaryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]) ?? findEmailFolder(folders, ["inbox"]);
+  return {
+    primary: emailFolderTotalCount(primaryFolder),
+    starred: emailFolderTotalCount(findEmailFolder(folders, ["starred", "flagged"])),
+    archive: emailFolderTotalCount(findEmailFolder(folders, ["archive", "archives", "archived"])),
+  };
+}
+
 export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
   return viewID === "aci-inbox" || viewID === "r-inbox";
 }
@@ -900,7 +911,36 @@ export function formatMessageDate(epochSeconds?: number): string {
   if (!epochSeconds) return "";
   const date = new Date(epochSeconds * 1000);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function emailFolderTotalCount(folder: EmailFolder | undefined): number | undefined {
+  const count = folder?.total_count;
+  if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return undefined;
+  return Math.floor(count);
+}
+
+function findEmailFolder(folders: EmailFolder[], tokens: string[]): EmailFolder | undefined {
+  const targets = new Set(tokens.map(normalizeEmailFolderToken).filter(Boolean));
+  return folders.find((folder) => emailFolderTokens(folder).some((token) => targets.has(token)));
+}
+
+function emailFolderTokens(folder: EmailFolder): string[] {
+  return [
+    folder.id,
+    folder.name,
+    folder.display_name,
+    folder.system_folder,
+    ...(folder.attributes ?? []),
+  ].map(normalizeEmailFolderToken).filter(Boolean);
+}
+
+function normalizeEmailFolderToken(value: string | undefined): string {
+  let token = value?.trim().toLowerCase() ?? "";
+  while (token.startsWith("\\")) token = token.slice(1);
+  token = token.replace(/[\s-]+/g, "_");
+  if (token.startsWith("category_")) token = `category:${token.slice("category_".length)}`;
+  return token;
 }
 
 export function messageDocument(body: string): string {
