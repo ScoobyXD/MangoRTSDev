@@ -20,7 +20,7 @@ import {
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
-import { RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
+import { ACI_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {
@@ -86,6 +86,8 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
   assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
+  assert.equal(getHomeViewLabel("aci-inbox", shared), "ACIO Nodes");
+  assert.equal(getHomeViewLabel("r-inbox", shared), "R Nodes");
   assert.equal(mailboxForHomeView("aci-inbox"), "all");
   assert.equal(mailboxForHomeView("my-triage"), "primary");
 });
@@ -109,15 +111,21 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const gates = new Map([
     ["gate-a", logicGate("gate-a", [{ company_id: "company-1", logic_gate_id: "gate-a", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
     ["gate-r", logicGate("gate-r", [{ company_id: "company-1", logic_gate_id: "gate-r", role: "responsible", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
+    ["gate-other-user", logicGate("gate-other-user", [{ company_id: "company-1", logic_gate_id: "gate-other-user", role: "consulted", user_id: "user-2", created_timestamp: "2026-01-01T00:00:00Z" }])],
   ]);
   const nodes = [
     node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], priority: 1 }),
     node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2 }),
+    node("node-other-user", "Other user node", { logic_gate_ids: ["gate-other-user"], priority: 3 }),
     node("node-done", "Done node", { logic_gate_ids: ["gate-r"], status: "Done", priority: 1 }),
   ];
   const nodeByID = new Map(nodes.map((item) => [item.node_id, item]));
 
-  assert.deepEqual(buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID).get("accountable:1")?.[0]?.nodeIDs, ["node-a"]);
+  const aciGroups = buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
+  assert.deepEqual(ACI_COLUMNS.map((column) => column.role), ["accountable", "consulted", "informed", "other"]);
+  assert.deepEqual(aciGroups.get("accountable:1")?.[0]?.nodeIDs, ["node-a"]);
+  assert.deepEqual(aciGroups.get("other:2")?.[0]?.nodeIDs, ["node-r"]);
+  assert.equal(aciGroups.has("other:3"), false);
   const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
   assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
   assert.equal(responsibleGroups.has("done:1"), false);

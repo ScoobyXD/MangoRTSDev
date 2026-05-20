@@ -805,7 +805,7 @@ export function AppSidebar({
           )}
         </div>
         <AppSidebarButton
-          label="ACI Inbox"
+          label="ACIO Nodes"
           active={homeActive && activeHomeView === "aci-inbox"}
           trailing={<SidebarNotificationBadges badges={[
             { key: "accountable", count: aciNotificationCounts.accountable, tone: "accountable", title: "Accountable notifications", onClick: (event) => openNotificationMenu(event, { title: "Accountable notifications", surface: "aci_inbox", role: "accountable" }) },
@@ -815,7 +815,7 @@ export function AppSidebar({
           onClick={() => onHomeViewSelect("aci-inbox")}
         />
         <AppSidebarButton
-          label="R Inbox"
+          label="R Nodes"
           active={homeActive && activeHomeView === "r-inbox"}
           trailing={<SidebarNotificationBadges badges={[{
             key: "responsible",

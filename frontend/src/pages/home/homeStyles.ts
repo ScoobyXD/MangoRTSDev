@@ -778,14 +778,16 @@ export const logicGateInboxNodeIconStyle: React.CSSProperties = {
   placeItems: "center",
 };
 
-export const logicGateInboxNodeTitleStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 11,
-  fontWeight: 700,
-};
+export function logicGateInboxNodeTitleStyle(hasUnreadNotification = false): React.CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 11,
+    fontWeight: hasUnreadNotification ? 800 : 600,
+  };
+}
 
 export const logicGateInboxNodeRemoveStyle: React.CSSProperties = {
   width: 18,
