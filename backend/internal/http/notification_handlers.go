@@ -491,18 +491,22 @@ func (s *Server) recordNodeUpdateNotifications(r *http.Request, input store.Upda
 	if len(changedFields) == 0 {
 		return
 	}
+	payload := map[string]any{
+		"recipient_user_ids": []string{afterAssignee},
+		"actor_display_name": actorLabel,
+		"node_title":         after.Title,
+		"changed_fields":     changedFields,
+	}
+	if input.StatusSet {
+		payload["status"] = optionalStringValue(after.Status)
+	}
 	s.recordNotificationEvent(store.NotificationEventInput{
 		CompanyID:   input.CompanyID,
 		ActorUserID: actorUserID,
 		Type:        domain.NotificationEventNodeFieldsChanged,
 		EntityType:  "node",
 		EntityID:    after.NodeID,
-		Payload: map[string]any{
-			"recipient_user_ids": []string{afterAssignee},
-			"actor_display_name": actorLabel,
-			"node_title":         after.Title,
-			"changed_fields":     changedFields,
-		},
+		Payload:     payload,
 	})
 }
 

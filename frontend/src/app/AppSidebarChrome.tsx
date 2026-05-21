@@ -229,11 +229,12 @@ export function AppSidebar({
     [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
-  const aciNotificationCounts = useMemo(() => ({
-    accountable: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable"),
-    consulted: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted"),
-    informed: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
-  }), [notificationSummary]);
+  const aciNotificationCount = useMemo(
+    () => notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable")
+      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted")
+      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
+    [notificationSummary],
+  );
   const responsibleNotificationCount = useMemo(
     () => notificationSummaryRoleCount(notificationSummary, "r_inbox", "responsible"),
     [notificationSummary],
@@ -874,11 +875,13 @@ export function AppSidebar({
         <AppSidebarButton
           label="ACIO Nodes"
           active={homeActive && activeHomeView === "aci-inbox"}
-          trailing={<SidebarNotificationBadges badges={[
-            { key: "accountable", count: aciNotificationCounts.accountable, tone: "accountable", title: "Accountable notifications", onClick: (event) => openNotificationMenu(event, { title: "Accountable notifications", surface: "aci_inbox", role: "accountable" }) },
-            { key: "consulted", count: aciNotificationCounts.consulted, tone: "consulted", title: "Consulted notifications", onClick: (event) => openNotificationMenu(event, { title: "Consulted notifications", surface: "aci_inbox", role: "consulted" }) },
-            { key: "informed", count: aciNotificationCounts.informed, tone: "informed", title: "Informed notifications", onClick: (event) => openNotificationMenu(event, { title: "Informed notifications", surface: "aci_inbox", role: "informed" }) },
-          ]} />}
+          trailing={<SidebarNotificationBadges badges={[{
+            key: "aci",
+            count: aciNotificationCount,
+            tone: "aci",
+            title: "ACIO nodes with changes",
+            onClick: (event) => openNotificationMenu(event, { title: "ACIO notifications", surface: "aci_inbox" }),
+          }]} />}
           onClick={() => onHomeViewSelect("aci-inbox")}
         />
         <AppSidebarButton
@@ -1134,7 +1137,7 @@ export function AppSidebar({
   );
 }
 
-type SidebarNotificationBadgeTone = NotificationRaciRole | "mail" | "mention";
+type SidebarNotificationBadgeTone = NotificationRaciRole | "aci" | "mail" | "mention";
 
 type SidebarNotificationBadge = {
   key: string;
@@ -1680,6 +1683,8 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    case "aci":
+      return { background: "#eef2ff", border: "rgba(79, 70, 229, 0.30)", color: "#3730a3" };
     case "mention":
       return { background: "#f5f3ff", border: "rgba(124, 58, 237, 0.32)", color: "#6d28d9" };
     case "mail":

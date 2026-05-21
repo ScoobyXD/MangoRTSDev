@@ -15,7 +15,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -711,6 +711,8 @@ export function HomeSidebar({
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
   const mentionUnreadCount = notificationCountForType(notificationSummary, "mention.created");
+  const aciChangedNodeCount = notificationCountForRoles(notificationSummary, "aci_inbox", ["accountable", "consulted", "informed"]);
+  const responsibleChangedNodeCount = notificationCountForRole(notificationSummary, "r_inbox", "responsible");
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -1132,8 +1134,18 @@ export function HomeSidebar({
             <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create Shared Triage">+</button>
           </form>
         </section>
-        <HomeNavButton label="ACIO Nodes" active={activeViewID === "aci-inbox"} onClick={() => onSelectView("aci-inbox", "all")} />
-        <HomeNavButton label="R Nodes" active={activeViewID === "r-inbox"} onClick={() => onSelectView("r-inbox", "all")} />
+        <HomeNavButton
+          label="ACIO Nodes"
+          active={activeViewID === "aci-inbox"}
+          meta={aciChangedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(aciChangedNodeCount)}</span> : undefined}
+          onClick={() => onSelectView("aci-inbox", "all")}
+        />
+        <HomeNavButton
+          label="R Nodes"
+          active={activeViewID === "r-inbox"}
+          meta={responsibleChangedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(responsibleChangedNodeCount)}</span> : undefined}
+          onClick={() => onSelectView("r-inbox", "all")}
+        />
         <HomeNavButton
           label="@ Mentions"
           active={mentionNotificationMenu !== null}
@@ -2120,13 +2132,13 @@ function notificationCountForInboxGroup(summary: NotificationSummary, role: Noti
   }, 0);
 }
 
-function hasUnreadNotificationForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string): boolean {
+function notificationCountForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string): number {
   const cleanNodeID = nodeID.trim();
-  if (!summary || !cleanNodeID || !group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return false;
-  return (summary.logic_gate_counts ?? []).some((item) => {
-    const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
-    return count > 0 && item.logic_gate_id === group.logicGateID && item.node_id?.trim() === cleanNodeID;
-  });
+  if (!summary || !cleanNodeID || !group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return 0;
+  return (summary.logic_gate_counts ?? []).reduce((count, item) => {
+    if (item.logic_gate_id !== group.logicGateID || item.node_id?.trim() !== cleanNodeID) return count;
+    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
+  }, 0);
 }
 
 function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | undefined {
@@ -2139,6 +2151,21 @@ function notificationCountForType(summary: NotificationSummary, type: string): n
   if (!cleanType) return 0;
   return (summary.type_counts ?? []).reduce((count, item) => {
     if (item.type !== cleanType) return count;
+    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
+  }, 0);
+}
+
+function notificationCountForRole(summary: NotificationSummary, surface: string, role: NotificationRaciRole): number {
+  return (summary.role_counts ?? []).reduce((count, item) => {
+    if (item.surface !== surface || item.role !== role) return count;
+    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
+  }, 0);
+}
+
+function notificationCountForRoles(summary: NotificationSummary, surface: string, roles: NotificationRaciRole[]): number {
+  const roleSet = new Set(roles);
+  return (summary.role_counts ?? []).reduce((count, item) => {
+    if (item.surface !== surface || !item.role || !roleSet.has(item.role)) return count;
     return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
   }, 0);
 }
@@ -2886,6 +2913,7 @@ export function LogicGateInboxNodeGroupCard({
         {group.nodeIDs.map((nodeID) => {
           const node = nodeByID.get(nodeID);
           if (!node) return null;
+          const nodeNotificationCount = notificationCountForInboxNode(notificationSummary, group, nodeID);
           return (
             <LogicGateInboxNodeRow
               key={nodeID}
@@ -2899,7 +2927,9 @@ export function LogicGateInboxNodeGroupCard({
               onOpenNodeBulkMenu={onOpenNodeBulkMenu}
               onOpenPinContextMenu={onOpenPinContextMenu}
               onRemovePlacement={canRemoveNode?.(nodeID) ? onRemovePlacement : undefined}
-              hasUnreadNotification={hasUnreadNotificationForInboxNode(notificationSummary, group, nodeID)}
+              hasUnreadNotification={nodeNotificationCount > 0}
+              notificationCount={nodeNotificationCount}
+              notificationRole={notificationRole}
             />
           );
         })}
@@ -2981,6 +3011,8 @@ export function LogicGateInboxNodeRow({
   onOpenPinContextMenu,
   onRemovePlacement,
   hasUnreadNotification = false,
+  notificationCount = 0,
+  notificationRole,
 }: {
   node: NodeRecord;
   selected: boolean;
@@ -2993,6 +3025,8 @@ export function LogicGateInboxNodeRow({
   onOpenPinContextMenu?: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
   onRemovePlacement?: (nodeID: string) => void;
   hasUnreadNotification?: boolean;
+  notificationCount?: number;
+  notificationRole?: NotificationRaciRole;
 }) {
   const nodeID = node.node_id;
   return (
@@ -3000,7 +3034,7 @@ export function LogicGateInboxNodeRow({
       role="button"
       tabIndex={0}
       draggable
-      style={logicGateInboxNodeRowStyle(selected)}
+      style={logicGateInboxNodeRowStyle(selected, hasUnreadNotification)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
@@ -3026,6 +3060,11 @@ export function LogicGateInboxNodeRow({
       <span style={logicGateInboxNodeGuideStyle} />
       <span style={logicGateInboxNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
       <span style={logicGateInboxNodeTitleStyle(hasUnreadNotification)}>{nodeTitle(node)}</span>
+      {notificationCount > 0 && (
+        <span title={`${formatInboxNotificationCount(notificationCount)} unread notifications`} style={logicGateInboxNodeNotificationStyle(notificationRole ?? "")}>
+          {formatInboxNotificationCount(notificationCount)}
+        </span>
+      )}
       {onRemovePlacement ? (
         <button
           type="button"

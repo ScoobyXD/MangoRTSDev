@@ -176,6 +176,28 @@ notification_id::text, company_id::text, recipient_user_id::text, actor_user_id:
 notification_type, source_event_id::text, entity_type, entity_id, title, body_preview,
 surface, role, logic_gate_id, node_id, read_timestamp, created_timestamp`
 
+const notificationRecipientVisibilityWhereSQL = `
+  and (
+    company_id is null
+    or (
+      (btrim(logic_gate_id) = '' or mangorts_user_can_access_resource(company_id, 'logic_gate', logic_gate_id::uuid, recipient_user_id, 'view'))
+      and (btrim(node_id) = '' or mangorts_user_can_access_resource(company_id, 'node', node_id::uuid, recipient_user_id, 'view'))
+      and case
+        when entity_type = 'logic_gate' then mangorts_user_can_access_resource(company_id, 'logic_gate', entity_id::uuid, recipient_user_id, 'view')
+        when entity_type = 'node' then mangorts_user_can_access_resource(company_id, 'node', entity_id::uuid, recipient_user_id, 'view')
+        when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder') then mangorts_user_can_access_resource(company_id, 'shared_triage_folder', entity_id::uuid, recipient_user_id, 'view')
+        else true
+      end
+    )
+  )`
+
+const notificationRoleSummaryTargetSQL = `
+case
+  when btrim(node_id) <> '' then 'node:' || coalesce(nullif(btrim(logic_gate_id), ''), '') || ':' || btrim(node_id)
+  when btrim(logic_gate_id) <> '' then 'logic_gate:' || btrim(logic_gate_id)
+  else btrim(entity_type) || ':' || btrim(entity_id)
+end`
+
 func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -244,7 +266,7 @@ from notifications
 where recipient_user_id=$1::uuid
   and ($2 = '' or company_id = nullif($2, '')::uuid)
   and ($3 = '' or notification_type = $3)
-  and (not $4::boolean or read_timestamp is null)
+  and (not $4::boolean or read_timestamp is null)`+notificationRecipientVisibilityWhereSQL+`
 order by created_timestamp desc, notification_id desc
 limit $5`, input.UserID, input.CompanyID, input.NotificationType, input.UnreadOnly, limit)
 	if err != nil {
@@ -281,17 +303,17 @@ select count(*)
 from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
-  and ($2 = '' or company_id = nullif($2, '')::uuid)`, input.UserID, input.CompanyID).Scan(&summary.TotalUnread); err != nil {
+  and ($2 = '' or company_id = nullif($2, '')::uuid)`+notificationRecipientVisibilityWhereSQL, input.UserID, input.CompanyID).Scan(&summary.TotalUnread); err != nil {
 		return domain.NotificationSummary{}, err
 	}
 
 	roleRows, err := r.db.Query(`
-select surface, role, count(*)
+select surface, role, count(distinct `+notificationRoleSummaryTargetSQL+`)
 from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
-  and (btrim(surface) <> '' or btrim(role) <> '')
+  and (btrim(surface) <> '' or btrim(role) <> '')`+notificationRecipientVisibilityWhereSQL+`
 group by surface, role
 order by surface asc, role asc`, input.UserID, input.CompanyID)
 	if err != nil {
@@ -314,7 +336,7 @@ select notification_type, count(*)
 from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
-  and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and ($2 = '' or company_id = nullif($2, '')::uuid)`+notificationRecipientVisibilityWhereSQL+`
 group by notification_type
 order by notification_type asc`, input.UserID, input.CompanyID)
 	if err != nil {
@@ -339,7 +361,7 @@ where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
   and btrim(logic_gate_id) <> ''
-  and btrim(role) <> ''
+  and btrim(role) <> ''`+notificationRecipientVisibilityWhereSQL+`
 group by logic_gate_id, node_id, role
 order by logic_gate_id asc, node_id asc, role asc`, input.UserID, input.CompanyID)
 	if err != nil {
@@ -370,7 +392,7 @@ select count(*)
 from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
-  and ($2 = '' or company_id = nullif($2, '')::uuid)`, userID, companyID).Scan(&count); err != nil {
+  and ($2 = '' or company_id = nullif($2, '')::uuid)`+notificationRecipientVisibilityWhereSQL, userID, companyID).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -385,7 +407,7 @@ func (r *PostgresRepo) MarkNotificationRead(userID, notificationID string, read 
 	item, err := scanNotification(r.db.QueryRow(`
 update notifications
 set read_timestamp=case when $3::boolean then coalesce(read_timestamp, now()) else null end
-where recipient_user_id=$1::uuid and notification_id=$2::uuid
+where recipient_user_id=$1::uuid and notification_id=$2::uuid`+notificationRecipientVisibilityWhereSQL+`
 returning `+notificationSelectColumns, userID, notificationID, read))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Notification{}, ErrNotFound
@@ -404,7 +426,7 @@ update notifications
 set read_timestamp=coalesce(read_timestamp, now())
 where recipient_user_id=$1::uuid
   and read_timestamp is null
-  and ($2 = '' or company_id = nullif($2, '')::uuid)`, userID, companyID)
+  and ($2 = '' or company_id = nullif($2, '')::uuid)`+notificationRecipientVisibilityWhereSQL, userID, companyID)
 	if err != nil {
 		return 0, err
 	}

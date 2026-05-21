@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -116,16 +117,19 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			return nil, err
 		}
 		toColumn := payloadString(payload, "column_title")
-		fromColumn := payloadString(payload, "previous_column_title")
 		nodeTitle := payloadString(payload, "node_title")
 		if toColumn == "" {
 			toColumn = "a new state"
 		}
-		title = "Logic Gate item moved to " + toColumn
-		if nodeTitle != "" && fromColumn != "" {
-			body = fmt.Sprintf("%s moved from %s to %s.", nodeTitle, fromColumn, toColumn)
-		} else if nodeTitle != "" {
-			body = fmt.Sprintf("%s moved to %s.", nodeTitle, toColumn)
+		actorLabel := payloadString(payload, "actor_display_name")
+		if actorLabel == "" {
+			actorLabel = "Someone"
+		}
+		title = "Node status changed to " + toColumn
+		if nodeTitle != "" {
+			body = fmt.Sprintf("%s changed %s to %s.", actorLabel, nodeTitle, toColumn)
+		} else {
+			body = fmt.Sprintf("%s changed this node to %s.", actorLabel, toColumn)
 		}
 	case domain.NotificationEventLogicGateRaciUpdated:
 		logicGateID := payloadString(payload, "logic_gate_id")
@@ -179,8 +183,21 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		if len(changedFields) == 0 {
 			changedFields = []string{"details"}
 		}
-		title = "Assigned node updated"
-		body = nodeTitle + " changed: " + strings.Join(changedFields, ", ") + "."
+		actorLabel := payloadString(payload, "actor_display_name")
+		if actorLabel == "" {
+			actorLabel = "Someone"
+		}
+		if stringSliceContains(changedFields, "status") {
+			status := payloadString(payload, "status")
+			if status == "" {
+				status = "a new status"
+			}
+			title = "Node status changed to " + status
+			body = fmt.Sprintf("%s changed %s to %s.", actorLabel, nodeTitle, status)
+		} else {
+			title = "Assigned node updated"
+			body = nodeTitle + " changed: " + strings.Join(changedFields, ", ") + "."
+		}
 	case domain.NotificationEventNodeCommentCreated:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
@@ -255,6 +272,13 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 
 	items := make([]store.NotificationCreateInput, 0, len(recipients))
 	for userID, meta := range recipients {
+		allowed, err := s.recipientCanSeeNotification(event, userID, meta)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			continue
+		}
 		items = append(items, store.NotificationCreateInput{
 			CompanyID:       event.CompanyID,
 			RecipientUserID: userID,
@@ -273,6 +297,29 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 	}
 	return items, nil
 }
+
+func (s *Service) recipientCanSeeNotification(event domain.NotificationEvent, userID string, meta notificationRecipientMeta) (bool, error) {
+	companyID := strings.TrimSpace(event.CompanyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return true, nil
+	}
+	targets := store.NotificationAccessTargets(event.EntityType, event.EntityID, meta.LogicGateID, meta.NodeID)
+	for _, target := range targets {
+		allowed, err := s.Repo.UserCanAccessEntity(companyID, target.EntityType, target.EntityID, userID, store.EntityPermissionView)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !allowed {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	text = strings.TrimSpace(text)
@@ -558,6 +605,19 @@ func payloadStringSlice(payload map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func stringSliceContains(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func payloadValueString(value any) string {
