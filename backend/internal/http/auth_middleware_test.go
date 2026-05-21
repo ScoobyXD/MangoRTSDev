@@ -169,14 +169,14 @@ func TestAuthMiddlewareAllowsCompanyAdminInsideCompanyOnly(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareAllowsCompanyUserFullCompanyAccess(t *testing.T) {
+func TestAuthMiddlewareAllowsCompanyUserGrantedEntityAccess(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "cognito-company-user-1"
-	_, err := repo.UpsertAuthUser(subject, "user@example.com", "")
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,6 +191,20 @@ func TestAuthMiddlewareAllowsCompanyUserFullCompanyAccess(t *testing.T) {
 	unassignedNode, err := repo.CreateNode(companyID, "unassigned node")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, nodeID := range []string{assignedNode.NodeID, unassignedNode.NodeID} {
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:  companyID,
+			EntityType: store.EntityTypeNode,
+			EntityID:   nodeID,
+			Permissions: []store.EntityPermissionInput{{
+				SubjectType: store.EntityPermissionSubjectUser,
+				SubjectID:   user.UserID,
+				AccessLevel: store.EntityPermissionEdit,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{
@@ -214,7 +228,7 @@ func TestAuthMiddlewareAllowsCompanyUserFullCompanyAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(listPayload.Nodes) != 2 {
-		t.Fatalf("filtered nodes = %+v, want both company nodes", listPayload.Nodes)
+		t.Fatalf("filtered nodes = %+v, want both granted company nodes", listPayload.Nodes)
 	}
 
 	assignedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+assignedNode.NodeID+"?company_id="+companyID, nil)

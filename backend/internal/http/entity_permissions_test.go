@@ -22,7 +22,7 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertAuthUser allowed: %v", err)
 	}
-	_, err = repo.UpsertAuthUser("denied-user", "denied@example.com", "Denied User")
+	deniedUser, err := repo.UpsertAuthUser("denied-user", "denied@example.com", "Denied User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser denied: %v", err)
 	}
@@ -40,6 +40,18 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 	restrictedNode, err := repo.CreateNode(companyID, "Restricted node")
 	if err != nil {
 		t.Fatalf("CreateNode restricted: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   openNode.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   deniedUser.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions open: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,

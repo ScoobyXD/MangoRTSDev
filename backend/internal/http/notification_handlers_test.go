@@ -19,10 +19,10 @@ func requestWithActorForNotifications(req *http.Request, user domain.User, compa
 		Memberships: []domain.CompanyMembership{{
 			CompanyID: companyID,
 			UserID:    user.UserID,
-			Role:      domain.RoleCompanyUser,
+			Role:      domain.RoleCompanyAdmin,
 		}},
 		CompanyID:   companyID,
-		CompanyRole: domain.RoleCompanyUser,
+		CompanyRole: domain.RoleCompanyAdmin,
 	}
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
 }

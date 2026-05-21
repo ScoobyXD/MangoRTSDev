@@ -370,6 +370,18 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, sharedUser.Email); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   actor.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	totalCount := 42
 	nylas := &fakeNylasClient{
 		folders: []NylasFolder{{ID: "archive", Name: "Archive", Attributes: []string{"\\Archive"}, TotalCount: &totalCount}},

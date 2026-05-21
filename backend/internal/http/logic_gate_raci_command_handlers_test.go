@@ -17,8 +17,8 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-raci-command-api"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	otherCompanyID := "company-raci-command-api-other"
 	repo.EnsureCompany(companyID, "RACI Command API Company")
 	repo.EnsureCompany(otherCompanyID, "Other RACI Command API Company")

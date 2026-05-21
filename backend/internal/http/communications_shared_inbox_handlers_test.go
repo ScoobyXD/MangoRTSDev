@@ -17,8 +17,8 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-shared-inbox-route-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	user, err := repo.UpsertAuthUser("subject-shared-route", "shared@example.com", "Shared User")
 	if err != nil {
@@ -108,7 +108,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSharedInboxListKeepsCompanyDefaultAccessWithGrants(t *testing.T) {
+func TestCommunicationsSharedInboxListFiltersToGrantedFoldersAndAncestors(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -189,8 +189,8 @@ func TestCommunicationsSharedInboxListKeepsCompanyDefaultAccessWithGrants(t *tes
 	for _, folder := range payload.SharedInboxes {
 		seen[folder.FolderID] = true
 	}
-	if !seen[parent.FolderID] || !seen[child.FolderID] || !seen[unrelated.FolderID] {
-		t.Fatalf("shared inbox folders = %+v, want all company folders by default", payload.SharedInboxes)
+	if !seen[parent.FolderID] || !seen[child.FolderID] || seen[unrelated.FolderID] {
+		t.Fatalf("shared inbox folders = %+v, want granted child and ancestor only", payload.SharedInboxes)
 	}
 }
 

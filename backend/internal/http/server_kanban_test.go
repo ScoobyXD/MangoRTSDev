@@ -18,8 +18,8 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-111111111111"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	boardID := "frame-kanban-api-test"
 
 	node, err := repo.CreateNode(companyID, "customer onboarding")

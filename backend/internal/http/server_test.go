@@ -152,12 +152,32 @@ func requestWithActorForTest(req *http.Request, user domain.User, companyID stri
 		Memberships: []domain.CompanyMembership{{
 			CompanyID: companyID,
 			UserID:    user.UserID,
-			Role:      domain.RoleCompanyUser,
+			Role:      domain.RoleCompanyAdmin,
 		}},
 		CompanyID:   companyID,
-		CompanyRole: domain.RoleCompanyUser,
+		CompanyRole: domain.RoleCompanyAdmin,
 	}
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
+}
+
+func handlerWithCompanyAdminForTest(handler http.Handler, companyID string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authenticatedActor(r); ok {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		actor := ActorContext{
+			User: domain.User{UserID: "test-company-admin", Email: "admin@example.com", DisplayName: "Test Admin"},
+			Memberships: []domain.CompanyMembership{{
+				CompanyID: companyID,
+				UserID:    "test-company-admin",
+				Role:      domain.RoleCompanyAdmin,
+			}},
+			CompanyID:   companyID,
+			CompanyRole: domain.RoleCompanyAdmin,
+		}
+		handler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorContextKey{}, actor)))
+	})
 }
 
 func TestWorkspaceStreamReceivesDurableEventsFromOtherServer(t *testing.T) {
@@ -310,8 +330,8 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-logic-gate-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	createGate := func(header string) string {
 		t.Helper()
@@ -405,8 +425,8 @@ func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-logic-gate-raci-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	otherCompanyID := "company-logic-gate-raci-other"
 	repo.EnsureCompany(companyID, "RACI Test Company")
 	repo.EnsureCompany(otherCompanyID, "Other Company")
@@ -522,8 +542,8 @@ func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-logic-gate-projection-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	logicGate, err := repo.CreateLogicGate(companyID, "logic gate with projected notes")
 	if err != nil {
@@ -617,8 +637,8 @@ func TestNodeInformationProjectionAPIKeepsEditorTextBoxesIndependent(t *testing.
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-node-projection-collapse-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	node, err := repo.CreateNode(companyID, "node with editor text blocks")
 	if err != nil {
@@ -684,8 +704,8 @@ func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T)
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-clear-projection-api-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	node, err := repo.CreateNode(companyID, "node with clearable editor")
 	if err != nil {
@@ -799,8 +819,8 @@ func TestUpdateNodeTitleViaPut(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-rename-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	node, err := repo.CreateNode(companyID, "old title")
 	if err != nil {
 		t.Fatalf("CreateNode() error = %v", err)
@@ -877,8 +897,8 @@ func TestUpdateNodeAssigneeRequiresCompanyMembership(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "company-node-assignee-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	otherCompanyID := "company-node-assignee-other"
 	repo.EnsureCompany(companyID, "Assignee Test Company")
 	repo.EnsureCompany(otherCompanyID, "Other Company")
@@ -970,8 +990,8 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-333333333333"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	logicGate, err := repo.CreateLogicGate(companyID, "Fulfillment Gate")
 	if err != nil {
