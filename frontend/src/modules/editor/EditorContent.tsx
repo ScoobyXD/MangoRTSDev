@@ -72,6 +72,7 @@ import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { getLogicGateArenaView, upsertKanbanCard } from "../kanban/kanbanApi";
 import { nextCardPosition } from "../kanban/shared";
+import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import {
   createEditorCollaborationClientID,
   editorCollaborationLabel,
@@ -1504,7 +1505,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const fallbackDocumentTopPx = activeTab === "relationships" ? 46 : linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
+  const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions";
+  const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
   const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 16) : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
@@ -1651,7 +1653,19 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             theme={theme}
           />
         )}
-        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && (
+        {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "permissions" && (
+          <div style={{ position: "absolute", top: documentTopPx, left: 12, right: 12, bottom: 12, zIndex: 2, pointerEvents: "auto", minHeight: 0 }}>
+            <EntityPermissionsPanel
+              requestJSON={requestJSON}
+              companyID={companyID}
+              entityType={linkedEntityKind}
+              entityID={linkedNodeID}
+              title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
+              variant="embedded"
+            />
+          </div>
+        )}
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (
           <NodeWorkspaceSurface
             companyID={companyID}
             nodeID={linkedNodeID}
