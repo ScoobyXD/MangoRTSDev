@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func memoryNodeTextBlockInformation(t *testing.T, document string) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]string{
+		"title":    "Notes",
+		"document": document,
+	})
+	if err != nil {
+		t.Fatalf("Marshal text block failed: %v", err)
+	}
+	return editorTextBlockContentPrefix + string(payload)
+}
+
 func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationIDProvided(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
@@ -36,6 +48,156 @@ func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationID
 	}
 	if projections[0].Information != "second snapshot" {
 		t.Fatalf("expected latest projection information to be updated, got %q", projections[0].Information)
+	}
+}
+
+func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	viewerID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	informationID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+	node, err := repo.CreateNode(companyID, "Change tracked node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "alpha beta"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("initial AddNodeInformationWithActor failed: %v", err)
+	}
+
+	ownChanges, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    actorID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges for actor failed: %v", err)
+	}
+	if len(ownChanges) != 0 {
+		t.Fatalf("actor should not see their own initial change, got %d", len(ownChanges))
+	}
+
+	viewerChanges, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges for viewer failed: %v", err)
+	}
+	if len(viewerChanges) != 1 {
+		t.Fatalf("expected one initial addition, got %d", len(viewerChanges))
+	}
+	if change := viewerChanges[0]; change.ChangeType != NodeContentChangeAddition || change.Text != "alpha beta" || change.ActorDisplayName != "Ada Lovelace" {
+		t.Fatalf("initial change = %+v, want Ada addition of alpha beta", change)
+	}
+	if count, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	}); err != nil || count != 1 {
+		t.Fatalf("MarkNodeContentChangeSeen all initial = (%d, %v), want (1, nil)", count, err)
+	}
+
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "alpha gamma!"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("updated AddNodeInformationWithActor failed: %v", err)
+	}
+	viewerChanges, err = repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges after update failed: %v", err)
+	}
+	if len(viewerChanges) != 2 {
+		t.Fatalf("expected replacement to create deletion and addition, got %d changes: %+v", len(viewerChanges), viewerChanges)
+	}
+	var sawDeletion, sawAddition bool
+	for _, change := range viewerChanges {
+		switch change.ChangeType {
+		case NodeContentChangeDeletion:
+			sawDeletion = true
+			if change.Text != "beta" {
+				t.Fatalf("deletion text = %q, want beta", change.Text)
+			}
+		case NodeContentChangeAddition:
+			sawAddition = true
+			if change.Text != "gamma!" {
+				t.Fatalf("addition text = %q, want gamma!", change.Text)
+			}
+		default:
+			t.Fatalf("unexpected change type %q", change.ChangeType)
+		}
+	}
+	if !sawDeletion || !sawAddition {
+		t.Fatalf("expected deletion and addition, got %+v", viewerChanges)
+	}
+
+	firstChangeID := viewerChanges[0].ChangeID
+	if count, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		ChangeID:  firstChangeID,
+		UserID:    viewerID,
+	}); err != nil || count != 1 {
+		t.Fatalf("MarkNodeContentChangeSeen one = (%d, %v), want (1, nil)", count, err)
+	}
+	viewerChanges, err = repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges after single seen failed: %v", err)
+	}
+	if len(viewerChanges) != 1 || viewerChanges[0].ChangeID == firstChangeID {
+		t.Fatalf("expected single unseen change after marking one seen, got %+v", viewerChanges)
+	}
+	if count, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	}); err != nil || count != 1 {
+		t.Fatalf("MarkNodeContentChangeSeen all remaining = (%d, %v), want (1, nil)", count, err)
+	}
+
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("DeleteNodeProjectionWithActor failed: %v", err)
+	}
+	viewerChanges, err = repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges after delete failed: %v", err)
+	}
+	if len(viewerChanges) != 1 || viewerChanges[0].ChangeType != NodeContentChangeDeletion || viewerChanges[0].Text != "alpha gamma!" {
+		t.Fatalf("delete should create one unseen deletion for viewer, got %+v", viewerChanges)
 	}
 }
 

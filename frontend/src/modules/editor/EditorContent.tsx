@@ -34,6 +34,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
+import type { NodeContentChange, NodeContentChangeResponse } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
@@ -236,6 +237,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeLogicGateIDs, setNodeLogicGateIDs] = useState<string[]>([]);
   const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
   const [nodeWorkspaceLoadedNodeID, setNodeWorkspaceLoadedNodeID] = useState("");
+  const [nodeContentChanges, setNodeContentChanges] = useState<NodeContentChange[]>([]);
+  const [nodeContentChangesLoadedNodeID, setNodeContentChangesLoadedNodeID] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
@@ -1388,6 +1391,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeLogicGateIDs([]);
       setNodeWorkspaceProjections([]);
       setNodeWorkspaceLoadedNodeID("");
+      setNodeContentChanges([]);
+      setNodeContentChangesLoadedNodeID("");
       setNodeStatus("");
       setNodeStatusColor("");
       setNodePriorityDraft("");
@@ -1413,6 +1418,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     setNodeWorkspaceLoadedNodeID("");
+    setNodeContentChanges([]);
+    setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
     (async () => {
       try {
@@ -1433,6 +1440,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
           setNodeWorkspaceProjections([]);
           setNodeWorkspaceLoadedNodeID("");
+          setNodeContentChanges([]);
+          setNodeContentChangesLoadedNodeID("");
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -1490,6 +1499,25 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return () => { cancelled = true; };
   }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!companyID || linkedEntityKind !== "node" || !linkedNodeID || nodeWorkspaceLoadedNodeID !== linkedNodeID) {
+      setNodeContentChanges([]);
+      setNodeContentChangesLoadedNodeID("");
+      return;
+    }
+    void requestJSON<NodeContentChangeResponse>(`/v1/nodes/${linkedNodeID}/changes?company_id=${encodeURIComponent(companyID)}`)
+      .then((payload) => {
+        if (cancelled) return;
+        setNodeContentChanges(payload.changes ?? []);
+        setNodeContentChangesLoadedNodeID(linkedNodeID);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_node_changes");
+      });
+    return () => { cancelled = true; };
+  }, [companyID, linkedEntityKind, linkedNodeID, nodeWorkspaceLoadedNodeID, requestJSON]);
+
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
   const surfaceText = isDarkTheme ? "#f4f7fa" : "#24120a";
@@ -1534,6 +1562,40 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  const markNodeContentChangeSeen = useCallback((changeID: string) => {
+    if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
+    const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);
+    setNodeContentChanges((current) => current.filter((change) => change.change_id !== changeID));
+    void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/${changeID}/seen`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyID }),
+    }).catch((cause) => {
+      if (removedChange) {
+        setNodeContentChanges((current) => {
+          if (current.some((change) => change.change_id === removedChange.change_id)) return current;
+          return [...current, removedChange].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
+        });
+      }
+      setError(cause instanceof Error ? cause.message : "failed_to_mark_node_change_seen");
+    });
+  }, [companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
+  const markAllNodeContentChangesSeen = useCallback(() => {
+    if (linkedEntityKind !== "node" || !linkedNodeID || nodeContentChanges.length === 0) return;
+    const removedChanges = nodeContentChanges;
+    setNodeContentChanges([]);
+    void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/seen-all`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyID }),
+    }).catch((cause) => {
+      setNodeContentChanges((current) => {
+        const existingIDs = new Set(current.map((change) => change.change_id));
+        const restored = removedChanges.filter((change) => !existingIDs.has(change.change_id));
+        if (restored.length === 0) return current;
+        return [...current, ...restored].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
+      });
+      setError(cause instanceof Error ? cause.message : "failed_to_mark_node_changes_seen");
+    });
+  }, [companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
   const visibleCollaborators = useMemo(() => {
     const now = Date.now();
     return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
@@ -1671,6 +1733,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             nodeID={linkedNodeID}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
+            unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             topPx={documentTopPx}
@@ -1684,6 +1747,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             outlineStyle={outlineStyle}
             requestJSON={requestJSON}
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
+            onMarkChangeSeen={markNodeContentChangeSeen}
+            onMarkAllChangesSeen={markAllNodeContentChangesSeen}
             onCreateNodeFromImage={createNodeFromImageDocument}
             onAssignToLogicGate={assignLinkedNodeToLogicGate}
             onError={setError}

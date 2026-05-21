@@ -3,6 +3,7 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"sync"
+	"time"
 )
 
 type MemoryRepo struct {
@@ -10,6 +11,8 @@ type MemoryRepo struct {
 	nodes                    map[string]domain.Node
 	nodeInfo                 map[string][]domain.NodeInformation
 	nodeText                 map[string]map[string]domain.NodeProjection
+	nodeContentChanges       map[string]domain.NodeContentChange
+	nodeContentChangeSeen    map[string]time.Time
 	nodeRels                 map[string][]domain.NodeRelationship
 	logicGates               map[string]domain.LogicGate
 	logicGateInfo            map[string][]domain.LogicGateInformation
@@ -51,6 +54,8 @@ func NewMemoryRepo() *MemoryRepo {
 		nodes:                    map[string]domain.Node{},
 		nodeInfo:                 map[string][]domain.NodeInformation{},
 		nodeText:                 map[string]map[string]domain.NodeProjection{},
+		nodeContentChanges:       map[string]domain.NodeContentChange{},
+		nodeContentChangeSeen:    map[string]time.Time{},
 		nodeRels:                 map[string][]domain.NodeRelationship{},
 		logicGates:               map[string]domain.LogicGate{},
 		logicGateInfo:            map[string][]domain.LogicGateInformation{},
@@ -89,6 +94,10 @@ func NewMemoryRepo() *MemoryRepo {
 
 func key(companyID, id string) string {
 	return companyID + ":" + id
+}
+
+func nodeContentChangeSeenKey(companyID, changeID, userID string) string {
+	return companyID + ":" + changeID + ":" + userID
 }
 
 func folderItemKey(companyID, itemType, itemID string) string {

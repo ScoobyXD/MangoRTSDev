@@ -7,6 +7,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
+	"time"
 )
 
 const nodeSelectColumns = `
@@ -1042,6 +1043,20 @@ func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDeta
 }
 
 func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error) {
+	return r.addNodeInformation(NodeInformationInput{
+		CompanyID:     companyID,
+		NodeID:        nodeID,
+		Type:          infoType,
+		Information:   information,
+		InformationID: informationID,
+	})
+}
+
+func (r *PostgresRepo) AddNodeInformationWithActor(input NodeInformationInput) (domain.NodeInformation, error) {
+	return r.addNodeInformation(input)
+}
+
+func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.NodeInformation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1049,6 +1064,10 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	}
 	defer tx.Rollback()
 
+	companyID := strings.TrimSpace(input.CompanyID)
+	nodeID := strings.TrimSpace(input.NodeID)
+	infoType := strings.TrimSpace(input.Type)
+	informationID := strings.TrimSpace(input.InformationID)
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
 		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
@@ -1065,7 +1084,7 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 		InformationID: newUUIDv7String(),
 		NodeID:        nodeID,
 		Type:          infoType,
-		Information:   information,
+		Information:   input.Information,
 	}
 	if err := tx.QueryRowContext(ctx,
 		`insert into node_information
@@ -1088,6 +1107,10 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	if keyValue == "" {
 		keyValue = item.InformationID
 	}
+	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, keyValue)
+	if err != nil {
+		return domain.NodeInformation{}, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`insert into node_projection_table
 		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
@@ -1097,15 +1120,98 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 		   type=excluded.type,
 		   information=excluded.information,
 		   updated_timestamp=now()`,
-		item.CompanyID, item.NodeID, keyValue, item.Type, information,
+		item.CompanyID, item.NodeID, keyValue, item.Type, input.Information,
 	); err != nil {
 		return domain.NodeInformation{}, err
+	}
+	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
+		actor := normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName)
+		var previousPtr *domain.NodeProjection
+		if previousFound {
+			previousPtr = &previous
+		}
+		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+			companyID,
+			nodeID,
+			keyValue,
+			infoType,
+			previousPtr,
+			input.Information,
+			actor,
+			time.Now().UTC(),
+		)); err != nil {
+			return domain.NodeInformation{}, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.NodeInformation{}, err
 	}
 	return item, nil
+}
+
+func postgresNodeProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID string) (domain.NodeProjection, bool, error) {
+	var item domain.NodeProjection
+	err := tx.QueryRowContext(ctx,
+		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		   from node_projection_table
+		  where company_id=$1 and node_id=$2 and information_id=$3`,
+		companyID, nodeID, informationID,
+	).Scan(
+		&item.CompanyID,
+		&item.NodeID,
+		&item.InformationID,
+		&item.Type,
+		&item.Information,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NodeProjection{}, false, nil
+	}
+	if err != nil {
+		return domain.NodeProjection{}, false, err
+	}
+	return item, true, nil
+}
+
+func insertNodeContentChangesTx(ctx context.Context, tx *sql.Tx, changes []domain.NodeContentChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	for _, change := range changes {
+		if _, err := tx.ExecContext(ctx, `
+insert into node_content_changes
+  (company_id, change_id, node_id, information_id, change_type, text, start_offset, end_offset, actor_user_id, actor_display_name, created_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, nullif($9::text, '')::uuid, $10, $11)`,
+			change.CompanyID,
+			change.ChangeID,
+			change.NodeID,
+			change.InformationID,
+			change.ChangeType,
+			change.Text,
+			change.StartOffset,
+			change.EndOffset,
+			cleanUUIDText(change.ActorUserID),
+			change.ActorDisplayName,
+			change.CreatedTimestamp,
+		); err != nil {
+			return err
+		}
+		if actorUserID := cleanUUIDText(change.ActorUserID); actorUserID != "" {
+			if _, err := tx.ExecContext(ctx, `
+insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, now())
+on conflict (company_id, change_id, user_id) do nothing`,
+				change.CompanyID,
+				change.ChangeID,
+				actorUserID,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error) {
@@ -1156,9 +1262,30 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 }
 
 func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
+	return r.deleteNodeProjection(NodeProjectionDeleteInput{
+		CompanyID:     companyID,
+		NodeID:        nodeID,
+		InformationID: informationID,
+	})
+}
+
+func (r *PostgresRepo) DeleteNodeProjectionWithActor(input NodeProjectionDeleteInput) error {
+	return r.deleteNodeProjection(input)
+}
+
+func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error {
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	companyID := strings.TrimSpace(input.CompanyID)
+	nodeID := strings.TrimSpace(input.NodeID)
+	informationID := strings.TrimSpace(input.InformationID)
 	var exists bool
-	if err := r.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
 		companyID, nodeID,
 	).Scan(&exists); err != nil {
@@ -1167,12 +1294,158 @@ func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID str
 	if !exists {
 		return ErrNotFound
 	}
-	_, err := r.db.ExecContext(ctx,
+	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
+		if previous, found, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID); err != nil {
+			return err
+		} else if found {
+			previousCopy := previous
+			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+				companyID,
+				nodeID,
+				informationID,
+				previous.Type,
+				&previousCopy,
+				"",
+				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName),
+				time.Now().UTC(),
+			)); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = tx.ExecContext(ctx,
 		`delete from node_projection_table
 		 where company_id=$1 and node_id=$2 and information_id=$3`,
 		companyID, nodeID, informationID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
+	companyID := strings.TrimSpace(input.CompanyID)
+	nodeID := strings.TrimSpace(input.NodeID)
+	userID := cleanUUIDText(input.UserID)
+	if companyID == "" || nodeID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
+		companyID, nodeID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select change.company_id::text,
+       change.change_id::text,
+       change.node_id::text,
+       change.information_id::text,
+       change.change_type,
+       change.text,
+       change.start_offset,
+       change.end_offset,
+       coalesce(change.actor_user_id::text, ''),
+       change.actor_display_name,
+       change.created_timestamp
+from node_content_changes change
+left join node_content_change_seen seen
+  on seen.company_id=change.company_id
+ and seen.change_id=change.change_id
+ and seen.user_id=$3::uuid
+where change.company_id=$1::uuid
+  and change.node_id=$2::uuid
+  and seen.change_id is null
+  and coalesce(change.actor_user_id::text, '') <> $3
+order by change.created_timestamp asc, change.change_id asc`, companyID, nodeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.NodeContentChange, 0)
+	for rows.Next() {
+		var item domain.NodeContentChange
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.ChangeID,
+			&item.NodeID,
+			&item.InformationID,
+			&item.ChangeType,
+			&item.Text,
+			&item.StartOffset,
+			&item.EndOffset,
+			&item.ActorUserID,
+			&item.ActorDisplayName,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error) {
+	companyID := strings.TrimSpace(input.CompanyID)
+	nodeID := strings.TrimSpace(input.NodeID)
+	changeID := strings.TrimSpace(input.ChangeID)
+	userID := cleanUUIDText(input.UserID)
+	if companyID == "" || nodeID == "" || userID == "" {
+		return 0, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, nodeID); err != nil {
+		return 0, err
+	} else if !exists {
+		return 0, ErrNotFound
+	}
+
+	if changeID != "" {
+		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from node_content_changes where company_id=$1::uuid and node_id=$2::uuid and change_id=$3::uuid)`, companyID, nodeID, changeID); err != nil {
+			return 0, err
+		} else if !exists {
+			return 0, ErrNotFound
+		}
+		result, err := tx.ExecContext(ctx, `
+insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, now())
+on conflict (company_id, change_id, user_id) do nothing`, companyID, changeID, userID)
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		affected, _ := result.RowsAffected()
+		return int(affected), nil
+	}
+
+	result, err := tx.ExecContext(ctx, `
+insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
+select change.company_id, change.change_id, $3::uuid, now()
+from node_content_changes change
+where change.company_id=$1::uuid
+  and change.node_id=$2::uuid
+on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, userID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
 }
 
 func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {

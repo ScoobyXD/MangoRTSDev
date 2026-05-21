@@ -146,6 +146,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeID := parts[0]
 
+	if len(parts) >= 2 && parts[1] == "changes" {
+		s.handleNodeContentChanges(w, r, nodeID, parts[2:])
+		return
+	}
+
 	if len(parts) == 1 {
 		if r.Method == http.MethodPut {
 			var fields map[string]json.RawMessage
@@ -354,7 +359,14 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		// Clearing an editor document removes the latest hot-read projection only.
 		// The append-only information history stays intact for audit/debug paths.
-		if err := s.repo.DeleteNodeProjection(companyID, nodeID, informationID); errors.Is(err, store.ErrNotFound) {
+		actorUserID, actorLabel := nodeChangeActorPayload(r)
+		if err := s.repo.DeleteNodeProjectionWithActor(store.NodeProjectionDeleteInput{
+			CompanyID:        companyID,
+			NodeID:           nodeID,
+			InformationID:    informationID,
+			ActorUserID:      actorUserID,
+			ActorDisplayName: actorLabel,
+		}); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		} else if err != nil {
@@ -395,7 +407,16 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information, req.InformationID)
+		actorUserID, actorLabel := nodeChangeActorPayload(r)
+		item, err := s.repo.AddNodeInformationWithActor(store.NodeInformationInput{
+			CompanyID:        req.CompanyID,
+			NodeID:           nodeID,
+			Type:             req.Type,
+			Information:      req.Information,
+			InformationID:    req.InformationID,
+			ActorUserID:      actorUserID,
+			ActorDisplayName: actorLabel,
+		})
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
@@ -411,6 +432,167 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func nodeChangeActorPayload(r *http.Request) (string, string) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		return "", ""
+	}
+	label := strings.TrimSpace(actor.User.DisplayName)
+	if label == "" {
+		label = strings.TrimSpace(actor.User.Email)
+	}
+	return strings.TrimSpace(actor.User.UserID), label
+}
+
+func (s *Server) handleNodeContentChanges(w http.ResponseWriter, r *http.Request, nodeID string, parts []string) {
+	if len(parts) == 0 {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		actorUserID, _ := nodeChangeActorPayload(r)
+		if actorUserID == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"company_id": companyID,
+				"node_id":    nodeID,
+				"changes":    []any{},
+			})
+			return
+		}
+		items, err := s.repo.ListUnseenNodeContentChanges(store.NodeContentChangeListInput{
+			CompanyID: companyID,
+			NodeID:    nodeID,
+			UserID:    actorUserID,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_change_query")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_node_changes")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"company_id": companyID,
+			"node_id":    nodeID,
+			"changes":    items,
+		})
+		return
+	}
+
+	if len(parts) == 1 && parts[0] == "seen-all" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		actorUserID, _ := nodeChangeActorPayload(r)
+		if actorUserID == "" {
+			writeError(w, http.StatusUnauthorized, "authenticated_user_required")
+			return
+		}
+		count, err := s.repo.MarkNodeContentChangeSeen(store.NodeContentChangeSeenInput{
+			CompanyID: req.CompanyID,
+			NodeID:    nodeID,
+			UserID:    actorUserID,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_change_seen_request")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_mark_node_changes_seen")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "seen", "count": count})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "seen" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		changeID := strings.TrimSpace(parts[0])
+		if changeID == "" {
+			writeError(w, http.StatusBadRequest, "change_id_required")
+			return
+		}
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		actorUserID, _ := nodeChangeActorPayload(r)
+		if actorUserID == "" {
+			writeError(w, http.StatusUnauthorized, "authenticated_user_required")
+			return
+		}
+		count, err := s.repo.MarkNodeContentChangeSeen(store.NodeContentChangeSeenInput{
+			CompanyID: req.CompanyID,
+			NodeID:    nodeID,
+			ChangeID:  changeID,
+			UserID:    actorUserID,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_change_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_change_seen_request")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_mark_node_change_seen")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "seen", "count": count})
 		return
 	}
 

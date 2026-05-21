@@ -25,6 +25,12 @@ import {
   type ActiveMentionDraft,
 } from "./editorMentions";
 import {
+  formatNodeContentChangeLabel,
+  resolveNodeAdditionRange,
+  resolveNodeDeletionAnchorOffset,
+  type NodeContentChange,
+} from "./nodeContentChanges";
+import {
   ArrowRightIcon,
   avatarBackgroundForName,
   buildChatThreads,
@@ -226,6 +232,7 @@ type NodeTextBlockEditorProps = {
   currentUserID: string;
   companyUsers: MentionableCompanyUser[];
   documentValue: string;
+  contentChanges: NodeContentChange[];
   chatMessages: EditorTextBlockChatMessage[];
   activeChatAnchorMessageID: string;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
@@ -238,6 +245,7 @@ type NodeTextBlockEditorProps = {
   onBlur: () => void;
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
+  onChangeSeen: (changeID: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
   onImageChatRequest: (image: TextBlockImageDraft) => void;
   onImageNodeRequest: (image: TextBlockImageDraft) => void;
@@ -261,6 +269,12 @@ type TextHighlightRect = {
   width: number;
   height: number;
   active: boolean;
+};
+
+type NodeContentChangeLabelLayout = {
+  change: NodeContentChange;
+  left: number;
+  top: number;
 };
 
 type TextRangeBoundary = {
@@ -370,6 +384,98 @@ function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, active
   return rects;
 }
 
+function firstVisibleRangeRect(root: HTMLElement, wrapper: HTMLElement, startOffset: number, endOffset: number): DOMRect | null {
+  const range = createTextRangeFromOffsets(root, startOffset, endOffset);
+  if (!range) return null;
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const editorRect = root.getBoundingClientRect();
+  for (const rect of Array.from(range.getClientRects())) {
+    const left = Math.max(rect.left, editorRect.left) - wrapperRect.left;
+    const right = Math.min(rect.right, editorRect.right) - wrapperRect.left;
+    const top = Math.max(rect.top, editorRect.top) - wrapperRect.top;
+    const bottom = Math.min(rect.bottom, editorRect.bottom) - wrapperRect.top;
+    if (right - left >= 1 && bottom - top >= 2) {
+      return new DOMRect(left, top, right - left, bottom - top);
+    }
+  }
+  const rect = range.getBoundingClientRect();
+  const left = Math.max(rect.left, editorRect.left) - wrapperRect.left;
+  const top = Math.max(rect.top, editorRect.top) - wrapperRect.top;
+  return new DOMRect(left, top, Math.max(1, rect.width), Math.max(16, rect.height || 16));
+}
+
+function buildNodeContentChangeVisuals(root: HTMLElement, wrapper: HTMLElement, changes: NodeContentChange[], activeChangeID: string): {
+  rects: TextHighlightRect[];
+  labels: NodeContentChangeLabelLayout[];
+} {
+  if (changes.length === 0) return { rects: [], labels: [] };
+  const documentText = readEditorDocumentText(root);
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const editorRect = root.getBoundingClientRect();
+  const rects: TextHighlightRect[] = [];
+  const labels: NodeContentChangeLabelLayout[] = [];
+
+  for (const change of changes) {
+    if (change.change_type === "addition") {
+      const range = resolveNodeAdditionRange(documentText, change);
+      if (!range) continue;
+      const rangeRect = createTextRangeFromOffsets(root, range.startOffset, range.endOffset);
+      if (!rangeRect) continue;
+      const active = change.change_id === activeChangeID;
+      const visibleRects = Array.from(rangeRect.getClientRects())
+        .map((rect, rectIndex) => {
+          const left = Math.max(rect.left, editorRect.left) - wrapperRect.left;
+          const right = Math.min(rect.right, editorRect.right) - wrapperRect.left;
+          const top = Math.max(rect.top, editorRect.top) - wrapperRect.top;
+          const bottom = Math.min(rect.bottom, editorRect.bottom) - wrapperRect.top;
+          const width = right - left;
+          const height = bottom - top;
+          if (width < 1 || height < 2) return null;
+          return {
+            key: `${change.change_id}:${rectIndex}:${Math.round(left)}:${Math.round(top)}`,
+            left,
+            top,
+            width,
+            height,
+            active,
+          };
+        })
+        .filter((rect): rect is TextHighlightRect => rect !== null);
+      rects.push(...visibleRects);
+      const firstRect = visibleRects[0];
+      if (firstRect) {
+        labels.push({
+          change,
+          left: Math.max(6, Math.min(firstRect.left + Math.min(firstRect.width, 220) + 8, wrapperRect.width - 190)),
+          top: Math.max(6, firstRect.top - 2),
+        });
+      }
+      continue;
+    }
+
+    const anchorOffset = resolveNodeDeletionAnchorOffset(documentText, change);
+    const endOffset = Math.min(documentText.length, anchorOffset + 1);
+    const anchorRect = documentText.length > 0 && endOffset > anchorOffset
+      ? firstVisibleRangeRect(root, wrapper, anchorOffset, endOffset)
+      : null;
+    labels.push({
+      change,
+      left: Math.max(6, Math.min((anchorRect?.left ?? TEXT_BLOCK_PADDING_LEFT) + 8, wrapperRect.width - 190)),
+      top: Math.max(6, anchorRect?.top ?? TEXT_BLOCK_PADDING_TOP),
+    });
+  }
+
+  labels.sort((a, b) => a.top - b.top || a.left - b.left);
+  let previousBottom = -Infinity;
+  for (const label of labels) {
+    if (label.top < previousBottom + 4) {
+      label.top = previousBottom + 4;
+    }
+    previousBottom = label.top + 26;
+  }
+  return { rects, labels };
+}
+
 function imageDataURLMimeType(dataURL: string): string {
   const match = /^data:([^;,]+);base64,/i.exec(dataURL.trim());
   return match?.[1] ?? "image/png";
@@ -431,6 +537,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   currentUserID,
   companyUsers,
   documentValue,
+  contentChanges,
   chatMessages,
   activeChatAnchorMessageID,
   chatNavigationRequest,
@@ -443,6 +550,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onBlur,
   onDocumentChange,
   onDocumentFlush,
+  onChangeSeen,
   onSelectionChatRequest,
   onImageChatRequest,
   onImageNodeRequest,
@@ -467,6 +575,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
   const [imageDraft, setImageDraft] = useState<TextBlockImageDraft | null>(null);
   const [textHighlightRects, setTextHighlightRects] = useState<TextHighlightRect[]>([]);
+  const [contentChangeHighlightRects, setContentChangeHighlightRects] = useState<TextHighlightRect[]>([]);
+  const [contentChangeLabels, setContentChangeLabels] = useState<NodeContentChangeLabelLayout[]>([]);
+  const [activeContentChangeID, setActiveContentChangeID] = useState("");
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
@@ -478,15 +589,27 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const wrapper = wrapperRef.current;
     if (!editor || !wrapper) {
       setTextHighlightRects((current) => current.length > 0 ? [] : current);
+      setContentChangeHighlightRects((current) => current.length > 0 ? [] : current);
+      setContentChangeLabels((current) => current.length > 0 ? [] : current);
       return;
     }
     const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages);
     setTextHighlightRects(nextRects);
-  }, [activeChatAnchorMessageID, chatMessages]);
+    const nextChangeVisuals = buildNodeContentChangeVisuals(editor, wrapper, contentChanges, activeContentChangeID);
+    setContentChangeHighlightRects(nextChangeVisuals.rects);
+    setContentChangeLabels(nextChangeVisuals.labels);
+  }, [activeChatAnchorMessageID, activeContentChangeID, chatMessages, contentChanges]);
 
   useEffect(() => {
     targetKeyRef.current = documentTargetKey;
   }, [documentTargetKey]);
+
+  useEffect(() => {
+    if (!activeContentChangeID) return;
+    if (!contentChanges.some((change) => change.change_id === activeContentChangeID)) {
+      setActiveContentChangeID("");
+    }
+  }, [activeContentChangeID, contentChanges]);
 
   useEffect(() => {
     const nextHeight = readStoredTextBlockHeight(heightStorageKey);
@@ -743,6 +866,34 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           </div>
         </div>
       )}
+      {contentChangeHighlightRects.length > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            pointerEvents: "none",
+            overflow: "hidden",
+          }}
+        >
+          {contentChangeHighlightRects.map((rect) => (
+            <div
+              key={rect.key}
+              style={{
+                position: "absolute",
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+                borderRadius: 3,
+                background: rect.active ? "rgba(38, 166, 91, 0.44)" : "rgba(46, 204, 113, 0.25)",
+                boxShadow: rect.active ? "0 0 0 1px rgba(17,122,67,0.72), 0 0 0 3px rgba(46,204,113,0.18)" : "none",
+              }}
+            />
+          ))}
+        </div>
+      )}
       {textHighlightRects.length > 0 && (
         <div
           aria-hidden="true"
@@ -836,6 +987,111 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           ["--editor-document-scroll-track" as string]: scrollbarTrack,
         }}
       />
+      {contentChangeLabels.length > 0 && (
+        <div
+          aria-label="Unseen text changes"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 6,
+            pointerEvents: "none",
+            overflow: "visible",
+          }}
+        >
+          {contentChangeLabels.map((label) => {
+            const active = activeContentChangeID === label.change.change_id;
+            const addition = label.change.change_type === "addition";
+            const color = addition ? "#0f6b3d" : "#b42318";
+            const border = addition ? "rgba(17,122,67,0.34)" : "rgba(180,35,24,0.34)";
+            const background = addition ? "rgba(232,247,237,0.98)" : "rgba(255,241,240,0.98)";
+            return (
+              <div
+                key={label.change.change_id}
+                onMouseEnter={() => setActiveContentChangeID(label.change.change_id)}
+                onMouseLeave={() => setActiveContentChangeID((current) => current === label.change.change_id ? "" : current)}
+                style={{
+                  position: "absolute",
+                  left: label.left,
+                  top: label.top,
+                  maxWidth: 240,
+                  display: "inline-grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  alignItems: "center",
+                  gap: 6,
+                  minHeight: 24,
+                  border: `1px solid ${border}`,
+                  borderRadius: 6,
+                  background,
+                  color,
+                  padding: "3px 4px 3px 7px",
+                  fontSize: 10,
+                  fontWeight: 900,
+                  letterSpacing: 0,
+                  boxShadow: active ? "0 10px 24px rgba(15,23,42,0.18)" : "0 6px 16px rgba(15,23,42,0.10)",
+                  pointerEvents: "auto",
+                }}
+              >
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {formatNodeContentChangeLabel(label.change)}
+                </span>
+                <button
+                  type="button"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onChangeSeen(label.change.change_id);
+                  }}
+                  style={{
+                    minHeight: 18,
+                    border: `1px solid ${border}`,
+                    borderRadius: 5,
+                    background: "#ffffff",
+                    color,
+                    padding: "0 5px",
+                    cursor: "pointer",
+                    fontSize: 10,
+                    fontWeight: 900,
+                    letterSpacing: 0,
+                  }}
+                >
+                  Seen
+                </button>
+                {active && (
+                  <div
+                    role="tooltip"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "calc(100% + 5px)",
+                      width: "min(320px, 78vw)",
+                      maxHeight: 170,
+                      overflowY: "auto",
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                      border: `1px solid ${border}`,
+                      borderRadius: 7,
+                      background: "#ffffff",
+                      color: surfaceText,
+                      padding: 8,
+                      boxShadow: "0 14px 30px rgba(15,23,42,0.20)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      lineHeight: 1.35,
+                      zIndex: 7,
+                    }}
+                  >
+                    {label.change.text}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {documentMentionMenu}
       {selectionDraft && (
         <button

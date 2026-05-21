@@ -4,6 +4,7 @@ import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
 import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
 import { generateStableInformationID } from "./editorTypes";
+import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
@@ -13,6 +14,7 @@ export type NodeWorkspaceSurfaceProps = {
   nodeID: string;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
+  unseenChanges: NodeContentChange[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
   topPx: number;
@@ -26,6 +28,8 @@ export type NodeWorkspaceSurfaceProps = {
   outlineStyle: EditorOutlineStyleID;
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
+  onMarkChangeSeen: (changeID: string) => void;
+  onMarkAllChangesSeen: () => void;
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
   onError: (message: string) => void;
