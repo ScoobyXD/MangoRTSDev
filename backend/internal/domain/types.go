@@ -71,6 +71,38 @@ type CompanyUser struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type CompanyUserGroup struct {
+	CompanyID        string    `json:"company_id"`
+	GroupID          string    `json:"group_id"`
+	ParentGroupID    *string   `json:"parent_group_id,omitempty"`
+	Name             string    `json:"name"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CompanyUserGroupMember struct {
+	CompanyID        string    `json:"company_id"`
+	GroupID          string    `json:"group_id"`
+	UserID           string    `json:"user_id"`
+	UserDisplayName  string    `json:"user_display_name,omitempty"`
+	UserEmail        string    `json:"user_email,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type EntityPermission struct {
+	CompanyID        string    `json:"company_id"`
+	EntityType       string    `json:"entity_type"`
+	EntityID         string    `json:"entity_id"`
+	SubjectType      string    `json:"subject_type"`
+	SubjectID        string    `json:"subject_id"`
+	SubjectName      string    `json:"subject_name,omitempty"`
+	SubjectEmail     string    `json:"subject_email,omitempty"`
+	Permission       string    `json:"permission"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
 type Invitation struct {
 	InvitationID      string     `json:"invitation_id"`
 	CompanyID         string     `json:"company_id"`

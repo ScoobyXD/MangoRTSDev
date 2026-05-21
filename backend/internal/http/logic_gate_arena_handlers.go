@@ -20,6 +20,9 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_and_logic_gate_id_required")
 		return
 	}
+	if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		return
+	}
 
 	logicGate, err := s.repo.GetLogicGate(companyID, logicGateID)
 	if errors.Is(err, store.ErrNotFound) {

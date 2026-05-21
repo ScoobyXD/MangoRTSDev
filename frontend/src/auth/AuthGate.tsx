@@ -70,6 +70,22 @@ type CompanyUser = {
   role: string;
 };
 
+type CompanyUserGroup = {
+  company_id: string;
+  group_id: string;
+  parent_group_id?: string;
+  name: string;
+  position: number;
+};
+
+type CompanyUserGroupMember = {
+  company_id: string;
+  group_id: string;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
+};
+
 const PASSWORD_RESET_SECONDS = 60 * 60;
 
 type Company = {
@@ -733,6 +749,27 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const inviteSelectedCompany = companyOptions.find((company) => company.company_id === inviteCompanyID) ?? null;
   const activeCompanyLabel = selectedCompany ? companyName(selectedCompany) : companyID ? "Selected company" : "No company selected";
   const canInvite = me.is_dev_admin || canManageSelectedCompany;
+  const [userGroups, setUserGroups] = useState<CompanyUserGroup[]>([]);
+  const [userGroupMembers, setUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
+  const [selectedUserGroupID, setSelectedUserGroupID] = useState("");
+  const [newUserGroupName, setNewUserGroupName] = useState("");
+  const [newChildUserGroupName, setNewChildUserGroupName] = useState("");
+  const [groupMemberDraft, setGroupMemberDraft] = useState<Set<string>>(new Set());
+  const [groupBusy, setGroupBusy] = useState(false);
+  const selectedUserGroup = userGroups.find((group) => group.group_id === selectedUserGroupID) ?? null;
+  const userGroupChildrenByParent = useMemo(() => {
+    const grouped = new Map<string, CompanyUserGroup[]>();
+    for (const group of userGroups) {
+      const parentID = group.parent_group_id?.trim() ?? "";
+      const list = grouped.get(parentID) ?? [];
+      list.push(group);
+      grouped.set(parentID, list);
+    }
+    for (const list of grouped.values()) {
+      list.sort((a, b) => (a.position - b.position) || a.name.localeCompare(b.name) || a.group_id.localeCompare(b.group_id));
+    }
+    return grouped;
+  }, [userGroups]);
 
   const loadCompanyOptions = useCallback(async (query = "") => {
     if (!me.is_dev_admin) return;
@@ -753,12 +790,21 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const load = useCallback(async () => {
     if (!companyID || !canManageSelectedCompany) {
       setUsers([]);
+      setUserGroups([]);
+      setUserGroupMembers([]);
+      setSelectedUserGroupID("");
       return;
     }
     setError("");
     try {
-      const usersPayload = await apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
+      const [usersPayload, groupsPayload] = await Promise.all([
+        apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
+        apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
+      ]);
       setUsers(usersPayload.users ?? []);
+      setUserGroups(groupsPayload.groups ?? []);
+      setUserGroupMembers(groupsPayload.members ?? []);
+      setSelectedUserGroupID((previous) => (groupsPayload.groups ?? []).some((group) => group.group_id === previous) ? previous : (groupsPayload.groups ?? [])[0]?.group_id ?? "");
     } catch {
       setError("Failed to load users");
     }
@@ -768,9 +814,101 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (companyID) setActiveCompanyID(companyID); }, [companyID]);
   useEffect(() => {
+    const memberIDs = userGroupMembers.filter((member) => member.group_id === selectedUserGroupID).map((member) => member.user_id);
+    setGroupMemberDraft(new Set(memberIDs));
+  }, [selectedUserGroupID, userGroupMembers]);
+  useEffect(() => {
     if (!me.is_dev_admin) setInviteCompanyID(companyID);
     else if (!inviteCompanyID && companyID) setInviteCompanyID(companyID);
   }, [companyID, inviteCompanyID, me.is_dev_admin]);
+
+  const createUserGroup = async (parentGroupID = "") => {
+    const name = (parentGroupID ? newChildUserGroupName : newUserGroupName).trim();
+    if (!companyID || !name) {
+      setError("Group name required");
+      return;
+    }
+    setGroupBusy(true);
+    setError("");
+    try {
+      const group = await apiFetchJSON<CompanyUserGroup>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`, {
+        method: "POST",
+        body: JSON.stringify({ name, parent_group_id: parentGroupID }),
+      });
+      setUserGroups((previous) => [...previous.filter((item) => item.group_id !== group.group_id), group]);
+      setSelectedUserGroupID(group.group_id);
+      if (parentGroupID) setNewChildUserGroupName("");
+      else setNewUserGroupName("");
+      await load();
+    } catch (groupError) {
+      console.error("Create user group failed", groupError);
+      setError(formatAuthError(groupError, "Create group failed"));
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  const saveSelectedUserGroupMembers = async () => {
+    if (!companyID || !selectedUserGroupID) return;
+    setGroupBusy(true);
+    setError("");
+    try {
+      const payload = await apiFetchJSON<{ members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups/${encodeURIComponent(selectedUserGroupID)}/members`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, user_ids: Array.from(groupMemberDraft) }),
+      });
+      setUserGroupMembers((previous) => [
+        ...previous.filter((member) => member.group_id !== selectedUserGroupID),
+        ...(payload.members ?? []),
+      ]);
+      await load();
+    } catch (groupError) {
+      console.error("Save user group members failed", groupError);
+      setError(formatAuthError(groupError, "Save group users failed"));
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  const deleteSelectedUserGroup = async () => {
+    if (!companyID || !selectedUserGroupID) return;
+    setGroupBusy(true);
+    setError("");
+    try {
+      await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/user-groups/${encodeURIComponent(selectedUserGroupID)}`, { method: "DELETE" });
+      setSelectedUserGroupID("");
+      await load();
+    } catch (groupError) {
+      console.error("Delete user group failed", groupError);
+      setError(formatAuthError(groupError, "Delete group failed"));
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  const renderUserGroup = (group: CompanyUserGroup, depth = 0): React.ReactNode => {
+    const childGroups = userGroupChildrenByParent.get(group.group_id) ?? [];
+    const memberCount = userGroupMembers.filter((member) => member.group_id === group.group_id).length;
+    return (
+      <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
+        <button
+          type="button"
+          style={{
+            ...smallButtonStyle,
+            justifyContent: "space-between",
+            display: "flex",
+            minHeight: 30,
+            borderColor: selectedUserGroupID === group.group_id ? "rgba(255,136,32,0.84)" : "rgba(0,0,0,0.16)",
+          }}
+          onClick={() => setSelectedUserGroupID(group.group_id)}
+        >
+          <span style={{ overflowWrap: "anywhere", textAlign: "left" }}>{group.name}</span>
+          <span style={{ color: "#5f6368" }}>{memberCount}</span>
+        </button>
+        {childGroups.map((child) => renderUserGroup(child, depth + 1))}
+      </div>
+    );
+  };
 
   return (
     <div style={embedded ? { ...settingsPageStyle, minHeight: "100%", boxSizing: "border-box" } : settingsPageStyle}>
@@ -974,6 +1112,67 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               </button>
             </div>
           ))}
+        </div>
+      </section>}
+      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
+        <div style={settingsSectionHeaderRowStyle}>
+          <h2 style={sectionTitleStyle}>User Groups</h2>
+          <span style={settingsSectionScopeStyle}>{activeCompanyLabel}</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 14 }}>
+          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
+            <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8 }} onSubmit={(event) => {
+              event.preventDefault();
+              void createUserGroup("");
+            }}>
+              <input style={settingsInputStyle} value={newUserGroupName} onChange={(event) => setNewUserGroupName(event.target.value)} placeholder="New group name" />
+              <button type="submit" style={smallButtonStyle} disabled={groupBusy}>Create</button>
+            </form>
+            <div style={{ display: "grid", gap: 4 }}>
+              {userGroups.length === 0 && <div style={settingsInfoTextStyle}>No groups yet.</div>}
+              {(userGroupChildrenByParent.get("") ?? []).map((group) => renderUserGroup(group))}
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
+            {selectedUserGroup ? (
+              <>
+                <div style={settingsSubsectionTitleStyle}>{selectedUserGroup.name}</div>
+                <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8 }} onSubmit={(event) => {
+                  event.preventDefault();
+                  void createUserGroup(selectedUserGroup.group_id);
+                }}>
+                  <input style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder="Child group name" />
+                  <button type="submit" style={smallButtonStyle} disabled={groupBusy}>Create child</button>
+                </form>
+                <div style={{ display: "grid", gap: 4, maxHeight: 260, overflow: "auto", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, padding: 8 }}>
+                  {users.map((user) => (
+                    <label key={user.user_id} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, alignItems: "center", fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={groupMemberDraft.has(user.user_id)}
+                        onChange={(event) => {
+                          setGroupMemberDraft((previous) => {
+                            const next = new Set(previous);
+                            if (event.target.checked) next.add(user.user_id);
+                            else next.delete(user.user_id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span style={{ overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
+                      <span style={{ color: "#5f6368" }}>{user.role}</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button type="button" style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={groupBusy} onClick={() => void deleteSelectedUserGroup()}>Delete group</button>
+                  <button type="button" style={settingsPrimaryButtonStyle} disabled={groupBusy} onClick={() => void saveSelectedUserGroupMembers()}>{groupBusy ? "Saving" : "Save users"}</button>
+                </div>
+              </>
+            ) : (
+              <div style={settingsInfoTextStyle}>Select a group to manage users.</div>
+            )}
+          </div>
         </div>
       </section>}
       {deleteConfirmation && (

@@ -668,6 +668,19 @@ func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
 			return
 		}
+		if item.Kind == "node" || item.Kind == "logic_gate" {
+			if entityType, ok := companyExplorerEntityType(item.Kind); ok {
+				if !s.requireEntityView(w, r, req.CompanyID, entityType, item.ID, companyExplorerEntityNotFoundCode(item.Kind)) {
+					return
+				}
+			}
+		}
+		if item.Kind == "kanban" && store.IsLogicGateKanbanBoardID(item.ID) {
+			logicGateID := strings.TrimSpace(strings.TrimPrefix(item.ID, "logic-gate:"))
+			if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+				return
+			}
+		}
 		key := item.Kind + ":" + item.ID
 		if seen[key] {
 			continue
@@ -776,6 +789,11 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
+		items, err = s.filterVisibleCompanyExplorerFolderItems(r, companyID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_company_explorer_folder_items")
+			return
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
 		return
 	}
@@ -798,6 +816,11 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidCompanyExplorerItemType(req.ItemType) {
 			writeError(w, http.StatusBadRequest, "company_folder_item_required")
 			return
+		}
+		if entityType, ok := companyExplorerEntityType(req.ItemType); ok {
+			if !s.requireEntityView(w, r, req.CompanyID, entityType, req.ItemID, companyExplorerEntityNotFoundCode(req.ItemType)) {
+				return
+			}
 		}
 		item, deletedRelationshipIDs, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID, req.Position)
 		if errors.Is(err, store.ErrNotFound) {
@@ -827,6 +850,11 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		if companyID == "" || itemID == "" || !isValidCompanyExplorerItemType(itemType) {
 			writeError(w, http.StatusBadRequest, "company_item_required")
 			return
+		}
+		if entityType, ok := companyExplorerEntityType(itemType); ok {
+			if !s.requireEntityView(w, r, companyID, entityType, itemID, companyExplorerEntityNotFoundCode(itemType)) {
+				return
+			}
 		}
 		if err := s.repo.RemoveCompanyExplorerFolderItem(companyID, itemType, itemID); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_item_not_found")
@@ -869,6 +897,11 @@ func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r 
 		if req.Assignments[index].FolderID == "" || req.Assignments[index].ItemID == "" || !isValidCompanyExplorerItemType(req.Assignments[index].ItemType) {
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_assignment")
 			return
+		}
+		if entityType, ok := companyExplorerEntityType(req.Assignments[index].ItemType); ok {
+			if !s.requireEntityView(w, r, req.CompanyID, entityType, req.Assignments[index].ItemID, companyExplorerEntityNotFoundCode(req.Assignments[index].ItemType)) {
+				return
+			}
 		}
 	}
 

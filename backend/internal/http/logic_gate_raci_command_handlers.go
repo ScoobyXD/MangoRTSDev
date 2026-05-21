@@ -28,6 +28,9 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
+	if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		return
+	}
 
 	assignments, ok := parseLogicGateRaciCommandAssignments(fields)
 	if !ok {

@@ -30,6 +30,17 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 			return
 		}
+		nodes, err := s.repo.ListNodes(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+			return
+		}
+		nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+			return
+		}
+		items = filterNodeRelationshipsByVisibleNodes(items, visibleNodeIDs(nodes))
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"relationships": items}, etag)
 		return
 	}
@@ -64,6 +75,12 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 	}
 	if !isLegalNodeRelationshipPositionPair(req.APosition, req.BPosition) {
 		writeError(w, http.StatusBadRequest, "illegal_relationship_pair")
+		return
+	}
+	if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, req.NodeIDA, "node_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, req.NodeIDB, "node_not_found") {
 		return
 	}
 
@@ -103,6 +120,29 @@ func (s *Server) handleNodeRelationshipByID(w http.ResponseWriter, r *http.Reque
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	relationships, err := s.repo.ListNodeRelationships(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_node_relationship")
+		return
+	}
+	found := false
+	for _, relationship := range relationships {
+		if relationship.NodeRelationshipID != relationshipID {
+			continue
+		}
+		found = true
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, relationship.NodeIDA, "relationship_not_found") {
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, relationship.NodeIDB, "relationship_not_found") {
+			return
+		}
+		break
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "relationship_not_found")
 		return
 	}
 	event, err := s.repo.DeleteNodeRelationshipAndWorkspaceEvent(companyID, relationshipID)

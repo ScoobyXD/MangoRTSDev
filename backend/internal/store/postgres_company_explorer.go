@@ -964,6 +964,13 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from entity_access_permissions
+		 where company_id=$1 and entity_type='node' and entity_id=$2::uuid`,
+		companyID, nodeID,
+	); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+		return err
+	}
 	deleted, err := tx.ExecContext(ctx,
 		`delete from nodes
 		 where company_id=$1 and node_id=$2`,
@@ -1071,6 +1078,13 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		 where company_id=$1 and logic_gate_id=$2`,
 		companyID, logicGateID,
 	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from entity_access_permissions
+		 where company_id=$1 and entity_type='logic_gate' and entity_id=$2::uuid`,
+		companyID, logicGateID,
+	); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,

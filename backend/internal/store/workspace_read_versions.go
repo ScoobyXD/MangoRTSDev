@@ -10,6 +10,7 @@ var (
 		"node_created",
 		"node_updated",
 		"node_deleted",
+		"node_permissions_updated",
 		"kanban_card_upserted",
 		"kanban_card_moved",
 		"kanban_card_deleted",
@@ -30,6 +31,7 @@ var (
 		"logic_gate_updated",
 		"logic_gate_deleted",
 		"logic_gate_raci_updated",
+		"logic_gate_permissions_updated",
 	}
 	LogicGateRelationshipWorkspaceEventTypes = []string{
 		"logic_gate_relationship_created",

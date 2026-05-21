@@ -53,6 +53,20 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 	if actor, ok := authenticatedActor(r); ok {
 		input.CreatorUserID = strings.TrimSpace(actor.User.UserID)
 	}
+	for _, relationship := range input.Relationships {
+		entityType := store.EntityTypeNode
+		notFoundCode := "node_not_found"
+		if input.EntityKind == "logic_gate" {
+			entityType = store.EntityTypeLogicGate
+			notFoundCode = "logic_gate_not_found"
+		}
+		if relationship.EntityIDA != "" && !s.requireEntityView(w, r, input.CompanyID, entityType, relationship.EntityIDA, notFoundCode) {
+			return
+		}
+		if relationship.EntityIDB != "" && !s.requireEntityView(w, r, input.CompanyID, entityType, relationship.EntityIDB, notFoundCode) {
+			return
+		}
+	}
 
 	result, err := s.repo.CreateMapEntityBatch(input)
 	if errors.Is(err, store.ErrInvalid) {

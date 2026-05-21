@@ -331,6 +331,11 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, nodeID))
+	for permissionKey, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID && permission.EntityType == EntityTypeNode && permission.EntityID == nodeID {
+			delete(r.entityPermissions, permissionKey)
+		}
+	}
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.NodeID == nodeID {
 			delete(r.emailNodeLinks, linkKey)

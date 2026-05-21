@@ -29,6 +29,7 @@ type Repository interface {
 	CommunicationsRepository
 	WorkGraphRepository
 	LogicGateRepository
+	EntityPermissionRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
 	MapLayoutRepository
@@ -48,6 +49,12 @@ type IdentityRepository interface {
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error)
+	ListCompanyUserGroups(companyID string) ([]domain.CompanyUserGroup, error)
+	CreateCompanyUserGroup(companyID, parentGroupID, name string) (domain.CompanyUserGroup, error)
+	UpdateCompanyUserGroup(companyID, groupID string, parentGroupID *string, name string, position int) (domain.CompanyUserGroup, error)
+	DeleteCompanyUserGroup(companyID, groupID string) error
+	ListCompanyUserGroupMembers(companyID string) ([]domain.CompanyUserGroupMember, error)
+	SetCompanyUserGroupMembers(companyID, groupID string, userIDs []string) ([]domain.CompanyUserGroupMember, error)
 	CompleteExternalIdentityDeletion(cognitoSubject string) error
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
 	ValidateInvitationToken(token string) (domain.Invitation, error)
@@ -117,6 +124,12 @@ type LogicGateRepository interface {
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
+}
+
+type EntityPermissionRepository interface {
+	ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error)
+	SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error)
+	UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error)
 }
 
 type WorkItemReadRepository interface {
@@ -270,6 +283,18 @@ type WorkItemLogicGateInboxItem struct {
 
 const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
+
+const (
+	EntityTypeNode      = "node"
+	EntityTypeLogicGate = "logic_gate"
+
+	EntityPermissionView = "view"
+
+	EntityPermissionSubjectUser  = "user"
+	EntityPermissionSubjectGroup = "group"
+
+	EntityPermissionMaxAssignments = 1000
+)
 
 func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
@@ -773,6 +798,19 @@ type LogicGateRaciAssignmentCommandResult struct {
 	Events            []domain.DomainEvent             `json:"-"`
 }
 
+type EntityPermissionInput struct {
+	SubjectType string `json:"subject_type"`
+	SubjectID   string `json:"subject_id"`
+	Permission  string `json:"permission"`
+}
+
+type EntityPermissionUpdateInput struct {
+	CompanyID   string
+	EntityType  string
+	EntityID    string
+	Permissions []EntityPermissionInput
+}
+
 type CreateInvitationInput struct {
 	CompanyID       string
 	Email           string
@@ -810,6 +848,37 @@ func NormalizeLogicGateRaciRole(role string) (string, bool) {
 		return domain.LogicGateRaciRoleConsulted, true
 	case domain.LogicGateRaciRoleInformed:
 		return domain.LogicGateRaciRoleInformed, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeEntityType(entityType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(entityType)) {
+	case EntityTypeNode:
+		return EntityTypeNode, true
+	case EntityTypeLogicGate:
+		return EntityTypeLogicGate, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeEntityPermissionSubjectType(subjectType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(subjectType)) {
+	case EntityPermissionSubjectUser:
+		return EntityPermissionSubjectUser, true
+	case EntityPermissionSubjectGroup:
+		return EntityPermissionSubjectGroup, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeEntityPermission(permission string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(permission)) {
+	case "", EntityPermissionView:
+		return EntityPermissionView, true
 	default:
 		return "", false
 	}

@@ -31,6 +31,9 @@ type MemoryRepo struct {
 	users                    map[string]domain.User
 	companies                map[string]domain.Company
 	memberships              map[string]domain.CompanyMembership
+	userGroups               map[string]domain.CompanyUserGroup
+	userGroupMembers         map[string]domain.CompanyUserGroupMember
+	entityPermissions        map[string]domain.EntityPermission
 	invitations              map[string]domain.Invitation
 	emailConnections         map[string]domain.UserEmailConnection
 	triageItems              map[string]domain.CommunicationsTriageItem
@@ -69,6 +72,9 @@ func NewMemoryRepo() *MemoryRepo {
 		users:                    map[string]domain.User{},
 		companies:                map[string]domain.Company{},
 		memberships:              map[string]domain.CompanyMembership{},
+		userGroups:               map[string]domain.CompanyUserGroup{},
+		userGroupMembers:         map[string]domain.CompanyUserGroupMember{},
+		entityPermissions:        map[string]domain.EntityPermission{},
 		invitations:              map[string]domain.Invitation{},
 		emailConnections:         map[string]domain.UserEmailConnection{},
 		triageItems:              map[string]domain.CommunicationsTriageItem{},
@@ -103,6 +109,18 @@ func nodeLogicGateAssignmentKey(companyID, nodeID string) string {
 
 func membershipKey(companyID, userID string) string {
 	return companyID + ":" + userID
+}
+
+func userGroupKey(companyID, groupID string) string {
+	return companyID + ":" + groupID
+}
+
+func userGroupMemberKey(companyID, groupID, userID string) string {
+	return companyID + ":" + groupID + ":" + userID
+}
+
+func entityPermissionKey(companyID, entityType, entityID, subjectType, subjectID, permission string) string {
+	return companyID + ":" + entityType + ":" + entityID + ":" + subjectType + ":" + subjectID + ":" + permission
 }
 
 func triageItemKey(userID, messageID string) string {
