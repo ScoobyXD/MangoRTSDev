@@ -5,7 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateAssignmentCommandResult } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRaciUserCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciUserCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -481,37 +481,51 @@ test("Home shared inbox commands normalize folder operations", async () => {
 });
 
 test("Home shared inbox RACI commands build direct replacement payloads", async () => {
-  const updateCalls: Array<{ companyID: string; folderID: string; assignments: Array<{ role: CommunicationsSharedInboxRaciRole; user_id: string }> }> = [];
+  type SharedInboxRaciUpdatePayload = Parameters<HomeUpdateSharedInboxRaciAssignments>[2][number];
+  const updateCalls: Array<{ companyID: string; folderID: string; assignments: SharedInboxRaciUpdatePayload[] }> = [];
   const updateSharedInboxRaciAssignments: HomeUpdateSharedInboxRaciAssignments = async (companyID, folderID, assignments) => {
     updateCalls.push({ companyID, folderID, assignments });
-    return assignments.map((assignment) => sharedRaci(folderID, assignment.role, assignment.user_id));
+    return assignments.map((assignment): CommunicationsSharedInboxRaciAssignment => ({
+      ...sharedRaci(folderID, assignment.role, assignment.user_id ?? assignment.subject_id ?? ""),
+      subject_type: assignment.subject_type,
+      subject_id: assignment.subject_id,
+    }));
   };
   const existing = sharedRaci("inbox-1", "responsible", "user-1");
   const inboxes = [sharedInbox("inbox-1", { raci_assignments: [existing] })];
 
-  const added = await addSharedInboxRaciUserCommand({
+  const added = await addSharedInboxRaciSubjectCommand({
     companyID: "company-1",
     folderID: " inbox-1 ",
     role: "accountable",
-    userID: " user-2 ",
+    subjectType: "user",
+    subjectID: " user-2 ",
     sharedInboxes: inboxes,
     companyUsers: [companyUser("user-2")],
     now: () => timestamp,
     updateSharedInboxRaciAssignments,
   });
-  const removed = await removeSharedInboxRaciUserCommand({
+  const removed = await removeSharedInboxRaciSubjectCommand({
     companyID: "company-1",
     folderID: "inbox-1",
     role: "responsible",
-    userID: "user-1",
+    subjectType: "user",
+    subjectID: "user-1",
     sharedInboxes: inboxes,
     updateSharedInboxRaciAssignments,
   });
 
   assert.deepEqual(updateCalls, [
-    { companyID: "company-1", folderID: "inbox-1", assignments: [{ role: "responsible", user_id: "user-1" }, { role: "accountable", user_id: "user-2" }] },
+    {
+      companyID: "company-1",
+      folderID: "inbox-1",
+      assignments: [
+        { role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" },
+        { role: "accountable", subject_type: "user", subject_id: "user-2", user_id: "user-2" },
+      ],
+    },
     { companyID: "company-1", folderID: "inbox-1", assignments: [] },
   ]);
-  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.user_id]), [["responsible", "user-1"], ["accountable", "user-2"]]);
+  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.subject_type, assignment.subject_id, assignment.user_id]), [["responsible", "user", "user-1", "user-1"], ["accountable", "user", "user-2", "user-2"]]);
   assert.deepEqual(removed?.assignments, []);
 });

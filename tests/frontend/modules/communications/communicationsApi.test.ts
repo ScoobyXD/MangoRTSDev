@@ -52,13 +52,15 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     if (path.startsWith("/v1/communications/shared-inboxes?")) {
       return jsonResponse({ shared_inboxes: [sharedInbox("shared-1", { name: "Business" })] });
     }
-    if (path.endsWith("/access")) {
+    if (path.endsWith("/raci")) {
       return jsonResponse({
-        access_assignments: [
+        raci_assignments: [
           {
             company_id: "company-1",
             folder_id: "shared-1",
             role: "responsible",
+            subject_type: "user",
+            subject_id: "user-1",
             user_id: "user-1",
             created_timestamp: "2026-05-20T00:00:00.000Z",
           },
@@ -74,13 +76,13 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const listed = await listCommunicationsSharedInboxes(" company-1 ");
     const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
-    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "responsible", user_id: "user-1" }]);
+    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
 
     assert.equal(listed[0]?.name, "Business");
     assert.equal(created.folder_id, "shared-2");
     assert.equal(updated.folder_id, "shared-1");
-    assert.deepEqual(access.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
+    assert.deepEqual(access.map((item) => [item.role, item.subject_type, item.subject_id, item.user_id]), [["responsible", "user", "user-1", "user-1"]]);
     assert.deepEqual(calls, [
       {
         path: "/v1/communications/shared-inboxes?company_id=company-1",
@@ -98,9 +100,9 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
         body: { company_id: "company-1", name: "Client Facing" },
       },
       {
-        path: "/v1/communications/shared-inboxes/shared-1/access",
+        path: "/v1/communications/shared-inboxes/shared-1/raci",
         method: "PUT",
-        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+        body: { company_id: "company-1", assignments: [{ role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" }] },
       },
       {
         path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
