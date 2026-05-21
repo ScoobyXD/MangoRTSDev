@@ -18,7 +18,7 @@ export type AppDockTabInput = {
 
 export const EVENT_APP_DOCK_TAB_REQUESTED = "mangorts:app-dock-tab-requested";
 
-const APP_DOCK_TABS_KEY = "mangorts.app-dock-tabs.v1";
+const APP_DOCK_TABS_STORAGE_PREFIX = "mangorts.app-taskbar.tabs.v1";
 const DEFAULT_TAB_LABEL: Record<AppDockTabKind, string> = {
   node: "Node",
   logic_gate_arena: "Logic Gate Arena",
@@ -31,6 +31,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function normalizeLabel(kind: AppDockTabKind, label: string): string {
   const normalized = label.trim().replace(/\s+/g, " ");
   return normalized || DEFAULT_TAB_LABEL[kind];
+}
+
+function scopePart(value: string, fallback: string): string {
+  return encodeURIComponent(value.trim() || fallback);
+}
+
+export function appTaskbarStorageScope(userID: string, companyID: string): string {
+  return `user:${scopePart(userID, "local")}:company:${scopePart(companyID, "global")}`;
+}
+
+function storageKey(scope: string): string {
+  return `${APP_DOCK_TABS_STORAGE_PREFIX}:${scope.trim() || "user:local:company:global"}`;
 }
 
 export function appDockTabID(kind: AppDockTabKind, entityID: string): string {
@@ -54,9 +66,9 @@ function coerceAppDockTab(value: unknown): AppDockTab | null {
   };
 }
 
-export function readAppDockTabs(): AppDockTab[] {
+export function readAppDockTabs(scope: string): AppDockTab[] {
   try {
-    const raw = localStorage.getItem(APP_DOCK_TABS_KEY);
+    const raw = localStorage.getItem(storageKey(scope));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -74,9 +86,9 @@ export function readAppDockTabs(): AppDockTab[] {
   }
 }
 
-export function saveAppDockTabs(tabs: AppDockTab[]): void {
+export function saveAppDockTabs(scope: string, tabs: AppDockTab[]): void {
   try {
-    localStorage.setItem(APP_DOCK_TABS_KEY, JSON.stringify(tabs));
+    localStorage.setItem(storageKey(scope), JSON.stringify(tabs));
   } catch {
     // App tabs are convenience UI state; storage failure should not block work.
   }

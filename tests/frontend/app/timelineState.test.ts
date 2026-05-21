@@ -4,7 +4,9 @@ import {
   APP_TIMELINE_DEFAULT_DURATION_MINUTES,
   alignTimelineMinute,
   createDefaultAppTimelineState,
+  rollTimelineStateToDate,
   setTimelineRange,
+  updateTimelineItemCompleted,
   updateTimelineItemTiming,
   upsertTimelineDropsAt,
 } from "../../../frontend/src/app/timelineState.js";
@@ -56,4 +58,21 @@ test("timeline drops upsert by entity and resizing stays inside the workday", ()
   const resized = updateTimelineItemTiming(updated, updated.items[0]?.id ?? "", 4 * 60, 23 * 60);
   assert.equal(resized.items[0]?.startMinute, 8 * 60);
   assert.equal(resized.items[0]?.endMinute, 17 * 60);
+});
+
+test("timeline completion persists on items and daily rollover archives current items", () => {
+  const state = upsertTimelineDropsAt(createDefaultAppTimelineState("2026-05-20"), [
+    { kind: "node", entityID: "node-1", label: "Write launch plan" },
+  ], 10 * 60);
+  const itemID = state.items[0]?.id ?? "";
+  const completed = updateTimelineItemCompleted(state, itemID, true);
+
+  assert.equal(completed.items[0]?.completed, true);
+  assert.equal(typeof completed.items[0]?.completedAt, "number");
+
+  const rolled = rollTimelineStateToDate(completed, "2026-05-21");
+  assert.equal(rolled.currentDate, "2026-05-21");
+  assert.equal(rolled.items.length, 0);
+  assert.equal(rolled.history[0]?.date, "2026-05-20");
+  assert.equal(rolled.history[0]?.items[0]?.completed, true);
 });

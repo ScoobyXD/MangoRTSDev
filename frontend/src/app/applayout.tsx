@@ -42,10 +42,9 @@ import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
-import { AppTimeline } from "./AppTimeline";
-import { AppTabBar } from "./AppTabBar";
-import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
-import { readAppTimelineState, saveAppTimelineState } from "./timelineState";
+import { AppTaskbar } from "./AppTaskbar";
+import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
+import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -279,6 +278,9 @@ const appResizeGripStyle: React.CSSProperties = {
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
   const activeCompanyID = getActiveCompanyID();
+  const taskbarScope = useMemo(() => (
+    appTaskbarStorageScope(me?.user.user_id || me?.user.email || "local", activeCompanyID)
+  ), [activeCompanyID, me?.user.email, me?.user.user_id]);
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -305,9 +307,27 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(null);
-  const [dockTabs, setDockTabs] = useState<AppDockTab[]>(readAppDockTabs);
-  const [timelineState, setTimelineState] = useState(() => readAppTimelineState(activeCompanyID));
+  const [taskbarData, setTaskbarData] = useState(() => ({
+    scope: taskbarScope,
+    dockTabs: readAppDockTabs(taskbarScope),
+    timelineState: readAppTimelineState(taskbarScope),
+  }));
+  const dockTabs = taskbarData.dockTabs;
+  const timelineState = taskbarData.timelineState;
+  const setDockTabs = useCallback((next: React.SetStateAction<AppDockTab[]>) => {
+    setTaskbarData((previous) => {
+      const nextDockTabs = typeof next === "function" ? next(previous.dockTabs) : next;
+      return nextDockTabs === previous.dockTabs ? previous : { ...previous, dockTabs: nextDockTabs };
+    });
+  }, []);
+  const setTimelineState = useCallback((next: React.SetStateAction<AppTimelineState>) => {
+    setTaskbarData((previous) => {
+      const nextTimelineState = typeof next === "function" ? next(previous.timelineState) : next;
+      return nextTimelineState === previous.timelineState ? previous : { ...previous, timelineState: nextTimelineState };
+    });
+  }, []);
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
+  const [taskbarExpanded, setTaskbarExpanded] = useState(false);
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(null);
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -469,8 +489,31 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
   useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
-  useEffect(() => { saveAppDockTabs(dockTabs); }, [dockTabs]);
-  useEffect(() => { saveAppTimelineState(activeCompanyID, timelineState); }, [activeCompanyID, timelineState]);
+  useEffect(() => {
+    setTaskbarData((previous) => {
+      if (previous.scope === taskbarScope) return previous;
+      return {
+        scope: taskbarScope,
+        dockTabs: readAppDockTabs(taskbarScope),
+        timelineState: readAppTimelineState(taskbarScope),
+      };
+    });
+    setActiveDockTabID(null);
+  }, [taskbarScope]);
+  useEffect(() => {
+    if (taskbarData.scope !== taskbarScope) return;
+    saveAppDockTabs(taskbarData.scope, taskbarData.dockTabs);
+  }, [taskbarData.dockTabs, taskbarData.scope, taskbarScope]);
+  useEffect(() => {
+    if (taskbarData.scope !== taskbarScope) return;
+    saveAppTimelineState(taskbarData.scope, taskbarData.timelineState);
+  }, [taskbarData.scope, taskbarData.timelineState, taskbarScope]);
+  useEffect(() => {
+    const rollCurrentTimeline = () => setTimelineState((current) => rollTimelineStateToDate(current));
+    rollCurrentTimeline();
+    const timer = window.setInterval(rollCurrentTimeline, 60_000);
+    return () => window.clearInterval(timer);
+  }, [setTimelineState]);
   useEffect(() => {
     const snapshot = buildSnapshot();
     if (restoringRef.current) {
@@ -1447,19 +1490,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       )}
       </div>
 
-      <AppTimeline
-        state={timelineState}
-        leftInset={appSidebarWidth + APP_RESIZE_HANDLE_W + PAGE_EDGE_GAP}
-        onChange={setTimelineState}
-        onOpenEntity={openTimelineEntity}
-      />
-
-      <AppTabBar
+      <AppTaskbar
         tabs={dockTabs}
         activeTabID={activeDockTabID}
+        timelineState={timelineState}
+        expanded={taskbarExpanded}
+        onExpandedChange={setTaskbarExpanded}
         onOpenTab={openDockTab}
         onReorderTab={reorderDockTab}
-        onContextMenu={(event, tab) => {
+        onTabContextMenu={(event, tab) => {
           event.preventDefault();
           event.stopPropagation();
           setDockTabMenu({ x: event.clientX, y: event.clientY, id: tab.id });
@@ -1469,6 +1508,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           setFrameRightClickMenu(null);
           setModuleTypeMenu(null);
         }}
+        onTimelineChange={setTimelineState}
+        onOpenTimelineEntity={openTimelineEntity}
       />
 
       {dockTabMenu && (

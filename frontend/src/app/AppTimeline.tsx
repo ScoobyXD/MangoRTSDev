@@ -3,20 +3,22 @@ import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcon
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import { getExplorerDropPayloadItems } from "../modules/company-explorer/treePresentation";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { APP_TAB_BAR_HEIGHT } from "./AppTabBar";
 import {
   APP_TIMELINE_STEP_MINUTES,
   alignTimelineMinute,
   clampTimelineEnd,
   clampTimelineStart,
   deleteTimelineItem,
+  formatTimelineDate,
   formatTimelineTime,
+  formatTimelineTimeRange,
   setTimelineRange,
-  shortTimelineLabel,
   timeInputFromTimelineMinute,
   timelineMinuteFromTimeInput,
+  updateTimelineItemCompleted,
   updateTimelineItemTiming,
   upsertTimelineDropsAt,
+  type AppTimelineDay,
   type AppTimelineDropInput,
   type AppTimelineEntityKind,
   type AppTimelineItem,
@@ -25,7 +27,7 @@ import {
 
 type AppTimelineProps = {
   state: AppTimelineState;
-  leftInset: number;
+  expanded: boolean;
   onChange: (next: AppTimelineState) => void;
   onOpenEntity: (target: { kind: AppTimelineEntityKind; id: string; label: string }) => void;
 };
@@ -42,14 +44,21 @@ type TimelineInteraction = {
   previousUserSelect: string;
 };
 
-const APP_TIMELINE_HEIGHT = 158;
-const APP_TIMELINE_TRACK_HEIGHT = 104;
-const MIN_TIMELINE_CONTENT_WIDTH = 760;
-const PIXELS_PER_QUARTER_HOUR = 42;
+type TimelineMetrics = {
+  rangeMinutes: number;
+  contentWidth: number;
+  pxPerMinute: number;
+  ticks: Array<{ minute: number; left: number; major: boolean; label: string }>;
+};
+
+const MIN_TIMELINE_CONTENT_WIDTH = 460;
+const PIXELS_PER_QUARTER_HOUR = 31;
+const COMPACT_TRACK_HEIGHT = 76;
+const EXPANDED_TRACK_HEIGHT = 108;
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
-  leftInset,
+  expanded,
   onChange,
   onOpenEntity,
 }) => {
@@ -119,18 +128,15 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onChange, selectedItemID]);
 
-  const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, state.endMinute - state.startMinute);
-  const intervalCount = Math.max(1, rangeMinutes / APP_TIMELINE_STEP_MINUTES);
-  const contentWidth = Math.max(MIN_TIMELINE_CONTENT_WIDTH, intervalCount * PIXELS_PER_QUARTER_HOUR);
-  const pxPerMinute = contentWidth / rangeMinutes;
-  const ticks = useMemo(() => buildTimelineTicks(state.startMinute, state.endMinute, contentWidth), [contentWidth, state.endMinute, state.startMinute]);
+  const compact = !expanded;
+  const metrics = useTimelineMetrics(state, compact);
 
   const dropMinuteFromEvent = (event: React.DragEvent<HTMLElement>): number => {
     const content = contentRef.current;
     if (!content) return state.startMinute;
     const bounds = content.getBoundingClientRect();
-    const x = Math.max(0, Math.min(contentWidth, event.clientX - bounds.left));
-    return clampTimelineStart(state.startMinute + (x / contentWidth) * rangeMinutes, state);
+    const x = Math.max(0, Math.min(metrics.contentWidth, event.clientX - bounds.left));
+    return clampTimelineStart(state.startMinute + (x / metrics.contentWidth) * metrics.rangeMinutes, state);
   };
 
   const startInteraction = (event: React.PointerEvent<HTMLElement>, item: AppTimelineItem, mode: TimelineInteraction["mode"]) => {
@@ -146,7 +152,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
       startX: event.clientX,
       startMinute: item.startMinute,
       endMinute: item.endMinute,
-      pxPerMinute,
+      pxPerMinute: metrics.pxPerMinute,
       ownerDocument,
       previousCursor: ownerDocument.body.style.cursor,
       previousUserSelect: ownerDocument.body.style.userSelect,
@@ -155,132 +161,147 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
     ownerDocument.body.style.userSelect = "none";
   };
 
+  const visibleHistory = state.history.filter((day) => day.items.length > 0);
+
   return (
     <section
-      aria-label="Day timeline"
-      style={timelineShellStyle(leftInset)}
+      aria-label="Taskbar timeline"
+      style={timelineShellStyle(expanded)}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) setSelectedItemID("");
       }}
     >
-      <div style={timelineHeaderStyle}>
-        <div style={timelineTitleStyle}>
-          <span style={timelineTitleDotStyle} />
-          <span>Day timeline</span>
-          <span style={timelineMetaStyle}>{state.items.length} item{state.items.length === 1 ? "" : "s"}</span>
-        </div>
-        <div style={timelineControlGroupStyle}>
-          <label style={timeFieldStyle}>
-            <span>Start</span>
-            <input
-              type="time"
-              step={APP_TIMELINE_STEP_MINUTES * 60}
-              value={timeInputFromTimelineMinute(state.startMinute)}
-              onChange={(event) => onChange(setTimelineRange(state, timelineMinuteFromTimeInput(event.target.value, state.startMinute), state.endMinute))}
-              style={timeInputStyle}
-            />
-          </label>
-          <label style={timeFieldStyle}>
-            <span>End</span>
-            <input
-              type="time"
-              step={APP_TIMELINE_STEP_MINUTES * 60}
-              value={timeInputFromTimelineMinute(state.endMinute)}
-              onChange={(event) => onChange(setTimelineRange(state, state.startMinute, timelineMinuteFromTimeInput(event.target.value, state.endMinute)))}
-              style={timeInputStyle}
-            />
-          </label>
-        </div>
-      </div>
-
-      <div
-        className="mango-home-scroll"
-        style={timelineScrollerStyle(dropActive)}
-        onDragOver={(event) => {
-          if (!hasExplorerTimelineDrag(event.dataTransfer)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-          setDropActive(true);
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
-        }}
-        onDrop={(event) => {
-          const drops = timelineDropsFromDataTransfer(event.dataTransfer);
-          setDropActive(false);
-          if (drops.length === 0) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onChange(upsertTimelineDropsAt(state, drops, dropMinuteFromEvent(event)));
-        }}
-      >
-        <div ref={contentRef} style={timelineContentStyle(contentWidth)}>
-          {ticks.map((tick) => (
-            <div
-              key={`${tick.minute}:${tick.left}`}
-              style={timelineTickStyle(tick.left, tick.major)}
-            >
-              {tick.label && <span style={timelineTickLabelStyle}>{tick.label}</span>}
-            </div>
-          ))}
-          <div style={timelineLaneStyle}>
-            {state.items.map((item) => {
-              const selected = selectedItemID === item.id;
-              const left = (item.startMinute - state.startMinute) * pxPerMinute;
-              const width = Math.max(34, (item.endMinute - item.startMinute) * pxPerMinute - 2);
-              return (
-                <div
-                  key={item.id}
-                  role="button"
-                  tabIndex={0}
-                  title={`${item.label}: ${formatTimelineTime(item.startMinute)} - ${formatTimelineTime(item.endMinute)}`}
-                  aria-label={`${item.label}, ${formatTimelineTime(item.startMinute)} to ${formatTimelineTime(item.endMinute)}`}
-                  aria-pressed={selected}
-                  style={timelineItemStyle(item.kind, selected, left, width)}
-                  onPointerDown={(event) => startInteraction(event, item, "move")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedItemID(item.id);
-                  }}
-                  onDoubleClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onOpenEntity({ kind: item.kind, id: item.entityID, label: item.label });
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setSelectedItemID(item.id);
-                    setContextMenu({ x: event.clientX, y: event.clientY, itemID: item.id });
-                  }}
-                >
-                  <span
-                    title="Adjust start time"
-                    aria-hidden="true"
-                    style={timelineItemHandleStyle("left")}
-                    onPointerDown={(event) => startInteraction(event, item, "start")}
-                  />
-                  <span style={timelineItemMainStyle}>
-                    <span style={timelineItemTopRowStyle}>
-                      <span style={timelineItemIconStyle}><ExplorerRowIcon kind={item.kind === "node" ? "node" : "logic_gate"} /></span>
-                      <span style={timelineItemTextStyle}>{item.label}</span>
-                    </span>
-                    <span style={timelineItemBottomRowStyle}>
-                      <span>{shortTimelineLabel(item.label)}</span>
-                      <span>{formatTimelineTime(item.startMinute)}</span>
-                    </span>
-                  </span>
-                  <span
-                    title="Adjust end time"
-                    aria-hidden="true"
-                    style={timelineItemHandleStyle("right")}
-                    onPointerDown={(event) => startInteraction(event, item, "end")}
-                  />
-                </div>
-              );
-            })}
+      {expanded && (
+        <div style={timelineHeaderStyle}>
+          <div style={timelineTitleStyle}>
+            <span>Timeline</span>
+            <span style={timelineMetaStyle}>{state.items.length} current item{state.items.length === 1 ? "" : "s"}</span>
+          </div>
+          <div style={timelineControlGroupStyle}>
+            <label style={timeFieldStyle}>
+              <span>Start</span>
+              <input
+                type="time"
+                step={APP_TIMELINE_STEP_MINUTES * 60}
+                value={timeInputFromTimelineMinute(state.startMinute)}
+                onChange={(event) => onChange(setTimelineRange(state, timelineMinuteFromTimeInput(event.target.value, state.startMinute), state.endMinute))}
+                style={timeInputStyle}
+              />
+            </label>
+            <label style={timeFieldStyle}>
+              <span>End</span>
+              <input
+                type="time"
+                step={APP_TIMELINE_STEP_MINUTES * 60}
+                value={timeInputFromTimelineMinute(state.endMinute)}
+                onChange={(event) => onChange(setTimelineRange(state, state.startMinute, timelineMinuteFromTimeInput(event.target.value, state.endMinute)))}
+                style={timeInputStyle}
+              />
+            </label>
           </div>
         </div>
+      )}
+
+      <div className={expanded ? "mango-home-scroll" : undefined} style={timelineDaysScrollerStyle(expanded)}>
+        <div style={timelineDayPanelStyle(expanded)}>
+          {expanded && (
+            <div style={timelineDayTitleStyle}>
+              <span>Today</span>
+              <span>{formatTimelineDate(state.currentDate)}</span>
+            </div>
+          )}
+          <div
+            className="mango-home-scroll"
+            style={timelineScrollerStyle(dropActive, compact)}
+            onDragOver={(event) => {
+              if (!hasExplorerTimelineDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+              setDropActive(true);
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+            }}
+            onDrop={(event) => {
+              const drops = timelineDropsFromDataTransfer(event.dataTransfer);
+              setDropActive(false);
+              if (drops.length === 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onChange(upsertTimelineDropsAt(state, drops, dropMinuteFromEvent(event)));
+            }}
+          >
+            <div ref={contentRef} style={timelineContentStyle(metrics.contentWidth, compact)}>
+              <TimelineTicks ticks={metrics.ticks} />
+              <div style={timelineLaneStyle(compact)}>
+                {state.items.map((item) => {
+                  const selected = selectedItemID === item.id;
+                  const left = (item.startMinute - state.startMinute) * metrics.pxPerMinute;
+                  const width = Math.max(compact ? 112 : 88, (item.endMinute - item.startMinute) * metrics.pxPerMinute - 2);
+                  return (
+                    <div
+                      key={item.id}
+                      role="button"
+                      tabIndex={0}
+                      title={`${item.label}: ${formatTimelineTimeRange(item.startMinute, item.endMinute)}`}
+                      aria-label={`${item.label}, ${formatTimelineTimeRange(item.startMinute, item.endMinute)}`}
+                      aria-pressed={selected}
+                      style={timelineItemStyle(item.kind, selected, item.completed, left, width, compact, false)}
+                      onPointerDown={(event) => startInteraction(event, item, "move")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedItemID(item.id);
+                      }}
+                      onDoubleClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onOpenEntity({ kind: item.kind, id: item.entityID, label: item.label });
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedItemID(item.id);
+                        setContextMenu({ x: event.clientX, y: event.clientY, itemID: item.id });
+                      }}
+                    >
+                      <span
+                        title="Adjust start time"
+                        aria-hidden="true"
+                        style={timelineItemHandleStyle("left")}
+                        onPointerDown={(event) => startInteraction(event, item, "start")}
+                      />
+                      <TimelineItemMain item={item} compact={compact} />
+                      <label
+                        title={item.completed ? "Mark incomplete" : "Mark complete"}
+                        aria-label={item.completed ? "Mark incomplete" : "Mark complete"}
+                        style={timelineCheckboxWrapStyle}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={(event) => onChange(updateTimelineItemCompleted(state, item.id, event.currentTarget.checked))}
+                          style={timelineCheckboxStyle}
+                        />
+                      </label>
+                      <span
+                        title="Adjust end time"
+                        aria-hidden="true"
+                        style={timelineItemHandleStyle("right")}
+                        onPointerDown={(event) => startInteraction(event, item, "end")}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {expanded && visibleHistory.map((day) => (
+          <TimelineHistoryDay key={day.date} day={day} onOpenEntity={onOpenEntity} />
+        ))}
       </div>
 
       {contextMenu && (
@@ -301,6 +322,103 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
     </section>
   );
 };
+
+function TimelineHistoryDay({
+  day,
+  onOpenEntity,
+}: {
+  day: AppTimelineDay;
+  onOpenEntity: (target: { kind: AppTimelineEntityKind; id: string; label: string }) => void;
+}) {
+  const metrics = useTimelineMetrics(day, false);
+  return (
+    <div style={timelineDayPanelStyle(true)}>
+      <div style={timelineDayTitleStyle}>
+        <span>{formatTimelineDate(day.date)}</span>
+        <span>{day.items.length} item{day.items.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="mango-home-scroll" style={timelineScrollerStyle(false, false)}>
+        <div style={timelineContentStyle(metrics.contentWidth, false)}>
+          <TimelineTicks ticks={metrics.ticks} />
+          <div style={timelineLaneStyle(false)}>
+            {day.items.map((item) => {
+              const left = (item.startMinute - day.startMinute) * metrics.pxPerMinute;
+              const width = Math.max(88, (item.endMinute - item.startMinute) * metrics.pxPerMinute - 2);
+              return (
+                <div
+                  key={item.id}
+                  role="button"
+                  tabIndex={0}
+                  title={`${item.label}: ${formatTimelineTimeRange(item.startMinute, item.endMinute)}`}
+                  aria-label={`${item.label}, ${formatTimelineTimeRange(item.startMinute, item.endMinute)}`}
+                  style={timelineItemStyle(item.kind, false, item.completed, left, width, false, true)}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onOpenEntity({ kind: item.kind, id: item.entityID, label: item.label });
+                  }}
+                >
+                  <TimelineItemMain item={item} compact={false} />
+                  <HistoryCompletedIcon completed={item.completed} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineItemMain({ item, compact }: { item: AppTimelineItem; compact: boolean }) {
+  return (
+    <span style={timelineItemMainStyle(compact)}>
+      <span style={timelineItemTopRowStyle}>
+        <span style={timelineItemIconStyle(compact)}><ExplorerRowIcon kind={item.kind === "node" ? "node" : "logic_gate"} /></span>
+        <span style={timelineItemTextStyle(compact, item.completed)}>{item.label}</span>
+      </span>
+      <span style={timelineItemBottomRowStyle(compact, item.completed)}>
+        {formatTimelineTimeRange(item.startMinute, item.endMinute)}
+      </span>
+    </span>
+  );
+}
+
+function TimelineTicks({ ticks }: { ticks: TimelineMetrics["ticks"] }) {
+  return (
+    <>
+      {ticks.map((tick) => (
+        <div
+          key={`${tick.minute}:${tick.left}`}
+          style={timelineTickStyle(tick.left, tick.major)}
+        >
+          {tick.label && <span style={timelineTickLabelStyle}>{tick.label}</span>}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function HistoryCompletedIcon({ completed }: { completed: boolean }) {
+  return (
+    <span style={timelineHistoryCheckStyle(completed)}>
+      {completed && (
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+          <path d="M3.2 8.3 6.4 11.4 12.8 4.7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, compact: boolean): TimelineMetrics {
+  const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, range.endMinute - range.startMinute);
+  const intervalCount = Math.max(1, rangeMinutes / APP_TIMELINE_STEP_MINUTES);
+  const contentWidth = Math.max(compact ? MIN_TIMELINE_CONTENT_WIDTH : 680, intervalCount * PIXELS_PER_QUARTER_HOUR);
+  const pxPerMinute = contentWidth / rangeMinutes;
+  const ticks = useMemo(() => buildTimelineTicks(range.startMinute, range.endMinute, contentWidth), [contentWidth, range.endMinute, range.startMinute]);
+  return { rangeMinutes, contentWidth, pxPerMinute, ticks };
+}
 
 function hasExplorerTimelineDrag(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes(EXPLORER_DRAG_MIME);
@@ -348,32 +466,22 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function timelineShellStyle(leftInset: number): React.CSSProperties {
+function timelineShellStyle(expanded: boolean): React.CSSProperties {
   return {
-    position: "fixed",
-    left: leftInset + 12,
-    right: 18,
-    bottom: APP_TAB_BAR_HEIGHT + 18,
-    height: APP_TIMELINE_HEIGHT,
-    display: "grid",
-    gridTemplateRows: "42px minmax(0, 1fr)",
+    width: "100%",
+    height: "100%",
     minWidth: 0,
-    padding: "9px 10px 10px",
-    boxSizing: "border-box",
-    border: "1px solid rgba(36, 18, 10, 0.12)",
-    borderRadius: 8,
-    background: "rgba(255, 255, 255, 0.96)",
-    boxShadow: "0 12px 28px rgba(36, 18, 10, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
-    zIndex: 112,
-    pointerEvents: "auto",
-    color: "#24120a",
+    display: "grid",
+    gridTemplateRows: expanded ? "34px minmax(0, 1fr)" : "minmax(0, 1fr)",
+    gap: expanded ? 8 : 0,
+    color: "#0f172a",
     fontFamily: "var(--mango-font-family)",
   };
 }
 
 const timelineHeaderStyle: React.CSSProperties = {
   display: "flex",
-  alignItems: "start",
+  alignItems: "center",
   justifyContent: "space-between",
   gap: 12,
   minWidth: 0,
@@ -389,17 +497,8 @@ const timelineTitleStyle: React.CSSProperties = {
   lineHeight: 1.2,
 };
 
-const timelineTitleDotStyle: React.CSSProperties = {
-  width: 9,
-  height: 9,
-  borderRadius: 999,
-  background: "#ff8820",
-  boxShadow: "0 0 0 4px rgba(255, 136, 32, 0.14)",
-  flex: "0 0 auto",
-};
-
 const timelineMetaStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "#64748b",
   fontSize: 11,
   fontWeight: 700,
 };
@@ -417,7 +516,7 @@ const timeFieldStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 5,
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "#475569",
   fontSize: 11,
   fontWeight: 800,
 };
@@ -425,10 +524,10 @@ const timeFieldStyle: React.CSSProperties = {
 const timeInputStyle: React.CSSProperties = {
   width: 92,
   height: 27,
-  border: "1px solid rgba(255, 136, 32, 0.28)",
+  border: "1px solid rgba(100, 116, 139, 0.32)",
   borderRadius: 6,
-  background: "#fffaf4",
-  color: "#24120a",
+  background: "#ffffff",
+  color: "#0f172a",
   font: "inherit",
   fontSize: 12,
   fontWeight: 800,
@@ -437,26 +536,61 @@ const timeInputStyle: React.CSSProperties = {
   outline: "none",
 };
 
-function timelineScrollerStyle(active: boolean): React.CSSProperties {
+function timelineDaysScrollerStyle(expanded: boolean): React.CSSProperties {
   return {
     minWidth: 0,
-    height: APP_TIMELINE_TRACK_HEIGHT,
-    overflowX: "auto",
-    overflowY: "hidden",
-    border: `1px solid ${active ? "rgba(0, 174, 190, 0.48)" : "rgba(36, 18, 10, 0.11)"}`,
-    borderRadius: 7,
-    background: active ? "linear-gradient(180deg, #f2feff 0%, #ffffff 100%)" : "linear-gradient(180deg, #fffdf9 0%, #ffffff 100%)",
-    boxShadow: active ? "0 0 0 2px rgba(0, 174, 190, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
+    minHeight: 0,
+    height: "100%",
+    display: "grid",
+    alignContent: "start",
+    gap: expanded ? 10 : 0,
+    overflowX: "hidden",
+    overflowY: expanded ? "auto" : "hidden",
+    paddingRight: expanded ? 3 : 0,
+    boxSizing: "border-box",
     scrollbarWidth: "thin",
   };
 }
 
-function timelineContentStyle(width: number): React.CSSProperties {
+function timelineDayPanelStyle(expanded: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gap: expanded ? 6 : 0,
+  };
+}
+
+const timelineDayTitleStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  color: "#475569",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: 0,
+};
+
+function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    height: compact ? COMPACT_TRACK_HEIGHT : EXPANDED_TRACK_HEIGHT,
+    overflowX: "auto",
+    overflowY: "hidden",
+    border: `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
+    borderRadius: 8,
+    background: active ? "linear-gradient(180deg, #ecfeff 0%, #ffffff 100%)" : "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+    boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
+    scrollbarWidth: "thin",
+  };
+}
+
+function timelineContentStyle(width: number, compact: boolean): React.CSSProperties {
   return {
     position: "relative",
     width,
     minWidth: width,
-    height: APP_TIMELINE_TRACK_HEIGHT - 2,
+    height: (compact ? COMPACT_TRACK_HEIGHT : EXPANDED_TRACK_HEIGHT) - 2,
   };
 }
 
@@ -467,7 +601,7 @@ function timelineTickStyle(left: number, major: boolean): React.CSSProperties {
     top: 0,
     bottom: 0,
     width: 1,
-    background: major ? "rgba(36, 18, 10, 0.22)" : "rgba(36, 18, 10, 0.10)",
+    background: major ? "rgba(15, 23, 42, 0.18)" : "rgba(15, 23, 42, 0.08)",
     transform: "translateX(-0.5px)",
   };
 }
@@ -476,46 +610,64 @@ const timelineTickLabelStyle: React.CSSProperties = {
   position: "absolute",
   top: 5,
   left: 5,
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "#64748b",
   fontSize: 10,
   fontWeight: 800,
   whiteSpace: "nowrap",
   pointerEvents: "none",
 };
 
-const timelineLaneStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  top: 37,
-  height: 56,
-  borderTop: "1px solid rgba(255, 136, 32, 0.22)",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.16)",
-  background: "rgba(255, 136, 32, 0.045)",
-};
+function timelineLaneStyle(compact: boolean): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: compact ? 23 : 37,
+    height: compact ? 46 : 56,
+    borderTop: "1px solid rgba(100, 116, 139, 0.18)",
+    borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
+    background: "rgba(226, 232, 240, 0.24)",
+  };
+}
 
-function timelineItemStyle(kind: AppTimelineEntityKind, selected: boolean, left: number, width: number): React.CSSProperties {
-  const accent = kind === "logic_gate" ? "#0c8f47" : "#ff8820";
+function timelineItemStyle(
+  kind: AppTimelineEntityKind,
+  selected: boolean,
+  completed: boolean,
+  left: number,
+  width: number,
+  compact: boolean,
+  readOnly: boolean,
+): React.CSSProperties {
+  const accent = completed ? "#16a34a" : kind === "logic_gate" ? "#0f9f68" : "#2563eb";
+  const nodeBackground = completed
+    ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
+    : kind === "logic_gate"
+      ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
+      : "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)";
   return {
     position: "absolute",
     left,
-    top: 5,
+    top: compact ? 4 : 5,
     width,
-    height: 46,
-    minWidth: 34,
+    height: compact ? 38 : 46,
+    minWidth: compact ? 112 : 88,
     display: "grid",
-    gridTemplateColumns: "7px minmax(0, 1fr) 7px",
-    border: `1px solid ${selected ? accent : "rgba(36, 18, 10, 0.16)"}`,
+    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "7px minmax(0, 1fr) 24px 7px",
+    border: `1px solid ${selected || completed ? accent : "rgba(100, 116, 139, 0.28)"}`,
     borderRadius: 7,
-    background: kind === "logic_gate"
-      ? "linear-gradient(180deg, #f0fff5 0%, #dff9e8 100%)"
-      : "linear-gradient(180deg, #fff9f1 0%, #ffe0bc 100%)",
-    color: "#24120a",
-    boxShadow: selected ? `0 0 0 2px ${kind === "logic_gate" ? "rgba(12, 143, 71, 0.16)" : "rgba(255, 136, 32, 0.18)"}` : "0 4px 10px rgba(36, 18, 10, 0.12)",
-    cursor: "grab",
+    background: nodeBackground,
+    color: "#0f172a",
+    boxShadow: completed
+      ? "0 6px 14px rgba(22, 163, 74, 0.22), inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
+      : selected
+        ? `0 0 0 2px ${kind === "logic_gate" ? "rgba(15, 159, 104, 0.16)" : "rgba(37, 99, 235, 0.16)"}`
+        : "0 4px 10px rgba(15, 23, 42, 0.10)",
+    cursor: readOnly ? "default" : "grab",
     overflow: "hidden",
     userSelect: "none",
     touchAction: "none",
+    opacity: completed ? 0.92 : 1,
   };
 }
 
@@ -525,19 +677,21 @@ function timelineItemHandleStyle(side: "left" | "right"): React.CSSProperties {
     height: "100%",
     cursor: "ew-resize",
     background: side === "left"
-      ? "linear-gradient(90deg, rgba(36, 18, 10, 0.18), transparent)"
-      : "linear-gradient(270deg, rgba(36, 18, 10, 0.18), transparent)",
+      ? "linear-gradient(90deg, rgba(15, 23, 42, 0.15), transparent)"
+      : "linear-gradient(270deg, rgba(15, 23, 42, 0.15), transparent)",
   };
 }
 
-const timelineItemMainStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gridTemplateRows: "minmax(0, 1fr) 14px",
-  gap: 1,
-  padding: "5px 4px 3px",
-  boxSizing: "border-box",
-};
+function timelineItemMainStyle(compact: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateRows: compact ? "minmax(0, 1fr) 10px" : "minmax(0, 1fr) 14px",
+    gap: 1,
+    padding: compact ? "4px 3px 3px" : "5px 4px 3px",
+    boxSizing: "border-box",
+  };
+}
 
 const timelineItemTopRowStyle: React.CSSProperties = {
   minWidth: 0,
@@ -546,35 +700,66 @@ const timelineItemTopRowStyle: React.CSSProperties = {
   gap: 4,
 };
 
-const timelineItemIconStyle: React.CSSProperties = {
-  width: 17,
-  height: 17,
+function timelineItemIconStyle(compact: boolean): React.CSSProperties {
+  return {
+    width: compact ? 15 : 17,
+    height: compact ? 15 : 17,
+    display: "grid",
+    placeItems: "center",
+    flex: "0 0 auto",
+  };
+}
+
+function timelineItemTextStyle(compact: boolean, completed: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: compact ? 9 : 11,
+    fontWeight: 900,
+    textDecoration: completed ? "line-through" : "none",
+    color: completed ? "#166534" : "#0f172a",
+  };
+}
+
+function timelineItemBottomRowStyle(compact: boolean, completed: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "block",
+    color: completed ? "#166534" : "#475569",
+    fontSize: compact ? 8 : 9,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+}
+
+const timelineCheckboxWrapStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
-  flex: "0 0 auto",
+  minWidth: 0,
+  cursor: "pointer",
 };
 
-const timelineItemTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 11,
-  fontWeight: 900,
+const timelineCheckboxStyle: React.CSSProperties = {
+  width: 15,
+  height: 15,
+  margin: 0,
+  accentColor: "#16a34a",
+  cursor: "pointer",
 };
 
-const timelineItemBottomRowStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 5,
-  color: "rgba(36, 18, 10, 0.64)",
-  fontSize: 9,
-  fontWeight: 900,
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-};
+function timelineHistoryCheckStyle(completed: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    placeItems: "center",
+    color: completed ? "#16a34a" : "transparent",
+    fontSize: 14,
+    fontWeight: 900,
+  };
+}
 
 const timelineMenuButtonStyle: React.CSSProperties = {
   display: "flex",
