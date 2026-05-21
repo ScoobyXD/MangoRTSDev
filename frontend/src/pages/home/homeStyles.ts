@@ -745,21 +745,25 @@ export const logicGateInboxNodeListStyle: React.CSSProperties = {
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
 
-export function logicGateInboxNodeRowStyle(selected: boolean): React.CSSProperties {
+export function logicGateInboxNodeRowStyle(selected: boolean, hasUnreadNotification = false): React.CSSProperties {
   return {
     minHeight: 28,
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: "10px 16px minmax(0, 1fr) auto",
+    gridTemplateColumns: "10px 16px minmax(0, 1fr) auto auto",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(255, 136, 32, 0.42)" : HOME_BLACK_SOFT}`,
     borderRadius: 5,
-    background: selected ? HOME_CYAN_SOFT : "#ffffff",
+    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#fff7eb" : "#ffffff",
     color: "#24120a",
     cursor: "grab",
     padding: "3px 4px 3px 0",
-    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_FAINT} inset` : "none",
+    boxShadow: selected
+      ? `0 0 0 2px ${HOME_CYAN_FAINT} inset`
+      : hasUnreadNotification
+        ? "0 0 0 1px rgba(255, 136, 32, 0.16) inset"
+        : "none",
   };
 }
 
@@ -786,6 +790,25 @@ export function logicGateInboxNodeTitleStyle(hasUnreadNotification = false): Rea
     whiteSpace: "nowrap",
     fontSize: 11,
     fontWeight: hasUnreadNotification ? 800 : 600,
+  };
+}
+
+export function logicGateInboxNodeNotificationStyle(role: string): React.CSSProperties {
+  const colors = inboxNotificationRoleColors(role);
+  return {
+    minWidth: 18,
+    height: 16,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.background,
+    color: colors.color,
+    fontSize: 10,
+    fontWeight: 900,
+    lineHeight: 1,
+    padding: "0 4px",
+    boxSizing: "border-box",
   };
 }
 

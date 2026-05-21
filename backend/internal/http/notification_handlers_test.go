@@ -27,6 +27,31 @@ func requestWithActorForNotifications(req *http.Request, user domain.User, compa
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
 }
 
+func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, companyID, entityType, entityID string, userIDs ...string) {
+	t.Helper()
+	permissions := make([]store.EntityPermissionInput, 0, len(userIDs))
+	for _, userID := range userIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			continue
+		}
+		permissions = append(permissions, store.EntityPermissionInput{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   userID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		})
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:   companyID,
+		EntityType:  entityType,
+		EntityID:    entityID,
+		Permissions: permissions,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions %s %s: %v", entityType, entityID, err)
+	}
+}
+
 func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	t.Parallel()
 
@@ -64,6 +89,27 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	consultedNoAccess, err := repo.UpsertAuthUser("consulted-no-access-subject", "consulted-no-access@example.com", "Consulted No Access")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("consulted-no-access-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	assignments, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{
+			{Role: domain.LogicGateRaciRoleResponsible, UserID: responsible.UserID},
+			{Role: domain.LogicGateRaciRoleConsulted, UserID: consultedNoAccess.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assignments) != 2 {
+		t.Fatalf("raci assignments = %+v, want responsible and consulted", assignments)
+	}
 	board, err := repo.EnsureLogicGateKanbanBoard(companyID, logicGate.LogicGateID, logicGate.Header)
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +134,8 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, responsible.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, responsible.UserID)
 	card, err := repo.UpsertKanbanCard(store.KanbanCardMutationInput{
 		CompanyID: companyID,
 		BoardID:   board.BoardID,
@@ -142,6 +190,23 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 		t.Fatalf("notification target = logic gate %q node %q, want %q %q", payload.Notifications[0].LogicGateID, payload.Notifications[0].NodeID, logicGate.LogicGateID, node.NodeID)
 	}
 
+	blockedReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	blockedReq = requestWithActorForNotifications(blockedReq, consultedNoAccess, companyID)
+	blockedRec := httptest.NewRecorder()
+	handler.ServeHTTP(blockedRec, blockedReq)
+	if blockedRec.Code != http.StatusOK {
+		t.Fatalf("GET blocked notifications status = %d body=%s", blockedRec.Code, blockedRec.Body.String())
+	}
+	var blockedPayload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(blockedRec.Body).Decode(&blockedPayload); err != nil {
+		t.Fatalf("decode blocked notifications: %v", err)
+	}
+	if len(blockedPayload.Notifications) != 0 {
+		t.Fatalf("blocked notification count = %d, want 0: %+v", len(blockedPayload.Notifications), blockedPayload.Notifications)
+	}
+
 	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
 	summaryReq = requestWithActorForNotifications(summaryReq, responsible, companyID)
 	summaryRec := httptest.NewRecorder()
@@ -161,6 +226,77 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	}
 	if len(summary.LogicGateCounts) != 1 || summary.LogicGateCounts[0].LogicGateID != logicGate.LogicGateID || summary.LogicGateCounts[0].NodeID != node.NodeID || summary.LogicGateCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.LogicGateCounts[0].Count != 1 {
 		t.Fatalf("summary logic gate counts = %+v, want one responsible logic gate/node count", summary.LogicGateCounts)
+	}
+}
+
+func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666660"
+	user, err := repo.UpsertAuthUser("summary-subject", "summary@example.com", "Summary User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("summary-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Summary gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, user.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, nodeA.NodeID, user.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, nodeB.NodeID, user.UserID)
+
+	candidates := make([]store.NotificationCreateInput, 0, 7)
+	for index := 0; index < 7; index++ {
+		nodeID := nodeA.NodeID
+		if index >= 5 {
+			nodeID = nodeB.NodeID
+		}
+		candidates = append(candidates, store.NotificationCreateInput{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventLogicGateStateChanged,
+			SourceEventID:   "66666666-6666-4666-8666-00000000000" + string(rune('1'+index)),
+			EntityType:      "kanban_card",
+			EntityID:        "card-" + string(rune('1'+index)),
+			Title:           "Node status changed",
+			Surface:         domain.NotificationSurfaceACIInbox,
+			Role:            domain.LogicGateRaciRoleConsulted,
+			LogicGateID:     logicGate.LogicGateID,
+			NodeID:          nodeID,
+		})
+	}
+	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates}); err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+
+	summary, err := repo.GetNotificationSummary(store.NotificationSummaryInput{UserID: user.UserID, CompanyID: companyID})
+	if err != nil {
+		t.Fatalf("GetNotificationSummary: %v", err)
+	}
+	if summary.TotalUnread != 7 {
+		t.Fatalf("total unread = %d, want 7", summary.TotalUnread)
+	}
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleConsulted || summary.RoleCounts[0].Count != 2 {
+		t.Fatalf("role counts = %+v, want two changed node targets", summary.RoleCounts)
+	}
+	countsByNode := map[string]int{}
+	for _, count := range summary.LogicGateCounts {
+		countsByNode[count.NodeID] += count.Count
+	}
+	if countsByNode[nodeA.NodeID] != 5 || countsByNode[nodeB.NodeID] != 2 {
+		t.Fatalf("logic gate counts by node = %+v, want 5 and 2", countsByNode)
 	}
 }
 
@@ -190,6 +326,7 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
 
 	commentBody, _ := json.Marshal(map[string]any{
 		"company_id":  companyID,
@@ -277,6 +414,7 @@ func TestNodeTextBoxMentionsNotifyNewUsersAcrossSameInformationID(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, first.UserID, second.UserID)
 
 	postTextBox := func(information string) {
 		t.Helper()
@@ -417,6 +555,7 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, assignee.UserID)
 
 	assignBody, _ := json.Marshal(map[string]any{
 		"company_id":       companyID,

@@ -26,6 +26,33 @@ func notificationStringPtr(value string) *string {
 	return &value
 }
 
+type NotificationAccessTarget struct {
+	EntityType string
+	EntityID   string
+}
+
+func NotificationAccessTargets(entityType, entityID, logicGateID, nodeID string) []NotificationAccessTarget {
+	targets := make([]NotificationAccessTarget, 0, 3)
+	seen := map[string]bool{}
+	add := func(targetType, targetID string) {
+		targetType, ok := NormalizeEntityType(targetType)
+		targetID = strings.TrimSpace(targetID)
+		if !ok || targetID == "" {
+			return
+		}
+		key := targetType + "\x00" + targetID
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		targets = append(targets, NotificationAccessTarget{EntityType: targetType, EntityID: targetID})
+	}
+	add(EntityTypeLogicGate, logicGateID)
+	add(EntityTypeNode, nodeID)
+	add(entityType, entityID)
+	return targets
+}
+
 func cloneNotificationEvent(item domain.NotificationEvent) domain.NotificationEvent {
 	item.Payload = cloneNotificationPayload(item.Payload)
 	if item.ActorUserID != nil {
@@ -49,6 +76,36 @@ func cloneNotification(item domain.Notification) domain.Notification {
 		item.ReadTimestamp = &read
 	}
 	return item
+}
+
+func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, userID string) bool {
+	companyID := strings.TrimSpace(item.CompanyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return true
+	}
+	for _, target := range NotificationAccessTargets(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID) {
+		if !r.entityExistsLocked(companyID, target.EntityType, target.EntityID) {
+			return false
+		}
+		if !r.userCanAccessEntityLocked(companyID, target.EntityType, target.EntityID, userID, EntityPermissionView) {
+			return false
+		}
+	}
+	return true
+}
+
+func notificationRoleSummaryTargetKey(item domain.Notification) string {
+	if strings.TrimSpace(item.NodeID) != "" {
+		return strings.Join([]string{"node", strings.TrimSpace(item.LogicGateID), strings.TrimSpace(item.NodeID)}, "\x00")
+	}
+	if strings.TrimSpace(item.LogicGateID) != "" {
+		return "logic_gate\x00" + strings.TrimSpace(item.LogicGateID)
+	}
+	if strings.TrimSpace(item.EntityType) != "" || strings.TrimSpace(item.EntityID) != "" {
+		return strings.TrimSpace(item.EntityType) + "\x00" + strings.TrimSpace(item.EntityID)
+	}
+	return strings.TrimSpace(item.NotificationID)
 }
 
 func (r *MemoryRepo) CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error) {
@@ -221,6 +278,9 @@ func (r *MemoryRepo) ListNotifications(input NotificationListInput) ([]domain.No
 		if input.UnreadOnly && item.ReadTimestamp != nil {
 			continue
 		}
+		if !r.notificationVisibleToUserLocked(item, input.UserID) {
+			continue
+		}
 		items = append(items, cloneNotification(item))
 	}
 	slices.SortFunc(items, func(a, b domain.Notification) int {
@@ -256,6 +316,7 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 		UpdatedTimestamp: time.Now().UTC(),
 	}
 	roleCounts := map[string]domain.NotificationRoleCount{}
+	roleTargets := map[string]map[string]bool{}
 	typeCounts := map[string]domain.NotificationTypeCount{}
 	logicGateCounts := map[string]domain.NotificationLogicGateCount{}
 	for _, item := range r.notifications {
@@ -263,6 +324,9 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			continue
 		}
 		if input.CompanyID != "" && item.CompanyID != input.CompanyID {
+			continue
+		}
+		if !r.notificationVisibleToUserLocked(item, input.UserID) {
 			continue
 		}
 		summary.TotalUnread++
@@ -281,7 +345,11 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 				count.Surface = item.Surface
 				count.Role = item.Role
 			}
-			count.Count++
+			if roleTargets[key] == nil {
+				roleTargets[key] = map[string]bool{}
+			}
+			roleTargets[key][notificationRoleSummaryTargetKey(item)] = true
+			count.Count = len(roleTargets[key])
 			roleCounts[key] = count
 		}
 		if item.LogicGateID != "" && item.Role != "" {
@@ -343,6 +411,9 @@ func (r *MemoryRepo) CountUnreadNotifications(userID, companyID string) (int, er
 		if companyID != "" && item.CompanyID != companyID {
 			continue
 		}
+		if !r.notificationVisibleToUserLocked(item, userID) {
+			continue
+		}
 		count++
 	}
 	return count, nil
@@ -360,6 +431,9 @@ func (r *MemoryRepo) MarkNotificationRead(userID, notificationID string, read bo
 
 	item, ok := r.notifications[notificationID]
 	if !ok || item.RecipientUserID != userID {
+		return domain.Notification{}, ErrNotFound
+	}
+	if !r.notificationVisibleToUserLocked(item, userID) {
 		return domain.Notification{}, ErrNotFound
 	}
 	if read {
@@ -389,6 +463,9 @@ func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, er
 			continue
 		}
 		if companyID != "" && item.CompanyID != companyID {
+			continue
+		}
+		if !r.notificationVisibleToUserLocked(item, userID) {
 			continue
 		}
 		item.ReadTimestamp = &now
