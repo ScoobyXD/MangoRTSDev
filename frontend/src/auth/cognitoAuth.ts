@@ -445,6 +445,14 @@ function friendlyApiError(code: string): string {
       return "Email access expired. Disconnect and reconnect your mailbox.";
     case "nylas_not_connected":
       return "Connect your mailbox before opening Home.";
+    case "failed_to_list_shared_inboxes":
+      return "Shared Triage folders could not be loaded.";
+    case "failed_to_create_shared_inbox":
+      return "Shared Triage folder could not be created.";
+    case "failed_to_update_shared_inbox_access":
+      return "Shared Triage access could not be updated.";
+    case "shared_inbox_storage_unavailable":
+      return "Shared Triage storage is not ready. Run pending database migrations, then try again.";
     case "failed_to_delete_cognito_user":
       return "The user could not be deleted in Cognito. Try again shortly.";
     case "failed_to_delete_company_user":

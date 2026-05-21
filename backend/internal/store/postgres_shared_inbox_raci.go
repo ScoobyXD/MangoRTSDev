@@ -70,6 +70,9 @@ order by assignment.folder_id::text asc,
 		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
 			return assignmentsByFolder, nil
 		}
+		if isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			return assignmentsByFolder, nil
+		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -169,6 +172,9 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx contex
 	}
 	parentByFolder, assignmentFolderIDs, err := r.listCommunicationsSharedInboxRaciAncestry(ctx, companyID, ids)
 	if err != nil {
+		if isPostgresUndefinedTable(err, "") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			return folders, nil
+		}
 		return nil, err
 	}
 	assignments, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, assignmentFolderIDs)
