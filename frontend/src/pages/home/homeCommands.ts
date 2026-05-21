@@ -22,6 +22,7 @@ import type {
   CommunicationsSharedInbox,
   CommunicationsSharedInboxRaciAssignment,
   CommunicationsSharedInboxRaciRole,
+  CommunicationsSharedInboxRaciSubjectType,
   EmailMessage,
   SendEmailInput,
   UserLogicGateShortcut,
@@ -500,29 +501,41 @@ export async function saveSharedInboxRaciAssignmentsCommand(args: {
   const assignments = await updateSharedInboxRaciAssignments(
     args.companyID,
     folderID,
-    directAssignments.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
+    directAssignments.map((assignment) => ({
+      role: assignment.role,
+      subject_type: assignment.subject_type ?? "user",
+      subject_id: assignment.subject_id ?? assignment.user_id,
+      user_id: assignment.user_id,
+    })),
   );
   return { folderID, assignments };
 }
 
-export async function addSharedInboxRaciUserCommand(args: {
+export async function addSharedInboxRaciSubjectCommand(args: {
   companyID: string;
   folderID: string;
   role: CommunicationsSharedInboxRaciRole;
-  userID: string;
+  subjectType: CommunicationsSharedInboxRaciSubjectType;
+  subjectID: string;
+  subjectName?: string;
   sharedInboxes: CommunicationsSharedInbox[];
   companyUsers: CompanyUser[];
   now?: () => string;
   updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
 }): Promise<HomeSharedInboxRaciCommandResult | null> {
   const folderID = args.folderID.trim();
-  const userID = args.userID.trim();
-  if (!folderID || !userID) return null;
+  const subjectID = args.subjectID.trim();
+  if (!folderID || !subjectID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
-  if (!folder || (folder.raci_assignments ?? []).some((assignment) => assignment.role === args.role && assignment.user_id === userID)) {
+  const subjectType = args.subjectType;
+  if (!folder || (folder.raci_assignments ?? []).some((assignment) => (
+    assignment.role === args.role
+    && (assignment.subject_type ?? "user") === subjectType
+    && (assignment.subject_id ?? assignment.user_id) === subjectID
+  ))) {
     return null;
   }
-  const user = args.companyUsers.find((item) => item.user_id === userID);
+  const user = subjectType === "user" ? args.companyUsers.find((item) => item.user_id === subjectID) : undefined;
   return saveSharedInboxRaciAssignmentsCommand({
     companyID: args.companyID,
     folderID,
@@ -532,7 +545,10 @@ export async function addSharedInboxRaciUserCommand(args: {
         company_id: args.companyID,
         folder_id: folderID,
         role: args.role,
-        user_id: userID,
+        subject_type: subjectType,
+        subject_id: subjectID,
+        subject_name: args.subjectName ?? user?.display_name ?? user?.email,
+        user_id: subjectType === "user" ? subjectID : "",
         user_display_name: user?.display_name,
         user_email: user?.email,
         created_timestamp: args.now?.() ?? new Date().toISOString(),
@@ -542,21 +558,26 @@ export async function addSharedInboxRaciUserCommand(args: {
   });
 }
 
-export async function removeSharedInboxRaciUserCommand(args: {
+export async function removeSharedInboxRaciSubjectCommand(args: {
   companyID: string;
   folderID: string;
   role: CommunicationsSharedInboxRaciRole;
-  userID: string;
+  subjectType: CommunicationsSharedInboxRaciSubjectType;
+  subjectID: string;
   sharedInboxes: CommunicationsSharedInbox[];
   updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
 }): Promise<HomeSharedInboxRaciCommandResult | null> {
   const folderID = args.folderID.trim();
-  const userID = args.userID.trim();
-  if (!folderID || !userID) return null;
+  const subjectID = args.subjectID.trim();
+  if (!folderID || !subjectID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
   if (!folder) return null;
   const directAssignments = (folder.raci_assignments ?? []).filter((assignment) => assignment.folder_id === folderID);
-  const assignments = directAssignments.filter((assignment) => !(assignment.role === args.role && assignment.user_id === userID));
+  const assignments = directAssignments.filter((assignment) => !(
+    assignment.role === args.role
+    && (assignment.subject_type ?? "user") === args.subjectType
+    && (assignment.subject_id ?? assignment.user_id) === subjectID
+  ));
   if (assignments.length === directAssignments.length) return null;
   return saveSharedInboxRaciAssignmentsCommand({
     companyID: args.companyID,

@@ -12,28 +12,36 @@ func sortSharedInboxRaciAssignments(items []domain.SharedInboxRaciAssignment) {
 		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
 			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
 		}
-		iLabel := strings.ToLower(strings.TrimSpace(items[i].UserDisplayName))
-		if iLabel == "" {
-			iLabel = strings.ToLower(strings.TrimSpace(items[i].UserEmail))
-		}
-		if iLabel == "" {
-			iLabel = items[i].UserID
-		}
-		jLabel := strings.ToLower(strings.TrimSpace(items[j].UserDisplayName))
-		if jLabel == "" {
-			jLabel = strings.ToLower(strings.TrimSpace(items[j].UserEmail))
-		}
-		if jLabel == "" {
-			jLabel = items[j].UserID
-		}
+		iLabel := sharedInboxRaciAssignmentSortLabel(items[i])
+		jLabel := sharedInboxRaciAssignmentSortLabel(items[j])
 		if iLabel != jLabel {
 			return iLabel < jLabel
 		}
-		if items[i].UserID != items[j].UserID {
-			return items[i].UserID < items[j].UserID
+		if items[i].SubjectType != items[j].SubjectType {
+			return items[i].SubjectType < items[j].SubjectType
+		}
+		if items[i].SubjectID != items[j].SubjectID {
+			return items[i].SubjectID < items[j].SubjectID
 		}
 		return items[i].FolderID < items[j].FolderID
 	})
+}
+
+func sharedInboxRaciAssignmentSortLabel(item domain.SharedInboxRaciAssignment) string {
+	label := strings.ToLower(strings.TrimSpace(item.SubjectName))
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserEmail))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.SubjectID))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserID))
+	}
+	return label
 }
 
 func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFolder) domain.CompanyExplorerFolder {
@@ -52,7 +60,13 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 		}
 		seenFolders[currentID] = true
 		for _, assignment := range r.sharedInboxRaci[sharedInboxRaciKey(folder.CompanyID, currentID)] {
-			seenKey := assignment.Role + ":" + assignment.UserID
+			subjectType := strings.TrimSpace(assignment.SubjectType)
+			subjectID := strings.TrimSpace(assignment.SubjectID)
+			if subjectType == "" {
+				subjectType = EntityPermissionSubjectUser
+				subjectID = strings.TrimSpace(assignment.UserID)
+			}
+			seenKey := assignment.Role + ":" + subjectType + ":" + subjectID
 			if seenAssignments[seenKey] {
 				continue
 			}
@@ -109,28 +123,55 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
 		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
+		subjectID := strings.TrimSpace(assignment.SubjectID)
 		userID := strings.TrimSpace(assignment.UserID)
-		if !ok || userID == "" {
+		if subjectType == "" && userID != "" {
+			subjectType = EntityPermissionSubjectUser
+			subjectID = userID
+		}
+		if subjectType == EntityPermissionSubjectUser && subjectID == "" {
+			subjectID = userID
+		}
+		if !ok || subjectID == "" {
 			return nil, ErrInvalid
 		}
-		seenKey := role + ":" + userID
+		seenKey := role + ":" + subjectType + ":" + subjectID
 		if seen[seenKey] {
 			continue
 		}
 		seen[seenKey] = true
-		user, ok := r.companyUserByIDLocked(companyID, userID)
-		if !ok {
-			return nil, ErrAssigneeNotInCompany
-		}
-		assignments = append(assignments, domain.SharedInboxRaciAssignment{
+		item := domain.SharedInboxRaciAssignment{
 			CompanyID:        companyID,
 			FolderID:         folderID,
 			Role:             role,
-			UserID:           userID,
-			UserDisplayName:  user.DisplayName,
-			UserEmail:        user.Email,
+			SubjectType:      subjectType,
+			SubjectID:        subjectID,
 			CreatedTimestamp: now,
-		})
+		}
+		switch subjectType {
+		case EntityPermissionSubjectUser:
+			user, ok := r.companyUserByIDLocked(companyID, subjectID)
+			if !ok {
+				return nil, ErrAssigneeNotInCompany
+			}
+			item.UserID = subjectID
+			item.UserDisplayName = user.DisplayName
+			item.UserEmail = user.Email
+			item.SubjectName = user.DisplayName
+			if item.SubjectName == "" {
+				item.SubjectName = user.Email
+			}
+		case EntityPermissionSubjectGroup:
+			group, ok := r.userGroups[key(companyID, subjectID)]
+			if !ok {
+				return nil, ErrAssigneeNotInCompany
+			}
+			item.SubjectName = group.Name
+		default:
+			return nil, ErrInvalid
+		}
+		assignments = append(assignments, item)
 	}
 	sortSharedInboxRaciAssignments(assignments)
 	r.sharedInboxRaci[sharedInboxRaciKey(companyID, folderID)] = assignments

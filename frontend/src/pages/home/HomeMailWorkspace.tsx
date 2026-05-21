@@ -169,7 +169,7 @@ export function HomeMailWorkspace({
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
   sharedInboxSettings?: { onOpen: () => void };
-  unassignedSharedInbox?: { folderName: string; onAssignEmail: () => void };
+  unassignedSharedInbox?: { folderName: string; message?: string; onAssignEmail?: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
@@ -203,14 +203,18 @@ export function HomeMailWorkspace({
       <>
         <section style={mailPanelStyle}>
           <div style={mailPanelControlsStyle}>
-            <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {unassignedSharedInbox.folderName}
-            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {unassignedSharedInbox.folderName}
+              </h2>
+              {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
+            </div>
           </div>
           <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
             <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#24120a", textAlign: "center" }}>
-              <strong style={{ fontSize: 20, lineHeight: 1.2 }}>This folder has not been assigned an email</strong>
-              <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>
+              <strong style={{ fontSize: 20, lineHeight: 1.2 }}>{unassignedSharedInbox.folderName}</strong>
+              <span>{unassignedSharedInbox.message ?? "This folder has not been assigned an email"}</span>
+              {unassignedSharedInbox.onAssignEmail && <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>}
             </div>
           </div>
         </section>
@@ -233,7 +237,7 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Access</button>}
+                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
                 </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>

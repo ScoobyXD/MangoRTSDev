@@ -544,6 +544,11 @@ export function AppSidebar({
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     if (!companyID || sharedBusy) return;
+    if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
+      setSharedContextMenu(null);
+      setSharedError("Parent folders cannot have emails assigned.");
+      return;
+    }
     setSharedContextMenu(null);
     setSharedBusy(true);
     setSharedError("");
@@ -557,16 +562,20 @@ export function AppSidebar({
     } finally {
       setSharedBusy(false);
     }
-  }, [companyID, replaceSharedFolder, sharedBusy]);
+  }, [companyID, replaceSharedFolder, sharedBusy, sharedInboxes]);
 
   const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
+    if (sharedInboxes.some((item) => (item.parent_folder_id ?? "").trim() === folder.folder_id)) {
+      setSharedContextMenu(null);
+      return;
+    }
     setSharedContextMenu(null);
     setSharedEmailDialog({
       folder,
       draft: (folder.account_email ?? cleanConnectedAccountEmail).trim().toLowerCase(),
       error: "",
     });
-  }, [cleanConnectedAccountEmail]);
+  }, [cleanConnectedAccountEmail, sharedInboxes]);
 
   const submitSharedEmailDialog = useCallback(() => {
     if (!sharedEmailDialog || sharedBusy) return;
@@ -1033,55 +1042,61 @@ export function AppSidebar({
           />
         </React.Suspense>
       </section>
-      {sharedContextMenu && (
-        <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
-          <button
-            type="button"
-            style={appSidebarContextMenuButtonStyle}
-            disabled={sharedBusy}
-            onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "")}
-          >
-            {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
-          </button>
-          {sharedContextMenu.folder && (
-            <>
-              <button
-                type="button"
-                style={appSidebarContextMenuButtonStyle}
-                disabled={sharedBusy}
-                onClick={() => openSharedEmailDialog(sharedContextMenu.folder!)}
-              >
-                Assign email to inbox
-              </button>
-              {sharedContextMenu.folder.account_email && (
+      {sharedContextMenu && (() => {
+        const contextFolder = sharedContextMenu.folder;
+        const contextFolderHasChildren = !!contextFolder && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === contextFolder.folder_id);
+        return (
+          <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
+            <button
+              type="button"
+              style={appSidebarContextMenuButtonStyle}
+              disabled={sharedBusy}
+              onClick={() => void createSharedFolder(contextFolder?.folder_id ?? "")}
+            >
+              {contextFolder ? "New Child Folder" : "New Folder"}
+            </button>
+            {contextFolder && (
+              <>
+                {!contextFolderHasChildren && (
+                  <button
+                    type="button"
+                    style={appSidebarContextMenuButtonStyle}
+                    disabled={sharedBusy}
+                    onClick={() => openSharedEmailDialog(contextFolder)}
+                  >
+                    Assign email to inbox
+                  </button>
+                )}
+                {!contextFolderHasChildren && contextFolder.account_email && (
+                  <button
+                    type="button"
+                    style={appSidebarContextMenuButtonStyle}
+                    disabled={sharedBusy}
+                    onClick={() => void setSharedFolderAccountEmail(contextFolder.folder_id, "")}
+                  >
+                    Detach Email
+                  </button>
+                )}
                 <button
                   type="button"
                   style={appSidebarContextMenuButtonStyle}
-                  disabled={sharedBusy}
-                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, "")}
+                  onClick={() => startSharedRename(contextFolder)}
                 >
-                  Detach Email
+                  Rename
                 </button>
-              )}
-              <button
-                type="button"
-                style={appSidebarContextMenuButtonStyle}
-                onClick={() => startSharedRename(sharedContextMenu.folder!)}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                style={{ ...appSidebarContextMenuButtonStyle, color: "#8b123f" }}
-                disabled={sharedBusy}
-                onClick={() => void requestDeleteSharedFolder(sharedContextMenu.folder!)}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </FrameRightClickMenu>
-      )}
+                <button
+                  type="button"
+                  style={{ ...appSidebarContextMenuButtonStyle, color: "#8b123f" }}
+                  disabled={sharedBusy}
+                  onClick={() => void requestDeleteSharedFolder(contextFolder)}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </FrameRightClickMenu>
+        );
+      })()}
       {sharedEmailDialog && (
         <SharedInboxEmailDialog
           inputRef={sharedEmailInputRef}

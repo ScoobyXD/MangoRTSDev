@@ -716,12 +716,14 @@ export function sharedInboxTreeID(folderID: string): HomeViewID {
 export function buildSharedInboxRows(folders: CommunicationsSharedInbox[], expandedFolderIDs?: Set<string>): SharedInboxTreeRow[] {
   const byParent = new Map<string, CommunicationsSharedInbox[]>();
   const childCounts = new Map<string, number>();
+  const visibleIDs = new Set(folders.map((folder) => folder.folder_id));
   for (const folder of sortSharedInboxes(folders)) {
-    const key = folder.parent_folder_id ?? "";
+    const parentID = folder.parent_folder_id?.trim() ?? "";
+    const key = parentID && visibleIDs.has(parentID) ? parentID : "";
     const bucket = byParent.get(key) ?? [];
     bucket.push(folder);
     byParent.set(key, bucket);
-    if (key) childCounts.set(key, (childCounts.get(key) ?? 0) + 1);
+    if (parentID && visibleIDs.has(parentID)) childCounts.set(parentID, (childCounts.get(parentID) ?? 0) + 1);
   }
   const rows: SharedInboxTreeRow[] = [];
   const visit = (parentID: string, depth: number, seen: Set<string>) => {
@@ -823,7 +825,7 @@ export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[],
   if (hasFullAccess) return folders;
   const cleanUserID = userID.trim();
   if (!cleanUserID) return [];
-  return folders;
+  return folders.filter((folder) => sharedInboxUserHasRole(folder, cleanUserID));
 }
 
 export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {

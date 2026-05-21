@@ -108,7 +108,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSharedInboxListFiltersToGrantedFoldersAndAncestors(t *testing.T) {
+func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -189,8 +189,8 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersAndAncestors(t *tes
 	for _, folder := range payload.SharedInboxes {
 		seen[folder.FolderID] = true
 	}
-	if !seen[parent.FolderID] || !seen[child.FolderID] || seen[unrelated.FolderID] {
-		t.Fatalf("shared inbox folders = %+v, want granted child and ancestor only", payload.SharedInboxes)
+	if seen[parent.FolderID] || !seen[child.FolderID] || seen[unrelated.FolderID] {
+		t.Fatalf("shared inbox folders = %+v, want granted folders only", payload.SharedInboxes)
 	}
 }
 
