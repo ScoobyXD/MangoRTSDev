@@ -7,14 +7,15 @@ import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, Comp
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
-import type { NodeRecord } from "../../modules/node-map/shared";
+import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
+import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeDragItemsFromExplorerRows, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setKanbanNodeEntityDragData, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
@@ -2021,6 +2022,7 @@ export function NodeInboxRail({
                   if (!payload) return;
                   event.dataTransfer.effectAllowed = row.kind === "folder" ? "copyMove" : "copy";
                   event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+                  setKanbanNodeEntityDragData(event.dataTransfer, nodeDragItemsFromExplorerRows(payload, allRows, nodeByID));
                   event.dataTransfer.setData("text/plain", row.label);
                 }}
               >
@@ -2333,6 +2335,7 @@ export function AciInboxMatrix({
   loading,
   nodes,
   nodeByID,
+  nodeRelationships,
   logicGateByID,
   nodeFolders,
   nodeFolderItems,
@@ -2354,6 +2357,7 @@ export function AciInboxMatrix({
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
+  nodeRelationships: NodeRelationship[];
   logicGateByID: Map<string, LogicGateRecord>;
   nodeFolders: CompanyExplorerFolder[];
   nodeFolderItems: CompanyExplorerFolderItem[];
@@ -2484,6 +2488,7 @@ export function AciInboxMatrix({
                           orderedLogicGateRowIDs={orderedLogicGateRowIDs}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          nodeRelationships={nodeRelationships}
                           nodeFolders={nodeFolders}
                           nodeFolderItems={nodeFolderItems}
                           getNodeDragIDs={getNodeDragIDs}
@@ -2529,6 +2534,7 @@ export function ResponsibleInboxMatrix({
   loading,
   nodes,
   nodeByID,
+  nodeRelationships,
   logicGateByID,
   nodeFolders,
   nodeFolderItems,
@@ -2550,6 +2556,7 @@ export function ResponsibleInboxMatrix({
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
+  nodeRelationships: NodeRelationship[];
   logicGateByID: Map<string, LogicGateRecord>;
   nodeFolders: CompanyExplorerFolder[];
   nodeFolderItems: CompanyExplorerFolderItem[];
@@ -2683,6 +2690,7 @@ export function ResponsibleInboxMatrix({
                           orderedLogicGateRowIDs={orderedLogicGateRowIDs}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          nodeRelationships={nodeRelationships}
                           nodeFolders={nodeFolders}
                           nodeFolderItems={nodeFolderItems}
                           getNodeDragIDs={getNodeDragIDs}
@@ -2732,6 +2740,7 @@ export function LogicGateInboxNodeGroupCard({
   orderedLogicGateRowIDs = [],
   orderedRowIDs,
   nodeByID,
+  nodeRelationships = [],
   nodeFolders = [],
   nodeFolderItems = [],
   getNodeDragIDs,
@@ -2766,6 +2775,7 @@ export function LogicGateInboxNodeGroupCard({
   orderedLogicGateRowIDs?: string[];
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
+  nodeRelationships?: NodeRelationship[];
   nodeFolders?: CompanyExplorerFolder[];
   nodeFolderItems?: CompanyExplorerFolderItem[];
   getNodeDragIDs: (nodeID: string) => string[];
@@ -2818,6 +2828,11 @@ export function LogicGateInboxNodeGroupCard({
   const nodeListStyle = explicitHeight
     ? { ...logicGateInboxNodeListStyle, maxHeight: "none" }
     : logicGateInboxNodeListStyle;
+  const nodeRows = useMemo(() => buildNodeRelationshipHierarchyRows({
+    nodeIDs: group.nodeIDs,
+    nodes: group.nodeIDs.map((nodeID) => nodeByID.get(nodeID)).filter((node): node is NodeRecord => Boolean(node)),
+    relationships: nodeRelationships,
+  }), [group.nodeIDs, nodeByID, nodeRelationships]);
   const readDroppedNodeIDs = (dataTransfer: DataTransfer): string[] => {
     if (!hasExplorerDrag(dataTransfer)) return [];
     return nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
@@ -2910,15 +2925,16 @@ export function LogicGateInboxNodeGroupCard({
         <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
       </div>
       {!collapsed && <div className="kanban-board-scroll" style={nodeListStyle}>
-        {group.nodeIDs.map((nodeID) => {
-          const node = nodeByID.get(nodeID);
+        {nodeRows.map((row) => {
+          const node = nodeByID.get(row.nodeID);
           if (!node) return null;
-          const nodeNotificationCount = notificationCountForInboxNode(notificationSummary, group, nodeID);
+          const nodeNotificationCount = notificationCountForInboxNode(notificationSummary, group, row.nodeID);
           return (
             <LogicGateInboxNodeRow
-              key={nodeID}
+              key={row.nodeID}
               node={node}
-              selected={selectedRowIDs.has(nodeTreeID(nodeID))}
+              depth={row.depth}
+              selected={selectedRowIDs.has(nodeTreeID(row.nodeID))}
               orderedRowIDs={orderedRowIDs}
               nodeByID={nodeByID}
               getNodeDragIDs={getNodeDragIDs}
@@ -2926,7 +2942,7 @@ export function LogicGateInboxNodeGroupCard({
               onOpenNode={onOpenNode}
               onOpenNodeBulkMenu={onOpenNodeBulkMenu}
               onOpenPinContextMenu={onOpenPinContextMenu}
-              onRemovePlacement={canRemoveNode?.(nodeID) ? onRemovePlacement : undefined}
+              onRemovePlacement={canRemoveNode?.(row.nodeID) ? onRemovePlacement : undefined}
               hasUnreadNotification={nodeNotificationCount > 0}
               notificationCount={nodeNotificationCount}
               notificationRole={notificationRole}
@@ -3001,6 +3017,7 @@ export function LogicGateInboxNodeGroupCard({
 
 export function LogicGateInboxNodeRow({
   node,
+  depth = 0,
   selected,
   orderedRowIDs,
   nodeByID,
@@ -3015,6 +3032,7 @@ export function LogicGateInboxNodeRow({
   notificationRole,
 }: {
   node: NodeRecord;
+  depth?: number;
   selected: boolean;
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
@@ -3034,7 +3052,7 @@ export function LogicGateInboxNodeRow({
       role="button"
       tabIndex={0}
       draggable
-      style={logicGateInboxNodeRowStyle(selected, hasUnreadNotification)}
+      style={logicGateInboxNodeRowStyle(selected, depth, hasUnreadNotification)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();

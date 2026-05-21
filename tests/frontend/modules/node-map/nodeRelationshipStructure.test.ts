@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildNodeRelationshipHierarchyRows,
   buildNodeRelationshipTreeRows,
   collectNodeStructureIDs,
   filterNodeGraphToStructure,
@@ -122,5 +123,37 @@ test("places children created from nested nodes one level below the source node"
     { id: "root", depth: 0, role: "Current" },
     { id: "child", depth: 1, role: "Child" },
     { id: "grandchild", depth: 2, role: "Child" },
+  ]);
+});
+
+test("builds hierarchy rows for an arbitrary logic gate node set", () => {
+  const rows = buildNodeRelationshipHierarchyRows({
+    nodeIDs: ["parent", "peer-a", "peer-b", "child-a", "child-b", "child-c"],
+    nodes: [
+      node("parent", "Parent"),
+      node("peer-a", "Peer A"),
+      node("peer-b", "Peer B"),
+      node("child-a", "Child A"),
+      node("child-b", "Child B"),
+      node("child-c", "Child C"),
+      node("outside", "Outside"),
+    ],
+    relationships: [
+      relationship("r1", "parent", "peer-a", "Peer", "Peer"),
+      relationship("r2", "parent", "peer-b", "Peer", "Peer"),
+      relationship("r3", "parent", "child-a", "Parent", "Child"),
+      relationship("r4", "parent", "child-b", "Parent", "Child"),
+      relationship("r5", "parent", "child-c", "Parent", "Child"),
+      relationship("r6", "parent", "outside", "Parent", "Child"),
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => ({ id: row.nodeID, depth: row.depth, role: row.role })), [
+    { id: "parent", depth: 0, role: "Related" },
+    { id: "peer-a", depth: 0, role: "Peer" },
+    { id: "peer-b", depth: 0, role: "Peer" },
+    { id: "child-a", depth: 1, role: "Child" },
+    { id: "child-b", depth: 1, role: "Child" },
+    { id: "child-c", depth: 1, role: "Child" },
   ]);
 });
