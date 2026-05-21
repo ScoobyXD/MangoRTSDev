@@ -4,6 +4,7 @@ import { KanbanContent } from "../../modules/kanban/KanbanContent";
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import { consumePendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
@@ -77,7 +78,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     const pending = consumePendingLogicGateArenaSelection(companyID);
     if (!pending) return;
     lastArenaSelectionChangedAtRef.current = pending.createdAt;
-    setSelectedLogicGate({ id: pending.logicGateID, label: pending.label, emptyMessage: "", nodeID: pending.nodeID });
+    setSelectedLogicGate({ id: pending.logicGateID, label: humanLabelOrFallback(pending.label, ""), emptyMessage: "", nodeID: pending.nodeID });
   }, [companyID]);
 
   useEffect(() => {
@@ -86,7 +87,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     lastArenaSelectionChangedAtRef.current = Date.now();
     setSelectedLogicGate({
       id: logicGateID,
-      label: logicGateID ? targetLogicGate.label.trim() : "",
+      label: logicGateID ? humanLabelOrFallback(targetLogicGate.label, "") : "",
       emptyMessage: "",
       nodeID: targetLogicGate.nodeID,
     });
@@ -97,13 +98,13 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     if (selection.changedAt > 0 && selection.changedAt < lastArenaSelectionChangedAtRef.current) return;
     if (selection.entityKind === "logic_gate") {
       lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
-      setSelectedLogicGate({ id: selection.entityID.trim(), label: selection.label.trim(), emptyMessage: "" });
+      setSelectedLogicGate({ id: selection.entityID.trim(), label: humanLabelOrFallback(selection.label, ""), emptyMessage: "" });
       return;
     }
     if (selection.entityKind === "kanban") {
       const logicGateID = logicGateIDFromKanbanBoardID(selection.entityID);
       lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
-      setSelectedLogicGate({ id: logicGateID, label: logicGateID ? selection.label.trim() : "", emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates." });
+      setSelectedLogicGate({ id: logicGateID, label: logicGateID ? humanLabelOrFallback(selection.label, "") : "", emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates." });
       return;
     }
     if (selection.entityKind === "node" && selection.sourceModule === "company-explorer") {

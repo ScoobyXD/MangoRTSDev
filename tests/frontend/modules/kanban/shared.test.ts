@@ -326,6 +326,16 @@ test("kanban board helpers keep saved board list stable and titled", () => {
   assert.deepEqual(sortKanbanBoards(boards).map((item) => item.board_id), ["first", "later", "fallback"]);
   assert.equal(getKanbanBoardDisplayTitle(boards[2]), "fallback");
   assert.equal(logicGateKanbanBoardID(" gate-1 "), "logic-gate:gate-1");
+  assert.equal(getKanbanBoardDisplayTitle(board({
+    board_id: "logic-gate:019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
+    logic_gate_id: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
+    title: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
+  })), "Logic Gate");
+  assert.equal(getKanbanBoardDisplayTitle(board({
+    board_id: "logic-gate:019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
+    logic_gate_id: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
+    title: "Quarterly Launch Review",
+  })), "Quarterly Launch Review");
 });
 
 test("kanban card color rail is independent from selection border styling", () => {

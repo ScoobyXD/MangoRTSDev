@@ -3,6 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../mod
 import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes.js";
+import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
@@ -240,7 +241,7 @@ export function logicGateIDFromTreeID(treeID: string): string {
 }
 
 export function logicGateTitle(logicGate?: Pick<LogicGateRecord, "header" | "logic_gate_id">): string {
-  return logicGate?.header?.trim() || logicGate?.logic_gate_id || "Logic Gate";
+  return humanLabelOrFallback(logicGate?.header, humanLabelOrFallback(logicGate?.logic_gate_id, "Logic Gate"));
 }
 
 export function buildLogicGateExplorerPayload(logicGateIDs: string[]): ExplorerDragPayload | null {
@@ -299,7 +300,7 @@ export function nodeTitle(node?: Pick<NodeRecord, "title" | "node_id">): string 
 
 export function inboxLogicGateLabel(logicGateID: string, logicGateByID: Map<string, LogicGateRecord>): string {
   const logicGate = logicGateByID.get(logicGateID);
-  return logicGate ? logicGateTitle(logicGate) : logicGateID || "Logic Gate";
+  return logicGate ? logicGateTitle(logicGate) : humanLabelOrFallback(logicGateID, "Logic Gate");
 }
 
 export function logicGateHasRaciRole(logicGate: LogicGateRecord | undefined, role: LogicGateRaciRole, userID: string): boolean {

@@ -1,4 +1,5 @@
 import type React from "react";
+import { humanLabelOrFallback, isLikelyOpaqueEntityID } from "../entityLabels.js";
 
 export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
 export const KANBAN_CARD_DRAG_MIME = "application/x-mango-kanban-card";
@@ -208,11 +209,12 @@ export function normalizeKanbanColumnItemColor(value: unknown): string {
   return isKanbanColumnItemColor(value) ? value.trim() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
 }
 
-export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title">): string {
+export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title" | "logic_gate_id">): string {
+  const logicGateID = board.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(board.board_id);
   const title = board.title.trim();
-  if (title) return title;
-  const boardID = board.board_id.trim();
-  return boardID || KANBAN_DEFAULT_BOARD_TITLE;
+  if (title && (!logicGateID || (title !== logicGateID && title !== logicGateKanbanBoardID(logicGateID) && !isLikelyOpaqueEntityID(title)))) return title;
+  if (logicGateID) return "Logic Gate";
+  return humanLabelOrFallback(board.board_id, KANBAN_DEFAULT_BOARD_TITLE);
 }
 
 export function logicGateKanbanBoardID(logicGateID: string): string {

@@ -1,3 +1,4 @@
+import { humanLabelOrFallback } from "../modules/entityLabels.js";
 export type AppDockTabKind = "node" | "logic_gate_arena";
 
 export type AppDockTab = {
@@ -30,6 +31,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function normalizeLabel(kind: AppDockTabKind, label: string): string {
   const normalized = label.trim().replace(/\s+/g, " ");
+  if (kind === "logic_gate_arena") return humanLabelOrFallback(normalized, DEFAULT_TAB_LABEL[kind]);
   return normalized || DEFAULT_TAB_LABEL[kind];
 }
 

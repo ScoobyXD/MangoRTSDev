@@ -1,3 +1,4 @@
+import { humanLabelOrFallback } from "../modules/entityLabels.js";
 export type SidebarPinKind = "node" | "logic_gate";
 
 export type SidebarPin = {
@@ -16,8 +17,8 @@ export type SidebarPinRequestDetail = {
 export const EVENT_APP_SIDEBAR_PIN_REQUESTED = "mangorts:app-sidebar-pin-requested";
 
 export function sidebarPinFallbackLabel(kind: SidebarPinKind, id: string): string {
-  const prefix = kind === "logic_gate" ? "Logic Gate" : "Node";
-  return `${prefix} ${id.trim().slice(0, 8) || "pin"}`;
+  if (kind === "logic_gate") return "Logic Gate";
+  return `Node ${id.trim().slice(0, 8) || "pin"}`;
 }
 
 export function requestAppSidebarPin(detail: SidebarPinRequestDetail): void {
@@ -27,7 +28,7 @@ export function requestAppSidebarPin(detail: SidebarPinRequestDetail): void {
     detail: {
       id,
       kind: detail.kind,
-      label: detail.label?.trim() || sidebarPinFallbackLabel(detail.kind, id),
+      label: detail.kind === "logic_gate" ? humanLabelOrFallback(detail.label, sidebarPinFallbackLabel(detail.kind, id)) : (detail.label?.trim() || sidebarPinFallbackLabel(detail.kind, id)),
     },
   }));
 }

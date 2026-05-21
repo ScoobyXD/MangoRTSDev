@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
-import { getNodeTitle as getLogicGateTitle, type LogicGateRecord } from "../logic-gate-map/shared";
+import { humanLabelOrFallback } from "../entityLabels.js";
+import type { LogicGateRecord } from "../logic-gate-map/shared";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import {
@@ -83,7 +84,7 @@ function storeTextChatSplitRatio(companyID: string, nodeID: string, ratio: numbe
 }
 
 function logicGateOptionLabel(logicGate: LogicGateRecord): string {
-  return getLogicGateTitle({ header: logicGate.header, title: logicGate.header }).trim() || logicGate.logic_gate_id;
+  return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Logic Gate"));
 }
 
 function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
@@ -212,6 +213,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGateOptionsLoading, setLogicGateOptionsLoading] = useState(false);
   const [logicGateSearchResults, setLogicGateSearchResults] = useState<LogicGateRecord[]>([]);
+  const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
   const [logicGateSearchLoading, setLogicGateSearchLoading] = useState(false);
   const [assigningLogicGateID, setAssigningLogicGateID] = useState("");
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
@@ -247,18 +249,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }), [logicGateFolderItems, logicGateFolders, searchedLogicGates]);
   const logicGateLabelByID = useMemo(() => {
     const labels = new Map<string, string>();
-    for (const logicGate of uniqueLogicGateOptions([...logicGateOptions, ...logicGateSearchResults])) {
+    for (const logicGate of uniqueLogicGateOptions([...logicGateOptions, ...logicGateSearchResults, ...assignedLogicGateRecords])) {
       labels.set(logicGate.logic_gate_id, logicGateOptionLabel(logicGate));
     }
     return labels;
-  }, [logicGateOptions, logicGateSearchResults]);
+  }, [assignedLogicGateRecords, logicGateOptions, logicGateSearchResults]);
   const assignedLogicGateIDSet = useMemo(() => new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)), [assignedLogicGateIDs]);
   const assignedLogicGateLabel = useMemo(() => {
     if (lastAssignedLogicGateLabel.trim()) return lastAssignedLogicGateLabel.trim();
     for (const logicGateID of assignedLogicGateIDs) {
       const cleanLogicGateID = logicGateID.trim();
       if (!cleanLogicGateID) continue;
-      return logicGateLabelByID.get(cleanLogicGateID) ?? cleanLogicGateID;
+      return logicGateLabelByID.get(cleanLogicGateID) ?? humanLabelOrFallback(cleanLogicGateID, "Logic Gate");
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
@@ -368,6 +370,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    const ids = Array.from(new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)));
+    if (!companyID || ids.length === 0) {
+      setAssignedLogicGateRecords([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(ids.map(async (logicGateID) => {
+      try {
+        const payload = await requestJSON<{ logic_gate?: LogicGateRecord }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}?company_id=${encodeURIComponent(companyID)}`);
+        return payload.logic_gate ?? null;
+      } catch {
+        return null;
+      }
+    })).then((records) => {
+      if (!cancelled) setAssignedLogicGateRecords(records.filter((record): record is LogicGateRecord => Boolean(record)));
+    });
+    return () => { cancelled = true; };
+  }, [assignedLogicGateIDs, companyID, requestJSON]);
   useEffect(() => {
     if (!logicGateAssignerOpen || !companyID) return;
     let cancelled = false;

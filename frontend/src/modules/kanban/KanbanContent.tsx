@@ -80,6 +80,7 @@ import {
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { createRequestJSON } from "../api/requestJSON";
+import { humanLabelOrFallback } from "../entityLabels.js";
 
 import {
   cardDropPlacement,
@@ -327,14 +328,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }), [arenaNodeByID, arenaUserByID, arenaXGroupBy, arenaXSortDirection, arenaYGroupBy, arenaYSortDirection, cards, orderedColumns]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
-  const activeBoardTitle = activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : (activeLogicGateLabel || KANBAN_DEFAULT_BOARD_TITLE);
+  const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Logic Gate")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
     return [{
       company_id: companyID,
       board_id: boardID,
       logic_gate_id: activeLogicGateID || null,
-      title: activeLogicGateLabel || `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`,
+      title: activeLogicGateID ? (activeLogicGateLabel || "Logic Gate") : (activeLogicGateLabel || `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`),
       position: 0,
       created_timestamp: "",
       updated_timestamp: "",
@@ -438,12 +439,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     void getLogicGateArenaView(apiBase, companyID, logicGateID)
       .then((view) => {
         if (activeBoardIDRef.current !== expectedBoardID) return;
-        upsertBoardInList(view.board);
+        const logicGateLabel = humanLabelOrFallback(view.logic_gate?.header, "Logic Gate");
+        const board = { ...view.board, logic_gate_id: view.board.logic_gate_id ?? logicGateID, title: logicGateLabel };
+        upsertBoardInList(board);
+        setActiveLogicGateLabel(logicGateLabel);
         const nextColumns = sortColumns(view.columns ?? []);
         const nextCards = view.cards ?? [];
         setColumns(nextColumns);
         setCards(nextCards);
-        primeKanbanBoardContentsCache(apiBase, companyID, view.board.board_id, { columns: nextColumns, cards: nextCards });
+        primeKanbanBoardContentsCache(apiBase, companyID, board.board_id, { columns: nextColumns, cards: nextCards });
         setError("");
         setLoading(false);
       })
@@ -471,7 +475,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setSelectionAnchorCardID("");
     setHighlightedEntity(forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null);
     setActiveLogicGateID(logicGateID);
-    setActiveLogicGateLabel(forcedLogicGateLabel.trim() || "Logic Gate Kanban");
+    setActiveLogicGateLabel(humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate"));
     setNodeEditorOverlay(null);
     setActiveBoardID(nextBoardID);
     const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
@@ -719,7 +723,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             invalidateKanbanBoardListCache(apiBase, companyID);
             invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
             const boardID = logicGateKanbanBoardID(logicGateID);
-            const title = typeof logicGate?.header === "string" && logicGate.header.trim() ? logicGate.header.trim() : boardID;
+            const title = humanLabelOrFallback(typeof logicGate?.header === "string" ? logicGate.header : "", "Logic Gate");
             const nextBoards = boardsRef.current.map((board) => (board.board_id === boardID ? { ...board, title, updated_timestamp: new Date().toISOString() } : board));
             boardsRef.current = nextBoards;
             setBoards(nextBoards);
@@ -878,7 +882,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
-        setActiveLogicGateLabel(logicGateID ? (selection.label?.trim() || "Logic Gate Kanban") : "");
+        setActiveLogicGateLabel(logicGateID ? humanLabelOrFallback(selection.label, "Logic Gate") : "");
         setNodeEditorOverlay(null);
         setActiveBoardID(selection.entityID.trim());
         if (logicGateID) loadLogicGateArenaView(logicGateID, selection.entityID.trim());
@@ -893,7 +897,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
-        setActiveLogicGateLabel(selection.label?.trim() || "Logic Gate Kanban");
+        setActiveLogicGateLabel(humanLabelOrFallback(selection.label, "Logic Gate"));
         setNodeEditorOverlay(null);
         setActiveBoardID(nextBoardID);
         const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
