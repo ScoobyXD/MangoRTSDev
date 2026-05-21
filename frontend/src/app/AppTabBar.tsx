@@ -10,7 +10,7 @@ type AppTabBarProps = {
   onContextMenu: (event: React.MouseEvent, tab: AppDockTab) => void;
 };
 
-const TAB_BAR_H = 58;
+const TAB_BAR_H = 76;
 
 export const APP_TAB_BAR_HEIGHT = TAB_BAR_H;
 
@@ -55,6 +55,7 @@ export const AppTabBar: React.FC<AppTabBarProps> = ({
       <div style={appTabRailStyle}>
         {tabs.map((tab) => {
           const active = activeTabID === tab.id;
+          const shortLabel = shortTabLabel(tab.label);
           return (
             <button
               key={tab.id}
@@ -84,6 +85,7 @@ export const AppTabBar: React.FC<AppTabBarProps> = ({
               <span style={appTabIconStyle(active)}>
                 <ExplorerRowIcon kind={tab.kind === "node" ? "node" : "logic_gate"} />
               </span>
+              <span style={appTabLabelStyle(active)}>{shortLabel}</span>
               {tab.pinned && <span style={appTabPinnedStyle}><PinIndicator /></span>}
             </button>
           );
@@ -99,6 +101,11 @@ const PinIndicator: React.FC = () => (
   </svg>
 );
 
+function shortTabLabel(label: string): string {
+  const compact = label.trim().replace(/\s+/g, "");
+  return (compact || "Item").slice(0, 4);
+}
+
 const appTabBarStyle: React.CSSProperties = {
   position: "fixed",
   left: "50%",
@@ -111,7 +118,7 @@ const appTabBarStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   minWidth: 0,
-  padding: "6px 0 8px",
+  padding: "7px 0 9px",
   boxSizing: "border-box",
   background: "transparent",
   pointerEvents: "none",
@@ -120,14 +127,14 @@ const appTabBarStyle: React.CSSProperties = {
 const appTabRailStyle: React.CSSProperties = {
   minWidth: 0,
   maxWidth: "100%",
-  height: 44,
+  height: 58,
   display: "flex",
   alignItems: "center",
-  gap: 8,
+  gap: 10,
   overflowX: "auto",
   overflowY: "hidden",
   scrollbarWidth: "thin",
-  padding: "4px 12px",
+  padding: "5px 14px",
   boxSizing: "border-box",
   border: "1px solid rgba(255, 136, 32, 0.24)",
   borderRadius: 999,
@@ -139,18 +146,19 @@ function appTabButtonStyle(active: boolean, moving: boolean): React.CSSPropertie
   return {
     flex: "0 0 auto",
     position: "relative",
-    width: 36,
-    height: 36,
+    width: 50,
+    height: 48,
     display: "grid",
+    gridTemplateRows: "minmax(0, 1fr) 12px",
     placeItems: "center",
     border: `1px solid ${active ? "rgba(255, 136, 32, 0.78)" : "rgba(36, 18, 10, 0.12)"}`,
-    borderRadius: 9,
+    borderRadius: 10,
     background: active ? "linear-gradient(180deg, #fff7ee 0%, #ffe0bc 100%)" : "linear-gradient(180deg, #ffffff 0%, #fff8f0 100%)",
     color: active ? "#ff8820" : "#33241a",
     cursor: "pointer",
     font: "inherit",
     letterSpacing: 0,
-    padding: 0,
+    padding: "5px 4px 4px",
     opacity: moving ? 0.78 : 1,
     boxShadow: active ? "0 5px 12px rgba(255, 136, 32, 0.22)" : "0 4px 10px rgba(36, 18, 10, 0.09)",
     transform: moving ? "translateY(-2px)" : "none",
@@ -159,18 +167,35 @@ function appTabButtonStyle(active: boolean, moving: boolean): React.CSSPropertie
 }
 function appTabIconStyle(active: boolean): React.CSSProperties {
   return {
-    width: 22,
-    height: 22,
+    width: 28,
+    height: 28,
     display: "grid",
     placeItems: "center",
     color: active ? "#ff8820" : "rgba(36, 18, 10, 0.72)",
+    transform: "scale(1.32)",
+  };
+}
+
+function appTabLabelStyle(active: boolean): React.CSSProperties {
+  return {
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: active ? "#9b430f" : "rgba(36, 18, 10, 0.66)",
+    fontSize: 9,
+    fontWeight: 900,
+    lineHeight: "10px",
+    letterSpacing: 0,
+    textTransform: "uppercase",
   };
 }
 
 const appTabPinnedStyle: React.CSSProperties = {
   position: "absolute",
-  right: 3,
-  top: 3,
+  right: 4,
+  top: 4,
   display: "grid",
   placeItems: "center",
   color: "#ff8820",

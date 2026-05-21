@@ -43,6 +43,8 @@
     "../app/framePointerRouting.test.ts",
     "../../../frontend/src/app/preloadDashboardPlan.ts",
     "../app/preloadDashboardPlan.test.ts",
+    "../../../frontend/src/app/timelineState.ts",
+    "../app/timelineState.test.ts",
     "../../../frontend/src/modules/linkingGraph.ts",
     "../modules/linkingGraph.test.ts",
     "../../../frontend/src/modules/node-map/shared.ts",

@@ -42,8 +42,10 @@ import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
+import { AppTimeline } from "./AppTimeline";
 import { AppTabBar } from "./AppTabBar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
+import { readAppTimelineState, saveAppTimelineState } from "./timelineState";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -276,6 +278,7 @@ const appResizeGripStyle: React.CSSProperties = {
 };
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
+  const activeCompanyID = getActiveCompanyID();
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -303,6 +306,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(null);
   const [dockTabs, setDockTabs] = useState<AppDockTab[]>(readAppDockTabs);
+  const [timelineState, setTimelineState] = useState(() => readAppTimelineState(activeCompanyID));
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(null);
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -466,6 +470,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
   useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
   useEffect(() => { saveAppDockTabs(dockTabs); }, [dockTabs]);
+  useEffect(() => { saveAppTimelineState(activeCompanyID, timelineState); }, [activeCompanyID, timelineState]);
   useEffect(() => {
     const snapshot = buildSnapshot();
     if (restoringRef.current) {
@@ -992,6 +997,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.label });
   }, [closeMenus, selectPrimaryPage]);
 
+  const openTimelineEntity = useCallback((target: { kind: "node" | "logic_gate"; id: string; label: string }) => {
+    openSidebarPin({
+      kind: target.kind,
+      id: target.id,
+      label: target.label,
+      addedAt: Date.now(),
+    });
+  }, [openSidebarPin]);
+
   const handleSidebarPinDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
     const pins = sidebarPinsFromDrop(event.dataTransfer);
     setPinDropActive(false);
@@ -1432,6 +1446,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       </FrameCanvas>
       )}
       </div>
+
+      <AppTimeline
+        state={timelineState}
+        leftInset={appSidebarWidth + APP_RESIZE_HANDLE_W + PAGE_EDGE_GAP}
+        onChange={setTimelineState}
+        onOpenEntity={openTimelineEntity}
+      />
 
       <AppTabBar
         tabs={dockTabs}
