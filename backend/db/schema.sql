@@ -349,7 +349,10 @@ returns boolean as $$
       where permission.company_id = p_company_id
         and permission.resource_type = p_resource_type
         and permission.resource_id = p_resource_id
-    ) then (select required_rank from requested) = 1
+    ) then case
+      when lower(btrim(p_resource_type)) in ('node', 'logic_gate') then true
+      else (select required_rank from requested) = 1
+    end
     when exists (
       select 1
       from resource_access_grants permission, requested

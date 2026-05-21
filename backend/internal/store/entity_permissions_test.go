@@ -98,8 +98,25 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionView); err != nil || !allowed {
 		t.Fatalf("viewer no-grant view allowed = %v err = %v, want true", allowed, err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionEdit); err != nil || allowed {
-		t.Fatalf("viewer no-grant edit allowed = %v err = %v, want false", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("viewer no-grant edit allowed = %v err = %v, want true", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionAdmin); err != nil || !allowed {
+		t.Fatalf("viewer no-grant admin allowed = %v err = %v, want true", allowed, err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Open logic gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, logicGate.LogicGateID, viewer.UserID, EntityPermissionAdmin); err != nil || !allowed {
+		t.Fatalf("viewer no-grant logic gate admin allowed = %v err = %v, want true", allowed, err)
+	}
+	sharedInbox, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Shared inbox")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder shared inbox: %v", err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, sharedInbox.FolderID, viewer.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("viewer no-grant shared inbox edit allowed = %v err = %v, want false", allowed, err)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{

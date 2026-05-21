@@ -380,7 +380,10 @@ func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, 
 			}
 		}
 	}
-	return accessLevel == EntityPermissionView && !hasRestriction
+	if !hasRestriction {
+		return entityTypeDefaultsToFullAccess(entityType) || accessLevel == EntityPermissionView
+	}
+	return false
 }
 
 func entityPermissionRank(accessLevel string) int {
@@ -393,6 +396,15 @@ func entityPermissionRank(accessLevel string) int {
 		return 3
 	default:
 		return 0
+	}
+}
+
+func entityTypeDefaultsToFullAccess(entityType string) bool {
+	switch strings.TrimSpace(entityType) {
+	case EntityTypeNode, EntityTypeLogicGate:
+		return true
+	default:
+		return false
 	}
 }
 
