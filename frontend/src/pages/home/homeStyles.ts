@@ -745,12 +745,13 @@ export const logicGateInboxNodeListStyle: React.CSSProperties = {
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
 
-export function logicGateInboxNodeRowStyle(selected: boolean): React.CSSProperties {
+export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0): React.CSSProperties {
+  const indentPx = 10 + Math.min(Math.max(0, Math.round(depth)), 8) * 14;
   return {
     minHeight: 28,
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: "10px 16px minmax(0, 1fr) auto",
+    gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto`,
     alignItems: "center",
     gap: 5,
     border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,

@@ -40,14 +40,14 @@ import {
 } from "../../modules/communications/communicationsApi";
 import { subscribeCommunicationsStream } from "../../modules/communications/communicationsStream";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
-import type { NodeRecord } from "../../modules/node-map/shared";
+import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
-import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
@@ -131,6 +131,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [nodeFolders, setNodeFolders] = useState<CompanyExplorerFolder[]>([]);
   const [nodeFolderItems, setNodeFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const [nodeRelationships, setNodeRelationships] = useState<NodeRelationship[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -186,6 +187,20 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
+
+  useEffect(() => {
+    if (!companyID || !isInboxMatrixView) {
+      setNodeRelationships([]);
+      return undefined;
+    }
+    const updateRelationships = () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      setNodeRelationships(snapshot.relationships ?? []);
+    };
+    updateRelationships();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, updateRelationships);
+  }, [apiBase, companyID, isInboxMatrixView]);
+
   const activeSharedInbox = useMemo(
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
     [activeSharedInboxFolderID, sharedInboxes],
@@ -1952,6 +1967,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   loading={loadingNodes}
                   nodes={nodes}
                   nodeByID={nodeByID}
+                  nodeRelationships={nodeRelationships}
                   logicGateByID={logicGateByID}
                   nodeFolders={nodeFolders}
                   nodeFolderItems={nodeFolderItems}
@@ -1975,6 +1991,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   loading={loadingNodes}
                   nodes={nodes}
                   nodeByID={nodeByID}
+                  nodeRelationships={nodeRelationships}
                   logicGateByID={logicGateByID}
                   nodeFolders={nodeFolders}
                   nodeFolderItems={nodeFolderItems}

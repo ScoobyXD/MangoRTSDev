@@ -1400,18 +1400,29 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }}
         onDragEnd={() => setDragOverCard(null)}
         onDragOver={(event) => {
-          if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
+          if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME)) return;
           event.preventDefault();
           event.stopPropagation();
-          setDragOverCard({ cardID: card.card_id, placement: cardDropPlacement(event) });
+          setDragOverCard({
+            cardID: card.card_id,
+            placement: dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) ? cardDropPlacement(event) : "after",
+          });
         }}
         onDragLeave={() => setDragOverCard((previous) => (previous?.cardID === card.card_id ? null : previous))}
         onDrop={(event) => {
           const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
-          if (!cardPayload) return;
+          if (cardPayload) {
+            event.preventDefault();
+            event.stopPropagation();
+            void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
+            return;
+          }
+          const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
+          if (explorerItems.length === 0) return;
           event.preventDefault();
           event.stopPropagation();
-          void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
+          setDragOverCard(null);
+          void addEntitiesToColumn(card.column_id, explorerItems);
         }}
       />
     );

@@ -12,6 +12,14 @@ export type NodeRelationshipTreeRow = {
   hasChildren: boolean;
 };
 
+export type NodeRelationshipHierarchyRow = {
+  nodeID: string;
+  title: string;
+  depth: number;
+  role: RelationshipRole | "Related";
+  hasChildren: boolean;
+};
+
 type HierarchyIndex = {
   childrenByParent: Map<string, Set<string>>;
   parentsByChild: Map<string, Set<string>>;
@@ -201,6 +209,74 @@ export function buildNodeRelationshipTreeRows(input: {
 
   for (const rootID of roots) walk(rootID, 0, new Set());
   for (const nodeID of sortedNodeIDs(allowedIDs, nodeByID, focusNodeID)) {
+    if (!visited.has(nodeID)) walk(nodeID, 0, new Set());
+  }
+
+  return rows;
+}
+
+export function buildNodeRelationshipHierarchyRows(input: {
+  nodes: NodeRecord[];
+  relationships: NodeRelationship[];
+  nodeIDs?: string[];
+}): NodeRelationshipHierarchyRow[] {
+  const requestedIDs = input.nodeIDs
+    ? Array.from(new Set(input.nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean)))
+    : Array.from(new Set(input.nodes.map((node) => node.node_id.trim()).filter(Boolean)));
+  if (requestedIDs.length === 0) return [];
+
+  const nodeByID = new Map(input.nodes.map((node) => [node.node_id, node]));
+  const allowedIDs = new Set(requestedIDs);
+  const relationships = input.relationships.filter((relationship) => (
+    allowedIDs.has(relationship.node_id_a) && allowedIDs.has(relationship.node_id_b)
+  ));
+  const { childrenByParent, parentsByChild } = indexHierarchy(relationships, allowedIDs);
+  const peersByNode = indexPeers(relationships, allowedIDs);
+
+  const canReachStructuredPeer = (nodeID: string): boolean => {
+    for (const peerID of peersByNode.get(nodeID) ?? []) {
+      if ((parentsByChild.get(peerID)?.size ?? 0) > 0) return true;
+      if ((childrenByParent.get(peerID)?.size ?? 0) > 0) return true;
+    }
+    return false;
+  };
+
+  const rowForNode = (nodeID: string, depth: number, role: RelationshipRole | "Related" = "Related"): NodeRelationshipHierarchyRow => ({
+    nodeID,
+    title: getNodeTitle(nodeByID.get(nodeID) ?? { title: nodeID }) || nodeID,
+    depth,
+    role,
+    hasChildren: (childrenByParent.get(nodeID)?.size ?? 0) > 0,
+  });
+
+  const roots = sortedNodeIDs(
+    requestedIDs
+      .filter((nodeID) => (parentsByChild.get(nodeID)?.size ?? 0) === 0)
+      .filter((nodeID) => !canReachStructuredPeer(nodeID)),
+    nodeByID,
+    "",
+  );
+  const rows: NodeRelationshipHierarchyRow[] = [];
+  const visited = new Set<string>();
+
+  const walk = (nodeID: string, depth: number, stack: Set<string>, role?: RelationshipRole | "Related") => {
+    if (!allowedIDs.has(nodeID)) return;
+    if (visited.has(nodeID)) return;
+    visited.add(nodeID);
+    rows.push(rowForNode(nodeID, depth, role));
+    if (stack.has(nodeID)) return;
+    const nextStack = new Set(stack);
+    nextStack.add(nodeID);
+    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, "")) {
+      walk(peerID, depth, nextStack, "Peer");
+    }
+    for (const childID of sortedNodeIDs(childrenByParent.get(nodeID) ?? [], nodeByID, "")) {
+      walk(childID, depth + 1, nextStack, "Child");
+    }
+  };
+
+  for (const rootID of roots) walk(rootID, 0, new Set());
+  for (const nodeID of sortedNodeIDs(requestedIDs, nodeByID, "")) {
     if (!visited.has(nodeID)) walk(nodeID, 0, new Set());
   }
 

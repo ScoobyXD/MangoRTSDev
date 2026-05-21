@@ -18,10 +18,14 @@ import {
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxCountsFromFolders,
   mailboxForHomeView,
+  nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
+  setNodeDragData,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
+import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
+import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
 import { ACI_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
@@ -194,6 +198,48 @@ test("my node groups follow logic gate folders and node drag payloads resolve fo
       explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
     ],
   ), ["node-root", "node-child"]);
+});
+
+test("home node drags include the Logic Gate Arena node payload", () => {
+  const nodeByID = new Map([
+    ["node-a", node("node-a", "Alpha")],
+    ["node-b", node("node-b", "Beta")],
+  ]);
+  const data = new Map<string, string>();
+  const transfer = {
+    effectAllowed: "",
+    setData(type: string, value: string) {
+      data.set(type, value);
+    },
+  } as unknown as DataTransfer;
+
+  setNodeDragData(transfer, ["node-a", "node-b"], nodeByID);
+
+  assert.equal(JSON.parse(data.get(EXPLORER_DRAG_MIME) ?? "{}").kind, "batch");
+  assert.deepEqual(JSON.parse(data.get(EXPLORER_ENTITY_DRAG_MIME) ?? "{}"), {
+    itemType: "node_batch",
+    nodes: [
+      { nodeID: "node-a", label: "Alpha" },
+      { nodeID: "node-b", label: "Beta" },
+    ],
+  });
+});
+
+test("home explorer rows expose selected nodes as Logic Gate Arena drag items", () => {
+  const nodeByID = new Map([
+    ["node-a", node("node-a", "Alpha")],
+    ["node-b", node("node-b", "Beta")],
+  ]);
+  const rows = [
+    { id: "folder-root", label: "Root", depth: 0, kind: "folder" as const, folderID: "folder-root", folderKind: "node" as const, scopeLevel: 0, position: 1000, createdTimestamp: "" },
+    { id: "node-node-a", label: "Alpha", depth: 1, kind: "node" as const, nodeID: "node-a", folderID: "folder-root", folderKind: "node" as const, scopeLevel: 1, position: 1000, createdTimestamp: "" },
+    { id: "node-node-b", label: "Beta", depth: 1, kind: "node" as const, nodeID: "node-b", folderID: "folder-root", folderKind: "node" as const, scopeLevel: 1, position: 2000, createdTimestamp: "" },
+  ];
+
+  assert.deepEqual(nodeDragItemsFromExplorerRows({ kind: "folder", folderID: "folder-root", folderKind: "node" }, rows, nodeByID), [
+    { nodeID: "node-a", label: "Alpha" },
+    { nodeID: "node-b", label: "Beta" },
+  ]);
 });
 
 test("my logic gate groups merge shortcuts with RACI-assigned gates", () => {

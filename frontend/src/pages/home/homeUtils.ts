@@ -5,7 +5,7 @@ import { getExplorerDropPayloadItems } from "../../modules/company-explorer/tree
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
-import { attachStackedDragPreview, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR } from "../../modules/kanban/shared.js";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, MAILBOX_OPTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
 import type { AciInboxRaciRole, AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
@@ -433,12 +433,57 @@ export function buildNodeExplorerPayload(nodeIDs: string[]): ExplorerDragPayload
   };
 }
 
+export function nodeDragItemsFromIDs(nodeIDs: string[], nodeByID: Map<string, NodeRecord>): ExplorerEntityDragItem[] {
+  return cleanIDList(nodeIDs)
+    .filter((nodeID) => nodeByID.has(nodeID))
+    .map((nodeID) => ({ nodeID, label: nodeTitle(nodeByID.get(nodeID)) || nodeID }));
+}
+
+export function nodeDragItemsFromExplorerRows(
+  payload: ExplorerDragPayload | null,
+  rows: ExplorerTreeNode[],
+  nodeByID: Map<string, NodeRecord>,
+): ExplorerEntityDragItem[] {
+  if (!payload) return [];
+  if (payload.kind === "node" && payload.itemID) return nodeDragItemsFromIDs([payload.itemID], nodeByID);
+  if (payload.kind === "batch") {
+    return nodeDragItemsFromIDs(
+      getExplorerDropPayloadItems(payload)
+        .filter((item) => item.itemType === "node")
+        .map((item) => item.itemID),
+      nodeByID,
+    );
+  }
+  if (payload.kind === "folder" && payload.folderKind === "node" && payload.folderID) {
+    const rootIndex = rows.findIndex((row) => row.kind === "folder" && row.folderID === payload.folderID);
+    if (rootIndex < 0) return [];
+    const rootDepth = rows[rootIndex].depth;
+    const nodeIDs: string[] = [];
+    for (let index = rootIndex + 1; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (row.depth <= rootDepth) break;
+      if (row.kind === "node" && row.nodeID) nodeIDs.push(row.nodeID);
+    }
+    return nodeDragItemsFromIDs(nodeIDs, nodeByID);
+  }
+  return [];
+}
+
+export function setKanbanNodeEntityDragData(dataTransfer: DataTransfer, items: ExplorerEntityDragItem[]): void {
+  if (items.length === 0) return;
+  const payload = items.length === 1
+    ? { itemType: "node" as const, nodeID: items[0].nodeID, label: items[0].label }
+    : { itemType: "node_batch" as const, nodes: items };
+  dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload(payload));
+}
+
 export function setNodeDragData(dataTransfer: DataTransfer, nodeIDs: string[], nodeByID: Map<string, NodeRecord>): void {
   const payload = buildNodeExplorerPayload(nodeIDs);
   if (!payload) return;
   const ids = cleanIDList(nodeIDs);
   dataTransfer.effectAllowed = "copyMove";
   dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+  setKanbanNodeEntityDragData(dataTransfer, nodeDragItemsFromIDs(ids, nodeByID));
   dataTransfer.setData("text/plain", ids.length === 1 ? nodeTitle(nodeByID.get(ids[0])) : `${ids.length} nodes`);
   attachStackedDragPreview(
     dataTransfer,
