@@ -92,6 +92,10 @@ func (r *PostgresRepo) attachCompanyExplorerFolderMetadata(ctx context.Context, 
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
+	items, err = r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	if len(items) == 0 {
 		return item, nil
 	}
@@ -366,7 +370,11 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 		}
 		return nil, err
 	}
-	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
@@ -423,7 +431,11 @@ order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(fold
 		}
 		return nil, err
 	}
-	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
@@ -913,6 +925,19 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	if len(folderIDs) > 0 {
+		grantFolderIDs := make([]string, 0, len(folderIDs))
+		for folderID := range folderIDs {
+			grantFolderIDs = append(grantFolderIDs, folderID)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`delete from resource_access_grants
+			 where company_id=$1 and resource_type=$2 and resource_id = any(string_to_array($3, ',')::uuid[])`,
+			companyID, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
+		); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
 	for folderID := range folderRootIDs {
 		if _, err := tx.ExecContext(ctx,
 			`delete from company_explorer_folders
@@ -981,10 +1006,10 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from entity_access_permissions
-		 where company_id=$1 and entity_type='node' and entity_id=$2::uuid`,
+		`delete from resource_access_grants
+		 where company_id=$1 and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
-	); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,
@@ -1097,10 +1122,10 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from entity_access_permissions
-		 where company_id=$1 and entity_type='logic_gate' and entity_id=$2::uuid`,
+		`delete from resource_access_grants
+		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,

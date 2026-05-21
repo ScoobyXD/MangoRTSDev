@@ -130,6 +130,7 @@ type EntityPermissionRepository interface {
 	ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error)
 	SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error)
 	UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error)
+	UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error)
 }
 
 type WorkItemReadRepository interface {
@@ -285,10 +286,13 @@ const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
 
 const (
-	EntityTypeNode      = "node"
-	EntityTypeLogicGate = "logic_gate"
+	EntityTypeNode               = "node"
+	EntityTypeLogicGate          = "logic_gate"
+	EntityTypeSharedTriageFolder = "shared_triage_folder"
 
-	EntityPermissionView = "view"
+	EntityPermissionView  = "view"
+	EntityPermissionEdit  = "edit"
+	EntityPermissionAdmin = "admin"
 
 	EntityPermissionSubjectUser  = "user"
 	EntityPermissionSubjectGroup = "group"
@@ -802,6 +806,7 @@ type EntityPermissionInput struct {
 	SubjectType string `json:"subject_type"`
 	SubjectID   string `json:"subject_id"`
 	Permission  string `json:"permission"`
+	AccessLevel string `json:"access_level"`
 }
 
 type EntityPermissionUpdateInput struct {
@@ -859,6 +864,8 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeNode, true
 	case EntityTypeLogicGate:
 		return EntityTypeLogicGate, true
+	case EntityTypeSharedTriageFolder, "communications_folder", "shared_inbox_folder":
+		return EntityTypeSharedTriageFolder, true
 	default:
 		return "", false
 	}
@@ -879,9 +886,36 @@ func NormalizeEntityPermission(permission string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(permission)) {
 	case "", EntityPermissionView:
 		return EntityPermissionView, true
+	case EntityPermissionEdit:
+		return EntityPermissionEdit, true
+	case EntityPermissionAdmin, "manage":
+		return EntityPermissionAdmin, true
 	default:
 		return "", false
 	}
+}
+func EntityPermissionRank(permission string) int {
+	if strings.TrimSpace(permission) == "" {
+		return 0
+	}
+	permission, ok := NormalizeEntityPermission(permission)
+	if !ok {
+		return 0
+	}
+	switch permission {
+	case EntityPermissionView:
+		return 1
+	case EntityPermissionEdit:
+		return 2
+	case EntityPermissionAdmin:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func EntityPermissionSatisfies(grant, required string) bool {
+	return EntityPermissionRank(grant) >= EntityPermissionRank(required) && EntityPermissionRank(required) > 0
 }
 
 func LogicGateKanbanBoardID(logicGateID string) string {

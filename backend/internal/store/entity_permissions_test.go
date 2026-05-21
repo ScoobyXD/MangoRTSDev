@@ -68,3 +68,72 @@ func TestMemoryEntityPermissionsIncludeDescendantGroupMembers(t *testing.T) {
 		t.Fatalf("other user allowed after clear = %v err = %v, want true", allowed, err)
 	}
 }
+func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111112"
+	repo.EnsureCompany(companyID, "Access Co")
+
+	viewer, err := repo.UpsertAuthUser("viewer-user", "viewer@example.com", "Viewer User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser viewer: %v", err)
+	}
+	editor, err := repo.UpsertAuthUser("editor-user", "editor@example.com", "Editor User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser editor: %v", err)
+	}
+	admin, err := repo.UpsertAuthUser("admin-user", "admin@example.com", "Admin User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	for _, subject := range []string{"viewer-user", "editor-user", "admin-user"} {
+		if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+			t.Fatalf("AddCompanyMembership %s: %v", subject, err)
+		}
+	}
+
+	node, err := repo.CreateNode(companyID, "Access node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionView); err != nil || !allowed {
+		t.Fatalf("viewer no-grant view allowed = %v err = %v, want true", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("viewer no-grant edit allowed = %v err = %v, want false", allowed, err)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: EntityPermissionView},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: EntityPermissionEdit},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: EntityPermissionAdmin},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		userID      string
+		accessLevel string
+		want        bool
+	}{
+		{name: "viewer can view", userID: viewer.UserID, accessLevel: EntityPermissionView, want: true},
+		{name: "viewer cannot edit", userID: viewer.UserID, accessLevel: EntityPermissionEdit, want: false},
+		{name: "editor can view", userID: editor.UserID, accessLevel: EntityPermissionView, want: true},
+		{name: "editor can edit", userID: editor.UserID, accessLevel: EntityPermissionEdit, want: true},
+		{name: "editor cannot admin", userID: editor.UserID, accessLevel: EntityPermissionAdmin, want: false},
+		{name: "admin can view", userID: admin.UserID, accessLevel: EntityPermissionView, want: true},
+		{name: "admin can edit", userID: admin.UserID, accessLevel: EntityPermissionEdit, want: true},
+		{name: "admin can admin", userID: admin.UserID, accessLevel: EntityPermissionAdmin, want: true},
+	}
+	for _, tc := range cases {
+		allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, tc.userID, tc.accessLevel)
+		if err != nil || allowed != tc.want {
+			t.Fatalf("%s allowed = %v err = %v, want %v", tc.name, allowed, err, tc.want)
+		}
+	}
+}

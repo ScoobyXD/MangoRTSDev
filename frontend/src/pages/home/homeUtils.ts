@@ -686,8 +686,27 @@ export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communi
   return [...folders].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name) || a.folder_id.localeCompare(b.folder_id));
 }
 
+type SharedInboxAccessLevel = "view" | "edit" | "admin";
+
+function sharedInboxAccessRank(accessLevel: string | undefined): number {
+  switch (accessLevel) {
+    case "view":
+      return 1;
+    case "edit":
+      return 2;
+    case "admin":
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+export function sharedInboxHasAnyAccessGrants(folders: CommunicationsSharedInbox[]): boolean {
+  return folders.some((folder) => (folder.access_grants ?? []).length > 0);
+}
+
 export function sharedInboxHasAnyRaciAssignments(folders: CommunicationsSharedInbox[]): boolean {
-  return folders.some((folder) => (folder.raci_assignments ?? []).length > 0);
+  return sharedInboxHasAnyAccessGrants(folders);
 }
 
 type SharedInboxAccessUser = {
@@ -706,45 +725,43 @@ export function userHasFullSharedInboxAccess(user: SharedInboxAccessUser | null 
   });
 }
 
-export function sharedInboxUserHasRole(folder: CommunicationsSharedInbox | undefined, userID: string): boolean {
+function sharedInboxEffectiveAccess(folder: CommunicationsSharedInbox | undefined, userID: string): SharedInboxAccessLevel | "" {
+  if (!folder) return "";
+  const effective = folder.effective_access_level;
+  if (effective === "view" || effective === "edit" || effective === "admin") return effective;
   const cleanUserID = userID.trim();
-  if (!folder || !cleanUserID) return false;
-  return (folder.raci_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
+  if (!cleanUserID) return "";
+  let best: SharedInboxAccessLevel | "" = "";
+  for (const grant of folder.access_grants ?? []) {
+    if (grant.subject_type !== "user" || grant.subject_id?.trim() !== cleanUserID) continue;
+    const accessLevel = grant.access_level ?? grant.permission;
+    if (sharedInboxAccessRank(accessLevel) > sharedInboxAccessRank(best)) best = accessLevel;
+  }
+  return best;
+}
+
+export function sharedInboxUserHasRole(folder: CommunicationsSharedInbox | undefined, userID: string): boolean {
+  return sharedInboxAccessRank(sharedInboxEffectiveAccess(folder, userID)) >= sharedInboxAccessRank("view");
 }
 
 export function sharedInboxUserCanManageMail(folder: CommunicationsSharedInbox | undefined, userID: string, hasFullAccess = false): boolean {
   if (hasFullAccess) return true;
-  if (!folder) return true;
-  const assignments = folder.raci_assignments ?? [];
-  const cleanUserID = userID.trim();
-  if (assignments.length === 0) return true;
-  if (!cleanUserID) return false;
-  return assignments.some((assignment) => {
-    if (assignment.user_id?.trim() !== cleanUserID) return false;
-    return assignment.role === "responsible" || assignment.role === "accountable";
-  });
+  if (!folder) return false;
+  if ((folder.access_grants ?? []).length === 0 && !folder.effective_access_level) return false;
+  return sharedInboxAccessRank(sharedInboxEffectiveAccess(folder, userID)) >= sharedInboxAccessRank("edit");
 }
 
 export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedInbox[], folderID: string, userID: string, hasFullAccess = false): boolean {
   if (hasFullAccess) return true;
-  const cleanUserID = userID.trim();
-  if (!sharedInboxHasAnyRaciAssignments(folders)) return true;
-  if (!cleanUserID) return false;
   const cleanFolderID = folderID.trim();
   const scopedFolderIDs = cleanFolderID ? collectSharedInboxSubtreeIDs(folders, cleanFolderID) : new Set(folders.map((folder) => folder.folder_id));
-  return folders.some((folder) => {
-    if (!scopedFolderIDs.has(folder.folder_id)) return false;
-    return (folder.raci_assignments ?? []).some((assignment) => {
-      if (assignment.user_id?.trim() !== cleanUserID) return false;
-      return assignment.role === "responsible" || assignment.role === "accountable";
-    });
-  });
+  return folders.some((folder) => scopedFolderIDs.has(folder.folder_id) && sharedInboxUserCanManageMail(folder, userID, false));
 }
 
 export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[], userID: string, hasFullAccess = false): CommunicationsSharedInbox[] {
   if (hasFullAccess) return folders;
   const cleanUserID = userID.trim();
-  if (!sharedInboxHasAnyRaciAssignments(folders)) return folders;
+  if (!sharedInboxHasAnyAccessGrants(folders)) return folders;
   if (!cleanUserID) return [];
 
   const byID = new Map(folders.map((folder) => [folder.folder_id, folder]));
@@ -782,7 +799,6 @@ export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[],
   }
   return folders.filter((folder) => included.has(folder.folder_id));
 }
-
 export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {
   const ids = new Set<string>();
   const cleanRootID = rootFolderID.trim();
@@ -874,6 +890,7 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
   if (!cleanType) return false;
   return cleanType === "logic_gate_raci_updated"
     || cleanType === "communications_shared_inbox_raci_updated"
+    || cleanType === "shared_triage_access_updated"
     || cleanType.startsWith("node_")
     || cleanType.startsWith("logic_gate_")
     || cleanType.startsWith("kanban_")

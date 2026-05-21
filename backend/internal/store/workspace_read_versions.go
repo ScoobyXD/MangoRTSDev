@@ -49,6 +49,7 @@ var (
 		"company_explorer_folder_updated",
 		"company_explorer_folder_deleted",
 		"communications_shared_inbox_raci_updated",
+		"shared_triage_access_updated",
 	}
 	CompanyExplorerFolderItemWorkspaceEventTypes = []string{
 		"company_explorer_folder_item_assigned",

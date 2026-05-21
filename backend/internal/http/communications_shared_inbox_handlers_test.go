@@ -75,17 +75,17 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 		t.Fatalf("PUT shared inbox access status = %d, want %d body=%s", accessRec.Code, http.StatusOK, accessRec.Body.String())
 	}
 	var accessPayload struct {
-		AccessAssignments []struct {
-			FolderID string `json:"folder_id"`
-			Role     string `json:"role"`
-			UserID   string `json:"user_id"`
-		} `json:"access_assignments"`
+		AccessGrants []struct {
+			EntityID    string `json:"entity_id"`
+			SubjectID   string `json:"subject_id"`
+			AccessLevel string `json:"access_level"`
+		} `json:"access_grants"`
 	}
 	if err := json.NewDecoder(accessRec.Body).Decode(&accessPayload); err != nil {
 		t.Fatalf("decode access payload: %v", err)
 	}
-	if len(accessPayload.AccessAssignments) != 1 || accessPayload.AccessAssignments[0].FolderID != created.FolderID || accessPayload.AccessAssignments[0].Role != "responsible" || accessPayload.AccessAssignments[0].UserID != user.UserID {
-		t.Fatalf("access assignments = %+v", accessPayload.AccessAssignments)
+	if len(accessPayload.AccessGrants) != 1 || accessPayload.AccessGrants[0].EntityID != created.FolderID || accessPayload.AccessGrants[0].AccessLevel != store.EntityPermissionEdit || accessPayload.AccessGrants[0].SubjectID != user.UserID {
+		t.Fatalf("access grants = %+v", accessPayload.AccessGrants)
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
@@ -143,23 +143,25 @@ func TestCommunicationsSharedInboxListFiltersForAssignedNonManager(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder unrelated error = %v", err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
-		CompanyID: companyID,
-		FolderID:  child.FolderID,
-		Assignments: []store.SharedInboxRaciAssignmentInput{
-			{Role: "responsible", UserID: currentUser.UserID},
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   child.FolderID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: currentUser.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments child error = %v", err)
+		t.Fatalf("SetEntityPermissions child error = %v", err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
-		CompanyID: companyID,
-		FolderID:  unrelated.FolderID,
-		Assignments: []store.SharedInboxRaciAssignmentInput{
-			{Role: "responsible", UserID: otherUser.UserID},
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   unrelated.FolderID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: otherUser.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments unrelated error = %v", err)
+		t.Fatalf("SetEntityPermissions unrelated error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)

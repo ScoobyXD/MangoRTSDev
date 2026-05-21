@@ -100,6 +100,7 @@ type EntityPermission struct {
 	SubjectName      string    `json:"subject_name,omitempty"`
 	SubjectEmail     string    `json:"subject_email,omitempty"`
 	Permission       string    `json:"permission"`
+	AccessLevel      string    `json:"access_level,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
@@ -312,6 +313,8 @@ type CompanyExplorerFolder struct {
 	AccountEmail     *string                     `json:"account_email,omitempty"`
 	Position         int                         `json:"position"`
 	RaciAssignments  []SharedInboxRaciAssignment `json:"raci_assignments,omitempty"`
+	AccessGrants     []EntityPermission          `json:"access_grants,omitempty"`
+	EffectiveAccess  string                      `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                   `json:"created_timestamp"`
 	UpdatedTimestamp time.Time                   `json:"updated_timestamp"`
 }

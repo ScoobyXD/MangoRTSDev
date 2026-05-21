@@ -259,7 +259,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
-  if (type === "company_explorer_folder_created" || type === "company_explorer_folder_moved" || type === "company_explorer_folder_updated" || type === "company_explorer_folder_deleted" || type === "communications_shared_inbox_raci_updated") {
+  if (type === "company_explorer_folder_created" || type === "company_explorer_folder_moved" || type === "company_explorer_folder_updated" || type === "company_explorer_folder_deleted" || type === "communications_shared_inbox_raci_updated" || type === "shared_triage_access_updated") {
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, folderID, folderKind });
     if (folderKind === "node") addScope(scopes, seen, { kind: "node_graph", eventType: type, folderID });
     if (folderKind === "logic_gate") addScope(scopes, seen, { kind: "logic_gate_graph", eventType: type, folderID });

@@ -688,6 +688,11 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxRaci, sharedInboxRaciKey(companyID, folderID))
 	}
+	for permissionKey, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedTriageFolder && folderIDs[permission.EntityID] {
+			delete(r.entityPermissions, permissionKey)
+		}
+	}
 	for itemKey, item := range r.folderItems {
 		if item.CompanyID == companyID && folderIDs[item.FolderID] {
 			delete(r.folderItems, itemKey)

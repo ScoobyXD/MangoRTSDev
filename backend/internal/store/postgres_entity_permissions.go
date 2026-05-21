@@ -69,6 +69,7 @@ func scanEntityPermission(row interface{ Scan(dest ...any) error }) (domain.Enti
 	if subjectEmail.Valid {
 		item.SubjectEmail = subjectEmail.String
 	}
+	item.AccessLevel = item.Permission
 	return item, err
 }
 
@@ -412,29 +413,29 @@ func (r *PostgresRepo) ListEntityPermissions(companyID, entityType, entityID str
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-select permission.company_id::text,
-       permission.entity_type,
-       permission.entity_id::text,
-       permission.subject_type,
-       permission.subject_id::text,
+select grant_row.company_id::text,
+       grant_row.resource_type,
+       grant_row.resource_id::text,
+       grant_row.principal_type,
+       grant_row.principal_id::text,
        coalesce(nullif(app_user.display_name, ''), user_group.name),
        nullif(app_user.email, ''),
-       permission.permission,
-       permission.created_timestamp
-from entity_access_permissions permission
+       grant_row.access_level,
+       grant_row.created_timestamp
+from resource_access_grants grant_row
 left join users app_user
-  on permission.subject_type='user'
- and app_user.user_id=permission.subject_id
+  on grant_row.principal_type='user'
+ and app_user.user_id=grant_row.principal_id
 left join company_user_groups user_group
-  on permission.subject_type='group'
- and user_group.company_id=permission.company_id
- and user_group.group_id=permission.subject_id
-where permission.company_id=$1
-  and permission.entity_type=$2
-  and permission.entity_id=$3::uuid
-order by permission.subject_type asc,
-         lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), user_group.name, permission.subject_id::text)) asc,
-         permission.subject_id::text asc`, companyID, entityType, entityID)
+  on grant_row.principal_type='group'
+ and user_group.company_id=grant_row.company_id
+ and user_group.group_id=grant_row.principal_id
+where grant_row.company_id=$1
+  and grant_row.resource_type=$2
+  and grant_row.resource_id=$3::uuid
+order by grant_row.principal_type asc,
+         lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), user_group.name, grant_row.principal_id::text)) asc,
+         grant_row.principal_id::text asc`, companyID, entityType, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +471,11 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 		if !ok {
 			return nil, ErrInvalid
 		}
-		permission, ok := NormalizeEntityPermission(raw.Permission)
+		rawAccessLevel := strings.TrimSpace(raw.AccessLevel)
+		if rawAccessLevel == "" {
+			rawAccessLevel = raw.Permission
+		}
+		permission, ok := NormalizeEntityPermission(rawAccessLevel)
 		if !ok {
 			return nil, ErrInvalid
 		}
@@ -515,16 +520,17 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-delete from entity_access_permissions
-where company_id=$1::uuid and entity_type=$2 and entity_id=$3::uuid`, companyID, entityType, entityID); err != nil {
+delete from resource_access_grants
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, entityType, entityID); err != nil {
 		return nil, err
 	}
 	for _, item := range normalized {
 		if _, err := tx.ExecContext(ctx, `
-insert into entity_access_permissions
-  (company_id, entity_type, entity_id, subject_type, subject_id, permission, created_timestamp)
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
 values ($1, $2, $3::uuid, $4, $5::uuid, $6, now())
-on conflict (company_id, entity_type, entity_id, subject_type, subject_id, permission) do nothing`,
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`,
 			companyID, entityType, entityID, item.subjectType, item.subjectID, item.permission,
 		); err != nil {
 			return nil, err
@@ -537,11 +543,16 @@ on conflict (company_id, entity_type, entity_id, subject_type, subject_id, permi
 }
 
 func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
+	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
+}
+
+func (r *PostgresRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	entityID = strings.TrimSpace(entityID)
 	userID = strings.TrimSpace(userID)
 	entityType, ok := NormalizeEntityType(entityType)
-	if companyID == "" || entityID == "" || userID == "" || !ok {
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if companyID == "" || entityID == "" || userID == "" || !ok || !accessOK {
 		return false, ErrInvalid
 	}
 	ctx := context.Background()
@@ -551,10 +562,114 @@ func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID
 		return false, ErrNotFound
 	}
 	var allowed bool
-	err := r.db.QueryRowContext(ctx, `select mangorts_user_can_view_entity($1::uuid, $2::text, $3::uuid, $4::uuid)`, companyID, entityType, entityID, userID).Scan(&allowed)
+	err := r.db.QueryRowContext(ctx, `select mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, $4::uuid, $5::text)`, companyID, entityType, entityID, userID, accessLevel).Scan(&allowed)
 	return allowed, err
 }
 
+func (r *PostgresRepo) listResourceAccessGrants(ctx context.Context, companyID, resourceType string, resourceIDs []string) (map[string][]domain.EntityPermission, error) {
+	itemsByResource := map[string][]domain.EntityPermission{}
+	if len(resourceIDs) == 0 {
+		return itemsByResource, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select grant_row.company_id::text,
+       grant_row.resource_type,
+       grant_row.resource_id::text,
+       grant_row.principal_type,
+       grant_row.principal_id::text,
+       coalesce(nullif(app_user.display_name, ''), user_group.name),
+       nullif(app_user.email, ''),
+       grant_row.access_level,
+       grant_row.created_timestamp
+from resource_access_grants grant_row
+left join users app_user
+  on grant_row.principal_type='user'
+ and app_user.user_id=grant_row.principal_id
+left join company_user_groups user_group
+  on grant_row.principal_type='group'
+ and user_group.company_id=grant_row.company_id
+ and user_group.group_id=grant_row.principal_id
+where grant_row.company_id=$1
+  and grant_row.resource_type=$2
+  and grant_row.resource_id = any(string_to_array($3, ',')::uuid[])
+order by grant_row.resource_id::text asc,
+         grant_row.principal_type asc,
+         lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), user_group.name, grant_row.principal_id::text)) asc,
+         grant_row.principal_id::text asc`, companyID, resourceType, strings.Join(resourceIDs, ","))
+	if err != nil {
+		if isPostgresUndefinedTable(err, "resource_access_grants") || isPostgresInvalidTextRepresentation(err) {
+			return itemsByResource, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanEntityPermission(rows)
+		if err != nil {
+			return nil, err
+		}
+		itemsByResource[item.EntityID] = append(itemsByResource[item.EntityID], item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for resourceID := range itemsByResource {
+		sortEntityPermissions(itemsByResource[resourceID])
+	}
+	return itemsByResource, nil
+}
+
+func resourceAccessGrantsForFolder(folderID string, parentByFolder map[string]string, grantsByResource map[string][]domain.EntityPermission) []domain.EntityPermission {
+	items := make([]domain.EntityPermission, 0)
+	seenSubjects := map[string]bool{}
+	seenFolders := map[string]bool{}
+	for currentID := strings.TrimSpace(folderID); currentID != ""; currentID = strings.TrimSpace(parentByFolder[currentID]) {
+		if seenFolders[currentID] {
+			break
+		}
+		seenFolders[currentID] = true
+		for _, grant := range grantsByResource[currentID] {
+			seenKey := grant.SubjectType + ":" + grant.SubjectID
+			if seenSubjects[seenKey] {
+				continue
+			}
+			seenSubjects[seenKey] = true
+			items = append(items, grant)
+		}
+		if _, ok := parentByFolder[currentID]; !ok {
+			break
+		}
+	}
+	sortEntityPermissions(items)
+	return items
+}
+
+func (r *PostgresRepo) attachCommunicationsSharedInboxAccessGrants(ctx context.Context, companyID string, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
+	ids := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		if folder.FolderKind == "communications" {
+			ids = append(ids, folder.FolderID)
+		}
+	}
+	parentByFolder, grantFolderIDs, err := r.listCommunicationsSharedInboxRaciAncestry(ctx, companyID, ids)
+	if err != nil {
+		if isPostgresUndefinedTable(err, "") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			return folders, nil
+		}
+		return nil, err
+	}
+	grantsByResource, err := r.listResourceAccessGrants(ctx, companyID, EntityTypeSharedTriageFolder, grantFolderIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range folders {
+		if folders[index].FolderKind != "communications" {
+			continue
+		}
+		folders[index].AccessGrants = resourceAccessGrantsForFolder(folders[index].FolderID, parentByFolder, grantsByResource)
+	}
+	return folders, nil
+}
 func postgresNextCompanyUserGroupPosition(ctx context.Context, tx *sql.Tx, companyID string, parent any) (int, error) {
 	var position int
 	err := tx.QueryRowContext(ctx, `
@@ -575,6 +690,10 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`, companyID, entityID).Scan(&exists)
 		return exists, err
+	case EntityTypeSharedTriageFolder:
+		var exists bool
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID).Scan(&exists)
+		return exists, err
 	default:
 		return false, ErrInvalid
 	}
@@ -586,6 +705,8 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 		return postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeLogicGate:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`, companyID, entityID)
+	case EntityTypeSharedTriageFolder:
+		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID)
 	default:
 		return false, ErrInvalid
 	}

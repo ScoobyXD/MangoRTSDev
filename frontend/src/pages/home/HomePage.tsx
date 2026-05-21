@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAuthConfig } from "../../auth/cognitoAuth";
+import { createRequestJSON } from "../../modules/api/requestJSON";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
@@ -29,7 +30,6 @@ import {
   sortEmailMessagesByDateDescending,
   type CompanyUser,
   type CommunicationsSharedInbox,
-  type CommunicationsSharedInboxRaciAssignment,
   type CommunicationsSharedInboxRaciRole,
   type EmailFolder,
   type EmailMailbox,
@@ -60,10 +60,11 @@ import {
 } from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
+import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix } from "./HomeParts";
+import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, addSharedInboxRaciUserCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciUserCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -98,6 +99,7 @@ async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEm
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
+  const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const notificationSummary = useNotificationSummary(companyID);
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
@@ -795,7 +797,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       onGap(gap) {
         if (gap.companyID !== companyID) return;
         const touchesSharedInbox = gap.scopes.some((scope) => (
-          scope.eventType === "communications_shared_inbox_raci_updated" ||
+          scope.eventType === "communications_shared_inbox_raci_updated" || scope.eventType === "shared_triage_access_updated" ||
           (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
           scope.kind === "workspace"
         ));
@@ -822,7 +824,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (envelope.company_id?.trim() && envelope.company_id.trim() !== companyID) return;
         const type = envelope.type?.trim() ?? "";
         if (!workspaceEventTouchesHomePanel(type)) return;
-        if (type === "communications_shared_inbox_raci_updated" || type.startsWith("company_explorer_folder_")) {
+        if ((type === "communications_shared_inbox_raci_updated" || type === "shared_triage_access_updated" || type.startsWith("company_explorer_folder_"))) {
           void loadSharedInboxes();
         }
         scheduleWorkspacePanelReload();
@@ -1219,59 +1221,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [companyID, sharedInboxes]);
-
-  const updateSharedInboxRaciState = useCallback((folderID: string, assignments: CommunicationsSharedInboxRaciAssignment[]) => {
-    setSharedInboxes((previous) => sortSharedInboxes(previous.map((folder) => (
-      folder.folder_id === folderID ? { ...folder, raci_assignments: assignments } : folder
-    ))));
-    void loadSharedInboxes();
-    setNotice("Shared Triage access updated.");
-  }, [loadSharedInboxes]);
-
-  const addSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
-    void (async () => {
-      setBusy("shared-inbox-raci");
-      setError("");
-      try {
-        const result = await addSharedInboxRaciUserCommand({
-          companyID,
-          folderID,
-          role,
-          userID,
-          sharedInboxes,
-          companyUsers,
-        });
-        if (!result) return;
-        updateSharedInboxRaciState(result.folderID, result.assignments);
-      } catch (raciError) {
-        setError(formatError(raciError, "Failed to update Shared Triage access"));
-      } finally {
-        setBusy("");
-      }
-    })();
-  }, [companyID, companyUsers, sharedInboxes, updateSharedInboxRaciState]);
-
-  const removeSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
-    void (async () => {
-      setBusy("shared-inbox-raci");
-      setError("");
-      try {
-        const result = await removeSharedInboxRaciUserCommand({
-          companyID,
-          folderID,
-          role,
-          userID,
-          sharedInboxes,
-        });
-        if (!result) return;
-        updateSharedInboxRaciState(result.folderID, result.assignments);
-      } catch (raciError) {
-        setError(formatError(raciError, "Failed to update Shared Triage access"));
-      } finally {
-        setBusy("");
-      }
-    })();
-  }, [companyID, sharedInboxes, updateSharedInboxRaciState]);
 
   const submitSharedInbox = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2161,13 +2110,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         </main>
       )}
       {sharedInboxRaciFolder && (
-        <SharedInboxRaciSettingsModal
-          folder={sharedInboxRaciFolder}
-          companyUsers={companyUsers}
-          busy={busy === "shared-inbox-raci"}
-          onAddUser={addSharedInboxRaciUser}
-          onRemoveUser={removeSharedInboxRaciUser}
+        <EntityPermissionsDialog
+          requestJSON={permissionsRequestJSON}
+          companyID={companyID}
+          entityType="shared_triage_folder"
+          entityID={sharedInboxRaciFolder.folder_id}
+          title={`Shared Triage / ${sharedInboxRaciFolder.name}`}
           onClose={() => setSharedInboxRaciFolderID("")}
+          onSaved={() => { void loadSharedInboxes(); }}
         />
       )}
       <HomeBulkEditMenu

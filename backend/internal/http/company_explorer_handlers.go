@@ -327,15 +327,43 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 	})
 }
 
+func (s *Server) filterCommunicationsSharedInboxFoldersForActor(companyID string, actor ActorContext, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
+	if actorCanManageCompany(actor, companyID) {
+		out := append([]domain.CompanyExplorerFolder{}, folders...)
+		for index := range out {
+			out[index].EffectiveAccess = store.EntityPermissionAdmin
+		}
+		return out, nil
+	}
+	groups, err := s.repo.ListCompanyUserGroups(companyID)
+	if err != nil {
+		return nil, err
+	}
+	members, err := s.repo.ListCompanyUserGroupMembers(companyID)
+	if err != nil {
+		return nil, err
+	}
+	return filterCommunicationsSharedInboxFoldersForUserWithGroups(folders, actor.User.UserID, groups, members), nil
+}
+
 func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplorerFolder, userID string) []domain.CompanyExplorerFolder {
-	if !communicationsSharedInboxHasRaciAssignments(folders) {
-		return folders
+	return filterCommunicationsSharedInboxFoldersForUserWithGroups(folders, userID, nil, nil)
+}
+
+func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.CompanyExplorerFolder, userID string, groups []domain.CompanyUserGroup, members []domain.CompanyUserGroupMember) []domain.CompanyExplorerFolder {
+	if !communicationsSharedInboxHasAccessGrants(folders) {
+		out := append([]domain.CompanyExplorerFolder{}, folders...)
+		for index := range out {
+			out[index].EffectiveAccess = store.EntityPermissionView
+		}
+		return out
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return []domain.CompanyExplorerFolder{}
 	}
 
+	userGroupIDs := sharedInboxAccessGroupIDsForUser(userID, groups, members)
 	byID := make(map[string]domain.CompanyExplorerFolder, len(folders))
 	childrenByParent := make(map[string][]domain.CompanyExplorerFolder)
 	for _, folder := range folders {
@@ -352,6 +380,7 @@ func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplo
 	}
 
 	included := make(map[string]bool, len(folders))
+	effectiveAccessByFolder := make(map[string]string, len(folders))
 	var includeAncestors func(string)
 	includeAncestors = func(folderID string) {
 		seen := make(map[string]bool)
@@ -362,6 +391,9 @@ func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplo
 				return
 			}
 			included[folderID] = true
+			if effectiveAccessByFolder[folderID] == "" {
+				effectiveAccessByFolder[folderID] = store.EntityPermissionView
+			}
 			if folder.ParentFolderID == nil {
 				return
 			}
@@ -376,44 +408,94 @@ func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplo
 				continue
 			}
 			included[childID] = true
+			if accessLevel := sharedInboxFolderEffectiveAccess(child, userID, userGroupIDs); accessLevel != "" {
+				effectiveAccessByFolder[childID] = accessLevel
+			} else if effectiveAccessByFolder[childID] == "" {
+				effectiveAccessByFolder[childID] = store.EntityPermissionView
+			}
 			includeDescendants(childID)
 		}
 	}
 
 	for _, folder := range folders {
-		if !sharedInboxFolderHasAssignmentForUser(folder, userID) {
+		accessLevel := sharedInboxFolderEffectiveAccess(folder, userID, userGroupIDs)
+		if !store.EntityPermissionSatisfies(accessLevel, store.EntityPermissionView) {
 			continue
 		}
 		folderID := strings.TrimSpace(folder.FolderID)
+		effectiveAccessByFolder[folderID] = accessLevel
 		includeAncestors(folderID)
 		includeDescendants(folderID)
 	}
 
 	filtered := make([]domain.CompanyExplorerFolder, 0, len(included))
 	for _, folder := range folders {
-		if included[strings.TrimSpace(folder.FolderID)] {
-			filtered = append(filtered, folder)
+		folderID := strings.TrimSpace(folder.FolderID)
+		if !included[folderID] {
+			continue
 		}
+		folder.EffectiveAccess = effectiveAccessByFolder[folderID]
+		if folder.EffectiveAccess == "" {
+			folder.EffectiveAccess = store.EntityPermissionView
+		}
+		filtered = append(filtered, folder)
 	}
 	return filtered
 }
 
-func communicationsSharedInboxHasRaciAssignments(folders []domain.CompanyExplorerFolder) bool {
+func communicationsSharedInboxHasAccessGrants(folders []domain.CompanyExplorerFolder) bool {
 	for _, folder := range folders {
-		if len(folder.RaciAssignments) > 0 {
+		if len(folder.AccessGrants) > 0 {
 			return true
 		}
 	}
 	return false
 }
 
-func sharedInboxFolderHasAssignmentForUser(folder domain.CompanyExplorerFolder, userID string) bool {
-	for _, assignment := range folder.RaciAssignments {
-		if strings.TrimSpace(assignment.UserID) == userID {
-			return true
+func sharedInboxAccessGroupIDsForUser(userID string, groups []domain.CompanyUserGroup, members []domain.CompanyUserGroupMember) map[string]bool {
+	parentByGroup := make(map[string]string, len(groups))
+	for _, group := range groups {
+		if group.ParentGroupID != nil {
+			parentByGroup[group.GroupID] = strings.TrimSpace(*group.ParentGroupID)
 		}
 	}
-	return false
+	ids := map[string]bool{}
+	for _, member := range members {
+		if strings.TrimSpace(member.UserID) != userID {
+			continue
+		}
+		for groupID, seen := strings.TrimSpace(member.GroupID), map[string]bool{}; groupID != "" && !seen[groupID]; groupID = parentByGroup[groupID] {
+			seen[groupID] = true
+			ids[groupID] = true
+		}
+	}
+	return ids
+}
+
+func sharedInboxFolderEffectiveAccess(folder domain.CompanyExplorerFolder, userID string, userGroupIDs map[string]bool) string {
+	bestRank := 0
+	bestAccess := ""
+	for _, grant := range folder.AccessGrants {
+		matches := false
+		switch strings.TrimSpace(grant.SubjectType) {
+		case store.EntityPermissionSubjectUser:
+			matches = strings.TrimSpace(grant.SubjectID) == userID
+		case store.EntityPermissionSubjectGroup:
+			matches = userGroupIDs[strings.TrimSpace(grant.SubjectID)]
+		}
+		if !matches {
+			continue
+		}
+		accessLevel := grant.AccessLevel
+		if strings.TrimSpace(accessLevel) == "" {
+			accessLevel = grant.Permission
+		}
+		if rank := store.EntityPermissionRank(accessLevel); rank > bestRank {
+			bestRank = rank
+			bestAccess, _ = store.NormalizeEntityPermission(accessLevel)
+		}
+	}
+	return bestAccess
 }
 
 func (s *Server) handleCompanyExplorerFolderShares(w http.ResponseWriter, r *http.Request, folderID string) {

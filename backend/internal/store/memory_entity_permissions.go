@@ -263,7 +263,11 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 		if !ok {
 			return nil, ErrInvalid
 		}
-		permission, ok := NormalizeEntityPermission(item.Permission)
+		rawAccessLevel := strings.TrimSpace(item.AccessLevel)
+		if rawAccessLevel == "" {
+			rawAccessLevel = item.Permission
+		}
+		permission, ok := NormalizeEntityPermission(rawAccessLevel)
 		if !ok {
 			return nil, ErrInvalid
 		}
@@ -300,6 +304,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			SubjectType:      item.subjectType,
 			SubjectID:        item.subjectID,
 			Permission:       item.permission,
+			AccessLevel:      item.permission,
 			CreatedTimestamp: now,
 		}
 		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, item.subjectType, item.subjectID, item.permission)] = permission
@@ -310,11 +315,16 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 }
 
 func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
+	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
+}
+
+func (r *MemoryRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	entityID = strings.TrimSpace(entityID)
 	userID = strings.TrimSpace(userID)
 	normalizedEntityType, ok := NormalizeEntityType(entityType)
-	if companyID == "" || entityID == "" || userID == "" || !ok {
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if companyID == "" || entityID == "" || userID == "" || !ok || !accessOK {
 		return false, ErrInvalid
 	}
 
@@ -324,7 +334,7 @@ func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID s
 	if !r.entityExistsLocked(companyID, normalizedEntityType, entityID) {
 		return false, ErrNotFound
 	}
-	return r.userCanViewEntityLocked(companyID, normalizedEntityType, entityID, userID), nil
+	return r.userCanAccessEntityLocked(companyID, normalizedEntityType, entityID, userID, accessLevel), nil
 }
 
 func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) bool {
@@ -335,18 +345,28 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 	case EntityTypeLogicGate:
 		_, ok := r.logicGates[key(companyID, entityID)]
 		return ok
+	case EntityTypeSharedTriageFolder:
+		item, ok := r.folders[key(companyID, entityID)]
+		return ok && item.FolderKind == "communications"
 	default:
 		return false
 	}
 }
 
-func (r *MemoryRepo) userCanViewEntityLocked(companyID, entityType, entityID, userID string) bool {
+func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, userID, accessLevel string) bool {
+	requiredRank := entityPermissionRank(accessLevel)
+	if requiredRank == 0 {
+		return false
+	}
 	hasRestriction := false
 	for _, permission := range r.entityPermissions {
-		if permission.CompanyID != companyID || permission.EntityType != entityType || permission.EntityID != entityID || permission.Permission != EntityPermissionView {
+		if permission.CompanyID != companyID || permission.EntityType != entityType || permission.EntityID != entityID {
 			continue
 		}
 		hasRestriction = true
+		if entityPermissionRank(permission.Permission) < requiredRank {
+			continue
+		}
 		if permission.SubjectType == EntityPermissionSubjectUser && permission.SubjectID == userID {
 			return true
 		}
@@ -360,7 +380,20 @@ func (r *MemoryRepo) userCanViewEntityLocked(companyID, entityType, entityID, us
 			}
 		}
 	}
-	return !hasRestriction
+	return accessLevel == EntityPermissionView && !hasRestriction
+}
+
+func entityPermissionRank(accessLevel string) int {
+	switch strings.TrimSpace(accessLevel) {
+	case EntityPermissionView:
+		return 1
+	case EntityPermissionEdit:
+		return 2
+	case EntityPermissionAdmin:
+		return 3
+	default:
+		return 0
+	}
 }
 
 func cloneCompanyUserGroup(group domain.CompanyUserGroup) domain.CompanyUserGroup {

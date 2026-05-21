@@ -1027,19 +1027,19 @@ func TestFilterCommunicationsSharedInboxFoldersForUserIncludesAssignedSubtreeAnd
 	folders := []domain.CompanyExplorerFolder{
 		{FolderID: parentID, FolderKind: "communications", Name: "Shared Triage"},
 		{
-			FolderID:        "ar",
-			ParentFolderID:  &parentID,
-			FolderKind:      "communications",
-			Name:            "AR",
-			RaciAssignments: []domain.SharedInboxRaciAssignment{{FolderID: "ar", UserID: "user-1", Role: domain.LogicGateRaciRoleResponsible}},
+			FolderID:       "ar",
+			ParentFolderID: &parentID,
+			FolderKind:     "communications",
+			Name:           "AR",
+			AccessGrants:   []domain.EntityPermission{{EntityType: store.EntityTypeSharedTriageFolder, EntityID: "ar", SubjectType: store.EntityPermissionSubjectUser, SubjectID: "user-1", Permission: store.EntityPermissionEdit, AccessLevel: store.EntityPermissionEdit}},
 		},
 		{FolderID: "ar-child", ParentFolderID: stringPtr("ar"), FolderKind: "communications", Name: "AR Child"},
 		{
-			FolderID:        "ap",
-			ParentFolderID:  &parentID,
-			FolderKind:      "communications",
-			Name:            "AP",
-			RaciAssignments: []domain.SharedInboxRaciAssignment{{FolderID: "ap", UserID: "user-2", Role: domain.LogicGateRaciRoleAccountable}},
+			FolderID:       "ap",
+			ParentFolderID: &parentID,
+			FolderKind:     "communications",
+			Name:           "AP",
+			AccessGrants:   []domain.EntityPermission{{EntityType: store.EntityTypeSharedTriageFolder, EntityID: "ap", SubjectType: store.EntityPermissionSubjectUser, SubjectID: "user-2", Permission: store.EntityPermissionEdit, AccessLevel: store.EntityPermissionEdit}},
 		},
 	}
 

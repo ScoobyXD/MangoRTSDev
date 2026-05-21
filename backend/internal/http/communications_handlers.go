@@ -159,7 +159,7 @@ func (s *Server) handleCommunicationsFolders(w http.ResponseWriter, r *http.Requ
 	if strings.TrimSpace(companyID) != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID)
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionView)
 	if !ok {
 		return
 	}
@@ -186,7 +186,7 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		if strings.TrimSpace(query.CompanyID) != "" && !requireCompanyAccess(w, r, query.CompanyID) {
 			return
 		}
-		connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID)
+		connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID, store.EntityPermissionView)
 		if !ok {
 			return
 		}
@@ -264,7 +264,11 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID)
+	requiredSharedInboxAccess := store.EntityPermissionView
+	if sharedInboxID != "" && (action == "archive" || action == "unarchive" || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		requiredSharedInboxAccess = store.EntityPermissionEdit
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, requiredSharedInboxAccess)
 	if !ok {
 		return
 	}
@@ -546,7 +550,7 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 	return connection, true
 }
 
-func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, sharedInboxID string) (domain.UserEmailConnection, bool) {
+func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, sharedInboxID, sharedInboxAccessLevel string) (domain.UserEmailConnection, bool) {
 	if !s.nylasConfig.IsConfigured() || s.nylasClient == nil {
 		writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
 		return domain.UserEmailConnection{}, false
@@ -569,7 +573,7 @@ func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return domain.UserEmailConnection{}, false
 	}
-	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, sharedInboxID)
+	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, sharedInboxID, sharedInboxAccessLevel)
 	if !ok {
 		return domain.UserEmailConnection{}, false
 	}
@@ -605,7 +609,7 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 	return connection, true
 }
 
-func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID string) (domain.CompanyExplorerFolder, bool) {
+func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID, accessLevel string) (domain.CompanyExplorerFolder, bool) {
 	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
 	if err != nil {
 		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
@@ -615,13 +619,14 @@ func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor Actor
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return domain.CompanyExplorerFolder{}, false
 	}
-	if !actorCanManageCompany(actor, companyID) {
-		folders = filterCommunicationsSharedInboxFoldersForUser(folders, actor.User.UserID)
-	}
 	for _, folder := range folders {
-		if folder.FolderID == folderID {
-			return folder, true
+		if folder.FolderID != folderID {
+			continue
 		}
+		if !s.requireCommunicationsSharedInboxAccess(w, nil, actor, companyID, folderID, accessLevel) {
+			return domain.CompanyExplorerFolder{}, false
+		}
+		return folder, true
 	}
 	writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 	return domain.CompanyExplorerFolder{}, false

@@ -89,6 +89,20 @@ export type CommunicationsSharedInboxRaciAssignment = {
   created_timestamp: string;
 };
 
+export type ResourceAccessLevel = "view" | "edit" | "admin";
+
+export type ResourceAccessGrant = {
+  company_id: string;
+  entity_type?: "node" | "logic_gate" | "shared_triage_folder";
+  entity_id?: string;
+  subject_type: "user" | "group";
+  subject_id: string;
+  subject_name?: string;
+  subject_email?: string;
+  permission: ResourceAccessLevel;
+  access_level?: ResourceAccessLevel;
+  created_timestamp: string;
+};
 export type CommunicationsSharedInbox = {
   company_id: string;
   folder_id: string;
@@ -98,6 +112,8 @@ export type CommunicationsSharedInbox = {
   account_email?: string;
   position: number;
   raci_assignments?: CommunicationsSharedInboxRaciAssignment[];
+  access_grants?: ResourceAccessGrant[];
+  effective_access_level?: ResourceAccessLevel;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -1114,7 +1130,12 @@ function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsShare
   return {
     ...inbox,
     raci_assignments: cloneSharedInboxRaciAssignments(inbox.raci_assignments ?? []),
+    access_grants: cloneResourceAccessGrants(inbox.access_grants ?? []),
   };
+}
+
+function cloneResourceAccessGrants(grants: ResourceAccessGrant[]): ResourceAccessGrant[] {
+  return grants.map((grant) => ({ ...grant }));
 }
 
 function cloneSharedInboxRaciAssignments(assignments: CommunicationsSharedInboxRaciAssignment[]): CommunicationsSharedInboxRaciAssignment[] {

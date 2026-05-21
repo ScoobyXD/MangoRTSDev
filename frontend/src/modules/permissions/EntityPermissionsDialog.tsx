@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { BoundRequestJSON } from "../api/requestJSON";
 
-type PermissionEntityType = "node" | "logic_gate";
-
+type PermissionEntityType = "node" | "logic_gate" | "shared_triage_folder";
 type PermissionSubjectType = "user" | "group";
+type ResourceAccessLevel = "view" | "edit" | "admin";
+type ResourceAccessSelection = "" | ResourceAccessLevel;
 
 type CompanyUser = {
   company_id: string;
@@ -32,7 +33,8 @@ type CompanyUserGroupMember = {
 type EntityPermission = {
   subject_type: PermissionSubjectType;
   subject_id: string;
-  permission: "view";
+  permission?: ResourceAccessLevel;
+  access_level?: ResourceAccessLevel;
 };
 
 type PermissionSelectionKey = `${PermissionSubjectType}:${string}`;
@@ -44,6 +46,7 @@ type EntityPermissionsDialogProps = {
   entityID: string;
   title: string;
   onClose: () => void;
+  onSaved?: () => void;
 };
 
 type EntityPermissionsPanelProps = {
@@ -56,6 +59,18 @@ type EntityPermissionsPanelProps = {
   onSaved?: () => void;
   variant?: "dialog" | "embedded";
 };
+
+type PermissionPayload = {
+  permissions?: EntityPermission[];
+  access_grants?: EntityPermission[];
+};
+
+const ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessSelection; label: string }> = [
+  { value: "", label: "No access" },
+  { value: "view", label: "View" },
+  { value: "edit", label: "Edit" },
+  { value: "admin", label: "Admin" },
+];
 
 export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
@@ -70,12 +85,12 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [members, setMembers] = useState<CompanyUserGroupMember[]>([]);
-  const [selected, setSelected] = useState<Set<PermissionSelectionKey>>(new Set());
+  const [accessBySubject, setAccessBySubject] = useState<Map<PermissionSelectionKey, ResourceAccessLevel>>(new Map());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const permissionsPath = entityType === "node" ? `/v1/nodes/${encodeURIComponent(entityID)}/permissions` : `/v1/logic-gates/${encodeURIComponent(entityID)}/permissions`;
+  const permissionsPath = permissionsPathFor(entityType, entityID);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,13 +101,13 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         const [usersPayload, groupsPayload, permissionsPayload] = await Promise.all([
           requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
           requestJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
-          requestJSON<{ permissions: EntityPermission[] }>(`${permissionsPath}?company_id=${encodeURIComponent(companyID)}`),
+          requestJSON<PermissionPayload>(`${permissionsPath}?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (cancelled) return;
         setUsers(usersPayload.users ?? []);
         setGroups(groupsPayload.groups ?? []);
         setMembers(groupsPayload.members ?? []);
-        setSelected(new Set((permissionsPayload.permissions ?? []).map((item) => `${item.subject_type}:${item.subject_id}` as PermissionSelectionKey)));
+        setAccessBySubject(permissionsToMap(permissionsPayload.permissions ?? permissionsPayload.access_grants ?? []));
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
@@ -137,12 +152,12 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const groupedUserIDs = useMemo(() => new Set(members.map((member) => member.user_id)), [members]);
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
 
-  const toggle = (key: PermissionSelectionKey) => {
+  const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessSelection) => {
     setSaved(false);
-    setSelected((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+    setAccessBySubject((previous) => {
+      const next = new Map(previous);
+      if (!accessLevel) next.delete(key);
+      else next.set(key, accessLevel);
       return next;
     });
   };
@@ -151,9 +166,9 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     setBusy(true);
     setError("");
     try {
-      const permissions = Array.from(selected).map((key) => {
+      const permissions = Array.from(accessBySubject.entries()).map(([key, accessLevel]) => {
         const [subjectType, subjectID] = key.split(":", 2) as [PermissionSubjectType, string];
-        return { subject_type: subjectType, subject_id: subjectID, permission: "view" };
+        return { subject_type: subjectType, subject_id: subjectID, permission: accessLevel, access_level: accessLevel };
       });
       await requestJSON(permissionsPath, {
         method: "PUT",
@@ -170,24 +185,37 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     }
   };
 
+  const renderAccessSelect = (key: PermissionSelectionKey) => (
+    <select
+      value={accessBySubject.get(key) ?? ""}
+      onChange={(event) => setAccess(key, event.target.value as ResourceAccessSelection)}
+      style={permissionSelectStyle}
+      disabled={busy}
+      aria-label="Access level"
+    >
+      {ACCESS_OPTIONS.map((option) => <option key={option.value || "none"} value={option.value}>{option.label}</option>)}
+    </select>
+  );
+
   const renderGroup = (group: CompanyUserGroup, depth: number): React.ReactNode => {
-    const key = `group:${group.group_id}` as PermissionSelectionKey;
+    const groupKey = `group:${group.group_id}` as PermissionSelectionKey;
     const groupMembers = membersByGroup.get(group.group_id) ?? [];
     const children = childrenByParent.get(group.group_id) ?? [];
     return (
       <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
-        <label style={permissionRowStyle}>
-          <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
+        <div style={permissionRowStyle}>
           <span style={permissionStrongTextStyle}>{group.name}</span>
           <span style={permissionMutedTextStyle}>{groupMembers.length} users</span>
-        </label>
+          {renderAccessSelect(groupKey)}
+        </div>
         {groupMembers.map((member) => {
           const userKey = `user:${member.user_id}` as PermissionSelectionKey;
           return (
-            <label key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
-              <input type="checkbox" checked={selected.has(userKey)} onChange={() => toggle(userKey)} />
+            <div key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
               <span>{permissionUserLabel(member)}</span>
-            </label>
+              <span style={permissionMutedTextStyle}>User</span>
+              {renderAccessSelect(userKey)}
+            </div>
           );
         })}
         {children.map((child) => renderGroup(child, depth + 1))}
@@ -195,6 +223,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     );
   };
 
+  const assignmentCount = accessBySubject.size;
   const dialogMode = variant === "dialog";
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
 
@@ -211,7 +240,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         <div style={permissionInfoStyle}>
-          {saved ? "Permissions saved" : selected.size === 0 ? "Visible to all company users" : `${selected.size} permission assignments`}
+          {saved ? "Permissions saved" : assignmentCount === 0 ? "Visible to all company users. Edit and admin still require an explicit grant." : `${assignmentCount} access grants`}
         </div>
         {error && <div style={permissionErrorStyle}>{error}</div>}
       </div>
@@ -223,10 +252,11 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
             {ungroupedUsers.map((user) => {
               const key = `user:${user.user_id}` as PermissionSelectionKey;
               return (
-                <label key={user.user_id} style={permissionRowStyle}>
-                  <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
+                <div key={user.user_id} style={permissionRowStyle}>
                   <span>{companyUserLabel(user)}</span>
-                </label>
+                  <span style={permissionMutedTextStyle}>User</span>
+                  {renderAccessSelect(key)}
+                </div>
               );
             })}
           </div>
@@ -234,7 +264,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
       </div>
       <div style={permissionFooterStyle}>
-        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setSelected(new Set()); }} disabled={busy}>Visible to all</button>
+        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>Clear grants</button>
         {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
         <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
       </div>
@@ -253,12 +283,34 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
           entityID={props.entityID}
           title={props.title}
           onClose={props.onClose}
+          onSaved={props.onSaved}
           variant="dialog"
         />
       </div>
     </div>
   );
 };
+
+function permissionsPathFor(entityType: PermissionEntityType, entityID: string): string {
+  switch (entityType) {
+    case "node":
+      return `/v1/nodes/${encodeURIComponent(entityID)}/permissions`;
+    case "logic_gate":
+      return `/v1/logic-gates/${encodeURIComponent(entityID)}/permissions`;
+    case "shared_triage_folder":
+      return `/v1/communications/shared-inboxes/${encodeURIComponent(entityID)}/access`;
+  }
+}
+
+function permissionsToMap(permissions: EntityPermission[]): Map<PermissionSelectionKey, ResourceAccessLevel> {
+  const out = new Map<PermissionSelectionKey, ResourceAccessLevel>();
+  for (const permission of permissions) {
+    const accessLevel = permission.access_level ?? permission.permission;
+    if (accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    out.set(`${permission.subject_type}:${permission.subject_id}` as PermissionSelectionKey, accessLevel);
+  }
+  return out;
+}
 
 function companyUserLabel(user: CompanyUser): string {
   const name = (user.display_name ?? "").trim();
@@ -284,7 +336,7 @@ const permissionBackdropStyle: React.CSSProperties = {
 };
 
 const permissionDialogStyle: React.CSSProperties = {
-  width: "min(620px, 100%)",
+  width: "min(680px, 100%)",
   maxHeight: "min(760px, calc(100vh - 32px))",
   border: "1px solid rgba(255, 136, 32, 0.64)",
   borderRadius: 8,
@@ -357,10 +409,19 @@ const permissionListStyle: React.CSSProperties = {
 const permissionRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr) auto",
+  gridTemplateColumns: "minmax(0, 1fr) auto 120px",
   alignItems: "center",
   gap: 8,
   padding: "5px 6px",
+  fontSize: 12,
+};
+
+const permissionSelectStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: 30,
+  border: "1px solid rgba(0,0,0,0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
   fontSize: 12,
 };
 

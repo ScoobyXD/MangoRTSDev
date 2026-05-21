@@ -22,12 +22,59 @@ func (s *Server) entityPermissionActorUserID(r *http.Request, companyID string) 
 	return strings.TrimSpace(actor.User.UserID)
 }
 
+func (s *Server) requireEntityAccess(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, accessLevel, notFoundCode string) bool {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return false
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if actorRoleForCompany(actor, companyID) == "" {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return false
+	}
+	if actorCanManageCompany(actor, companyID) {
+		return true
+	}
+	accessLevel, ok = store.NormalizeEntityPermission(accessLevel)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+		return false
+	}
+	allowed, err := s.repo.UserCanAccessEntity(companyID, entityType, entityID, actor.User.UserID, accessLevel)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+		return false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, notFoundCode)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+		return false
+	}
+	if !allowed {
+		if accessLevel == store.EntityPermissionView {
+			writeError(w, http.StatusNotFound, notFoundCode)
+		} else {
+			writeError(w, http.StatusForbidden, "entity_access_denied")
+		}
+		return false
+	}
+	return true
+}
+
 func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, notFoundCode string) bool {
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
 		return true
 	}
-	allowed, err := s.repo.UserCanViewEntity(companyID, entityType, entityID, userID)
+	allowed, err := s.repo.UserCanAccessEntity(companyID, entityType, entityID, userID, store.EntityPermissionView)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 		return false
@@ -45,6 +92,14 @@ func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, compa
 		return false
 	}
 	return true
+}
+
+func (s *Server) requireEntityEdit(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, notFoundCode string) bool {
+	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionEdit, notFoundCode)
+}
+
+func (s *Server) requireEntityAdmin(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, notFoundCode string) bool {
+	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionAdmin, notFoundCode)
 }
 
 func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []domain.Node) ([]domain.Node, error) {
@@ -429,7 +484,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	if !requireCompanyManager(w, r, req.CompanyID) {
+	if !s.requireEntityAdmin(w, r, req.CompanyID, entityType, entityID, notFoundCode) {
 		return
 	}
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
