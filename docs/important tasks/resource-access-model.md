@@ -59,7 +59,7 @@ Shared Triage folder names and tree structure live in `company_explorer_folders`
 
 Shared Triage access uses `resource_access_grants` with `resource_type = 'shared_triage_folder'`.
 
-Folder grants inherit downward. A child folder can override an inherited parent grant with a direct grant for the same principal. Saving grants on a top-level parent applies that saved grant set to descendants; saving grants on a child stays local and can override the inherited parent behavior for that child.
+Folder grants inherit downward. A child folder can override an inherited parent grant with a direct grant for the same principal. Saving grants on a parent folder applies that saved grant set to descendants; saving grants on a leaf child stays local and can override the inherited parent behavior for that child.
 
 Mail behavior:
 
