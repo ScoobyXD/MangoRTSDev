@@ -641,6 +641,7 @@ func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGate
 	}
 	node.AssigneeUserID = &responsibleUserID
 	r.nodes[nodeKey] = node
+	r.grantEntityAccessAtLeastLocked(companyID, EntityTypeNode, nodeID, EntityPermissionSubjectUser, responsibleUserID, EntityPermissionEdit, time.Now().UTC())
 }
 
 type memoryKanbanCardLocation struct {

@@ -180,6 +180,105 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 	}
 }
 
+func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111114"
+	repo.EnsureCompany(companyID, "Assignment Access Co")
+
+	assigned, err := repo.UpsertAuthUser("assigned-user", "assigned@example.com", "Assigned User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser assigned: %v", err)
+	}
+	responsible, err := repo.UpsertAuthUser("responsible-user", "responsible@example.com", "Responsible User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser responsible: %v", err)
+	}
+	for _, subject := range []string{"assigned-user", "responsible-user"} {
+		if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+			t.Fatalf("AddCompanyMembership %s: %v", subject, err)
+		}
+	}
+
+	node, err := repo.CreateNode(companyID, "Assigned node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   assigned.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node deny: %v", err)
+	}
+	if _, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:         companyID,
+		NodeID:            node.NodeID,
+		AssigneeUserID:    &assigned.UserID,
+		AssigneeUserIDSet: true,
+	}); err != nil {
+		t.Fatalf("UpdateNode assignee: %v", err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, assigned.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("assigned node edit allowed = %v err = %v, want true", allowed, err)
+	}
+
+	gate, err := repo.CreateLogicGate(companyID, "RACI gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeLogicGate,
+		EntityID:   gate.LogicGateID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   responsible.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions gate deny: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: gate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleConsulted,
+			UserID: responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("RACI user logic gate edit allowed = %v err = %v, want true", allowed, err)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{CompanyID: companyID, EntityType: EntityTypeLogicGate, EntityID: gate.LogicGateID}); err != nil {
+		t.Fatalf("clear gate permissions: %v", err)
+	}
+	repaired, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: gate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleConsulted,
+			UserID: responsible.UserID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("duplicate AddLogicGateRaciAssignments: %v", err)
+	}
+	if repaired.Changed {
+		t.Fatalf("duplicate AddLogicGateRaciAssignments changed = true, want false")
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("duplicate RACI add repaired edit allowed = %v err = %v, want true", allowed, err)
+	}
+}
+
 func TestMemorySharedTriagePermissionsInheritAndChildOverrides(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111113"

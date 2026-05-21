@@ -56,17 +56,7 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 		return domain.Node{}, err
 	}
 	if assigneeUserID != "" {
-		permission := domain.EntityPermission{
-			CompanyID:        companyID,
-			EntityType:       EntityTypeNode,
-			EntityID:         n.NodeID,
-			SubjectType:      EntityPermissionSubjectUser,
-			SubjectID:        assigneeUserID,
-			Permission:       EntityPermissionAdmin,
-			AccessLevel:      EntityPermissionAdmin,
-			CreatedTimestamp: n.CreatedTimestamp,
-		}
-		r.entityPermissions[entityPermissionKey(companyID, EntityTypeNode, n.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin)] = permission
+		r.grantEntityAccessAtLeastLocked(companyID, EntityTypeNode, n.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin, n.CreatedTimestamp)
 	}
 	return r.withNodeReadModelLocked(n), nil
 }
@@ -211,6 +201,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 				return domain.Node{}, ErrAssigneeNotInCompany
 			}
 			node.AssigneeUserID = &value
+			r.grantEntityAccessAtLeastLocked(input.CompanyID, EntityTypeNode, input.NodeID, EntityPermissionSubjectUser, value, EntityPermissionEdit, time.Now().UTC())
 		}
 	}
 	r.nodes[k] = node

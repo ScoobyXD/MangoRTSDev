@@ -8,6 +8,7 @@ import (
 
 type memoryLogicGateRaciCommandSnapshot struct {
 	logicGateRaci         map[string][]domain.LogicGateRaciAssignment
+	entityPermissions     map[string]domain.EntityPermission
 	workItemInboxEntries  map[string]memoryWorkItemInboxEntry
 	domainEvents          map[string]domain.DomainEvent
 	workspaceReadVersions map[string]int64
@@ -16,6 +17,7 @@ type memoryLogicGateRaciCommandSnapshot struct {
 func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRaciCommandSnapshot {
 	return memoryLogicGateRaciCommandSnapshot{
 		logicGateRaci:         cloneMemorySliceMap(r.logicGateRaci),
+		entityPermissions:     cloneMemoryMap(r.entityPermissions),
 		workItemInboxEntries:  cloneMemoryMap(r.workItemInboxEntries),
 		domainEvents:          cloneMemoryMap(r.domainEvents),
 		workspaceReadVersions: cloneMemoryMap(r.workspaceReadVersions),
@@ -24,6 +26,7 @@ func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRa
 
 func (r *MemoryRepo) restoreLogicGateRaciCommandStateLocked(snapshot memoryLogicGateRaciCommandSnapshot) {
 	r.logicGateRaci = snapshot.logicGateRaci
+	r.entityPermissions = snapshot.entityPermissions
 	r.workItemInboxEntries = snapshot.workItemInboxEntries
 	r.domainEvents = snapshot.domainEvents
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
@@ -125,11 +128,20 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		BeforeAssignments: before,
 		Events:            []domain.DomainEvent{},
 	}
+	var snapshot memoryLogicGateRaciCommandSnapshot
+	if changed {
+		snapshot = r.snapshotLogicGateRaciCommandStateLocked()
+	}
+	if operation == LogicGateRaciCommandAdd {
+		now := time.Now().UTC()
+		for _, commandAssignment := range commandAssignments {
+			r.grantEntityAccessAtLeastLocked(companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, commandAssignment.userID, EntityPermissionEdit, now)
+		}
+	}
 	if !changed {
 		return result, nil
 	}
 
-	snapshot := r.snapshotLogicGateRaciCommandStateLocked()
 	r.logicGateRaci[raciKey] = assignments
 	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	event, err := r.appendDomainEventLocked(logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))
