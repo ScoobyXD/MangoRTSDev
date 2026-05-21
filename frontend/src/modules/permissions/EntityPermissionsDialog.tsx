@@ -46,13 +46,26 @@ type EntityPermissionsDialogProps = {
   onClose: () => void;
 };
 
-export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = ({
+type EntityPermissionsPanelProps = {
+  requestJSON: BoundRequestJSON;
+  companyID: string;
+  entityType: PermissionEntityType;
+  entityID: string;
+  title: string;
+  onClose?: () => void;
+  onSaved?: () => void;
+  variant?: "dialog" | "embedded";
+};
+
+export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
   companyID,
   entityType,
   entityID,
   title,
   onClose,
+  onSaved,
+  variant = "dialog",
 }) => {
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
@@ -60,6 +73,7 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
   const [selected, setSelected] = useState<Set<PermissionSelectionKey>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
 
   const permissionsPath = entityType === "node" ? `/v1/nodes/${encodeURIComponent(entityID)}/permissions` : `/v1/logic-gates/${encodeURIComponent(entityID)}/permissions`;
 
@@ -79,6 +93,7 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
         setGroups(groupsPayload.groups ?? []);
         setMembers(groupsPayload.members ?? []);
         setSelected(new Set((permissionsPayload.permissions ?? []).map((item) => `${item.subject_type}:${item.subject_id}` as PermissionSelectionKey)));
+        setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
           console.error("Failed to load permissions", loadError);
@@ -123,6 +138,7 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
 
   const toggle = (key: PermissionSelectionKey) => {
+    setSaved(false);
     setSelected((previous) => {
       const next = new Set(previous);
       if (next.has(key)) next.delete(key);
@@ -143,7 +159,9 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
         method: "PUT",
         body: JSON.stringify({ company_id: companyID, permissions }),
       });
-      onClose();
+      setSaved(true);
+      onSaved?.();
+      onClose?.();
     } catch (saveError) {
       console.error("Failed to save permissions", saveError);
       setError("Failed to save permissions");
@@ -177,43 +195,66 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
     );
   };
 
+  const dialogMode = variant === "dialog";
+  const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
+
   return (
-    <div style={permissionBackdropStyle} onPointerDown={onClose}>
-      <div style={permissionDialogStyle} onPointerDown={(event) => event.stopPropagation()}>
-        <div style={permissionHeaderStyle}>
-          <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-            <h2 style={permissionTitleStyle}>Permissions</h2>
-            <div style={permissionMutedTextStyle}>{title}</div>
-          </div>
-          <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
+    <div style={containerStyle}>
+      <div style={permissionHeaderStyle}>
+        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+          <h2 style={permissionTitleStyle}>Permissions</h2>
+          <div style={permissionMutedTextStyle}>{title}</div>
         </div>
+        {onClose && (
+          <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
+        )}
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
         <div style={permissionInfoStyle}>
-          {selected.size === 0 ? "Visible to all company users" : `${selected.size} permission assignments`}
+          {saved ? "Permissions saved" : selected.size === 0 ? "Visible to all company users" : `${selected.size} permission assignments`}
         </div>
         {error && <div style={permissionErrorStyle}>{error}</div>}
-        <div style={permissionListStyle}>
-          {childrenByParent.get("")?.map((group) => renderGroup(group, 0))}
-          {ungroupedUsers.length > 0 && (
-            <div style={{ display: "grid", gap: 4 }}>
-              <div style={permissionSubheadStyle}>Ungrouped Users</div>
-              {ungroupedUsers.map((user) => {
-                const key = `user:${user.user_id}` as PermissionSelectionKey;
-                return (
-                  <label key={user.user_id} style={permissionRowStyle}>
-                    <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
-                    <span>{companyUserLabel(user)}</span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
-          {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
-        </div>
-        <div style={permissionFooterStyle}>
-          <button type="button" style={permissionSecondaryButtonStyle} onClick={() => setSelected(new Set())} disabled={busy}>Visible to all</button>
-          <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
-        </div>
+      </div>
+      <div style={permissionListStyle}>
+        {childrenByParent.get("")?.map((group) => renderGroup(group, 0))}
+        {ungroupedUsers.length > 0 && (
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={permissionSubheadStyle}>Ungrouped Users</div>
+            {ungroupedUsers.map((user) => {
+              const key = `user:${user.user_id}` as PermissionSelectionKey;
+              return (
+                <label key={user.user_id} style={permissionRowStyle}>
+                  <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
+                  <span>{companyUserLabel(user)}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
+      </div>
+      <div style={permissionFooterStyle}>
+        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setSelected(new Set()); }} disabled={busy}>Visible to all</button>
+        {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
+        <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
+      </div>
+    </div>
+  );
+};
+
+export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (props) => {
+  return (
+    <div style={permissionBackdropStyle} onPointerDown={props.onClose}>
+      <div onPointerDown={(event) => event.stopPropagation()}>
+        <EntityPermissionsPanel
+          requestJSON={props.requestJSON}
+          companyID={props.companyID}
+          entityType={props.entityType}
+          entityID={props.entityID}
+          title={props.title}
+          onClose={props.onClose}
+          variant="dialog"
+        />
       </div>
     </div>
   );
@@ -251,7 +292,22 @@ const permissionDialogStyle: React.CSSProperties = {
   color: "#111111",
   boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
   display: "grid",
-  gridTemplateRows: "auto auto auto minmax(0, 1fr) auto",
+  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
+  gap: 10,
+  padding: 12,
+  boxSizing: "border-box",
+};
+
+const permissionEmbeddedStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  minHeight: 0,
+  border: "1px solid rgba(255, 136, 32, 0.42)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#111111",
+  display: "grid",
+  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
   gap: 10,
   padding: 12,
   boxSizing: "border-box",
