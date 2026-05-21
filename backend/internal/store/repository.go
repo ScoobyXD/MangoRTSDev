@@ -98,8 +98,12 @@ type WorkGraphRepository interface {
 	DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error)
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
+	AddNodeInformationWithActor(input NodeInformationInput) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	DeleteNodeProjection(companyID, nodeID, informationID string) error
+	DeleteNodeProjectionWithActor(input NodeProjectionDeleteInput) error
+	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
+	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error)
 }
@@ -767,6 +771,37 @@ type UpdateNodeInput struct {
 	PrioritySet       bool
 	AssigneeUserID    *string
 	AssigneeUserIDSet bool
+}
+
+type NodeInformationInput struct {
+	CompanyID        string
+	NodeID           string
+	Type             string
+	Information      string
+	InformationID    string
+	ActorUserID      string
+	ActorDisplayName string
+}
+
+type NodeProjectionDeleteInput struct {
+	CompanyID        string
+	NodeID           string
+	InformationID    string
+	ActorUserID      string
+	ActorDisplayName string
+}
+
+type NodeContentChangeListInput struct {
+	CompanyID string
+	NodeID    string
+	UserID    string
+}
+
+type NodeContentChangeSeenInput struct {
+	CompanyID string
+	NodeID    string
+	ChangeID  string
+	UserID    string
 }
 
 type LogicGateRaciAssignmentInput struct {

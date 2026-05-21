@@ -105,6 +105,8 @@
     "../modules/editor/editorProjection.test.ts",
     "../../../frontend/src/modules/editor/editorTextBlockChatHighlights.ts",
     "../modules/editor/editorTextBlockChatHighlights.test.ts",
+    "../../../frontend/src/modules/editor/nodeContentChanges.ts",
+    "../modules/editor/nodeContentChanges.test.ts",
     "../../../frontend/src/modules/editor/editorDates.ts",
     "../modules/editor/editorDates.test.ts"
   ],

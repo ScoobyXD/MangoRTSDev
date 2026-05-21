@@ -21,6 +21,7 @@ import {
   type EditorTextBlockChatMessage,
 } from "./editorProjection";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
+import type { NodeContentChange } from "./nodeContentChanges";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
@@ -164,6 +165,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   nodeID,
   assignedLogicGateIDs,
   projections,
+  unseenChanges,
   companyUsers,
   projectionsLoaded,
   topPx,
@@ -177,6 +179,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   outlineStyle,
   requestJSON,
   onProjectionMutation,
+  onMarkChangeSeen,
+  onMarkAllChangesSeen,
   onCreateNodeFromImage,
   onAssignToLogicGate,
   onError,
@@ -258,6 +262,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
+  const unseenChangesByBlockID = useMemo(() => {
+    const items = new Map<string, NodeContentChange[]>();
+    for (const change of unseenChanges) {
+      if (change.node_id !== nodeID || !change.information_id) continue;
+      const bucket = items.get(change.information_id) ?? [];
+      bucket.push(change);
+      items.set(change.information_id, bucket);
+    }
+    for (const bucket of items.values()) {
+      bucket.sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
+    }
+    return items;
+  }, [nodeID, unseenChanges]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1087,6 +1104,29 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           >
             <PlusIcon color={accent} />
           </button>
+          {unseenChanges.length > 0 && (
+            <button
+              type="button"
+              onClick={onMarkAllChangesSeen}
+              style={{
+                minHeight: 30,
+                borderRadius: 6,
+                border: "1px solid rgba(17, 122, 67, 0.34)",
+                background: "rgba(232, 247, 237, 0.94)",
+                color: "#0f6b3d",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: 0,
+              }}
+            >
+              Seen all
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setEmailPickerOpen(true)}
@@ -1347,6 +1387,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     currentUserID={author.userID || "local-user"}
                     companyUsers={companyUsers}
                     documentValue={block.document}
+                    contentChanges={unseenChangesByBlockID.get(block.id) ?? []}
                     chatMessages={messages}
                     activeChatAnchorMessageID={activeChatAnchorMessageID}
                     chatNavigationRequest={chatNavigationRequest?.blockID === block.id
@@ -1369,6 +1410,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       updateTextBlockContent(block.id, { document });
                       flushTextBlockSave(block.id);
                     }}
+                    onChangeSeen={onMarkChangeSeen}
                     onSelectionChatRequest={openSelectionChat}
                     onImageChatRequest={addImageChatComment}
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
