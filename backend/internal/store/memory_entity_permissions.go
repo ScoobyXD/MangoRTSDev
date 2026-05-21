@@ -472,7 +472,7 @@ func (r *MemoryRepo) sharedTriageFolderAncestryLocked(companyID, folderID string
 func (r *MemoryRepo) sharedTriagePermissionTargetIDsLocked(companyID, folderID string) []string {
 	ids := []string{folderID}
 	root, ok := r.folders[key(companyID, folderID)]
-	if !ok || root.FolderKind != "communications" || (root.ParentFolderID != nil && strings.TrimSpace(*root.ParentFolderID) != "") {
+	if !ok || root.FolderKind != "communications" {
 		return ids
 	}
 	seen := map[string]bool{folderID: true}

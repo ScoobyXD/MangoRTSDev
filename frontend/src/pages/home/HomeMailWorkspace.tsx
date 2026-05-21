@@ -198,6 +198,32 @@ export function HomeMailWorkspace({
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
 }) {
+  if (unassignedSharedInbox) {
+    return (
+      <>
+        <section style={mailPanelStyle}>
+          <div style={mailPanelControlsStyle}>
+            <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {unassignedSharedInbox.folderName}
+            </h2>
+          </div>
+          <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
+            <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#24120a", textAlign: "center" }}>
+              <strong style={{ fontSize: 20, lineHeight: 1.2 }}>This folder has not been assigned an email</strong>
+              <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>
+            </div>
+          </div>
+        </section>
+
+        {showDetailResizeHandle && <HomeColumnResizeHandle dividerIndex={1} onPointerDown={onColumnResizeStart} />}
+
+        <section style={panelStyle}>
+          <div style={emptyStateStyle}>Select a message or compose a new one</div>
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <section style={mailPanelStyle}>
@@ -282,7 +308,6 @@ export function HomeMailWorkspace({
               value={searchDraft}
               onChange={(event) => onSearchDraftChange(event.target.value)}
               placeholder="Search mail"
-                          disabled={!!unassignedSharedInbox}
             />
             <button type="submit" style={searchButtonStyle}>Search</button>
           </form>
@@ -291,7 +316,6 @@ export function HomeMailWorkspace({
               <input
                 type="checkbox"
                 checked={unreadOnly}
-                disabled={!!unassignedSharedInbox}
                 onChange={(event) => onToggleUnreadOnly(event.target.checked)}
               />
               <span>Unread only</span>
@@ -311,7 +335,6 @@ export function HomeMailWorkspace({
           style={messageListStyle}
           onScroll={(event) => {
             const target = event.currentTarget;
-            if (unassignedSharedInbox) return;
             if (isArchivableListView && mailbox === "primary") {
               const scrolledOutIDs = collectScrolledOutMessageIDs(target);
               if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
@@ -319,12 +342,7 @@ export function HomeMailWorkspace({
             if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) onLoadMoreMessages();
           }}
         >
-          {unassignedSharedInbox ? (
-            <div style={{ ...emptyStateStyle, gap: 8 }}>
-              <span>This folder has not been assigned an email</span>
-              <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>
-            </div>
-          ) : messages.length === 0 && !loadingMessages ? (
+          {messages.length === 0 && !loadingMessages ? (
             <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;

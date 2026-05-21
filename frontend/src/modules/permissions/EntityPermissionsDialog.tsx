@@ -4,7 +4,6 @@ import type { BoundRequestJSON } from "../api/requestJSON";
 type PermissionEntityType = "node" | "logic_gate" | "shared_triage_folder";
 type PermissionSubjectType = "user" | "group";
 type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
-type ResourceAccessSelection = "" | ResourceAccessLevel;
 
 type CompanyUser = {
   company_id: string;
@@ -71,10 +70,6 @@ const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label
   { value: "edit", label: "Edit" },
   { value: "admin", label: "Admin" },
 ];
-
-function accessOptionsFor(defaultLabel: string): ReadonlyArray<{ value: ResourceAccessSelection; label: string }> {
-  return [{ value: "", label: defaultLabel }, ...EXPLICIT_ACCESS_OPTIONS];
-}
 
 export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
@@ -157,15 +152,12 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const usersByID = useMemo(() => new Map(users.map((user) => [user.user_id, user])), [users]);
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
   const assignmentCount = accessBySubject.size;
-  const defaultAccessLabel = entityType === "shared_triage_folder" ? "Inherited / no access" : "No access";
-  const accessOptions = useMemo(() => accessOptionsFor(defaultAccessLabel), [defaultAccessLabel]);
 
-  const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessSelection) => {
+  const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
-      if (!accessLevel) next.delete(key);
-      else next.set(key, accessLevel);
+      next.set(key, accessLevel);
       return next;
     });
   };
@@ -196,14 +188,19 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const renderAccessSelect = (key: PermissionSelectionKey, forcedAccessLevel: ResourceAccessLevel | "" = "") => (
     <select
       value={forcedAccessLevel || accessBySubject.get(key) || ""}
-      onChange={(event) => setAccess(key, event.target.value as ResourceAccessSelection)}
+      onChange={(event) => setAccess(key, event.target.value as ResourceAccessLevel)}
       style={permissionSelectStyle}
       disabled={busy || !!forcedAccessLevel}
       aria-label="Access level"
     >
       {forcedAccessLevel
         ? <option value={forcedAccessLevel}>{roleAccessLabel(forcedAccessLevel)}</option>
-        : accessOptions.map((option) => <option key={option.value || "default"} value={option.value}>{option.label}</option>)}
+        : (
+          <>
+            <option value="" hidden>No Access</option>
+            {EXPLICIT_ACCESS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </>
+        )}
     </select>
   );
 
@@ -317,18 +314,17 @@ function permissionsPathFor(entityType: PermissionEntityType, entityID: string):
 function accessLevelLabel(accessLevel: ResourceAccessLevel): string {
   switch (accessLevel) {
     case "no_access":
-      return "no access";
+      return "No Access";
     case "view":
-      return "view";
+      return "View";
     case "edit":
-      return "edit";
+      return "Edit";
     case "admin":
-      return "admin";
+      return "Admin";
   }
 }
 
 function roleAccessLabel(accessLevel: ResourceAccessLevel): string {
-  if (accessLevel === "admin") return "Admin (role)";
   return accessLevelLabel(accessLevel);
 }
 
@@ -350,7 +346,7 @@ function companyUserRoleLabel(role: string | undefined): string {
 function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType): string {
   if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
   if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access.`;
-  if (entityType === "shared_triage_folder") return "No direct grants here. This folder can inherit parent Shared Triage grants; otherwise access is denied except for dev admins and company admins.";
+  if (entityType === "shared_triage_folder") return "No grants saved here. Parent Shared Triage grants can still apply; otherwise access is denied except for dev admins and company admins.";
   return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 

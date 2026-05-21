@@ -213,6 +213,10 @@ func TestMemorySharedTriagePermissionsInheritAndChildOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create child folder: %v", err)
 	}
+	grandchild, err := repo.CreateCompanyExplorerFolder(companyID, child.FolderID, "communications", "Grandchild inbox")
+	if err != nil {
+		t.Fatalf("Create grandchild folder: %v", err)
+	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -231,6 +235,9 @@ func TestMemorySharedTriagePermissionsInheritAndChildOverrides(t *testing.T) {
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, pam.UserID, EntityPermissionAdmin); err != nil || !allowed {
 		t.Fatalf("pam propagated child admin allowed = %v err = %v, want true", allowed, err)
 	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, pam.UserID, EntityPermissionAdmin); err != nil || !allowed {
+		t.Fatalf("pam propagated grandchild admin allowed = %v err = %v, want true", allowed, err)
+	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -248,5 +255,8 @@ func TestMemorySharedTriagePermissionsInheritAndChildOverrides(t *testing.T) {
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("joe child override edit allowed = %v err = %v, want true", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("joe nested parent edit propagated to grandchild allowed = %v err = %v, want true", allowed, err)
 	}
 }

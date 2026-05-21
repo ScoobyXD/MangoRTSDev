@@ -571,7 +571,6 @@ descendants(folder_id, path) as (
   cross join root
   where child.company_id=$1::uuid
     and child.folder_kind='communications'
-    and root.parent_folder_id is null
     and not child.folder_id = any(descendants.path)
 )
 select folder_id::text from descendants`, companyID, folderID)
