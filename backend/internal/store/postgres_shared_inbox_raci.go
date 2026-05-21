@@ -83,7 +83,16 @@ order by assignment.folder_id::text asc,
 		}
 		assignmentsByFolder[item.FolderID] = append(assignmentsByFolder[item.FolderID], item)
 	}
-	return assignmentsByFolder, rows.Err()
+	if err := rows.Err(); err != nil {
+		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
+			return assignmentsByFolder, nil
+		}
+		if isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			return assignmentsByFolder, nil
+		}
+		return nil, err
+	}
+	return assignmentsByFolder, nil
 }
 
 func (r *PostgresRepo) listCommunicationsSharedInboxRaciAncestry(ctx context.Context, companyID string, folderIDs []string) (map[string]string, []string, error) {
@@ -104,7 +113,7 @@ with recursive ancestry as (
          parent.parent_folder_id::text as parent_folder_id
   from company_explorer_folders parent
   join ancestry child
-    on child.parent_folder_id = parent.folder_id
+    on child.parent_folder_id = parent.folder_id::text
   where parent.company_id = $1
     and parent.folder_kind = 'communications'
 )

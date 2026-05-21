@@ -21,6 +21,10 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 		items, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
 		if err != nil {
 			log.Printf("communications shared inboxes: failed to list company_id=%s: %v", companyID, err)
+			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed_to_list_shared_inboxes")
 			return
 		}
@@ -236,6 +240,10 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		folder, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 			return
 		}
 		if err != nil {

@@ -608,6 +608,10 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID string) (domain.CompanyExplorerFolder, bool) {
 	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
 	if err != nil {
+		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
+			return domain.CompanyExplorerFolder{}, false
+		}
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return domain.CompanyExplorerFolder{}, false
 	}

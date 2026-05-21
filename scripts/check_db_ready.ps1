@@ -17,7 +17,9 @@ select to_regclass('public.nodes') as nodes,
        to_regclass('public.node_information') as node_information,
        to_regclass('public.node_projection_table') as node_projection_table,
        to_regclass('public.logic_gates') as logic_gates,
-       to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table;
+       to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table,
+       to_regclass('public.company_explorer_folders') as company_explorer_folders,
+       to_regclass('public.communications_shared_inbox_raci_assignments') as communications_shared_inbox_raci_assignments;
 
 select conname
 from pg_constraint
@@ -39,6 +41,30 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_not_self_chk') then
     raise exception 'missing constraint node_relationships_not_self_chk; run apply_db_migrations';
   end if;
+  if to_regclass('public.company_explorer_folders') is null then
+    raise exception 'missing table company_explorer_folders; run apply_db_migrations';
+  end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'company_explorer_folders'
+      and column_name = 'account_email'
+  ) then
+    raise exception 'missing column company_explorer_folders.account_email; run apply_db_migrations';
+  end if;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.company_explorer_folders'::regclass
+      and conname = 'company_explorer_folders_kind_chk'
+      and pg_get_constraintdef(oid) like '%communications%'
+  ) then
+    raise exception 'company_explorer_folders_kind_chk does not allow communications folders; run apply_db_migrations';
+  end if;
+  if to_regclass('public.communications_shared_inbox_raci_assignments') is null then
+    raise exception 'missing table communications_shared_inbox_raci_assignments; run apply_db_migrations';
+  end if;
 end $$;
 '@
 
@@ -47,4 +73,4 @@ if ($LASTEXITCODE -ne 0) {
   throw "psql failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "✅ DB connectivity, canonical tables, and node relationship guards verified"
+Write-Host "✅ DB connectivity, canonical tables, node relationship guards, and Shared Triage schema verified"

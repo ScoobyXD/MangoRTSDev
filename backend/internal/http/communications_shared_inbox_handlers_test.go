@@ -194,3 +194,58 @@ func TestCommunicationsSharedInboxListFiltersForAssignedNonManager(t *testing.T)
 		t.Fatalf("filtered folders include unrelated shared inbox: %+v", payload.SharedInboxes)
 	}
 }
+
+type sharedInboxListErrorRepo struct {
+	store.Repository
+	err error
+}
+
+func (r sharedInboxListErrorRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	return nil, r.err
+}
+
+func TestCommunicationsSharedInboxListReportsStorageUnavailable(t *testing.T) {
+	t.Parallel()
+
+	repo := sharedInboxListErrorRepo{Repository: store.NewMemoryRepo(), err: store.ErrSharedInboxStorageUnavailable}
+	handler := NewServer(repo).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id=11111111-1111-1111-1111-111111111111", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET shared inboxes status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error != "shared_inbox_storage_unavailable" {
+		t.Fatalf("error = %q, want shared_inbox_storage_unavailable", payload.Error)
+	}
+}
+
+func TestCommunicationsSharedInboxAccessReportsStorageUnavailable(t *testing.T) {
+	t.Parallel()
+
+	repo := sharedInboxListErrorRepo{Repository: store.NewMemoryRepo(), err: store.ErrSharedInboxStorageUnavailable}
+	handler := NewServer(repo).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes/folder-1/access?company_id=11111111-1111-1111-1111-111111111111", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET shared inbox access status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error != "shared_inbox_storage_unavailable" {
+		t.Fatalf("error = %q, want shared_inbox_storage_unavailable", payload.Error)
+	}
+}

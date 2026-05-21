@@ -55,6 +55,16 @@ func companyExplorerFolderAccountEmailColumn(includeAccountEmail bool, qualifier
 	return qualifier + ".account_email"
 }
 
+func companyExplorerCommunicationsFolderStorageUnavailable(err error, folderKind string) bool {
+	if folderKind != "communications" {
+		return false
+	}
+	if isPostgresUndefinedTable(err, "company_explorer_folders") {
+		return true
+	}
+	return isPostgresUndefinedColumn(err, "")
+}
+
 func (r *PostgresRepo) getCompanyExplorerFolder(ctx context.Context, companyID, folderID string, includeAccountEmail bool) (domain.CompanyExplorerFolder, error) {
 	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
 		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
@@ -332,6 +342,9 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
 		}
+		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
+			return nil, ErrSharedInboxStorageUnavailable
+		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -347,6 +360,9 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 	if err := rows.Err(); err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
+		}
+		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
+			return nil, ErrSharedInboxStorageUnavailable
 		}
 		return nil, err
 	}
