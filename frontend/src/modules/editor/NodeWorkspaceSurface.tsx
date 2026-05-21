@@ -61,6 +61,8 @@ const DEFAULT_TEXT_CHAT_SPLIT_RATIO = 0.704;
 const TEXT_CHAT_SPLIT_MIN_RATIO = 0.50;
 const TEXT_CHAT_SPLIT_MAX_RATIO = 0.84;
 const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v1";
+const LOGIC_GATE_ASSIGN_SUCCESS_COLOR = "#15803d";
+const LOGIC_GATE_ASSIGN_ERROR_COLOR = "#b42318";
 
 function clampTextChatSplitRatio(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
@@ -163,6 +165,7 @@ function focusContentEditableAtEnd(element: HTMLElement | null) {
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
+  nodePriorityDraft,
   assignedLogicGateIDs,
   projections,
   unseenChanges,
@@ -183,10 +186,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onMarkAllChangesSeen,
   onCreateNodeFromImage,
   onAssignToLogicGate,
+  onRequireNodePriorityForLogicGateAssignment,
   onError,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
+  const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
   const focusBlockIDRef = useRef("");
   const previousNodeIDRef = useRef(nodeID);
@@ -253,6 +258,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return labels;
   }, [logicGateOptions, logicGateSearchResults]);
   const assignedLogicGateIDSet = useMemo(() => new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)), [assignedLogicGateIDs]);
+  const hasAssignedLogicGate = assignedLogicGateIDSet.size > 0 || Boolean(lastAssignedLogicGateID.trim());
   const assignedLogicGateLabel = useMemo(() => {
     if (lastAssignedLogicGateLabel.trim()) return lastAssignedLogicGateLabel.trim();
     for (const logicGateID of assignedLogicGateIDs) {
@@ -262,6 +268,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
+  const nodePriorityUnassignedForLogicGate = useMemo(() => {
+    const raw = nodePriorityDraft.trim();
+    if (!raw || raw === "0") return true;
+    const parsed = Number(raw);
+    return !Number.isInteger(parsed) || parsed < 1 || parsed > 5;
+  }, [nodePriorityDraft]);
   const unseenChangesByBlockID = useMemo(() => {
     const items = new Map<string, NodeContentChange[]>();
     for (const change of unseenChanges) {
@@ -425,6 +437,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [companyID, logicGateAssignerOpen, logicGateSearch, onError, requestJSON]);
 
   useEffect(() => () => {
+    if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
   }, []);
@@ -898,13 +911,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
     const cleanLogicGateID = logicGate.logic_gate_id.trim();
     if (!cleanLogicGateID || assigningLogicGateID) return;
+    if (nodePriorityUnassignedForLogicGate) {
+      const message = "Must give node a priority";
+      setLastAssignedLogicGateID("");
+      setLastAssignedLogicGateLabel("");
+      setLogicGateAssignStatus(message);
+      onRequireNodePriorityForLogicGateAssignment();
+      if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
+      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
+        setLogicGateAssignStatus((current) => (current === message ? "" : current));
+        logicGateAssignStatusTimerRef.current = null;
+      }, 2400);
+      return;
+    }
     const label = logicGateOptionLabel(logicGate);
     setAssigningLogicGateID(cleanLogicGateID);
-    setLastAssignedLogicGateID(cleanLogicGateID);
-    setLastAssignedLogicGateLabel(label);
-    setLogicGateAssignStatus(`Assign to logic gate: ${label}`);
+    setLogicGateAssignStatus(`Assigning to Logic Gate: ${label}`);
     try {
       await onAssignToLogicGate(cleanLogicGateID);
+      setLastAssignedLogicGateID(cleanLogicGateID);
+      setLastAssignedLogicGateLabel(label);
+      setLogicGateAssignStatus(`✓ Successfully assigned to Logic Gate: ${label}`);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "failed_to_assign_logic_gate";
       setLastAssignedLogicGateID("");
@@ -914,7 +941,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningLogicGateID("");
     }
-  }, [assigningLogicGateID, onAssignToLogicGate, onError]);
+  }, [assigningLogicGateID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     const email = parseDraggedEmail(event.dataTransfer);
@@ -1172,23 +1199,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             }}
           >
             <ExplorerRowIcon kind="logic_gate" />
-            Assign to logic gate
+            Assign to Logic Gate
           </button>
           <div
-            title={`Assign to logic gate: ${assignedLogicGateLabel}`}
+            title={hasAssignedLogicGate ? `Successfully assigned to Logic Gate: ${assignedLogicGateLabel}` : "Assign to Logic Gate: None"}
             style={{
               minWidth: 0,
               maxWidth: compact ? "100%" : 320,
-              color: surfaceText,
+              color: hasAssignedLogicGate ? LOGIC_GATE_ASSIGN_SUCCESS_COLOR : surfaceText,
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: hasAssignedLogicGate ? 800 : 700,
               lineHeight: 1.2,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
           >
-            Assign to logic gate: <strong>{assignedLogicGateLabel}</strong>
+            {hasAssignedLogicGate ? (
+              <>✓ Successfully assigned to Logic Gate: <strong>{assignedLogicGateLabel}</strong></>
+            ) : (
+              <>Assign to Logic Gate: <strong>{assignedLogicGateLabel}</strong></>
+            )}
           </div>
         </div>
 
@@ -1204,9 +1235,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
                   <ExplorerRowIcon kind="logic_gate" />
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>Assign to logic gate: {assignedLogicGateLabel}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{hasAssignedLogicGate ? `Assigned to Logic Gate: ${assignedLogicGateLabel}` : "Assign to Logic Gate"}</span>
                 </div>
                 {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
+              </div>
+              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(180,35,24,0.32)" : "rgba(21,128,61,0.28)"}`, borderRadius: 7, background: nodePriorityUnassignedForLogicGate ? "rgba(180,35,24,0.06)" : "rgba(21,128,61,0.06)", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3 }}>
+                In order to assign to a Logic Gate, give this node a priority.
               </div>
 
               <div style={{ display: "grid", gap: 6 }}>
@@ -1245,7 +1279,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   {!logicGateSearchLoading && searchedLogicGateGroups.length > 0 && renderLogicGateGroups(searchedLogicGateGroups, "search")}
                 </div>
               )}
-              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus.startsWith("Assign to logic gate:") ? accent : "#b42318" }}>{logicGateAssignStatus}</div>}
+              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus.startsWith("✓") ? LOGIC_GATE_ASSIGN_SUCCESS_COLOR : logicGateAssignStatus.startsWith("Assigning") ? accent : LOGIC_GATE_ASSIGN_ERROR_COLOR }}>{logicGateAssignStatus}</div>}
             </div>
             {!compact && <div aria-hidden="true" />}
             {!compact && <div aria-hidden="true" />}
