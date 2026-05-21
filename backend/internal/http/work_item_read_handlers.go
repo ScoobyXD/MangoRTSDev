@@ -66,6 +66,11 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_list_responsible_inbox")
 		return
 	}
+	items, err = s.filterVisibleNodes(r, query.CompanyID, items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_responsible_inbox")
+		return
+	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"company_id": query.CompanyID,
 		"user_id":    query.UserID,
@@ -86,6 +91,11 @@ func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) 
 	items, err := s.repo.ListACIInboxLogicGatesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_aci_inbox")
+		return
+	}
+	items, err = s.filterVisibleWorkItemLogicGates(r, query.CompanyID, items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_aci_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -110,6 +120,11 @@ func (s *Server) handleWorkItemMyNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_nodes")
 		return
 	}
+	items, err = s.filterVisibleNodes(r, query.CompanyID, items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_my_nodes")
+		return
+	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"company_id": query.CompanyID,
 		"user_id":    query.UserID,
@@ -130,6 +145,11 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 	items, err := s.repo.ListMyLogicGatesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_logic_gates")
+		return
+	}
+	items, err = s.filterVisibleWorkItemLogicGates(r, query.CompanyID, items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_my_logic_gates")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{

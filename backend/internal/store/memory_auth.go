@@ -351,6 +351,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 	}
 
 	delete(r.memberships, membershipKey(companyID, userID))
+	for memberKey, member := range r.userGroupMembers {
+		if member.CompanyID == companyID && member.UserID == userID {
+			delete(r.userGroupMembers, memberKey)
+		}
+	}
+	for permissionKey, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID && permission.SubjectType == EntityPermissionSubjectUser && permission.SubjectID == userID {
+			delete(r.entityPermissions, permissionKey)
+		}
+	}
 	for key, node := range r.nodes {
 		if node.CompanyID == companyID && node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
 			node.AssigneeUserID = nil
@@ -392,6 +402,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 	for key, share := range r.folderShares {
 		if share.Email == email || share.InvitedByUserID == userID || (share.UserID != nil && *share.UserID == userID) {
 			delete(r.folderShares, key)
+		}
+	}
+	for memberKey, member := range r.userGroupMembers {
+		if member.UserID == userID {
+			delete(r.userGroupMembers, memberKey)
+		}
+	}
+	for permissionKey, permission := range r.entityPermissions {
+		if permission.SubjectType == EntityPermissionSubjectUser && permission.SubjectID == userID {
+			delete(r.entityPermissions, permissionKey)
 		}
 	}
 	delete(r.emailConnections, userID)

@@ -602,6 +602,13 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from entity_access_permissions
+		 where company_id=$1 and entity_type='logic_gate' and entity_id=$2::uuid`,
+		companyID, logicGateID,
+	); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+		return err
+	}
 
 	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gates

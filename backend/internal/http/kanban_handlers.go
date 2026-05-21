@@ -97,6 +97,11 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
 			return
 		}
+		items, err = s.filterVisibleKanbanBoards(r, companyID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_kanban_boards")
+			return
+		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"boards": items}, etag)
 		return
 	}
@@ -143,6 +148,9 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		if !s.requireKanbanBoardView(w, r, companyID, boardID, "") {
+			return
+		}
 		result, err := s.repo.DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_board_not_found")
@@ -183,6 +191,9 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "kanban_board_update_required")
 		return
 	}
+	if !s.requireKanbanBoardView(w, r, req.CompanyID, boardID, "") {
+		return
+	}
 	result, err := s.repo.UpdateKanbanBoardWithWorkspaceEvent(req.CompanyID, boardID, req.Title, req.Position)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "kanban_board_not_found")
@@ -202,6 +213,9 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 		if companyID == "" || boardID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		if !s.requireKanbanBoardView(w, r, companyID, boardID, "") {
 			return
 		}
 		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "kanban-columns", []store.DomainEventStreamQuery{
@@ -247,6 +261,9 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
 		return
 	}
+	if !s.requireKanbanBoardView(w, r, req.CompanyID, req.BoardID, "") {
+		return
+	}
 	result, err := s.repo.CreateKanbanColumnWithWorkspaceEvent(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
@@ -283,6 +300,9 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
+		if !s.requireKanbanBoardView(w, r, req.CompanyID, req.BoardID, "") {
+			return
+		}
 		result, err := s.repo.UpdateKanbanColumnWithWorkspaceEvent(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
@@ -301,6 +321,9 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 		if companyID == "" || boardID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		if !s.requireKanbanBoardView(w, r, companyID, boardID, "") {
 			return
 		}
 		result, err := s.repo.DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID)
@@ -332,6 +355,9 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
+		if !s.requireKanbanBoardView(w, r, companyID, boardID, "") {
+			return
+		}
 		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "kanban-cards", []store.DomainEventStreamQuery{
 			workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
 		})
@@ -349,6 +375,11 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
+			return
+		}
+		items, err = s.filterVisibleKanbanCards(r, companyID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_kanban_cards")
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"cards": items}, etag)
@@ -380,6 +411,12 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	req.DescriptionSnapshot = strings.TrimSpace(req.DescriptionSnapshot)
 	if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" || req.NodeID == "" {
 		writeError(w, http.StatusBadRequest, "company_board_column_and_node_required")
+		return
+	}
+	if !s.requireKanbanBoardView(w, r, req.CompanyID, req.BoardID, "") {
+		return
+	}
+	if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, req.NodeID, "node_not_found") {
 		return
 	}
 	if req.NodeTitle == "" {
@@ -439,6 +476,12 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_and_board_required")
 			return
 		}
+		if !s.requireKanbanBoardView(w, r, req.CompanyID, req.BoardID, "") {
+			return
+		}
+		if !s.requireKanbanCardView(w, r, req.CompanyID, req.BoardID, cardID) {
+			return
+		}
 		if columnID == "" && req.IsIssue == nil {
 			writeError(w, http.StatusBadRequest, "kanban_card_update_required")
 			return
@@ -473,6 +516,12 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 		if companyID == "" || boardID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		if !s.requireKanbanBoardView(w, r, companyID, boardID, "") {
+			return
+		}
+		if !s.requireKanbanCardView(w, r, companyID, boardID, cardID) {
 			return
 		}
 		result, err := s.repo.DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID)

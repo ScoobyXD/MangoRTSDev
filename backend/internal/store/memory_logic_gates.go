@@ -288,6 +288,11 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
 	delete(r.logicGateRaci, k)
+	for permissionKey, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID && permission.EntityType == EntityTypeLogicGate && permission.EntityID == logicGateID {
+			delete(r.entityPermissions, permissionKey)
+		}
+	}
 	r.deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)

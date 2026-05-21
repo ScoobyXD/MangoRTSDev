@@ -34,6 +34,7 @@ type LogicGateMapContextMenusProps = {
   onFindNodeSelection: (nodeID: string) => void;
   onPinNode: (nodeID: string) => void;
   onRenameNode: (nodeID: string) => void;
+  onOpenPermissions: (nodeID: string) => void;
   onRequestDeleteNodes: (nodeIDs: string[]) => void;
   onDeleteRelationships: (relationshipIDs: string[]) => void;
   onConfirmDelete: () => void;
@@ -68,6 +69,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
   onFindNodeSelection,
   onPinNode,
   onRenameNode,
+  onOpenPermissions,
   onRequestDeleteNodes,
   onDeleteRelationships,
   onConfirmDelete,
@@ -224,6 +226,9 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
         </button>
         <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
           Rename logic gate
+        </button>
+        <button style={contextMenuButtonStyle} onClick={() => onOpenPermissions(nodeContextMenu.nodeID)}>
+          Permissions
         </button>
         <button
           style={contextMenuDangerButtonStyle}

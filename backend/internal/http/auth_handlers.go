@@ -82,12 +82,23 @@ func (s *Server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/companies/"), "/")
 	parts := strings.Split(trimmed, "/")
-	if len(parts) < 2 || len(parts) > 3 || strings.TrimSpace(parts[0]) == "" || parts[1] != "users" {
+	if len(parts) < 2 || len(parts) > 4 || strings.TrimSpace(parts[0]) == "" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	companyID := strings.TrimSpace(parts[0])
-	if len(parts) == 2 {
+	switch parts[1] {
+	case "users":
+		s.handleCompanyUsersSubresource(w, r, companyID, parts[2:])
+	case "user-groups":
+		s.handleCompanyUserGroupsSubresource(w, r, companyID, parts[2:])
+	default:
+		writeError(w, http.StatusNotFound, "not_found")
+	}
+}
+
+func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Request, companyID string, parts []string) {
+	if len(parts) == 0 {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
@@ -103,6 +114,10 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"users": users})
 		return
 	}
+	if len(parts) != 1 {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
 	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -115,7 +130,7 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID := strings.TrimSpace(parts[2])
+	userID := strings.TrimSpace(parts[0])
 	if userID == "" {
 		writeError(w, http.StatusBadRequest, "user_id_required")
 		return
@@ -168,6 +183,169 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		"cognito_user_deleted":              cognitoDeleted,
 		"external_identity_deletion_queued": result.DeleteExternalIdentity && !cognitoDeleted,
 	})
+}
+
+func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *http.Request, companyID string, parts []string) {
+	if len(parts) == 0 {
+		switch r.Method {
+		case http.MethodGet:
+			if !requireCompanyAccess(w, r, companyID) {
+				return
+			}
+			groups, err := s.repo.ListCompanyUserGroups(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_user_groups")
+				return
+			}
+			members, err := s.repo.ListCompanyUserGroupMembers(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_user_group_members")
+				return
+			}
+			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"groups": groups, "members": members})
+			return
+		case http.MethodPost:
+			if !requireCompanyManager(w, r, companyID) {
+				return
+			}
+			var req struct {
+				Name          string `json:"name"`
+				ParentGroupID string `json:"parent_group_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			group, err := s.repo.CreateCompanyUserGroup(companyID, req.ParentGroupID, req.Name)
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_user_group")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "user_group_parent_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_create_user_group")
+				return
+			}
+			writeJSON(w, http.StatusCreated, group)
+			return
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+	}
+
+	if len(parts) == 2 && parts[1] == "members" {
+		if r.Method != http.MethodPut {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		if !requireCompanyManager(w, r, companyID) {
+			return
+		}
+		var req struct {
+			UserIDs []string `json:"user_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		members, err := s.repo.SetCompanyUserGroupMembers(companyID, strings.TrimSpace(parts[0]), req.UserIDs)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_user_group_members")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "user_group_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrAssigneeNotInCompany) {
+			writeError(w, http.StatusBadRequest, "user_group_member_not_in_company")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group_members")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"members": members})
+		return
+	}
+
+	if len(parts) != 1 {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	groupID := strings.TrimSpace(parts[0])
+	if groupID == "" {
+		writeError(w, http.StatusBadRequest, "user_group_id_required")
+		return
+	}
+	if !requireCompanyManager(w, r, companyID) {
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		name := ""
+		if raw, ok := fields["name"]; ok {
+			if err := json.Unmarshal(raw, &name); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_user_group_name")
+				return
+			}
+		}
+		parentGroupID, _, ok := parseOptionalStringField(fields, "parent_group_id")
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid_parent_group_id")
+			return
+		}
+		position := 0
+		if raw, ok := fields["position"]; ok && strings.TrimSpace(string(raw)) != "null" {
+			if err := json.Unmarshal(raw, &position); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_user_group_position")
+				return
+			}
+		}
+		group, err := s.repo.UpdateCompanyUserGroup(companyID, groupID, parentGroupID, name, position)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_user_group")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "user_group_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group")
+			return
+		}
+		writeJSON(w, http.StatusOK, group)
+		return
+	case http.MethodDelete:
+		err := s.repo.DeleteCompanyUserGroup(companyID, groupID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_user_group")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "user_group_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_user_group")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
 }
 
 func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {

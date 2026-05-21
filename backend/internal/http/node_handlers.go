@@ -32,6 +32,11 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
 		}
+		items, err = s.filterVisibleNodes(r, companyID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+			return
+		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"nodes": items}, etag)
 		return
 	}
@@ -209,6 +214,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "node_update_required")
 				return
 			}
+			if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+				return
+			}
 			beforeNode, beforeNodeErr := s.repo.GetNode(input.CompanyID, nodeID)
 			item, event, err := s.repo.UpdateNodeAndWorkspaceEvent(input)
 			if errors.Is(err, store.ErrNotFound) {
@@ -240,6 +248,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
+			if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+				return
+			}
 			event, err := s.repo.DeleteNodeAndWorkspaceEvent(companyID, nodeID)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
@@ -261,6 +272,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
 		details, err := s.repo.GetNodeDetails(companyID, nodeID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
@@ -270,7 +284,23 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
 			return
 		}
+		nodes, err := s.repo.ListNodes(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+			return
+		}
+		nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+			return
+		}
+		details.Relationships = filterNodeRelationshipsByVisibleNodes(details.Relationships, visibleNodeIDs(nodes))
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "permissions" {
+		s.handleEntityPermissions(w, r, store.EntityTypeNode, nodeID, "node_not_found", "node_permissions_updated")
 		return
 	}
 
@@ -282,6 +312,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
 		items, err := s.repo.ListNodeProjections(companyID, nodeID)
@@ -314,6 +347,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		informationID := strings.TrimSpace(parts[2])
 		if informationID == "" {
 			writeError(w, http.StatusBadRequest, "information_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
 		// Clearing an editor document removes the latest hot-read projection only.
@@ -353,6 +389,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			// UI clients and future headless agents share this endpoint. Guarding here keeps
 			// blank editor blurs from creating hot-path history/projection noise in Postgres.
 			writeError(w, http.StatusBadRequest, "information_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
 

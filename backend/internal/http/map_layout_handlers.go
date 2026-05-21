@@ -74,6 +74,11 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 					return
 				}
+				items, err = s.filterVisibleNodeMapPositions(r, companyID, items)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_filter_node_map_positions")
+					return
+				}
 				writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "folder_id": query.FolderID, "window": query.Window, "nodes_limit": query.Limit, "positions": items}, etag)
 				return
 			}
@@ -91,6 +96,11 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			items, err := s.repo.ListNodeMapPositions(companyID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
+				return
+			}
+			items, err = s.filterVisibleNodeMapPositions(r, companyID, items)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_filter_node_map_positions")
 				return
 			}
 			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items}, etag)
@@ -129,6 +139,11 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 					return
 				}
+				items, err = s.filterVisibleLogicGateMapPositions(r, companyID, items)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gate_map_positions")
+					return
+				}
 				writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "folder_id": query.FolderID, "window": query.Window, "logic_gates_limit": query.Limit, "positions": items}, etag)
 				return
 			}
@@ -146,6 +161,11 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			items, err := s.repo.ListLogicGateMapPositions(companyID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
+				return
+			}
+			items, err = s.filterVisibleLogicGateMapPositions(r, companyID, items)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gate_map_positions")
 				return
 			}
 			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items}, etag)
@@ -184,6 +204,9 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusBadRequest, "invalid_position")
 					return
 				}
+				if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+					return
+				}
 				positions = append(positions, domain.NodeMapPosition{CompanyID: req.CompanyID, NodeID: nodeID, X: input.X, Y: input.Y})
 			}
 			items, err := s.repo.UpsertNodeMapPositions(req.CompanyID, positions)
@@ -205,6 +228,9 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 				logicGateID := input.entityIDFor(req.MapType)
 				if logicGateID == "" || !validMapLayoutCoordinate(input.X) || !validMapLayoutCoordinate(input.Y) {
 					writeError(w, http.StatusBadRequest, "invalid_position")
+					return
+				}
+				if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 					return
 				}
 				positions = append(positions, domain.LogicGateMapPosition{CompanyID: req.CompanyID, LogicGateID: logicGateID, X: input.X, Y: input.Y})

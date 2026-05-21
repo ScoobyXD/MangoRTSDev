@@ -34,6 +34,7 @@ type NodeMapContextMenusProps = {
   onFindNodeSelection: (nodeID: string) => void;
   onPinNode: (nodeID: string) => void;
   onRenameNode: (nodeID: string) => void;
+  onOpenPermissions: (nodeID: string) => void;
   onRequestDeleteNodes: (nodeIDs: string[]) => void;
   onDeleteRelationships: (relationshipIDs: string[]) => void;
   onConfirmDelete: () => void;
@@ -68,6 +69,7 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
   onFindNodeSelection,
   onPinNode,
   onRenameNode,
+  onOpenPermissions,
   onRequestDeleteNodes,
   onDeleteRelationships,
   onConfirmDelete,
@@ -225,6 +227,9 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
         </button>
         <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
           Rename node
+        </button>
+        <button style={contextMenuButtonStyle} onClick={() => onOpenPermissions(nodeContextMenu.nodeID)}>
+          Permissions
         </button>
         <button
           style={contextMenuDangerButtonStyle}

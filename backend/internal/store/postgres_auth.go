@@ -295,6 +295,9 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1 and assignee_user_id = $2`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
+	if _, err = tx.Exec(`delete from entity_access_permissions where company_id = $1 and subject_type = 'user' and subject_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+		return DeleteCompanyUserResult{}, err
+	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1 and user_id = $2`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
@@ -345,6 +348,9 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 			return DeleteCompanyUserResult{}, err
 		}
 		if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		if _, err = tx.Exec(`delete from entity_access_permissions where subject_type = 'user' and subject_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
 			return DeleteCompanyUserResult{}, err
 		}
 		if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {

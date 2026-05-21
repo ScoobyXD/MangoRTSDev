@@ -24,6 +24,7 @@ import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
+import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 
 type NodeMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -100,6 +101,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeMapNodeContextMenuState | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<NodeMapRelationshipContextMenuState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<NodeMapDeleteConfirmationState | null>(null);
+  const [permissionsNodeID, setPermissionsNodeID] = useState("");
   const [canvasActive, setCanvasActive] = useState(false);
   const [inlineCommentThreads, setInlineCommentThreads] = useState<NodeInlineCommentThread[]>(() => readNodeInlineCommentThreads(inlineCommentStorageKey));
   const [inlineCommentDraft, setInlineCommentDraft] = useState<NodeInlineCommentDraft | null>(null);
@@ -1592,6 +1594,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             setEditingNodeTitleNodeID(nodeID);
             setNodeContextMenu(null);
           }}
+          onOpenPermissions={(nodeID) => {
+            setPermissionsNodeID(nodeID);
+            setNodeContextMenu(null);
+          }}
           onRequestDeleteNodes={(nodeIDs) => {
             setConfirmDelete({ nodeIDs, relationshipIDs: [] });
             setNodeContextMenu(null);
@@ -1607,6 +1613,19 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           }}
           onCancelDelete={() => setConfirmDelete(null)}
         />
+        {permissionsNodeID && (
+          <EntityPermissionsDialog
+            requestJSON={requestJSON}
+            companyID={companyID}
+            entityType="node"
+            entityID={permissionsNodeID}
+            title={(() => {
+              const current = nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID);
+              return current ? getNodeTitle(current) : permissionsNodeID;
+            })()}
+            onClose={() => setPermissionsNodeID("")}
+          />
+        )}
       </div>
     </div>
   );

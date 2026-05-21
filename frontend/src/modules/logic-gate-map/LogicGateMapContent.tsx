@@ -21,6 +21,7 @@ import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandle
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
+import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 
 type LogicGateMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -80,6 +81,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
+  const [permissionsLogicGateID, setPermissionsLogicGateID] = useState("");
   const [canvasActive, setCanvasActive] = useState(false);
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
@@ -1512,6 +1514,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             setEditingNodeTitleNodeID(nodeID);
             setNodeContextMenu(null);
           }}
+          onOpenPermissions={(nodeID) => {
+            setPermissionsLogicGateID(nodeID);
+            setNodeContextMenu(null);
+          }}
           onRequestDeleteNodes={(nodeIDs) => {
             setConfirmDelete({ nodeIDs, relationshipIDs: [] });
             setNodeContextMenu(null);
@@ -1527,6 +1533,19 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           }}
           onCancelDelete={() => setConfirmDelete(null)}
         />
+        {permissionsLogicGateID && (
+          <EntityPermissionsDialog
+            requestJSON={requestJSON}
+            companyID={companyID}
+            entityType="logic_gate"
+            entityID={permissionsLogicGateID}
+            title={(() => {
+              const current = nodes.find((node) => node.node_id === permissionsLogicGateID) ?? allNodes.find((node) => node.node_id === permissionsLogicGateID);
+              return current ? getNodeTitle(current) : permissionsLogicGateID;
+            })()}
+            onClose={() => setPermissionsLogicGateID("")}
+          />
+        )}
       </div>
     </div>
   );

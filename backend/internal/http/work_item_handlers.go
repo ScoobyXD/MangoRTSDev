@@ -194,6 +194,12 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		input.IsIssue = isIssue
 		input.IsIssueSet = true
 	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeLogicGate, input.LogicGateID, "logic_gate_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, input.NodeID, "node_not_found") {
+		return
+	}
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.AssignNodeToLogicGateStatus(input)
@@ -290,6 +296,15 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	} else if set {
 		input.Position = position
 	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeLogicGate, input.LogicGateID, "logic_gate_assignment_not_found") {
+		return
+	}
+	if input.FromLogicGateID != "" && !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeLogicGate, input.FromLogicGateID, "logic_gate_assignment_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, input.NodeID, "logic_gate_assignment_not_found") {
+		return
+	}
 
 	beforeCard, columnTitles, hadBeforeCard := s.logicGateAssignmentNotificationSnapshot(input.CompanyID, input.LogicGateID, input.NodeID)
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
@@ -361,6 +376,12 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 	} else if set {
 		input.FallbackStatusColor = optionalStringPointer(fallbackColor)
 	}
+	if input.LogicGateID != "" && !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeLogicGate, input.LogicGateID, "logic_gate_assignment_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, input.NodeID, "logic_gate_assignment_not_found") {
+		return
+	}
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.RemoveLogicGateNodeAssignment(input)
@@ -424,6 +445,12 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 		return
 	} else if set && logicGateID != nil {
 		input.LogicGateID = *logicGateID
+	}
+	if input.LogicGateID != "" && !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeLogicGate, input.LogicGateID, "logic_gate_assignment_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, input.NodeID, "logic_gate_assignment_not_found") {
+		return
 	}
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)

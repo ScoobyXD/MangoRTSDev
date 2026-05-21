@@ -60,12 +60,22 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_query_logic_gates")
 				return
 			}
+			items, err = s.filterVisibleLogicGates(r, companyID, items)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+				return
+			}
 			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)
 			return
 		}
 		items, err := s.repo.ListLogicGates(companyID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		items, err = s.filterVisibleLogicGates(r, companyID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)
@@ -138,6 +148,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 				return
 			}
+			if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+				return
+			}
 			item, err := s.repo.UpdateLogicGateHeader(req.CompanyID, logicGateID, strings.TrimSpace(req.Header))
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")
@@ -155,6 +168,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 			if companyID == "" {
 				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
 			if err := s.repo.DeleteLogicGate(companyID, logicGateID); errors.Is(err, store.ErrNotFound) {
@@ -177,6 +193,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
 		details, err := s.repo.GetLogicGateDetails(companyID, logicGateID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "logic_gate_not_found")
@@ -186,6 +205,17 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate")
 			return
 		}
+		logicGates, err := s.repo.ListLogicGates(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+			return
+		}
+		details.Relationships = filterLogicGateRelationshipsByVisibleGates(details.Relationships, visibleLogicGateIDs(logicGates))
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
 		return
 	}
@@ -195,6 +225,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 			if companyID == "" {
 				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
 			logicGate, err := s.repo.GetLogicGate(companyID, logicGateID)
@@ -227,6 +260,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if strings.TrimSpace(req.CompanyID) == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		var beforeAssignments []domain.LogicGateRaciAssignment
@@ -288,6 +324,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "permissions" {
+		s.handleEntityPermissions(w, r, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found", "logic_gate_permissions_updated")
+		return
+	}
+
 	if len(parts) == 3 && parts[1] == "raci" && (parts[2] == store.LogicGateRaciCommandAdd || parts[2] == store.LogicGateRaciCommandRemove) {
 		s.handleLogicGateRaciCommand(w, r, logicGateID, parts[2])
 		return
@@ -300,6 +341,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		items, err := s.repo.ListLogicGateProjections(companyID, logicGateID)
@@ -332,6 +376,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		informationID := strings.TrimSpace(parts[2])
 		if informationID == "" {
 			writeError(w, http.StatusBadRequest, "information_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		// Same contract as nodes: clear the latest value without manufacturing
@@ -375,6 +422,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			// Keep the API contract strict: empty text boxes should not become durable
 			// logic_gate_information rows, no matter whether the caller is UI or an agent.
 			writeError(w, http.StatusBadRequest, "information_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)

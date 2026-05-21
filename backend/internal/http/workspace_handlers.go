@@ -58,21 +58,35 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 		return
 	}
+	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+		return
+	}
+	nodeIDs := visibleNodeIDs(nodes)
 	relationships, err := s.repo.ListNodeRelationships(companyID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 		return
 	}
+	relationships = filterNodeRelationshipsByVisibleNodes(relationships, nodeIDs)
 	logicGates, err := s.repo.ListLogicGates(companyID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
 		return
 	}
+	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+		return
+	}
+	logicGateIDs := visibleLogicGateIDs(logicGates)
 	logicGateRelationships, err := s.repo.ListLogicGateRelationships(companyID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 		return
 	}
+	logicGateRelationships = filterLogicGateRelationshipsByVisibleGates(logicGateRelationships, logicGateIDs)
 	nodeFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "node")
 	if err != nil {
 		log.Printf("workspace snapshot: failed to list node company explorer folders company_id=%s: %v", companyID, err)
@@ -91,16 +105,19 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 		return
 	}
+	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nodeIDs, logicGateIDs)
 	nodeMapPositions, err := s.repo.ListNodeMapPositions(companyID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 		return
 	}
+	nodeMapPositions = filterNodeMapPositionsByVisibleNodes(nodeMapPositions, nodeIDs)
 	logicGateMapPositions, err := s.repo.ListLogicGateMapPositions(companyID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 		return
 	}
+	logicGateMapPositions = filterLogicGateMapPositionsByVisibleGates(logicGateMapPositions, logicGateIDs)
 	kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
@@ -266,6 +283,15 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			return
 		}
 	}
+	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+		return
+	}
+	nodeIDs := visibleNodeIDs(nodes)
+	relationships = filterNodeRelationshipsByVisibleNodes(relationships, nodeIDs)
+	positions = filterNodeMapPositionsByVisibleNodes(positions, nodeIDs)
+	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nodeIDs, nil)
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":              "node_map",
 		"company_id":         companyID,
@@ -376,6 +402,15 @@ func (s *Server) handleNodeMapWindowWorkspaceSnapshot(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_window")
 		return
 	}
+	result.Nodes, err = s.filterVisibleNodes(r, companyID, result.Nodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+		return
+	}
+	nodeIDs := visibleNodeIDs(result.Nodes)
+	result.Relationships = filterNodeRelationshipsByVisibleNodes(result.Relationships, nodeIDs)
+	result.NodeMapPositions = filterNodeMapPositionsByVisibleNodes(result.NodeMapPositions, nodeIDs)
+	result.FolderItems = filterCompanyExplorerItemsForVisibleEntities(result.FolderItems, nodeIDs, nil)
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, nodeMapWindowSnapshotPayload(result), etag)
 }
 func logicGateMapWindowQueryParamPresent(r *http.Request) bool {
@@ -465,6 +500,15 @@ func (s *Server) handleLogicGateMapWindowWorkspaceSnapshot(w http.ResponseWriter
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_window")
 		return
 	}
+	result.LogicGates, err = s.filterVisibleLogicGates(r, companyID, result.LogicGates)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+		return
+	}
+	logicGateIDs := visibleLogicGateIDs(result.LogicGates)
+	result.Relationships = filterLogicGateRelationshipsByVisibleGates(result.Relationships, logicGateIDs)
+	result.LogicGateMapPositions = filterLogicGateMapPositionsByVisibleGates(result.LogicGateMapPositions, logicGateIDs)
+	result.FolderItems = filterCompanyExplorerItemsForVisibleEntities(result.FolderItems, nil, logicGateIDs)
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateMapWindowSnapshotPayload(result), etag)
 }
 func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
@@ -528,6 +572,15 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			return
 		}
 	}
+	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+		return
+	}
+	logicGateIDs := visibleLogicGateIDs(logicGates)
+	relationships = filterLogicGateRelationshipsByVisibleGates(relationships, logicGateIDs)
+	positions = filterLogicGateMapPositionsByVisibleGates(positions, logicGateIDs)
+	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nil, logicGateIDs)
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":                    "logic_gate_map",
 		"company_id":               companyID,
@@ -646,6 +699,17 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		}
 	}
 
+	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
+		return
+	}
+	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+		return
+	}
+	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, visibleNodeIDs(nodes), visibleLogicGateIDs(logicGates))
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":        "company_explorer",
 		"company_id":   companyID,
@@ -662,6 +726,12 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 	if boardID == "" {
 		writeError(w, http.StatusBadRequest, "board_id_required")
 		return
+	}
+	if store.IsLogicGateKanbanBoardID(boardID) {
+		logicGateID := strings.TrimSpace(strings.TrimPrefix(boardID, "logic-gate:"))
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
 	}
 	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
 	if err != nil {

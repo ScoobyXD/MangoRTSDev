@@ -30,6 +30,17 @@ func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 			return
 		}
+		logicGates, err := s.repo.ListLogicGates(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
+			return
+		}
+		items = filterLogicGateRelationshipsByVisibleGates(items, visibleLogicGateIDs(logicGates))
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gate_relationships": items}, etag)
 		return
 	}
@@ -63,6 +74,12 @@ func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Req
 	}
 	if !isLegalLogicGateRelationshipPositionPair(req.APosition, req.BPosition) {
 		writeError(w, http.StatusBadRequest, "illegal_logic_gate_relationship_pair")
+		return
+	}
+	if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, req.LogicGateIDA, "logic_gate_not_found") {
+		return
+	}
+	if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, req.LogicGateIDB, "logic_gate_not_found") {
 		return
 	}
 	item, err := s.repo.CreateLogicGateRelationship(req.CompanyID, req.LogicGateIDA, req.LogicGateIDB, req.APosition, req.BPosition)
@@ -105,6 +122,29 @@ func (s *Server) handleLogicGateRelationshipByID(w http.ResponseWriter, r *http.
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	relationships, err := s.repo.ListLogicGateRelationships(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_relationship")
+		return
+	}
+	found := false
+	for _, relationship := range relationships {
+		if relationship.LogicGateRelationshipID != relationshipID {
+			continue
+		}
+		found = true
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, relationship.LogicGateIDA, "logic_gate_relationship_not_found") {
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, relationship.LogicGateIDB, "logic_gate_relationship_not_found") {
+			return
+		}
+		break
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "logic_gate_relationship_not_found")
 		return
 	}
 	if err := s.repo.DeleteLogicGateRelationship(companyID, relationshipID); errors.Is(err, store.ErrNotFound) {

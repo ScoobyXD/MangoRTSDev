@@ -234,7 +234,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
-  if (type === "node_created" || type === "node_updated" || type === "node_deleted") {
+  if (type === "node_created" || type === "node_updated" || type === "node_deleted" || type === "node_permissions_updated") {
     addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID });
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "node", itemID: nodeID });
     return scopes;
@@ -245,7 +245,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
-  if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_deleted" || type === "logic_gate_raci_updated") {
+  if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_deleted" || type === "logic_gate_raci_updated" || type === "logic_gate_permissions_updated") {
     const logicGateBoardID = logicGateKanbanBoardID(logicGateID);
     addScope(scopes, seen, { kind: "logic_gate_graph", eventType: type, logicGateID });
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "logic_gate", itemID: logicGateID });
