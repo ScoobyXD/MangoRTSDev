@@ -1565,7 +1565,7 @@ const appSidebarSectionStyle: React.CSSProperties = {
   gap: 4,
   minWidth: 0,
   paddingBottom: 10,
-  borderBottom: "1px solid rgba(255, 136, 32, 0.2)",
+  borderBottom: "1px solid rgba(17, 17, 17, 0.28)",
 };
 
 function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
@@ -1575,7 +1575,7 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
     gap: 5,
     minWidth: 0,
     padding: "0 0 10px",
-    borderBottom: "1px solid rgba(255, 136, 32, 0.2)",
+    borderBottom: "1px solid rgba(17, 17, 17, 0.28)",
     outline: active ? "2px solid rgba(255, 136, 32, 0.32)" : "2px solid transparent",
     outlineOffset: 2,
     borderRadius: 6,
@@ -1749,7 +1749,7 @@ const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
 const appSidebarMiniExplorerFrameStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "visible",
-  border: "1px solid rgba(255, 136, 32, 0.14)",
+  border: "1px solid rgba(17, 17, 17, 0.22)",
   borderRadius: 6,
   background: "#ffffff",
 };
@@ -2042,7 +2042,7 @@ const appSidebarExplorerSectionStyle: React.CSSProperties = {
   display: "grid",
   overflow: "visible",
   borderRadius: 6,
-  border: "1px solid rgba(255, 136, 32, 0.16)",
+  border: "1px solid rgba(17, 17, 17, 0.22)",
   background: "#ffffff",
 };
 

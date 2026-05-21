@@ -1513,7 +1513,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(36,18,10,0.06)";
   const selectedRowBackground = isDarkTheme ? "rgba(255,136,32,0.2)" : "rgba(255, 136, 32, 0.28)";
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
-  const folderToggleColor = isDarkTheme ? "#fbb152" : "#8a3b10";
+  const folderToggleColor = isDarkTheme ? "#f4f7fa" : "#111111";
   const rowIconColor = isDarkTheme ? "#ffd8a6" : "#8a3b10";
   const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";

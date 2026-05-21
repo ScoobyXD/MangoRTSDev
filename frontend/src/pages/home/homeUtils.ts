@@ -303,6 +303,19 @@ export function inboxLogicGateLabel(logicGateID: string, logicGateByID: Map<stri
   return logicGate ? logicGateTitle(logicGate) : humanLabelOrFallback(logicGateID, "Logic Gate");
 }
 
+export function missingLogicGateRecordIDs(nodes: Pick<NodeRecord, "logic_gate_ids">[], logicGateByID: Map<string, LogicGateRecord>): string[] {
+  const seen = new Set<string>();
+  const missing: string[] = [];
+  for (const node of nodes) {
+    for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
+      if (logicGateByID.has(logicGateID) || seen.has(logicGateID)) continue;
+      seen.add(logicGateID);
+      missing.push(logicGateID);
+    }
+  }
+  return missing;
+}
+
 export function logicGateHasRaciRole(logicGate: LogicGateRecord | undefined, role: LogicGateRaciRole, userID: string): boolean {
   const cleanUserID = userID.trim();
   if (!logicGate || !cleanUserID) return false;

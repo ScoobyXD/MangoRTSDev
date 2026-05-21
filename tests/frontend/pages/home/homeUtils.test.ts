@@ -16,6 +16,7 @@ import {
   getHomeViewLabel,
   inboxLogicGateLabel,
   logicGateTitle,
+  missingLogicGateRecordIDs,
   getInboxMatrixGridTemplateColumns,
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxCountsFromFolders,
@@ -170,6 +171,10 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const opaqueID = "019e3de8-c507-7a03-a7ab-fbea8f4e1d22";
   assert.equal(inboxLogicGateLabel(opaqueID, new Map()), "Logic Gate");
   assert.equal(logicGateTitle({ logic_gate_id: opaqueID, header: opaqueID }), "Logic Gate");
+  assert.deepEqual(missingLogicGateRecordIDs([
+    node("node-missing-a", "Missing A", { logic_gate_ids: [opaqueID, "gate-r"] }),
+    node("node-missing-b", "Missing B", { logic_gate_ids: [opaqueID, "gate-new"] }),
+  ], gates), [opaqueID, "gate-new"]);
 });
 
 test("my node groups follow logic gate folders and node drag payloads resolve folder drops", () => {

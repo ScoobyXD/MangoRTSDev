@@ -47,6 +47,7 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
+import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
@@ -65,7 +66,7 @@ import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermiss
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1278,6 +1279,36 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
+  useEffect(() => {
+    if (!companyID || nodes.length === 0) return undefined;
+    const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID);
+    if (missingIDs.length === 0) return undefined;
+    let cancelled = false;
+    void Promise.all(missingIDs.map(async (logicGateID) => {
+      try {
+        const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
+        return details.logic_gate;
+      } catch {
+        return null;
+      }
+    })).then((records) => {
+      if (cancelled) return;
+      const fetched = records.filter((record): record is LogicGateRecord => Boolean(record));
+      if (fetched.length === 0) return;
+      setLogicGates((previous) => {
+        const byID = new Map(previous.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+        let changed = false;
+        for (const logicGate of fetched) {
+          const current = byID.get(logicGate.logic_gate_id);
+          if (current?.header === logicGate.header && current?.raci_assignments === logicGate.raci_assignments) continue;
+          byID.set(logicGate.logic_gate_id, logicGate);
+          changed = true;
+        }
+        return changed ? Array.from(byID.values()) : previous;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, logicGateByID, nodes]);
   const myNodes = useMemo(() => {
     if (!currentUserID) return [];
     return nodes.filter((node) => node.assignee_user_id?.trim() === currentUserID);

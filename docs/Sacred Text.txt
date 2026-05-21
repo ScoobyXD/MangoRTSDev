@@ -10,5 +10,3 @@ This startup is building B2B software for:
 - AWS-hosted app and database infrastructure, with code written efficiently to minimize cloud cost
 Default engineering rule:
 Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously.
-
-Find the simplest solution possible. Only increase complexity when needed.
