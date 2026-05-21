@@ -630,14 +630,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         setRootRowOrder((previous) => ({ ...previous, [`node-${node.node_id}`]: position }));
       }
       expandCreatedItemTarget(createdFolderID);
-      lastLocalExplorerSelectionRef.current = { domain: "node", changedAt: Date.now() };
-      pendingExplorerSelectionIntentRef.current = "activate";
-      setSelectedTreeID(`node-${node.node_id}`);
-      setSelectedTreeIDs(new Set([`node-${node.node_id}`]));
-      setSelectionAnchorTreeID(`node-${node.node_id}`);
-      setSelectedNodeID(node.node_id);
-      setSelectedLogicGateID("");
-      setSelectedKanbanBoardID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }

@@ -854,8 +854,6 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         [node.node_id]: position,
       }));
       applyCreatedNodeBatchSideEffects(response, [node], response.relationships ?? []);
-      setSelectedNodeID(node.node_id);
-      setSelectedNodeIDs(new Set([node.node_id]));
       return node;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
@@ -928,9 +926,6 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       }
 
       applyCreatedNodeBatchSideEffects(response, [node], response.relationships ?? []);
-      setSelectedNodeID(node.node_id);
-      setSelectedNodeIDs(new Set([node.node_id]));
-      setDetailsPanelNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
     }

@@ -14,6 +14,7 @@ type EditorLinkedDocumentPanelsProps = {
     status: string;
     statusColor: string;
     priorityDraft: string;
+    priorityRequirementError?: string;
     assigneeDraft: string;
     dueDateDraft: string;
   } | null;
@@ -46,7 +47,7 @@ const NODE_PRIORITY_OPTIONS = [
   { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#ff8820" },
   { value: "4", label: "4\u00A0\u00A0Within the week", color: "#f59e0b" },
   { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
-  { value: "0", label: "0\u00A0\u00A0Unassigned", color: "#64748b" },
+  { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;
 
 const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
@@ -156,6 +157,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
   const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
+  const priorityRequirementError = nodePresetFields?.priorityRequirementError ?? "";
+  const priorityHasRequirementError = Boolean(priorityRequirementError);
   const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
   const assigneeMatches = useMemo(() => {
     const query = (nodePresetFields?.assigneeDraft ?? "").trim().toLowerCase();
@@ -362,98 +365,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 </span>
               </label>
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-                <strong>Priority:</strong>
-                <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>
-                  <button
-                    type="button"
-                    aria-haspopup="listbox"
-                    aria-expanded={priorityMenuOpen}
-                    onClick={() => setPriorityMenuOpen((open) => !open)}
-                    style={{
-                      width: "100%",
-                      minHeight: 26,
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) 18px",
-                      alignItems: "center",
-                      gap: 7,
-                      border: `1px solid ${selectedPriority.color}66`,
-                      borderRadius: 6,
-                      background: hexWithAlpha(selectedPriority.color, "14"),
-                      color: selectedPriority.color,
-                      font: "inherit",
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      padding: "3px 8px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
-                    <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "currentColor" }}>
-                      {selectedPriority.value !== "0" ? <PriorityCheckIcon color={selectedPriority.color} /> : null}
-                    </span>
-                  </button>
-                  {priorityMenuOpen && (
-                    <div
-                      role="listbox"
-                      aria-label="Priority"
-                      style={{
-                        position: "absolute",
-                        zIndex: 30,
-                        top: "calc(100% + 5px)",
-                        left: 0,
-                        width: "min(270px, 86vw)",
-                        padding: 5,
-                        border: `1px solid ${ruleColor}`,
-                        borderRadius: 8,
-                        background: "#ffffff",
-                        boxShadow: "0 14px 30px rgba(15,23,42,0.18)",
-                        color: "#111827",
-                      }}
-                    >
-                      {NODE_PRIORITY_OPTIONS.map((option) => {
-                        const selected = option.value === selectedPriority.value;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              onSetNodePriorityDraft(option.value);
-                              onCommitNodePriorityDraft(option.value);
-                              setPriorityMenuOpen(false);
-                            }}
-                            style={{
-                              width: "100%",
-                              display: "grid",
-                              gridTemplateColumns: "minmax(0, 1fr) 18px",
-                              alignItems: "center",
-                              gap: 8,
-                              border: "none",
-                              borderRadius: 6,
-                              background: selected ? hexWithAlpha(option.color, "18") : "transparent",
-                              color: selected ? option.color : "#1f2937",
-                              font: "inherit",
-                              fontSize: 11.5,
-                              fontWeight: 500,
-                              padding: "7px 8px",
-                              cursor: "pointer",
-                              textAlign: "left",
-                            }}
-                          >
-                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
-                            <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
-                              {selected ? <PriorityCheckIcon color={option.color} /> : null}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </span>
-              </label>
-              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
@@ -494,6 +405,103 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     aria-hidden="true"
                     style={{ position: "absolute", right: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
                   />
+                </span>
+              </label>
+              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+                <strong style={{ paddingTop: 3 }}>Priority:</strong>
+                <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                  <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>
+                    <button
+                      type="button"
+                      aria-haspopup="listbox"
+                      aria-expanded={priorityMenuOpen}
+                      aria-invalid={priorityHasRequirementError}
+                      onClick={() => setPriorityMenuOpen((open) => !open)}
+                      style={{
+                        width: "100%",
+                        minHeight: 26,
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) 18px",
+                        alignItems: "center",
+                        gap: 7,
+                        border: `1px solid ${priorityHasRequirementError ? "#b42318" : `${selectedPriority.color}66`}`,
+                        borderRadius: 6,
+                        background: priorityHasRequirementError ? "rgba(180,35,24,0.08)" : hexWithAlpha(selectedPriority.color, "14"),
+                        color: priorityHasRequirementError ? "#b42318" : selectedPriority.color,
+                        font: "inherit",
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(180,35,24,0.18)" : "none",
+                      }}
+                    >
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
+                      <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "currentColor" }}>
+                        {selectedPriority.value !== "0" ? <PriorityCheckIcon color={priorityHasRequirementError ? "#b42318" : selectedPriority.color} /> : null}
+                      </span>
+                    </button>
+                    {priorityMenuOpen && (
+                      <div
+                        role="listbox"
+                        aria-label="Priority"
+                        style={{
+                          position: "absolute",
+                          zIndex: 30,
+                          top: "calc(100% + 5px)",
+                          left: 0,
+                          width: "min(270px, 86vw)",
+                          padding: 5,
+                          border: `1px solid ${ruleColor}`,
+                          borderRadius: 8,
+                          background: "#ffffff",
+                          boxShadow: "0 14px 30px rgba(15,23,42,0.18)",
+                          color: "#111827",
+                        }}
+                      >
+                        {NODE_PRIORITY_OPTIONS.map((option) => {
+                          const selected = option.value === selectedPriority.value;
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                onSetNodePriorityDraft(option.value);
+                                onCommitNodePriorityDraft(option.value);
+                                setPriorityMenuOpen(false);
+                              }}
+                              style={{
+                                width: "100%",
+                                display: "grid",
+                                gridTemplateColumns: "minmax(0, 1fr) 18px",
+                                alignItems: "center",
+                                gap: 8,
+                                border: "none",
+                                borderRadius: 6,
+                                background: selected ? hexWithAlpha(option.color, "18") : "transparent",
+                                color: selected ? option.color : "#1f2937",
+                                font: "inherit",
+                                fontSize: 11.5,
+                                fontWeight: 500,
+                                padding: "7px 8px",
+                                cursor: "pointer",
+                                textAlign: "left",
+                              }}
+                            >
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
+                              <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
+                                {selected ? <PriorityCheckIcon color={option.color} /> : null}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </span>
+                  {priorityRequirementError && <span style={{ color: "#b42318", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
                 </span>
               </label>
             </div>

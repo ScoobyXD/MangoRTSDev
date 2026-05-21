@@ -194,7 +194,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
               Priority
               <select value={priority} onChange={(event) => setPriority(event.target.value)} style={fieldStyle}>
                 <option value="__no_change__">No change</option>
-                <option value="0">Unassigned</option>
+                <option value="0">Unassigned to a Logic Gate</option>
                 <option value="1">1 Urgent</option>
                 <option value="2">2 End of day</option>
                 <option value="3">3 Few days</option>

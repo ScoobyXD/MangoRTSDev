@@ -12,6 +12,7 @@ export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 export type NodeWorkspaceSurfaceProps = {
   companyID: string;
   nodeID: string;
+  nodePriorityDraft: string;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
   unseenChanges: NodeContentChange[];
@@ -32,6 +33,7 @@ export type NodeWorkspaceSurfaceProps = {
   onMarkAllChangesSeen: () => void;
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
+  onRequireNodePriorityForLogicGateAssignment: () => void;
   onError: (message: string) => void;
 };
 

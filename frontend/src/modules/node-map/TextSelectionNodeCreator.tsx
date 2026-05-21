@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { publishLiveSelection } from "../selectionCoordinator";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle, type SelectionNodeRelationshipKind } from "./selectionNodeCreation";
 
 type TextSelectionNodeCreatorProps = {
@@ -81,7 +80,7 @@ function readSelectionSnapshot(root: HTMLElement | null): TextSelectionSnapshot 
   return { title, x, y, sourceNodeID };
 }
 
-export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> = ({ companyID, accent, targetFrameIDs, rootRef }) => {
+export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> = ({ companyID, accent, rootRef }) => {
   const [snapshot, setSnapshot] = useState<TextSelectionSnapshot | null>(null);
   const [creating, setCreating] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -89,11 +88,6 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
   const frameRef = useRef<number | null>(null);
   const errorTimerRef = useRef<number | null>(null);
   const pointerSelectingRef = useRef(false);
-
-  const cleanTargetFrameIDs = useMemo(
-    () => Array.from(new Set(targetFrameIDs.map((id) => id.trim()).filter(Boolean))),
-    [targetFrameIDs],
-  );
 
   const scheduleRefresh = useCallback((force = false) => {
     if (creating) return;
@@ -161,25 +155,11 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
     setCreating(true);
     setError("");
     try {
-      const node = await createNodeFromSelectionTitle({
+      await createNodeFromSelectionTitle({
         companyID,
         title: current.title,
         sourceNodeID: current.sourceNodeID,
         relationshipKind,
-      });
-      const treeID = `node-${node.node_id}`;
-      publishLiveSelection({
-        companyID,
-        entityKind: "node",
-        entityID: node.node_id,
-        label: node.title,
-        sourceFrameID: "text-selection-node-creator",
-        sourceModule: "editor",
-        targetFrameIDs: cleanTargetFrameIDs,
-        selectedTreeID: treeID,
-        selectedTreeIDs: [treeID],
-        selectedEntityIDs: [node.node_id],
-        selectionIntent: "navigate",
       });
       document.getSelection()?.removeAllRanges();
       setSnapshot(null);
@@ -189,7 +169,7 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
     } finally {
       setCreating(false);
     }
-  }, [cleanTargetFrameIDs, companyID, creating, showError, snapshot]);
+  }, [companyID, creating, showError, snapshot]);
 
   if (!snapshot || !companyID) return null;
 

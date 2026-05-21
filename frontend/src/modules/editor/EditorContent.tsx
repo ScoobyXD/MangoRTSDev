@@ -22,7 +22,7 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { createRequestJSON } from "../api/requestJSON";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -242,6 +242,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
+  const [nodePriorityRequirementError, setNodePriorityRequirementError] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
   const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
@@ -286,6 +287,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
   const collaborationSendTimerRef = useRef<number | null>(null);
   const collaborationStatusTimerRef = useRef<number | null>(null);
+  const nodePriorityRequirementTimerRef = useRef<number | null>(null);
   const pendingCollaborationHTMLRef = useRef<string | null>(null);
   const applyingRemoteCollaborationRef = useRef(false);
   const lastLocalCollaborationEditAtRef = useRef(0);
@@ -492,6 +494,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     collaborationStatusTimerRef.current = window.setTimeout(() => {
       collaborationStatusTimerRef.current = null;
       setCollaborationStatus("");
+    }, 2_400);
+  }, []);
+
+  const showNodePriorityRequirementError = useCallback(() => {
+    const message = "Must give node a priority";
+    setNodePriorityRequirementError(message);
+    if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
+    nodePriorityRequirementTimerRef.current = window.setTimeout(() => {
+      nodePriorityRequirementTimerRef.current = null;
+      setNodePriorityRequirementError("");
     }, 2_400);
   }, []);
 
@@ -897,22 +909,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
       primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: relationship ? [relationship] : [] }]);
       invalidateWorkspaceSnapshot(apiBase, companyID);
-      setActiveTab("editor");
-      applyLinkedNode(node.node_id, getNodeTitle(node), { focusEditor: true });
-      publishLiveSelection({
-        companyID,
-        entityKind: "node",
-        entityID: node.node_id,
-        label: getNodeTitle(node),
-        sourceFrameID: scope,
-        sourceModule: "editor",
-        targetFrameIDs: [linkedMapWidgetID].filter(Boolean),
-        selectionIntent: "activate",
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_related_node");
     }
-  }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedMapWidgetID, linkedNodeID, requestJSON, scope]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string }) => {
     if (!companyID || linkedEntityKind !== "node") return;
@@ -966,8 +966,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-    applyLinkedNode(node.node_id, getNodeTitle(node), { focusEditor: true });
-  }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
@@ -1028,6 +1027,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError("Priority must be 1 through 5");
       return;
     }
+    setNodePriorityRequirementError("");
     void updateNodePresetPatch({ priority: parsed });
   }, [updateNodePresetPatch]);
 
@@ -1205,8 +1205,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => () => {
     if (collaborationSendTimerRef.current !== null) window.clearTimeout(collaborationSendTimerRef.current);
     if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
+    if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
     if (remoteCollaborationTimerRef.current !== null) window.clearTimeout(remoteCollaborationTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    setNodePriorityRequirementError("");
+  }, [linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     const refresh = () => {
@@ -1648,6 +1653,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               status: nodeStatus || "",
               statusColor: nodeStatusColor || "",
               priorityDraft: nodePriorityDraft,
+              priorityRequirementError: nodePriorityRequirementError,
               assigneeDraft: nodeAssigneeDraft,
               dueDateDraft: nodeDueDateDraft,
             } : null}
@@ -1731,6 +1737,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <NodeWorkspaceSurface
             companyID={companyID}
             nodeID={linkedNodeID}
+            nodePriorityDraft={nodePriorityDraft}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
             unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
@@ -1751,6 +1758,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onMarkAllChangesSeen={markAllNodeContentChangesSeen}
             onCreateNodeFromImage={createNodeFromImageDocument}
             onAssignToLogicGate={assignLinkedNodeToLogicGate}
+            onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}
             onError={setError}
           />
         )}

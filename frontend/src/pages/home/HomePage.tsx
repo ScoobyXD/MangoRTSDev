@@ -1769,13 +1769,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         return;
       }
       setNotice("Node created.");
-      openNodeEditorOverlay(result.node);
     } catch (createError) {
       setError(formatError(createError, assignment?.logicGateID ? "Failed to create node in Logic Gate" : "Failed to create node"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID, openNodeEditorOverlay]);
+  }, [apiBase, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
   const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean } = {}) => {
     setBusy("create-logic-gate");
     setError("");

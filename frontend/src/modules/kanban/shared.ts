@@ -645,7 +645,7 @@ function getKanbanPriorityGroupLabel(priority: number): string {
   if (priority === 3) return "3\u00A0\u00A0Within a few days";
   if (priority === 4) return "4\u00A0\u00A0Within the week";
   if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
-  return "0\u00A0\u00A0Unassigned";
+  return "Unassigned to a Logic Gate";
 }
 
 export function getKanbanGroupValue(

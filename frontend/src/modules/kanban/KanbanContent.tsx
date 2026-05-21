@@ -1297,8 +1297,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setSelectedCardIDs(new Set([createdCard.card_id]));
       setSelectionAnchorCardID(createdCard.card_id);
       setHighlightedEntity({ nodeID: createdCard.node_id });
-      publishKanbanSelectionToLinkedFrames(companyID, frameID, createdCard.node_id, createdCard.node_title, [createdCard.node_id]);
-      setNodeEditorOverlay({ nodeID: createdCard.node_id, nodeTitle: createdCard.node_title });
     } catch {
       setError("Node create failed");
       refreshBoard();
