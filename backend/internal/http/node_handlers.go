@@ -289,17 +289,16 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
 			return
 		}
-		nodes, err := s.repo.ListNodes(companyID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
-			return
+		relationshipNodeIDs := make([]string, 0, len(details.Relationships)*2)
+		for _, relationship := range details.Relationships {
+			relationshipNodeIDs = append(relationshipNodeIDs, relationship.NodeIDA, relationship.NodeIDB)
 		}
-		nodes, err = s.filterVisibleNodes(r, companyID, nodes)
+		visibleRelationshipNodeIDs, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, relationshipNodeIDs)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
 			return
 		}
-		details.Relationships = filterNodeRelationshipsByVisibleNodes(details.Relationships, visibleNodeIDs(nodes))
+		details.Relationships = filterNodeRelationshipsByVisibleNodes(details.Relationships, visibleRelationshipNodeIDs)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
 		return
 	}

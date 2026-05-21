@@ -101,3 +101,38 @@ The loop above violated these rules by repeatedly issuing snapshot reads and re-
 - Add dashboard panels for `/v1/workspace/snapshot` request rate and 2xx/304 breakdown.
 - Alert when per-session snapshot GET rate exceeds expected thresholds on Node Map hot path.
 - Add a dedicated frontend test harness for NodeRelationshipGraph store subscription/refresh loops.
+
+# Hot Read Visibility Regression
+
+Last updated: 2026-05-21
+
+## Symptom
+
+Several unrelated backend reads clustered around multi-second response times, especially:
+
+- `GET /v1/workspace/snapshot`
+- `GET /v1/company-explorer/folder-items`
+- `GET /v1/nodes/{node_id}`
+- `GET /v1/logic-gates/{logic_gate_id}`
+
+## Root cause summary
+
+The resource-access layer introduced per-entity visibility checks on hot read paths. List and snapshot handlers loaded result sets and then called `UserCanViewEntity` once per node, Logic Gate, map position, Kanban item, or Explorer folder item. On Postgres this meant one or more SQL round trips per returned entity.
+
+Node and Logic Gate detail handlers also reloaded the full company node/gate list just to filter relationships for one selected entity.
+
+`GET /v1/company-explorer/folder-items` also used a payload-hash ETag path, so unchanged conditional requests still loaded data and filtered permissions before returning `304 Not Modified`.
+
+## Implemented fix
+
+- Added repository-level bulk visibility checks via `ListAccessibleEntityIDs`.
+- Reworked HTTP visibility filters to request a visible ID set once per entity type and filter in memory while preserving response order.
+- Changed node and Logic Gate detail views to filter only IDs present in that detail response's relationships instead of loading the full company list.
+- Moved `GET /v1/company-explorer/folder-items` to a pre-body read-version ETag path.
+- Added `company-explorer-folder-items` read-version rows and mappings so folder item conditional GETs can resolve from a cheap validator.
+
+## Expected behavior after fix
+
+- Company Explorer snapshots, folder item reads, map snapshots, work-item lists, and Kanban list filters avoid N+1 permission checks.
+- Opening a node or Logic Gate no longer scales with total company node/gate count.
+- Unchanged folder-item requests can return `304 Not Modified` before payload assembly.

@@ -621,6 +621,186 @@ func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID
 	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
 }
 
+func (r *PostgresRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	entityType, ok := NormalizeEntityType(entityType)
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if companyID == "" || userID == "" || !ok || !accessOK {
+		return nil, ErrInvalid
+	}
+
+	cleanIDs := make([]string, 0, len(entityIDs))
+	seen := map[string]bool{}
+	for _, rawID := range entityIDs {
+		entityID := cleanUUIDText(rawID)
+		if entityID == "" || seen[entityID] {
+			continue
+		}
+		seen[entityID] = true
+		cleanIDs = append(cleanIDs, entityID)
+	}
+	if len(cleanIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+
+	existingSQL := ""
+	switch entityType {
+	case EntityTypeNode:
+		existingSQL = `
+  select input.resource_id
+  from input
+  join nodes item
+    on item.company_id=$1::uuid
+   and item.node_id=input.resource_id`
+	case EntityTypeLogicGate:
+		existingSQL = `
+  select input.resource_id
+  from input
+  join logic_gates item
+    on item.company_id=$1::uuid
+   and item.logic_gate_id=input.resource_id`
+	case EntityTypeSharedTriageFolder:
+		existingSQL = `
+  select input.resource_id
+  from input
+  join company_explorer_folders item
+    on item.company_id=$1::uuid
+   and item.folder_id=input.resource_id
+   and item.folder_kind='communications'`
+	default:
+		return nil, ErrInvalid
+	}
+
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive input(resource_id) as (
+  select distinct raw.resource_id::uuid
+  from unnest($5::text[]) as raw(resource_id)
+),
+normalized_resource(resource_type) as (
+  select $2::text
+),
+requested(required_rank) as (
+  select mangorts_access_level_rank($4::text)
+),
+role_admin_actor(allowed) as (
+  select exists (
+    select 1
+    from company_memberships membership
+    where membership.user_id=$3::uuid
+      and (
+        membership.role='dev_admin'
+        or (membership.company_id=$1::uuid and membership.role='company_admin')
+      )
+  )
+),
+existing(resource_id) as (`+existingSQL+`
+),
+resource_scope(root_id, resource_id, depth, path) as (
+  select existing.resource_id, existing.resource_id, 0, array[existing.resource_id]
+  from existing
+  union all
+  select resource_scope.root_id,
+         folder.parent_folder_id,
+         resource_scope.depth + 1,
+         resource_scope.path || folder.parent_folder_id
+  from resource_scope
+  join company_explorer_folders folder
+    on folder.company_id=$1::uuid
+   and folder.folder_kind='communications'
+   and folder.folder_id=resource_scope.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type='shared_triage_folder'
+  where folder.parent_folder_id is not null
+    and not folder.parent_folder_id = any(resource_scope.path)
+),
+permitted_group_scope(root_id, resource_id, depth, group_id, access_rank, path) as (
+  select resource_scope.root_id,
+         permission.resource_id,
+         resource_scope.depth,
+         permission.principal_id,
+         mangorts_access_level_rank(permission.access_level),
+         array[permission.principal_id]
+  from resource_access_grants permission
+  join resource_scope
+    on resource_scope.resource_id=permission.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type=permission.resource_type
+  where permission.company_id=$1::uuid
+    and permission.principal_type='group'
+  union all
+  select parent.root_id,
+         parent.resource_id,
+         parent.depth,
+         child.group_id,
+         parent.access_rank,
+         parent.path || child.group_id
+  from permitted_group_scope parent
+  join company_user_groups child
+    on child.company_id=$1::uuid
+   and child.parent_group_id=parent.group_id
+  where not child.group_id = any(parent.path)
+),
+matching_grants(root_id, depth, subject_rank, access_rank) as (
+  select resource_scope.root_id,
+         resource_scope.depth,
+         2,
+         mangorts_access_level_rank(permission.access_level)
+  from resource_access_grants permission
+  join resource_scope
+    on resource_scope.resource_id=permission.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type=permission.resource_type
+  where permission.company_id=$1::uuid
+    and permission.principal_type='user'
+    and permission.principal_id=$3::uuid
+  union all
+  select permitted_group_scope.root_id,
+         permitted_group_scope.depth,
+         1,
+         permitted_group_scope.access_rank
+  from company_user_group_members member
+  join permitted_group_scope
+    on permitted_group_scope.group_id=member.group_id
+  where member.company_id=$1::uuid
+    and member.user_id=$3::uuid
+),
+effective_grant(root_id, access_rank) as (
+  select distinct on (matching_grants.root_id)
+         matching_grants.root_id,
+         matching_grants.access_rank
+  from matching_grants
+  order by matching_grants.root_id,
+           matching_grants.depth asc,
+           matching_grants.subject_rank desc,
+           matching_grants.access_rank desc
+)
+select existing.resource_id::text
+from existing
+cross join requested
+left join effective_grant
+  on effective_grant.root_id=existing.resource_id
+where requested.required_rank > 0
+  and (
+    (select allowed from role_admin_actor)
+    or coalesce(effective_grant.access_rank >= requested.required_rank, false)
+  )`, companyID, entityType, userID, accessLevel, cleanIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var entityID string
+		if err := rows.Scan(&entityID); err != nil {
+			return nil, err
+		}
+		out[entityID] = true
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	entityID = strings.TrimSpace(entityID)

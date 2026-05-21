@@ -82,6 +82,12 @@ func workspaceReadVersionQueryForResource(companyID, resource string, queries []
 	switch resource {
 	case "nodes", "node-relationships", "logic-gates", "logic-gate-relationships", "map-layout:node", "map-layout:node-window", "map-layout:logic_gate", "map-layout:logic_gate-window", "kanban-boards":
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
+	case "company-explorer-folder-items":
+		itemType := workspaceEventQueryPayloadValue(queries, "item_type")
+		if itemType == "" {
+			return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
+		}
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource, ResourceKey: store.WorkspaceReadVersionResourceKey("item_type", itemType)}
 	case "kanban-columns", "kanban-cards":
 		boardID := workspaceEventQueryPayloadValue(queries, "board_id")
 		if boardID == "" {

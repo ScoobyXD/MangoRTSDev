@@ -123,6 +123,9 @@ func WorkspaceReadVersionStaticRows(companyID string) []WorkspaceReadVersionQuer
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "node")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "logic_gate")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "communications")},
+		{CompanyID: companyID, Scope: "company-explorer-folder-items"},
+		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "node")},
+		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "logic_gate")},
 		{CompanyID: companyID, Scope: "nodes"},
 		{CompanyID: companyID, Scope: "node-relationships"},
 		{CompanyID: companyID, Scope: "logic-gates"},
@@ -155,6 +158,9 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 	addCompanyExplorer := func(resourceKey string) {
 		add("workspace-snapshot:company_explorer", resourceKey)
 	}
+	addCompanyExplorerFolderItems := func(resourceKey string) {
+		add("company-explorer-folder-items", resourceKey)
+	}
 	addNodeMapSnapshots := func() {
 		add("workspace-snapshot:node_map", "")
 		add("workspace-snapshot:node_map_window", "")
@@ -183,6 +189,10 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 		addCompanyExplorer("")
 		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "node"))
 	}
+	if eventType == "node_deleted" || eventType == "node_permissions_updated" {
+		addCompanyExplorerFolderItems("")
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "node"))
+	}
 	if stringInList(eventType, NodeRelationshipWorkspaceEventTypes) {
 		add("node-relationships", "")
 		addNodeMapSnapshots()
@@ -202,6 +212,10 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 		addLogicGateMapSnapshots()
 		addCompanyExplorer("")
 		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
+	}
+	if eventType == "logic_gate_deleted" || eventType == "logic_gate_permissions_updated" {
+		addCompanyExplorerFolderItems("")
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
 	}
 	if stringInList(eventType, LogicGateRelationshipWorkspaceEventTypes) {
 		add("logic-gate-relationships", "")
@@ -224,11 +238,15 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			add("map-layout:node-window", "")
 			addCompanyExplorer("")
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "node"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "node"))
 		case "logic_gate":
 			addLogicGateMapSnapshots()
 			add("map-layout:logic_gate-window", "")
 			addCompanyExplorer("")
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
 		case "communications":
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "communications"))
 		}
@@ -240,11 +258,15 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			add("map-layout:node-window", "")
 			addCompanyExplorer("")
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "node"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "node"))
 		case "logic_gate":
 			addLogicGateMapSnapshots()
 			add("map-layout:logic_gate-window", "")
 			addCompanyExplorer("")
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
 		}
 	}
 

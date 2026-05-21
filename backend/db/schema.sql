@@ -2104,6 +2104,9 @@ returns table(scope text, resource_key text) as $$
     ('workspace-snapshot:company_explorer', 'folder_kind:node'),
     ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
     ('workspace-snapshot:company_explorer', 'folder_kind:communications'),
+    ('company-explorer-folder-items', ''),
+    ('company-explorer-folder-items', 'item_type:node'),
+    ('company-explorer-folder-items', 'item_type:logic_gate'),
     ('nodes', ''),
     ('node-relationships', ''),
     ('logic-gates', ''),
@@ -2139,7 +2142,8 @@ begin
     'work_item.logic_gate_assignment_removed',
     'work_item.logic_gate_issue_toggled',
     'kanban_column_deleted',
-    'kanban_board_deleted'
+    'kanban_board_deleted',
+    'node_permissions_updated'
   ]::text[]) then
     return query select v.scope, v.resource_key from (values
       ('nodes', ''),
@@ -2147,6 +2151,13 @@ begin
       ('workspace-snapshot:node_map_window', ''),
       ('workspace-snapshot:company_explorer', ''),
       ('workspace-snapshot:company_explorer', 'folder_kind:node')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['node_deleted', 'node_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:node')
     ) as v(scope, resource_key);
   end if;
 
@@ -2174,13 +2185,20 @@ begin
     ) as v(scope, resource_key);
   end if;
 
-  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_raci_updated']::text[]) then
+  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_raci_updated', 'logic_gate_permissions_updated']::text[]) then
     return query select v.scope, v.resource_key from (values
       ('logic-gates', ''),
       ('workspace-snapshot:logic_gate_map', ''),
       ('workspace-snapshot:logic_gate_map_window', ''),
       ('workspace-snapshot:company_explorer', ''),
       ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['logic_gate_deleted', 'logic_gate_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:logic_gate')
     ) as v(scope, resource_key);
   end if;
 
@@ -2212,7 +2230,8 @@ begin
     'company_explorer_folder_created',
     'company_explorer_folder_updated',
     'company_explorer_folder_deleted',
-    'communications_shared_inbox_raci_updated'
+    'communications_shared_inbox_raci_updated',
+    'shared_triage_access_updated'
   ]::text[]) then
     if folder_kind = 'node' then
       return query select v.scope, v.resource_key from (values
@@ -2220,7 +2239,9 @@ begin
         ('workspace-snapshot:node_map_window', ''),
         ('map-layout:node-window', ''),
         ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:node')
+        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:node')
       ) as v(scope, resource_key);
     elsif folder_kind = 'logic_gate' then
       return query select v.scope, v.resource_key from (values
@@ -2228,7 +2249,9 @@ begin
         ('workspace-snapshot:logic_gate_map_window', ''),
         ('map-layout:logic_gate-window', ''),
         ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
+        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:logic_gate')
       ) as v(scope, resource_key);
     elsif folder_kind = 'communications' then
       return query select v.scope, v.resource_key from (values
@@ -2244,7 +2267,9 @@ begin
         ('workspace-snapshot:node_map_window', ''),
         ('map-layout:node-window', ''),
         ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:node')
+        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:node')
       ) as v(scope, resource_key);
     elsif item_type = 'logic_gate' then
       return query select v.scope, v.resource_key from (values
@@ -2252,7 +2277,9 @@ begin
         ('workspace-snapshot:logic_gate_map_window', ''),
         ('map-layout:logic_gate-window', ''),
         ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
+        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:logic_gate')
       ) as v(scope, resource_key);
     end if;
   end if;

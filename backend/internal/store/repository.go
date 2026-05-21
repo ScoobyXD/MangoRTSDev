@@ -133,6 +133,7 @@ type LogicGateRepository interface {
 type EntityPermissionRepository interface {
 	ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error)
 	SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error)
+	ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error)
 	UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error)
 	UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error)
 }

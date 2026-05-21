@@ -102,21 +102,43 @@ func (s *Server) requireEntityAdmin(w http.ResponseWriter, r *http.Request, comp
 	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionAdmin, notFoundCode)
 }
 
-func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []domain.Node) ([]domain.Node, error) {
+func (s *Server) visibleEntityIDSet(r *http.Request, companyID, entityType string, entityIDs []string) (map[string]bool, error) {
+	cleanIDs := make([]string, 0, len(entityIDs))
+	seen := map[string]bool{}
+	for _, rawID := range entityIDs {
+		entityID := strings.TrimSpace(rawID)
+		if entityID == "" || seen[entityID] {
+			continue
+		}
+		seen[entityID] = true
+		cleanIDs = append(cleanIDs, entityID)
+	}
+	if len(cleanIDs) == 0 {
+		return map[string]bool{}, nil
+	}
 	userID := s.entityPermissionActorUserID(r, companyID)
 	if userID == "" {
-		return nodes, nil
+		out := make(map[string]bool, len(cleanIDs))
+		for _, entityID := range cleanIDs {
+			out[entityID] = true
+		}
+		return out, nil
+	}
+	return s.repo.ListAccessibleEntityIDs(companyID, entityType, userID, store.EntityPermissionView, cleanIDs)
+}
+
+func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []domain.Node) ([]domain.Node, error) {
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.NodeID)
+	}
+	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.Node, 0, len(nodes))
 	for _, node := range nodes {
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeNode, node.NodeID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visible[node.NodeID] {
 			out = append(out, node)
 		}
 	}
@@ -124,20 +146,17 @@ func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []d
 }
 
 func (s *Server) filterVisibleLogicGates(r *http.Request, companyID string, logicGates []domain.LogicGate) ([]domain.LogicGate, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return logicGates, nil
+	logicGateIDs := make([]string, 0, len(logicGates))
+	for _, logicGate := range logicGates {
+		logicGateIDs = append(logicGateIDs, logicGate.LogicGateID)
+	}
+	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.LogicGate, 0, len(logicGates))
 	for _, logicGate := range logicGates {
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visible[logicGate.LogicGateID] {
 			out = append(out, logicGate)
 		}
 	}
@@ -145,20 +164,17 @@ func (s *Server) filterVisibleLogicGates(r *http.Request, companyID string, logi
 }
 
 func (s *Server) filterVisibleWorkItemLogicGates(r *http.Request, companyID string, items []store.WorkItemLogicGateInboxItem) ([]store.WorkItemLogicGateInboxItem, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	logicGateIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		logicGateIDs = append(logicGateIDs, item.LogicGateID)
+	}
+	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]store.WorkItemLogicGateInboxItem, 0, len(items))
 	for _, item := range items {
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeLogicGate, item.LogicGateID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visible[item.LogicGateID] {
 			out = append(out, item)
 		}
 	}
@@ -202,20 +218,17 @@ func filterNodeMapPositionsByVisibleNodes(items []domain.NodeMapPosition, ids ma
 }
 
 func (s *Server) filterVisibleNodeMapPositions(r *http.Request, companyID string, items []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	nodeIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		nodeIDs = append(nodeIDs, item.NodeID)
+	}
+	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.NodeMapPosition, 0, len(items))
 	for _, item := range items {
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeNode, item.NodeID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visible[item.NodeID] {
 			out = append(out, item)
 		}
 	}
@@ -243,20 +256,17 @@ func filterLogicGateMapPositionsByVisibleGates(items []domain.LogicGateMapPositi
 }
 
 func (s *Server) filterVisibleLogicGateMapPositions(r *http.Request, companyID string, items []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	logicGateIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		logicGateIDs = append(logicGateIDs, item.LogicGateID)
+	}
+	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.LogicGateMapPosition, 0, len(items))
 	for _, item := range items {
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeLogicGate, item.LogicGateID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visible[item.LogicGateID] {
 			out = append(out, item)
 		}
 	}
@@ -283,25 +293,36 @@ func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorer
 }
 
 func (s *Server) filterVisibleCompanyExplorerFolderItems(r *http.Request, companyID string, items []domain.CompanyExplorerFolderItem) ([]domain.CompanyExplorerFolderItem, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	nodeIDs := make([]string, 0)
+	logicGateIDs := make([]string, 0)
+	for _, item := range items {
+		switch item.ItemType {
+		case "node":
+			nodeIDs = append(nodeIDs, item.ItemID)
+		case "logic_gate":
+			logicGateIDs = append(logicGateIDs, item.ItemID)
+		}
+	}
+	visibleNodes, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	visibleLogicGates, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.CompanyExplorerFolderItem, 0, len(items))
 	for _, item := range items {
-		entityType, ok := companyExplorerEntityType(item.ItemType)
-		if !ok {
-			out = append(out, item)
-			continue
-		}
-		allowed, err := s.repo.UserCanViewEntity(companyID, entityType, item.ItemID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		switch item.ItemType {
+		case "node":
+			if visibleNodes[item.ItemID] {
+				out = append(out, item)
+			}
+		case "logic_gate":
+			if visibleLogicGates[item.ItemID] {
+				out = append(out, item)
+			}
+		default:
 			out = append(out, item)
 		}
 	}
@@ -349,9 +370,19 @@ func (s *Server) requireKanbanBoardView(w http.ResponseWriter, r *http.Request, 
 }
 
 func (s *Server) filterVisibleKanbanBoards(r *http.Request, companyID string, items []domain.KanbanBoard) ([]domain.KanbanBoard, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	logicGateIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		logicGateID := logicGateIDFromKanbanBoardID(item.BoardID)
+		if item.LogicGateID != nil && strings.TrimSpace(*item.LogicGateID) != "" {
+			logicGateID = strings.TrimSpace(*item.LogicGateID)
+		}
+		if logicGateID != "" {
+			logicGateIDs = append(logicGateIDs, logicGateID)
+		}
+	}
+	visibleLogicGates, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.KanbanBoard, 0, len(items))
 	for _, item := range items {
@@ -363,14 +394,7 @@ func (s *Server) filterVisibleKanbanBoards(r *http.Request, companyID string, it
 			out = append(out, item)
 			continue
 		}
-		allowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeLogicGate, logicGateID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
+		if visibleLogicGates[logicGateID] {
 			out = append(out, item)
 		}
 	}
@@ -378,31 +402,29 @@ func (s *Server) filterVisibleKanbanBoards(r *http.Request, companyID string, it
 }
 
 func (s *Server) filterVisibleKanbanCards(r *http.Request, companyID string, items []domain.KanbanCard) ([]domain.KanbanCard, error) {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return items, nil
+	nodeIDs := make([]string, 0, len(items))
+	logicGateIDs := make([]string, 0)
+	for _, item := range items {
+		nodeIDs = append(nodeIDs, item.NodeID)
+		if item.LogicGateID != nil && strings.TrimSpace(*item.LogicGateID) != "" {
+			logicGateIDs = append(logicGateIDs, strings.TrimSpace(*item.LogicGateID))
+		}
+	}
+	visibleNodes, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	visibleLogicGates, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]domain.KanbanCard, 0, len(items))
 	for _, item := range items {
-		nodeAllowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeNode, item.NodeID, userID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !nodeAllowed {
+		if !visibleNodes[item.NodeID] {
 			continue
 		}
 		if item.LogicGateID != nil && strings.TrimSpace(*item.LogicGateID) != "" {
-			gateAllowed, err := s.repo.UserCanViewEntity(companyID, store.EntityTypeLogicGate, *item.LogicGateID, userID)
-			if errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !gateAllowed {
+			if !visibleLogicGates[strings.TrimSpace(*item.LogicGateID)] {
 				continue
 			}
 		}
