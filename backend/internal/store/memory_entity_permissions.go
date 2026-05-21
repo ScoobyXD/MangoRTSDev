@@ -350,6 +350,36 @@ func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID s
 	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
 }
 
+func (r *MemoryRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	normalizedEntityType, ok := NormalizeEntityType(entityType)
+	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
+	if companyID == "" || userID == "" || !ok || !accessOK {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := map[string]bool{}
+	seen := map[string]bool{}
+	for _, rawID := range entityIDs {
+		entityID := strings.TrimSpace(rawID)
+		if entityID == "" || seen[entityID] {
+			continue
+		}
+		seen[entityID] = true
+		if !r.entityExistsLocked(companyID, normalizedEntityType, entityID) {
+			continue
+		}
+		if r.userCanAccessEntityLocked(companyID, normalizedEntityType, entityID, userID, accessLevel) {
+			out[entityID] = true
+		}
+	}
+	return out, nil
+}
+
 func (r *MemoryRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	entityID = strings.TrimSpace(entityID)

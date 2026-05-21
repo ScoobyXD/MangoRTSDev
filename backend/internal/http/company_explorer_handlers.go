@@ -800,9 +800,6 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusBadRequest, "invalid_item_type")
 			return
 		}
-
-		var items []domain.CompanyExplorerFolderItem
-		var err error
 		if includeDescendants {
 			if folderID == "" {
 				writeError(w, http.StatusBadRequest, "folder_id_required")
@@ -812,6 +809,18 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 				writeError(w, http.StatusBadRequest, "item_type_required")
 				return
 			}
+		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "company-explorer-folder-items", companyExplorerFolderItemsVersionQueries(itemType))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
+
+		var items []domain.CompanyExplorerFolderItem
+		if includeDescendants {
 			folders, listErr := s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, itemType)
 			if listErr != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
@@ -834,7 +843,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusInternalServerError, "failed_to_filter_company_explorer_folder_items")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"folder_items": items}, etag)
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -909,6 +918,27 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 	}
 
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func companyExplorerFolderItemsVersionQueries(itemType string) []store.DomainEventStreamQuery {
+	switch strings.TrimSpace(itemType) {
+	case "node":
+		return []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
+		}
+	case "logic_gate":
+		return []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+		}
+	default:
+		return []store.DomainEventStreamQuery{
+			workspaceEventQuery(companyExplorerFolderItemWorkspaceEventTypes...),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+		}
+	}
 }
 
 func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r *http.Request) {
