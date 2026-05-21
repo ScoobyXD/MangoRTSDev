@@ -3,7 +3,7 @@ import type { BoundRequestJSON } from "../api/requestJSON";
 
 type PermissionEntityType = "node" | "logic_gate" | "shared_triage_folder";
 type PermissionSubjectType = "user" | "group";
-type ResourceAccessLevel = "view" | "edit" | "admin";
+type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
 type ResourceAccessSelection = "" | ResourceAccessLevel;
 
 type CompanyUser = {
@@ -11,7 +11,7 @@ type CompanyUser = {
   user_id: string;
   email: string;
   display_name?: string;
-  role: string;
+  role: "dev_admin" | "company_admin" | "company_user" | string;
 };
 
 type CompanyUserGroup = {
@@ -66,6 +66,7 @@ type PermissionPayload = {
 };
 
 const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label: string }> = [
+  { value: "no_access", label: "No Access" },
   { value: "view", label: "View" },
   { value: "edit", label: "Edit" },
   { value: "admin", label: "Admin" },
@@ -153,10 +154,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   }, [members]);
 
   const groupedUserIDs = useMemo(() => new Set(members.map((member) => member.user_id)), [members]);
+  const usersByID = useMemo(() => new Map(users.map((user) => [user.user_id, user])), [users]);
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
   const assignmentCount = accessBySubject.size;
-  const defaultsToFullAccess = entityTypeDefaultsToFullAccess(entityType);
-  const defaultAccessLabel = assignmentCount > 0 ? "No access" : defaultsToFullAccess ? "Default admin" : "Default view";
+  const defaultAccessLabel = entityType === "shared_triage_folder" ? "Inherited / no access" : "No access";
   const accessOptions = useMemo(() => accessOptionsFor(defaultAccessLabel), [defaultAccessLabel]);
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessSelection) => {
@@ -192,15 +193,17 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     }
   };
 
-  const renderAccessSelect = (key: PermissionSelectionKey) => (
+  const renderAccessSelect = (key: PermissionSelectionKey, forcedAccessLevel: ResourceAccessLevel | "" = "") => (
     <select
-      value={accessBySubject.get(key) ?? ""}
+      value={forcedAccessLevel || accessBySubject.get(key) || ""}
       onChange={(event) => setAccess(key, event.target.value as ResourceAccessSelection)}
       style={permissionSelectStyle}
-      disabled={busy}
+      disabled={busy || !!forcedAccessLevel}
       aria-label="Access level"
     >
-      {accessOptions.map((option) => <option key={option.value || "default"} value={option.value}>{option.label}</option>)}
+      {forcedAccessLevel
+        ? <option value={forcedAccessLevel}>{roleAccessLabel(forcedAccessLevel)}</option>
+        : accessOptions.map((option) => <option key={option.value || "default"} value={option.value}>{option.label}</option>)}
     </select>
   );
 
@@ -217,11 +220,13 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         </div>
         {groupMembers.map((member) => {
           const userKey = `user:${member.user_id}` as PermissionSelectionKey;
+          const user = usersByID.get(member.user_id);
+          const forcedAccessLevel = companyUserRoleForcesAdmin(user?.role) ? "admin" : "";
           return (
             <div key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
               <span>{permissionUserLabel(member)}</span>
-              <span style={permissionMutedTextStyle}>User</span>
-              {renderAccessSelect(userKey)}
+              <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user?.role)}</span>
+              {renderAccessSelect(userKey, forcedAccessLevel)}
             </div>
           );
         })}
@@ -246,7 +251,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         <div style={permissionInfoStyle}>
-          {permissionSummaryText(saved, assignmentCount, defaultsToFullAccess)}
+          {permissionSummaryText(saved, assignmentCount, entityType)}
         </div>
         {error && <div style={permissionErrorStyle}>{error}</div>}
       </div>
@@ -257,11 +262,12 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
             <div style={permissionSubheadStyle}>Ungrouped Users</div>
             {ungroupedUsers.map((user) => {
               const key = `user:${user.user_id}` as PermissionSelectionKey;
+              const forcedAccessLevel = companyUserRoleForcesAdmin(user.role) ? "admin" : "";
               return (
                 <div key={user.user_id} style={permissionRowStyle}>
                   <span>{companyUserLabel(user)}</span>
-                  <span style={permissionMutedTextStyle}>User</span>
-                  {renderAccessSelect(key)}
+                  <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user.role)}</span>
+                  {renderAccessSelect(key, forcedAccessLevel)}
                 </div>
               );
             })}
@@ -270,7 +276,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
       </div>
       <div style={permissionFooterStyle}>
-        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>{defaultsToFullAccess ? "Restore default full access" : "Clear grants"}</button>
+        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>{"Clear grants"}</button>
         {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
         <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
       </div>
@@ -308,22 +314,51 @@ function permissionsPathFor(entityType: PermissionEntityType, entityID: string):
   }
 }
 
-function entityTypeDefaultsToFullAccess(entityType: PermissionEntityType): boolean {
-  return entityType === "node" || entityType === "logic_gate";
+function accessLevelLabel(accessLevel: ResourceAccessLevel): string {
+  switch (accessLevel) {
+    case "no_access":
+      return "no access";
+    case "view":
+      return "view";
+    case "edit":
+      return "edit";
+    case "admin":
+      return "admin";
+  }
 }
 
-function permissionSummaryText(saved: boolean, assignmentCount: number, defaultsToFullAccess: boolean): string {
-  if (saved) return "Permissions saved";
-  if (assignmentCount > 0) return `${assignmentCount} access grants`;
-  if (defaultsToFullAccess) return "Default full access: all company users can view, edit, and admin.";
-  return "Visible to all company users. Edit and admin still require an explicit grant.";
+function roleAccessLabel(accessLevel: ResourceAccessLevel): string {
+  if (accessLevel === "admin") return "Admin (role)";
+  return accessLevelLabel(accessLevel);
+}
+
+function companyUserRoleForcesAdmin(role: string | undefined): boolean {
+  return role === "dev_admin" || role === "company_admin";
+}
+
+function companyUserRoleLabel(role: string | undefined): string {
+  switch (role) {
+    case "dev_admin":
+      return "Dev Admin";
+    case "company_admin":
+      return "Company Admin";
+    default:
+      return "User";
+  }
+}
+
+function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType): string {
+  if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
+  if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access.`;
+  if (entityType === "shared_triage_folder") return "No direct grants here. This folder can inherit parent Shared Triage grants; otherwise access is denied except for dev admins and company admins.";
+  return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 
 function permissionsToMap(permissions: EntityPermission[]): Map<PermissionSelectionKey, ResourceAccessLevel> {
   const out = new Map<PermissionSelectionKey, ResourceAccessLevel>();
   for (const permission of permissions) {
     const accessLevel = permission.access_level ?? permission.permission;
-    if (accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
     out.set(`${permission.subject_type}:${permission.subject_id}` as PermissionSelectionKey, accessLevel);
   }
   return out;

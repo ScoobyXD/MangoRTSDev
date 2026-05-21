@@ -484,7 +484,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	if !s.requireEntityAdmin(w, r, req.CompanyID, entityType, entityID, notFoundCode) {
+	if !requireCompanyManager(w, r, req.CompanyID) {
 		return
 	}
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{

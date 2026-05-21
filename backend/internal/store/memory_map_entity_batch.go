@@ -17,15 +17,16 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
+	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
+	if input.CreatorUserID != "" {
+		if _, ok := r.memberships[membershipKey(input.CompanyID, input.CreatorUserID)]; !ok {
+			return MapEntityBatchResult{}, ErrAssigneeNotInCompany
+		}
+	}
+
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
 	if input.EntityKind == "node" {
-		input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
-		if input.CreatorUserID != "" {
-			if _, ok := r.memberships[membershipKey(input.CompanyID, input.CreatorUserID)]; !ok {
-				return MapEntityBatchResult{}, ErrAssigneeNotInCompany
-			}
-		}
 		activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if !ok {
 			return MapEntityBatchResult{}, ErrNotFound
@@ -88,6 +89,19 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 				created.AssigneeUserID = &input.CreatorUserID
 			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
+			if input.CreatorUserID != "" {
+				permission := domain.EntityPermission{
+					CompanyID:        input.CompanyID,
+					EntityType:       EntityTypeNode,
+					EntityID:         created.NodeID,
+					SubjectType:      EntityPermissionSubjectUser,
+					SubjectID:        input.CreatorUserID,
+					Permission:       EntityPermissionAdmin,
+					AccessLevel:      EntityPermissionAdmin,
+					CreatedTimestamp: now,
+				}
+				r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeNode, created.NodeID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
+			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
@@ -111,6 +125,19 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 			CreatedTimestamp: now,
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
+		if input.CreatorUserID != "" {
+			permission := domain.EntityPermission{
+				CompanyID:        input.CompanyID,
+				EntityType:       EntityTypeLogicGate,
+				EntityID:         created.LogicGateID,
+				SubjectType:      EntityPermissionSubjectUser,
+				SubjectID:        input.CreatorUserID,
+				Permission:       EntityPermissionAdmin,
+				AccessLevel:      EntityPermissionAdmin,
+				CreatedTimestamp: now,
+			}
+			r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeLogicGate, created.LogicGateID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
+		}
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID

@@ -308,11 +308,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			return
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		actor, hasActor, ok := sharedInboxActorForCompany(w, r, req.CompanyID)
-		if !ok {
-			return
-		}
-		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionAdmin) {
+		if !requireCompanyManager(w, r, req.CompanyID) {
 			return
 		}
 		permissions := req.Permissions

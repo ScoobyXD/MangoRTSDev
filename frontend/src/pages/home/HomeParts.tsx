@@ -35,15 +35,8 @@ const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/
   }>,
 })));
 
-function promptSharedInboxEmail(defaultEmail = ""): string {
-  const raw = window.prompt("Email for shared inbox", defaultEmail.trim().toLowerCase());
-  const email = raw?.trim().toLowerCase() ?? "";
-  if (!email) return "";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    window.alert("Enter a valid email address.");
-    return "";
-  }
-  return email;
+function isValidSharedInboxEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
 type HomePinContextMenuState = {
@@ -709,8 +702,10 @@ export function HomeSidebar({
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
   const [mentionNotificationMenu, setMentionNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
@@ -752,6 +747,14 @@ export function HomeSidebar({
       renameInputRef.current?.select();
     }, 0);
   }, [renamingSharedFolderID]);
+
+  useEffect(() => {
+    if (!sharedEmailDialog) return;
+    window.setTimeout(() => {
+      sharedEmailInputRef.current?.focus();
+      sharedEmailInputRef.current?.select();
+    }, 0);
+  }, [sharedEmailDialog?.folder.folder_id]);
 
   useEffect(() => {
     if (activeViewID.startsWith("shared:")) return;
@@ -803,11 +806,26 @@ export function HomeSidebar({
     await onSetSharedInboxAccountEmail(folderID, accountEmail);
   }, [onSetSharedInboxAccountEmail]);
 
-  const promptAndSetSharedFolderAccountEmail = useCallback((folder: CommunicationsSharedInbox) => {
-    const accountEmail = promptSharedInboxEmail(folder.account_email ?? cleanConnectedAccountEmail);
-    if (!accountEmail) return;
-    void setSharedFolderAccountEmail(folder.folder_id, accountEmail);
-  }, [cleanConnectedAccountEmail, setSharedFolderAccountEmail]);
+  const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
+    setSharedContextMenu(null);
+    setSharedEmailDialog({
+      folder,
+      draft: (folder.account_email ?? cleanConnectedAccountEmail).trim().toLowerCase(),
+      error: "",
+    });
+  }, [cleanConnectedAccountEmail]);
+
+  const submitSharedEmailDialog = useCallback(() => {
+    if (!sharedEmailDialog || sharedBusy) return;
+    const accountEmail = sharedEmailDialog.draft.trim().toLowerCase();
+    if (!isValidSharedInboxEmail(accountEmail)) {
+      setSharedEmailDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
+      return;
+    }
+    const folderID = sharedEmailDialog.folder.folder_id;
+    setSharedEmailDialog(null);
+    void setSharedFolderAccountEmail(folderID, accountEmail);
+  }, [setSharedFolderAccountEmail, sharedBusy, sharedEmailDialog]);
 
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
     setSharedContextMenu(null);
@@ -928,27 +946,45 @@ export function HomeSidebar({
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const active = activeViewID === row.treeID || selectedSharedTreeIDs.has(row.treeID);
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
+    const folderHasAccess = folder.effective_access_level !== "no_access";
     return (
       <div
         key={folder.folder_id}
         role="button"
         tabIndex={0}
-        draggable={!isRenaming && !sharedBusy}
+        draggable={!isRenaming && !sharedBusy && folderHasAccess}
         style={sharedInboxFolderRowStyle(row.depth, active, rowDropPlacement)}
-        onClick={(event) => selectSharedFolderRow(row, event)}
+        onClick={(event) => {
+          if (!folderHasAccess) {
+            if (row.hasChildren) toggleSharedFolder(folder.folder_id);
+            return;
+          }
+          selectSharedFolderRow(row, event);
+        }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
+          if (!folderHasAccess) {
+            if (row.hasChildren) toggleSharedFolder(folder.folder_id);
+            return;
+          }
           selectSharedFolderRow(row);
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          startSharedRename(folder);
+          if (folderHasAccess) startSharedRename(folder);
         }}
-        onContextMenu={(event) => openSharedContextMenu(event, folder)}
+        onContextMenu={(event) => {
+          if (!folderHasAccess) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          openSharedContextMenu(event, folder);
+        }}
         onDragStart={(event) => {
-          if (sharedBusy) {
+          if (sharedBusy || !folderHasAccess) {
             event.preventDefault();
             return;
           }
@@ -1123,7 +1159,7 @@ export function HomeSidebar({
                 type="button"
                 style={sharedInboxContextMenuButtonStyle}
                 disabled={sharedBusy}
-                onClick={() => promptAndSetSharedFolderAccountEmail(sharedContextMenu.folder!)}
+                onClick={() => openSharedEmailDialog(sharedContextMenu.folder!)}
               >
                 Assign email to inbox
               </button>
@@ -1156,8 +1192,68 @@ export function HomeSidebar({
           )}
         </FrameRightClickMenu>
       )}
+      {sharedEmailDialog && (
+        <SharedInboxEmailDialog
+          inputRef={sharedEmailInputRef}
+          folderName={sharedEmailDialog.folder.name}
+          draft={sharedEmailDialog.draft}
+          error={sharedEmailDialog.error}
+          busy={sharedBusy}
+          onDraftChange={(draft) => setSharedEmailDialog((current) => current ? { ...current, draft, error: "" } : current)}
+          onCancel={() => setSharedEmailDialog(null)}
+          onSubmit={submitSharedEmailDialog}
+        />
+      )}
       <InboxNotificationMenu menu={mentionNotificationMenu} onClose={() => setMentionNotificationMenu(null)} onOpen={openMentionNotificationTarget} />
     </aside>
+  );
+}
+
+function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDraftChange, onSubmit, onCancel }: {
+  inputRef: React.RefObject<HTMLInputElement>;
+  folderName: string;
+  draft: string;
+  error: string;
+  busy: boolean;
+  onDraftChange: (draft: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const label = folderName.trim() || "this inbox";
+  return (
+    <div style={deleteModalBackdropStyle} onPointerDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Assign email to inbox"
+        style={deleteModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700 }}>Assign email to inbox</div>
+        <div style={deleteModalDetailStyle}>Type down the email that you want to use here.</div>
+        <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
+          <span>{label}</span>
+          <input
+            ref={inputRef}
+            type="email"
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            placeholder="name@example.com"
+            disabled={busy}
+            style={inputStyle}
+          />
+        </label>
+        {error && <div style={{ color: "#8b123f", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>
+          <button type="submit" disabled={busy} style={primaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

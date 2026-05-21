@@ -282,33 +282,45 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 		} else if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
 			return nil, ErrNotFound
 		}
-		key := subjectType + ":" + subjectID + ":" + permission
+		key := subjectType + ":" + subjectID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 		normalized = append(normalized, normalizedPermission{subjectType: subjectType, subjectID: subjectID, permission: permission})
 	}
+	targetEntityIDs := []string{entityID}
+	if entityType == EntityTypeSharedTriageFolder {
+		targetEntityIDs = r.sharedTriagePermissionTargetIDsLocked(companyID, entityID)
+	}
+	targetEntityIDSet := make(map[string]bool, len(targetEntityIDs))
+	for _, targetEntityID := range targetEntityIDs {
+		targetEntityIDSet[targetEntityID] = true
+	}
 	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == entityType && permission.EntityID == entityID {
+		if permission.CompanyID == companyID && permission.EntityType == entityType && targetEntityIDSet[permission.EntityID] {
 			delete(r.entityPermissions, permissionKey)
 		}
 	}
 	now := time.Now().UTC()
 	out := make([]domain.EntityPermission, 0, len(normalized))
-	for _, item := range normalized {
-		permission := domain.EntityPermission{
-			CompanyID:        companyID,
-			EntityType:       entityType,
-			EntityID:         entityID,
-			SubjectType:      item.subjectType,
-			SubjectID:        item.subjectID,
-			Permission:       item.permission,
-			AccessLevel:      item.permission,
-			CreatedTimestamp: now,
+	for _, targetEntityID := range targetEntityIDs {
+		for _, item := range normalized {
+			permission := domain.EntityPermission{
+				CompanyID:        companyID,
+				EntityType:       entityType,
+				EntityID:         targetEntityID,
+				SubjectType:      item.subjectType,
+				SubjectID:        item.subjectID,
+				Permission:       item.permission,
+				AccessLevel:      item.permission,
+				CreatedTimestamp: now,
+			}
+			r.entityPermissions[entityPermissionKey(companyID, entityType, targetEntityID, item.subjectType, item.subjectID, item.permission)] = permission
+			if targetEntityID == entityID {
+				out = append(out, r.withEntityPermissionSubjectLocked(permission))
+			}
 		}
-		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, item.subjectType, item.subjectID, item.permission)] = permission
-		out = append(out, r.withEntityPermissionSubjectLocked(permission))
 	}
 	sortEntityPermissions(out)
 	return out, nil
@@ -358,36 +370,74 @@ func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, 
 	if requiredRank == 0 {
 		return false
 	}
-	hasRestriction := false
-	for _, permission := range r.entityPermissions {
-		if permission.CompanyID != companyID || permission.EntityType != entityType || permission.EntityID != entityID {
-			continue
-		}
-		hasRestriction = true
-		if entityPermissionRank(permission.Permission) < requiredRank {
-			continue
-		}
-		if permission.SubjectType == EntityPermissionSubjectUser && permission.SubjectID == userID {
-			return true
-		}
-		if permission.SubjectType != EntityPermissionSubjectGroup {
-			continue
-		}
-		groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, permission.SubjectID)
-		for groupID := range groupIDs {
-			if _, ok := r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)]; ok {
-				return true
+	if r.userHasRoleAdminAccessLocked(companyID, userID) {
+		return true
+	}
+	entityIDs := []string{entityID}
+	if entityType == EntityTypeSharedTriageFolder {
+		entityIDs = r.sharedTriageFolderAncestryLocked(companyID, entityID)
+	}
+	type matchedGrant struct {
+		depth       int
+		subjectRank int
+		accessRank  int
+	}
+	best := matchedGrant{depth: len(entityIDs) + 1, subjectRank: -1, accessRank: -1}
+	found := false
+	for depth, currentEntityID := range entityIDs {
+		for _, permission := range r.entityPermissions {
+			if permission.CompanyID != companyID || permission.EntityType != entityType || permission.EntityID != currentEntityID {
+				continue
+			}
+			subjectRank := 0
+			switch permission.SubjectType {
+			case EntityPermissionSubjectUser:
+				if permission.SubjectID != userID {
+					continue
+				}
+				subjectRank = 2
+			case EntityPermissionSubjectGroup:
+				groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, permission.SubjectID)
+				matchedGroup := false
+				for groupID := range groupIDs {
+					if _, ok := r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)]; ok {
+						matchedGroup = true
+						break
+					}
+				}
+				if !matchedGroup {
+					continue
+				}
+				subjectRank = 1
+			default:
+				continue
+			}
+			candidate := matchedGrant{depth: depth, subjectRank: subjectRank, accessRank: entityPermissionRank(permission.Permission)}
+			if !found || candidate.depth < best.depth ||
+				(candidate.depth == best.depth && candidate.subjectRank > best.subjectRank) ||
+				(candidate.depth == best.depth && candidate.subjectRank == best.subjectRank && candidate.accessRank > best.accessRank) {
+				best = candidate
+				found = true
 			}
 		}
 	}
-	if !hasRestriction {
-		return entityTypeDefaultsToFullAccess(entityType) || accessLevel == EntityPermissionView
+	return found && best.accessRank >= requiredRank
+}
+
+func (r *MemoryRepo) userHasRoleAdminAccessLocked(companyID, userID string) bool {
+	for _, membership := range r.memberships {
+		if membership.UserID == userID && membership.Role == domain.RoleDevAdmin {
+			return true
+		}
 	}
-	return false
+	membership, ok := r.memberships[membershipKey(companyID, userID)]
+	return ok && membership.Role == domain.RoleCompanyAdmin
 }
 
 func entityPermissionRank(accessLevel string) int {
 	switch strings.TrimSpace(accessLevel) {
+	case EntityPermissionNoAccess:
+		return 0
 	case EntityPermissionView:
 		return 1
 	case EntityPermissionEdit:
@@ -399,13 +449,47 @@ func entityPermissionRank(accessLevel string) int {
 	}
 }
 
-func entityTypeDefaultsToFullAccess(entityType string) bool {
-	switch strings.TrimSpace(entityType) {
-	case EntityTypeNode, EntityTypeLogicGate:
-		return true
-	default:
-		return false
+func (r *MemoryRepo) sharedTriageFolderAncestryLocked(companyID, folderID string) []string {
+	ids := []string{folderID}
+	seen := map[string]bool{folderID: true}
+	currentID := folderID
+	for {
+		folder, ok := r.folders[key(companyID, currentID)]
+		if !ok || folder.FolderKind != "communications" || folder.ParentFolderID == nil {
+			break
+		}
+		parentID := strings.TrimSpace(*folder.ParentFolderID)
+		if parentID == "" || seen[parentID] {
+			break
+		}
+		seen[parentID] = true
+		ids = append(ids, parentID)
+		currentID = parentID
 	}
+	return ids
+}
+
+func (r *MemoryRepo) sharedTriagePermissionTargetIDsLocked(companyID, folderID string) []string {
+	ids := []string{folderID}
+	root, ok := r.folders[key(companyID, folderID)]
+	if !ok || root.FolderKind != "communications" || (root.ParentFolderID != nil && strings.TrimSpace(*root.ParentFolderID) != "") {
+		return ids
+	}
+	seen := map[string]bool{folderID: true}
+	for index := 0; index < len(ids); index++ {
+		parentID := ids[index]
+		for _, folder := range r.folders {
+			if folder.CompanyID != companyID || folder.FolderKind != "communications" || folder.ParentFolderID == nil {
+				continue
+			}
+			if strings.TrimSpace(*folder.ParentFolderID) != parentID || seen[folder.FolderID] {
+				continue
+			}
+			seen[folder.FolderID] = true
+			ids = append(ids, folder.FolderID)
+		}
+	}
+	return ids
 }
 
 func cloneCompanyUserGroup(group domain.CompanyUserGroup) domain.CompanyUserGroup {

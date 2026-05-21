@@ -686,10 +686,12 @@ export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communi
   return [...folders].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name) || a.folder_id.localeCompare(b.folder_id));
 }
 
-type SharedInboxAccessLevel = "view" | "edit" | "admin";
+type SharedInboxAccessLevel = "no_access" | "view" | "edit" | "admin";
 
 function sharedInboxAccessRank(accessLevel: string | undefined): number {
   switch (accessLevel) {
+    case "no_access":
+      return 0;
     case "view":
       return 1;
     case "edit":
@@ -728,14 +730,15 @@ export function userHasFullSharedInboxAccess(user: SharedInboxAccessUser | null 
 function sharedInboxEffectiveAccess(folder: CommunicationsSharedInbox | undefined, userID: string): SharedInboxAccessLevel | "" {
   if (!folder) return "";
   const effective = folder.effective_access_level;
-  if (effective === "view" || effective === "edit" || effective === "admin") return effective;
+  if (effective === "no_access" || effective === "view" || effective === "edit" || effective === "admin") return effective;
   const cleanUserID = userID.trim();
-  if (!cleanUserID) return "";
   let best: SharedInboxAccessLevel | "" = "";
+  if (!cleanUserID) return best;
   for (const grant of folder.access_grants ?? []) {
     if (grant.subject_type !== "user" || grant.subject_id?.trim() !== cleanUserID) continue;
     const accessLevel = grant.access_level ?? grant.permission;
-    if (sharedInboxAccessRank(accessLevel) > sharedInboxAccessRank(best)) best = accessLevel;
+    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (best === "" || sharedInboxAccessRank(accessLevel) > sharedInboxAccessRank(best)) best = accessLevel;
   }
   return best;
 }
@@ -747,7 +750,6 @@ export function sharedInboxUserHasRole(folder: CommunicationsSharedInbox | undef
 export function sharedInboxUserCanManageMail(folder: CommunicationsSharedInbox | undefined, userID: string, hasFullAccess = false): boolean {
   if (hasFullAccess) return true;
   if (!folder) return false;
-  if ((folder.access_grants ?? []).length === 0 && !folder.effective_access_level) return false;
   return sharedInboxAccessRank(sharedInboxEffectiveAccess(folder, userID)) >= sharedInboxAccessRank("edit");
 }
 
@@ -761,44 +763,10 @@ export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedIn
 export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[], userID: string, hasFullAccess = false): CommunicationsSharedInbox[] {
   if (hasFullAccess) return folders;
   const cleanUserID = userID.trim();
-  if (!sharedInboxHasAnyAccessGrants(folders)) return folders;
   if (!cleanUserID) return [];
-
-  const byID = new Map(folders.map((folder) => [folder.folder_id, folder]));
-  const childrenByParent = new Map<string, CommunicationsSharedInbox[]>();
-  for (const folder of folders) {
-    const parentID = folder.parent_folder_id ?? "";
-    const children = childrenByParent.get(parentID) ?? [];
-    children.push(folder);
-    childrenByParent.set(parentID, children);
-  }
-
-  const included = new Set<string>();
-  const includeAncestors = (folderID: string) => {
-    let current = byID.get(folderID);
-    const seen = new Set<string>();
-    while (current && !seen.has(current.folder_id)) {
-      seen.add(current.folder_id);
-      included.add(current.folder_id);
-      const parentID = current.parent_folder_id ?? "";
-      current = parentID ? byID.get(parentID) : undefined;
-    }
-  };
-  const includeDescendants = (folderID: string) => {
-    for (const child of childrenByParent.get(folderID) ?? []) {
-      if (included.has(child.folder_id)) continue;
-      included.add(child.folder_id);
-      includeDescendants(child.folder_id);
-    }
-  };
-
-  for (const folder of folders) {
-    if (!sharedInboxUserHasRole(folder, cleanUserID)) continue;
-    includeAncestors(folder.folder_id);
-    includeDescendants(folder.folder_id);
-  }
-  return folders.filter((folder) => included.has(folder.folder_id));
+  return folders;
 }
+
 export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {
   const ids = new Set<string>();
   const cleanRootID = rootFolderID.trim();

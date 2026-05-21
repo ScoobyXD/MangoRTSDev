@@ -190,6 +190,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
     [activeSharedInboxFolderID, sharedInboxes],
   );
+  const activeSharedInboxNeedsEmail = !!activeSharedInbox && !(activeSharedInbox.account_email ?? "").trim();
   const sharedInboxRaciFolder = useMemo(
     () => sharedInboxRaciFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxRaciFolderID) ?? null : null,
     [sharedInboxRaciFolderID, sharedInboxes],
@@ -510,7 +511,17 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setNextPageToken("");
       return;
     }
-    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+    if (activeSharedInboxNeedsEmail) {
+      setMessages([]);
+      setSelectedMessage(null);
+      setSelectedMessageID("");
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setNextPageToken("");
+      messageRequestKeyRef.current = "";
+      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+      return;
+    }    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
@@ -560,7 +571,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         }
       }
     }
-  }, [activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeSharedInboxNeedsEmail, activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
   const loadMoreMessages = useCallback(async () => {
     if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
@@ -1171,6 +1182,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
   }, [companyID]);
 
+  const assignActiveSharedInboxEmail = useCallback(() => {
+    if (!activeSharedInbox) return;
+    const initialEmail = (activeSharedInbox.account_email ?? connection?.account_email ?? "").trim().toLowerCase();
+    const rawEmail = window.prompt("Email for shared inbox", initialEmail);
+    if (rawEmail === null) return;
+    const accountEmail = rawEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    void setSharedInboxAccountEmail(activeSharedInbox.folder_id, accountEmail);
+  }, [activeSharedInbox, connection?.account_email, setSharedInboxAccountEmail]);
   const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
     setBusy("shared-inbox");
     setError("");
@@ -2026,6 +2049,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             selectedMessageID={selectedMessageID}
             selectedMessageIDs={selectedMessageIDs}
             sharedInboxSettings={activeSharedInbox ? { onOpen: () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id) } : undefined}
+            unassignedSharedInbox={activeSharedInboxNeedsEmail && activeSharedInbox ? { folderName: activeSharedInbox.name, onAssignEmail: assignActiveSharedInboxEmail } : undefined}
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}

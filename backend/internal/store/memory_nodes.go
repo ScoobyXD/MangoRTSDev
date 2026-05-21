@@ -55,6 +55,19 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
 	}
+	if assigneeUserID != "" {
+		permission := domain.EntityPermission{
+			CompanyID:        companyID,
+			EntityType:       EntityTypeNode,
+			EntityID:         n.NodeID,
+			SubjectType:      EntityPermissionSubjectUser,
+			SubjectID:        assigneeUserID,
+			Permission:       EntityPermissionAdmin,
+			AccessLevel:      EntityPermissionAdmin,
+			CreatedTimestamp: n.CreatedTimestamp,
+		}
+		r.entityPermissions[entityPermissionKey(companyID, EntityTypeNode, n.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin)] = permission
+	}
 	return r.withNodeReadModelLocked(n), nil
 }
 

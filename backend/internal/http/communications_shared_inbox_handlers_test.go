@@ -108,7 +108,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSharedInboxListFiltersForAssignedNonManager(t *testing.T) {
+func TestCommunicationsSharedInboxListKeepsCompanyDefaultAccessWithGrants(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -189,11 +189,8 @@ func TestCommunicationsSharedInboxListFiltersForAssignedNonManager(t *testing.T)
 	for _, folder := range payload.SharedInboxes {
 		seen[folder.FolderID] = true
 	}
-	if !seen[parent.FolderID] || !seen[child.FolderID] {
-		t.Fatalf("filtered folders = %+v, want parent and child", payload.SharedInboxes)
-	}
-	if seen[unrelated.FolderID] {
-		t.Fatalf("filtered folders include unrelated shared inbox: %+v", payload.SharedInboxes)
+	if !seen[parent.FolderID] || !seen[child.FolderID] || !seen[unrelated.FolderID] {
+		t.Fatalf("shared inbox folders = %+v, want all company folders by default", payload.SharedInboxes)
 	}
 }
 

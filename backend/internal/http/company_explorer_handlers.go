@@ -351,105 +351,88 @@ func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplo
 }
 
 func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.CompanyExplorerFolder, userID string, groups []domain.CompanyUserGroup, members []domain.CompanyUserGroupMember) []domain.CompanyExplorerFolder {
-	if !communicationsSharedInboxHasAccessGrants(folders) {
-		out := append([]domain.CompanyExplorerFolder{}, folders...)
-		for index := range out {
-			out[index].EffectiveAccess = store.EntityPermissionView
-		}
-		return out
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return []domain.CompanyExplorerFolder{}
 	}
-
 	userGroupIDs := sharedInboxAccessGroupIDsForUser(userID, groups, members)
-	byID := make(map[string]domain.CompanyExplorerFolder, len(folders))
-	childrenByParent := make(map[string][]domain.CompanyExplorerFolder)
+	folderByID := make(map[string]domain.CompanyExplorerFolder, len(folders))
 	for _, folder := range folders {
-		folderID := strings.TrimSpace(folder.FolderID)
-		if folderID == "" {
-			continue
-		}
-		byID[folderID] = folder
-		parentID := ""
-		if folder.ParentFolderID != nil {
-			parentID = strings.TrimSpace(*folder.ParentFolderID)
-		}
-		childrenByParent[parentID] = append(childrenByParent[parentID], folder)
+		folderByID[folder.FolderID] = folder
 	}
-
-	included := make(map[string]bool, len(folders))
-	effectiveAccessByFolder := make(map[string]string, len(folders))
-	var includeAncestors func(string)
-	includeAncestors = func(folderID string) {
-		seen := make(map[string]bool)
-		for folderID != "" && !seen[folderID] {
-			seen[folderID] = true
-			folder, ok := byID[folderID]
-			if !ok {
-				return
-			}
-			included[folderID] = true
-			if effectiveAccessByFolder[folderID] == "" {
-				effectiveAccessByFolder[folderID] = store.EntityPermissionView
-			}
-			if folder.ParentFolderID == nil {
-				return
-			}
-			folderID = strings.TrimSpace(*folder.ParentFolderID)
-		}
-	}
-	var includeDescendants func(string)
-	includeDescendants = func(folderID string) {
-		for _, child := range childrenByParent[folderID] {
-			childID := strings.TrimSpace(child.FolderID)
-			if childID == "" || included[childID] {
-				continue
-			}
-			included[childID] = true
-			if accessLevel := sharedInboxFolderEffectiveAccess(child, userID, userGroupIDs); accessLevel != "" {
-				effectiveAccessByFolder[childID] = accessLevel
-			} else if effectiveAccessByFolder[childID] == "" {
-				effectiveAccessByFolder[childID] = store.EntityPermissionView
-			}
-			includeDescendants(childID)
-		}
-	}
-
+	accessByFolderID := make(map[string]string, len(folders))
+	includeFolderIDs := make(map[string]bool, len(folders))
 	for _, folder := range folders {
 		accessLevel := sharedInboxFolderEffectiveAccess(folder, userID, userGroupIDs)
+		if accessLevel == "" {
+			accessLevel = store.EntityPermissionNoAccess
+		}
+		accessByFolderID[folder.FolderID] = accessLevel
 		if !store.EntityPermissionSatisfies(accessLevel, store.EntityPermissionView) {
 			continue
 		}
-		folderID := strings.TrimSpace(folder.FolderID)
-		effectiveAccessByFolder[folderID] = accessLevel
-		includeAncestors(folderID)
-		includeDescendants(folderID)
+		seen := map[string]bool{}
+		for currentID := folder.FolderID; strings.TrimSpace(currentID) != "" && !seen[currentID]; {
+			seen[currentID] = true
+			includeFolderIDs[currentID] = true
+			current, ok := folderByID[currentID]
+			if !ok || current.ParentFolderID == nil {
+				break
+			}
+			currentID = strings.TrimSpace(*current.ParentFolderID)
+		}
 	}
-
-	filtered := make([]domain.CompanyExplorerFolder, 0, len(included))
+	out := make([]domain.CompanyExplorerFolder, 0, len(folders))
 	for _, folder := range folders {
-		folderID := strings.TrimSpace(folder.FolderID)
-		if !included[folderID] {
+		if !includeFolderIDs[folder.FolderID] {
 			continue
 		}
-		folder.EffectiveAccess = effectiveAccessByFolder[folderID]
-		if folder.EffectiveAccess == "" {
-			folder.EffectiveAccess = store.EntityPermissionView
+		item := folder
+		item.EffectiveAccess = accessByFolderID[folder.FolderID]
+		if !store.EntityPermissionSatisfies(item.EffectiveAccess, store.EntityPermissionView) {
+			item.EffectiveAccess = store.EntityPermissionNoAccess
 		}
-		filtered = append(filtered, folder)
+		out = append(out, item)
 	}
-	return filtered
+	return out
 }
 
-func communicationsSharedInboxHasAccessGrants(folders []domain.CompanyExplorerFolder) bool {
-	for _, folder := range folders {
-		if len(folder.AccessGrants) > 0 {
-			return true
+func sharedInboxFolderEffectiveAccess(folder domain.CompanyExplorerFolder, userID string, userGroupIDs map[string]bool) string {
+	bestSubjectRank := -1
+	bestAccessRank := -1
+	bestAccess := ""
+	for _, grant := range folder.AccessGrants {
+		subjectRank := 0
+		switch strings.TrimSpace(grant.SubjectType) {
+		case store.EntityPermissionSubjectUser:
+			if strings.TrimSpace(grant.SubjectID) != userID {
+				continue
+			}
+			subjectRank = 2
+		case store.EntityPermissionSubjectGroup:
+			if !userGroupIDs[strings.TrimSpace(grant.SubjectID)] {
+				continue
+			}
+			subjectRank = 1
+		default:
+			continue
+		}
+		accessLevel := grant.AccessLevel
+		if strings.TrimSpace(accessLevel) == "" {
+			accessLevel = grant.Permission
+		}
+		accessLevel, ok := store.NormalizeEntityPermission(accessLevel)
+		if !ok {
+			continue
+		}
+		accessRank := store.EntityPermissionRank(accessLevel)
+		if bestAccess == "" || subjectRank > bestSubjectRank || (subjectRank == bestSubjectRank && accessRank > bestAccessRank) {
+			bestSubjectRank = subjectRank
+			bestAccessRank = accessRank
+			bestAccess = accessLevel
 		}
 	}
-	return false
+	return bestAccess
 }
 
 func sharedInboxAccessGroupIDsForUser(userID string, groups []domain.CompanyUserGroup, members []domain.CompanyUserGroupMember) map[string]bool {
@@ -470,32 +453,6 @@ func sharedInboxAccessGroupIDsForUser(userID string, groups []domain.CompanyUser
 		}
 	}
 	return ids
-}
-
-func sharedInboxFolderEffectiveAccess(folder domain.CompanyExplorerFolder, userID string, userGroupIDs map[string]bool) string {
-	bestRank := 0
-	bestAccess := ""
-	for _, grant := range folder.AccessGrants {
-		matches := false
-		switch strings.TrimSpace(grant.SubjectType) {
-		case store.EntityPermissionSubjectUser:
-			matches = strings.TrimSpace(grant.SubjectID) == userID
-		case store.EntityPermissionSubjectGroup:
-			matches = userGroupIDs[strings.TrimSpace(grant.SubjectID)]
-		}
-		if !matches {
-			continue
-		}
-		accessLevel := grant.AccessLevel
-		if strings.TrimSpace(accessLevel) == "" {
-			accessLevel = grant.Permission
-		}
-		if rank := store.EntityPermissionRank(accessLevel); rank > bestRank {
-			bestRank = rank
-			bestAccess, _ = store.NormalizeEntityPermission(accessLevel)
-		}
-	}
-	return bestAccess
 }
 
 func (s *Server) handleCompanyExplorerFolderShares(w http.ResponseWriter, r *http.Request, folderID string) {

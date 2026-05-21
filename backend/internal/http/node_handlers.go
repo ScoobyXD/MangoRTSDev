@@ -214,7 +214,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "node_update_required")
 				return
 			}
-			if !s.requireEntityView(w, r, input.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
 			beforeNode, beforeNodeErr := s.repo.GetNode(input.CompanyID, nodeID)
@@ -248,7 +248,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
-			if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
 			event, err := s.repo.DeleteNodeAndWorkspaceEvent(companyID, nodeID)
@@ -349,7 +349,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "information_id_required")
 			return
 		}
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
 		// Clearing an editor document removes the latest hot-read projection only.
@@ -391,7 +391,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "information_required")
 			return
 		}
-		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
 

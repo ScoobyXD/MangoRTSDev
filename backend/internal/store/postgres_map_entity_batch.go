@@ -22,24 +22,25 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
-	targetFolderID := input.FolderID
-	targetFolderKind := input.EntityKind
-	if input.EntityKind == "node" {
-		input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
-		if input.CreatorUserID != "" {
-			var ok bool
-			if err := tx.QueryRowContext(ctx, `
+	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
+	if input.CreatorUserID != "" {
+		var ok bool
+		if err := tx.QueryRowContext(ctx, `
 select exists(
   select 1
   from company_memberships
   where company_id=$1 and user_id::text=$2
 )`, input.CompanyID, input.CreatorUserID).Scan(&ok); err != nil {
-				return MapEntityBatchResult{}, err
-			}
-			if !ok {
-				return MapEntityBatchResult{}, ErrAssigneeNotInCompany
-			}
+			return MapEntityBatchResult{}, err
 		}
+		if !ok {
+			return MapEntityBatchResult{}, ErrAssigneeNotInCompany
+		}
+	}
+
+	targetFolderID := input.FolderID
+	targetFolderKind := input.EntityKind
+	if input.EntityKind == "node" {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if err != nil {
 			return MapEntityBatchResult{}, err
@@ -78,6 +79,14 @@ select exists(
 			}
 			if input.CreatorUserID != "" {
 				created.AssigneeUserID = &input.CreatorUserID
+				if _, err := tx.ExecContext(ctx, `
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`, input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
+					return MapEntityBatchResult{}, err
+				}
 			}
 			created, err = scanNode(tx.QueryRowContext(ctx,
 				"select "+nodeSelectColumns+" from nodes n "+nodeStatusJoin+" where n.company_id=$1 and n.node_id=$2",
@@ -115,6 +124,16 @@ select exists(
 			created.CompanyID, created.LogicGateID, created.Header,
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
 			return MapEntityBatchResult{}, err
+		}
+		if input.CreatorUserID != "" {
+			if _, err := tx.ExecContext(ctx, `
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+values ($1::uuid, 'logic_gate', $2::uuid, 'user', $3::uuid, 'admin', now())
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`, input.CompanyID, created.LogicGateID, input.CreatorUserID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
 		}
 		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
 			return MapEntityBatchResult{}, err

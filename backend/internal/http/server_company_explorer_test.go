@@ -1020,7 +1020,7 @@ func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	}
 }
 
-func TestFilterCommunicationsSharedInboxFoldersForUserIncludesAssignedSubtreeAndAncestors(t *testing.T) {
+func TestFilterCommunicationsSharedInboxFoldersForUserKeepsDefaultCompanyAccess(t *testing.T) {
 	t.Parallel()
 
 	parentID := "shared-root"
@@ -1049,7 +1049,7 @@ func TestFilterCommunicationsSharedInboxFoldersForUserIncludesAssignedSubtreeAnd
 		ids = append(ids, folder.FolderID)
 	}
 
-	want := []string{"shared-root", "ar", "ar-child"}
+	want := []string{"shared-root", "ar", "ar-child", "ap"}
 	if len(ids) != len(want) {
 		t.Fatalf("filtered IDs = %v, want %v", ids, want)
 	}

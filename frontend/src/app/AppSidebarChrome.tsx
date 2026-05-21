@@ -6,6 +6,7 @@ import { MangoWordmark } from "./MangoLogo";
 import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
@@ -129,15 +130,8 @@ function saveSidebarSectionOpen(sectionID: SidebarSectionID, open: boolean): voi
   } catch {}
 }
 
-function promptSharedInboxEmail(defaultEmail = ""): string {
-  const raw = window.prompt("Email for shared inbox", defaultEmail.trim().toLowerCase());
-  const email = raw?.trim().toLowerCase() ?? "";
-  if (!email) return "";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    window.alert("Enter a valid email address.");
-    return "";
-  }
-  return email;
+function isValidSharedInboxEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
 function promptEmailProviderForConnection(): EmailProvider | "" {
@@ -214,16 +208,20 @@ export function AppSidebar({
   const [sharedBusy, setSharedBusy] = useState(false);
   const [sharedError, setSharedError] = useState("");
   const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
+  const [selectedSharedTreeIDs, setSelectedSharedTreeIDs] = useState<Set<string>>(new Set());
+  const [sharedSelectionAnchorTreeID, setSharedSelectionAnchorTreeID] = useState("");
   const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
@@ -273,6 +271,11 @@ export function AppSidebar({
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
 
+  useEffect(() => {
+    if (activeHomeView.startsWith("shared:")) return;
+    setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
+    setSharedSelectionAnchorTreeID("");
+  }, [activeHomeView]);
   const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
     event.preventDefault();
     event.stopPropagation();
@@ -476,6 +479,14 @@ export function AppSidebar({
     }, 0);
   }, [renamingSharedFolderID]);
 
+  useEffect(() => {
+    if (!sharedEmailDialog) return;
+    window.setTimeout(() => {
+      sharedEmailInputRef.current?.focus();
+      sharedEmailInputRef.current?.select();
+    }, 0);
+  }, [sharedEmailDialog?.folder.folder_id]);
+
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
@@ -530,12 +541,6 @@ export function AppSidebar({
     }
   }, [companyID, onHomeViewSelect, sharedBusy]);
 
-  const createSharedInboxWithAssignedEmail = useCallback((parentFolderID: string) => {
-    const accountEmail = promptSharedInboxEmail(cleanConnectedAccountEmail);
-    if (!accountEmail) return;
-    void createSharedFolder(parentFolderID, accountEmail);
-  }, [cleanConnectedAccountEmail, createSharedFolder]);
-
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
@@ -553,11 +558,26 @@ export function AppSidebar({
     }
   }, [companyID, replaceSharedFolder, sharedBusy]);
 
-  const promptAndSetSharedFolderAccountEmail = useCallback((folder: CommunicationsSharedInbox) => {
-    const accountEmail = promptSharedInboxEmail(folder.account_email ?? cleanConnectedAccountEmail);
-    if (!accountEmail) return;
-    void setSharedFolderAccountEmail(folder.folder_id, accountEmail);
-  }, [cleanConnectedAccountEmail, setSharedFolderAccountEmail]);
+  const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
+    setSharedContextMenu(null);
+    setSharedEmailDialog({
+      folder,
+      draft: (folder.account_email ?? cleanConnectedAccountEmail).trim().toLowerCase(),
+      error: "",
+    });
+  }, [cleanConnectedAccountEmail]);
+
+  const submitSharedEmailDialog = useCallback(() => {
+    if (!sharedEmailDialog || sharedBusy) return;
+    const accountEmail = sharedEmailDialog.draft.trim().toLowerCase();
+    if (!isValidSharedInboxEmail(accountEmail)) {
+      setSharedEmailDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
+      return;
+    }
+    const folderID = sharedEmailDialog.folder.folder_id;
+    setSharedEmailDialog(null);
+    void setSharedFolderAccountEmail(folderID, accountEmail);
+  }, [setSharedFolderAccountEmail, sharedBusy, sharedEmailDialog]);
 
   const commitSharedRename = useCallback(async () => {
     const folderID = renamingSharedFolderID.trim();
@@ -639,6 +659,24 @@ export function AppSidebar({
     }
   }, [activeHomeView, companyID, onHomeViewSelect, sharedBusy, sharedInboxes]);
 
+  const selectSharedFolderRow = useCallback((row: SharedInboxTreeRow, event?: React.MouseEvent) => {
+    const orderedIDs = sharedRows.map((item) => item.treeID);
+    const selected = resolveExplorerClickSelection({
+      orderedIDs,
+      previousSelectedIDs: selectedSharedTreeIDs,
+      anchorID: sharedSelectionAnchorTreeID,
+      clickedID: row.treeID,
+      shiftKey: !!event?.shiftKey,
+      ctrlKey: !!event?.ctrlKey || !!event?.metaKey,
+    });
+    if (selected.selectedIDs.size === 0) selected.selectedIDs.add(row.treeID);
+    const orderedSelectedIDs = orderedIDs.filter((id) => selected.selectedIDs.has(id));
+    const nextSelectedIDs = orderedSelectedIDs.length > 0 ? orderedSelectedIDs : [row.treeID];
+    setSelectedSharedTreeIDs(new Set(nextSelectedIDs));
+    setSharedSelectionAnchorTreeID(selected.anchorID);
+    const primaryTreeID = (selected.selectedIDs.has(row.treeID) ? row.treeID : nextSelectedIDs[0]) ?? row.treeID;
+    onHomeViewSelect(primaryTreeID as HomeSidebarView);
+  }, [onHomeViewSelect, selectedSharedTreeIDs, sharedRows, sharedSelectionAnchorTreeID]);
   const handleSharedRootDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
     const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
     if (!canDropSharedFolder(sourceFolderID, "")) return;
@@ -665,12 +703,12 @@ export function AppSidebar({
         role="button"
         tabIndex={0}
         draggable={!isRenaming && !sharedBusy}
-        style={appSidebarSharedFolderRowStyle(row.depth, homeActive && activeHomeView === treeID, rowDropPlacement)}
-        onClick={() => onHomeViewSelect(treeID)}
+        style={appSidebarSharedFolderRowStyle(row.depth, homeActive && (activeHomeView === treeID || selectedSharedTreeIDs.has(row.treeID)), rowDropPlacement)}
+        onClick={(event) => selectSharedFolderRow(row, event)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
-          onHomeViewSelect(treeID);
+          selectSharedFolderRow(row);
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -1002,21 +1040,13 @@ export function AppSidebar({
           >
             {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
           </button>
-          <button
-            type="button"
-            style={appSidebarContextMenuButtonStyle}
-            disabled={sharedBusy}
-            onClick={() => createSharedInboxWithAssignedEmail(sharedContextMenu.folder?.folder_id ?? "")}
-          >
-            Assign email and create inbox
-          </button>
           {sharedContextMenu.folder && (
             <>
               <button
                 type="button"
                 style={appSidebarContextMenuButtonStyle}
                 disabled={sharedBusy}
-                onClick={() => promptAndSetSharedFolderAccountEmail(sharedContextMenu.folder!)}
+                onClick={() => openSharedEmailDialog(sharedContextMenu.folder!)}
               >
                 Assign email to inbox
               </button>
@@ -1048,6 +1078,18 @@ export function AppSidebar({
             </>
           )}
         </FrameRightClickMenu>
+      )}
+      {sharedEmailDialog && (
+        <SharedInboxEmailDialog
+          inputRef={sharedEmailInputRef}
+          folderName={sharedEmailDialog.folder.name}
+          draft={sharedEmailDialog.draft}
+          error={sharedEmailDialog.error}
+          busy={sharedBusy}
+          onDraftChange={(draft) => setSharedEmailDialog((current) => current ? { ...current, draft, error: "" } : current)}
+          onCancel={() => setSharedEmailDialog(null)}
+          onSubmit={submitSharedEmailDialog}
+        />
       )}
       {notificationMenu && (
         <FrameRightClickMenu x={notificationMenu.x} y={notificationMenu.y} onClose={() => setNotificationMenu(null)}>
@@ -1292,6 +1334,54 @@ function readStoredNodeEditorPopupSize(): { width: number; height: number } | nu
   } catch {
     return null;
   }
+}
+
+function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDraftChange, onSubmit, onCancel }: {
+  inputRef: React.RefObject<HTMLInputElement>;
+  folderName: string;
+  draft: string;
+  error: string;
+  busy: boolean;
+  onDraftChange: (draft: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const label = folderName.trim() || "this inbox";
+  return (
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Assign email to inbox"
+        style={sharedInboxEmailModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div style={sharedInboxEmailModalTitleStyle}>Assign email to inbox</div>
+        <div style={sharedInboxEmailModalDetailStyle}>Type down the email that you want to use here.</div>
+        <label style={sharedInboxEmailModalLabelStyle}>
+          <span>{label}</span>
+          <input
+            ref={inputRef}
+            type="email"
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            placeholder="name@example.com"
+            disabled={busy}
+            style={sharedInboxEmailModalInputStyle}
+          />
+        </label>
+        {error && <div style={sharedInboxEmailModalErrorStyle}>{error}</div>}
+        <div style={sharedInboxEmailModalActionsStyle}>
+          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+          <button type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
 function storeNodeEditorPopupSize(size: { width: number; height: number }) {
@@ -1955,6 +2045,89 @@ const appSidebarExplorerFallbackStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   background: "#ffffff",
+};
+
+const sharedInboxEmailModalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 190,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(0,0,0,0.28)",
+  padding: 16,
+};
+
+const sharedInboxEmailModalStyle: React.CSSProperties = {
+  width: "min(420px, 100%)",
+  display: "grid",
+  gap: 10,
+  border: "1px solid rgba(255,136,32,0.45)",
+  borderRadius: 10,
+  background: "#ffffff",
+  color: "#24120a",
+  padding: 12,
+  boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
+};
+
+const sharedInboxEmailModalTitleStyle: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const sharedInboxEmailModalDetailStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.68)",
+  fontSize: 11,
+  lineHeight: 1.35,
+};
+
+const sharedInboxEmailModalLabelStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 5,
+  minWidth: 0,
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const sharedInboxEmailModalInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 34,
+  border: "1px solid rgba(255, 136, 32, 0.28)",
+  borderRadius: 6,
+  padding: "0 9px",
+  font: "inherit",
+  fontSize: 12,
+  boxSizing: "border-box",
+};
+
+const sharedInboxEmailModalErrorStyle: React.CSSProperties = {
+  color: "#8b123f",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const sharedInboxEmailModalActionsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+};
+
+const sharedInboxEmailModalSecondaryButtonStyle: React.CSSProperties = {
+  minHeight: 32,
+  border: "1px solid rgba(0,0,0,0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#111111",
+  cursor: "pointer",
+  font: "inherit",
+  fontWeight: 700,
+};
+
+const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
+  ...sharedInboxEmailModalSecondaryButtonStyle,
+  border: "1px solid rgba(255,136,32,0.74)",
+  background: "#ff8a00",
+  color: "#111111",
 };
 
 const nodeEditorPopupBackdropStyle: React.CSSProperties = {

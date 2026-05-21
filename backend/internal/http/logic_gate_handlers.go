@@ -103,6 +103,22 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
 		return
 	}
+	if actor, ok := authenticatedActor(r); ok && actorRoleForCompany(actor, req.CompanyID) != "" && !actorCanManageCompany(actor, req.CompanyID) {
+		if _, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:  req.CompanyID,
+			EntityType: store.EntityTypeLogicGate,
+			EntityID:   item.LogicGateID,
+			Permissions: []store.EntityPermissionInput{{
+				SubjectType: store.EntityPermissionSubjectUser,
+				SubjectID:   strings.TrimSpace(actor.User.UserID),
+				AccessLevel: store.EntityPermissionAdmin,
+				Permission:  store.EntityPermissionAdmin,
+			}},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_grant_logic_gate_creator_access")
+			return
+		}
+	}
 	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -148,7 +164,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 				return
 			}
-			if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
 			item, err := s.repo.UpdateLogicGateHeader(req.CompanyID, logicGateID, strings.TrimSpace(req.Header))
@@ -170,7 +186,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
-			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
 			if err := s.repo.DeleteLogicGate(companyID, logicGateID); errors.Is(err, store.ErrNotFound) {
@@ -262,7 +278,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		var beforeAssignments []domain.LogicGateRaciAssignment
@@ -378,7 +394,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "information_id_required")
 			return
 		}
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		// Same contract as nodes: clear the latest value without manufacturing
@@ -424,7 +440,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "information_required")
 			return
 		}
-		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)

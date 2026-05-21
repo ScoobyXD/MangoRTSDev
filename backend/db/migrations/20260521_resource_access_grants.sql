@@ -8,7 +8,7 @@ create table if not exists resource_access_grants (
   created_timestamp timestamptz not null default now(),
   constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
   constraint resource_access_grants_principal_type_chk check (principal_type in ('user', 'group')),
-  constraint resource_access_grants_access_level_chk check (access_level in ('view', 'edit', 'admin')),
+  constraint resource_access_grants_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   primary key (company_id, resource_type, resource_id, principal_type, principal_id),
   foreign key (company_id) references companies (company_id) on delete cascade
 );
@@ -22,45 +22,13 @@ create index if not exists idx_resource_access_grants_resource
 create or replace function mangorts_access_level_rank(p_access_level text)
 returns integer as $$
   select case lower(btrim(coalesce(p_access_level, '')))
+    when 'no_access' then 0
     when 'view' then 1
     when 'edit' then 2
     when 'admin' then 3
     else 0
   end;
 $$ language sql immutable;
-
-insert into resource_access_grants (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-select permission.company_id,
-       permission.entity_type,
-       permission.entity_id,
-       permission.subject_type,
-       permission.subject_id,
-       case when permission.permission in ('view', 'edit', 'admin') then permission.permission else 'view' end,
-       permission.created_timestamp
-from entity_access_permissions permission
-where permission.entity_type in ('node', 'logic_gate')
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level = case
-    when mangorts_access_level_rank(excluded.access_level) > mangorts_access_level_rank(resource_access_grants.access_level) then excluded.access_level
-    else resource_access_grants.access_level
-  end;
-
-insert into resource_access_grants (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-select assignment.company_id,
-       'shared_triage_folder',
-       assignment.folder_id,
-       'user',
-       assignment.user_id,
-       case when bool_or(assignment.role in ('responsible', 'accountable')) then 'edit' else 'view' end,
-       min(assignment.created_timestamp)
-from communications_shared_inbox_raci_assignments assignment
-group by assignment.company_id, assignment.folder_id, assignment.user_id
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level = case
-    when mangorts_access_level_rank(excluded.access_level) > mangorts_access_level_rank(resource_access_grants.access_level) then excluded.access_level
-    else resource_access_grants.access_level
-  end;
-
 create or replace function mangorts_user_can_access_resource(
   p_company_id uuid,
   p_resource_type text,
@@ -69,56 +37,101 @@ create or replace function mangorts_user_can_access_resource(
   p_access_level text
 )
 returns boolean as $$
-  with recursive requested(required_rank) as (
+  with recursive normalized_resource(resource_type) as (
+    select lower(btrim(coalesce(p_resource_type, '')))
+  ),
+  requested(required_rank) as (
     select mangorts_access_level_rank(p_access_level)
   ),
-  permitted_group_scope(group_id, access_rank) as (
-    select permission.principal_id, mangorts_access_level_rank(permission.access_level)
+  role_admin_actor(allowed) as (
+    select exists (
+      select 1
+      from company_memberships membership
+      where membership.user_id = p_user_id
+        and (
+          membership.role = 'dev_admin'
+          or (membership.company_id = p_company_id and membership.role = 'company_admin')
+        )
+    )
+  ),
+  resource_scope(resource_id, depth, path) as (
+    select p_resource_id, 0, array[p_resource_id]
+    union all
+    select folder.parent_folder_id, resource_scope.depth + 1, resource_scope.path || folder.parent_folder_id
+    from resource_scope
+    join company_explorer_folders folder
+      on folder.company_id = p_company_id
+     and folder.folder_kind = 'communications'
+     and folder.folder_id = resource_scope.resource_id
+    join normalized_resource normalized
+      on normalized.resource_type = 'shared_triage_folder'
+    where folder.parent_folder_id is not null
+      and not folder.parent_folder_id = any(resource_scope.path)
+  ),
+  permitted_group_scope(resource_id, depth, group_id, access_rank, path) as (
+    select permission.resource_id,
+           resource_scope.depth,
+           permission.principal_id,
+           mangorts_access_level_rank(permission.access_level),
+           array[permission.principal_id]
     from resource_access_grants permission
+    join resource_scope
+      on resource_scope.resource_id = permission.resource_id
+    join normalized_resource normalized
+      on normalized.resource_type = permission.resource_type
     where permission.company_id = p_company_id
-      and permission.resource_type = p_resource_type
-      and permission.resource_id = p_resource_id
       and permission.principal_type = 'group'
     union all
-    select child.group_id, parent.access_rank
-    from company_user_groups child
-    join permitted_group_scope parent
-      on parent.group_id = child.parent_group_id
-    where child.company_id = p_company_id
+    select parent.resource_id,
+           parent.depth,
+           child.group_id,
+           parent.access_rank,
+           parent.path || child.group_id
+    from permitted_group_scope parent
+    join company_user_groups child
+      on child.company_id = p_company_id
+     and child.parent_group_id = parent.group_id
+    where not child.group_id = any(parent.path)
+  ),
+  matching_grants(depth, subject_rank, access_rank) as (
+    select resource_scope.depth,
+           2,
+           mangorts_access_level_rank(permission.access_level)
+    from resource_access_grants permission
+    join resource_scope
+      on resource_scope.resource_id = permission.resource_id
+    join normalized_resource normalized
+      on normalized.resource_type = permission.resource_type
+    where permission.company_id = p_company_id
+      and permission.principal_type = 'user'
+      and permission.principal_id = p_user_id
+    union all
+    select permitted_group_scope.depth,
+           1,
+           permitted_group_scope.access_rank
+    from company_user_group_members member
+    join permitted_group_scope
+      on permitted_group_scope.group_id = member.group_id
+    where member.company_id = p_company_id
+      and member.user_id = p_user_id
+  ),
+  effective_grant(access_rank) as (
+    select matching_grants.access_rank
+    from matching_grants
+    order by matching_grants.depth asc,
+             matching_grants.subject_rank desc,
+             matching_grants.access_rank desc
+    limit 1
   )
   select case
-    when (select required_rank from requested) = 0 then false
-    when not exists (
-      select 1
-      from resource_access_grants permission
-      where permission.company_id = p_company_id
-        and permission.resource_type = p_resource_type
-        and permission.resource_id = p_resource_id
-    ) then (select required_rank from requested) = 1
-    when exists (
-      select 1
-      from resource_access_grants permission, requested
-      where permission.company_id = p_company_id
-        and permission.resource_type = p_resource_type
-        and permission.resource_id = p_resource_id
-        and permission.principal_type = 'user'
-        and permission.principal_id = p_user_id
-        and mangorts_access_level_rank(permission.access_level) >= requested.required_rank
-    ) then true
-    when exists (
-      select 1
-      from company_user_group_members member
-      join permitted_group_scope scope
-        on scope.group_id = member.group_id
-      cross join requested
-      where member.company_id = p_company_id
-        and member.user_id = p_user_id
-        and scope.access_rank >= requested.required_rank
-    ) then true
+    when requested.required_rank = 0 then false
+    when normalized_resource.resource_type not in ('node', 'logic_gate', 'shared_triage_folder') then false
+    when (select allowed from role_admin_actor) then true
+    when exists (select 1 from effective_grant) then (select access_rank from effective_grant) >= requested.required_rank
     else false
-  end;
+  end
+  from requested, normalized_resource;
 $$ language sql stable;
-
 create or replace function mangorts_user_can_view_entity(
   p_company_id uuid,
   p_entity_type text,

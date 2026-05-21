@@ -89,7 +89,7 @@ export type CommunicationsSharedInboxRaciAssignment = {
   created_timestamp: string;
 };
 
-export type ResourceAccessLevel = "view" | "edit" | "admin";
+export type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
 
 export type ResourceAccessGrant = {
   company_id: string;

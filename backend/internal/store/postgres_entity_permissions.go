@@ -483,7 +483,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 		if subjectID == "" {
 			return nil, ErrInvalid
 		}
-		key := subjectType + ":" + subjectID + ":" + permission
+		key := subjectType + ":" + subjectID
 		if seen[key] {
 			continue
 		}
@@ -519,21 +519,33 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
-delete from resource_access_grants
-where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, entityType, entityID); err != nil {
-		return nil, err
+	targetEntityIDs := []string{entityID}
+	if entityType == EntityTypeSharedTriageFolder {
+		ids, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, entityID)
+		if err != nil {
+			return nil, err
+		}
+		targetEntityIDs = ids
 	}
-	for _, item := range normalized {
+	for _, targetEntityID := range targetEntityIDs {
 		if _, err := tx.ExecContext(ctx, `
+delete from resource_access_grants
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, entityType, targetEntityID); err != nil {
+			return nil, err
+		}
+	}
+	for _, targetEntityID := range targetEntityIDs {
+		for _, item := range normalized {
+			if _, err := tx.ExecContext(ctx, `
 insert into resource_access_grants
   (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
 values ($1, $2, $3::uuid, $4, $5::uuid, $6, now())
 on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
   access_level=excluded.access_level`,
-			companyID, entityType, entityID, item.subjectType, item.subjectID, item.permission,
-		); err != nil {
-			return nil, err
+				companyID, entityType, targetEntityID, item.subjectType, item.subjectID, item.permission,
+			); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -542,6 +554,47 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 	return r.ListEntityPermissions(companyID, entityType, entityID)
 }
 
+func postgresSharedTriagePermissionTargetIDs(ctx context.Context, tx *sql.Tx, companyID, folderID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+with recursive root(folder_id, parent_folder_id) as (
+  select folder_id, parent_folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications'
+),
+descendants(folder_id, path) as (
+  select folder_id, array[folder_id]
+  from root
+  union all
+  select child.folder_id, descendants.path || child.folder_id
+  from company_explorer_folders child
+  join descendants on child.parent_folder_id = descendants.folder_id
+  cross join root
+  where child.company_id=$1::uuid
+    and child.folder_kind='communications'
+    and root.parent_folder_id is null
+    and not child.folder_id = any(descendants.path)
+)
+select folder_id::text from descendants`, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, ErrNotFound
+	}
+	return ids, nil
+}
 func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
 	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
 }

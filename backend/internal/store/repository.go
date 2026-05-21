@@ -290,9 +290,10 @@ const (
 	EntityTypeLogicGate          = "logic_gate"
 	EntityTypeSharedTriageFolder = "shared_triage_folder"
 
-	EntityPermissionView  = "view"
-	EntityPermissionEdit  = "edit"
-	EntityPermissionAdmin = "admin"
+	EntityPermissionNoAccess = "no_access"
+	EntityPermissionView     = "view"
+	EntityPermissionEdit     = "edit"
+	EntityPermissionAdmin    = "admin"
 
 	EntityPermissionSubjectUser  = "user"
 	EntityPermissionSubjectGroup = "group"
@@ -886,6 +887,8 @@ func NormalizeEntityPermission(permission string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(permission)) {
 	case "", EntityPermissionView:
 		return EntityPermissionView, true
+	case EntityPermissionNoAccess:
+		return EntityPermissionNoAccess, true
 	case EntityPermissionEdit:
 		return EntityPermissionEdit, true
 	case EntityPermissionAdmin, "manage":
@@ -894,6 +897,7 @@ func NormalizeEntityPermission(permission string) (string, bool) {
 		return "", false
 	}
 }
+
 func EntityPermissionRank(permission string) int {
 	if strings.TrimSpace(permission) == "" {
 		return 0
@@ -903,6 +907,8 @@ func EntityPermissionRank(permission string) int {
 		return 0
 	}
 	switch permission {
+	case EntityPermissionNoAccess:
+		return 0
 	case EntityPermissionView:
 		return 1
 	case EntityPermissionEdit:

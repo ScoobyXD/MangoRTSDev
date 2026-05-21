@@ -115,6 +115,7 @@ export function HomeMailWorkspace({
   selectedMessageID,
   selectedMessageIDs,
   sharedInboxSettings,
+  unassignedSharedInbox,
   showDetailResizeHandle,
   unreadOnly,
   unreadMessageCount,
@@ -168,6 +169,7 @@ export function HomeMailWorkspace({
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
   sharedInboxSettings?: { onOpen: () => void };
+  unassignedSharedInbox?: { folderName: string; onAssignEmail: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
@@ -280,6 +282,7 @@ export function HomeMailWorkspace({
               value={searchDraft}
               onChange={(event) => onSearchDraftChange(event.target.value)}
               placeholder="Search mail"
+                          disabled={!!unassignedSharedInbox}
             />
             <button type="submit" style={searchButtonStyle}>Search</button>
           </form>
@@ -288,6 +291,7 @@ export function HomeMailWorkspace({
               <input
                 type="checkbox"
                 checked={unreadOnly}
+                disabled={!!unassignedSharedInbox}
                 onChange={(event) => onToggleUnreadOnly(event.target.checked)}
               />
               <span>Unread only</span>
@@ -307,6 +311,7 @@ export function HomeMailWorkspace({
           style={messageListStyle}
           onScroll={(event) => {
             const target = event.currentTarget;
+            if (unassignedSharedInbox) return;
             if (isArchivableListView && mailbox === "primary") {
               const scrolledOutIDs = collectScrolledOutMessageIDs(target);
               if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
@@ -314,7 +319,12 @@ export function HomeMailWorkspace({
             if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) onLoadMoreMessages();
           }}
         >
-          {messages.length === 0 && !loadingMessages ? (
+          {unassignedSharedInbox ? (
+            <div style={{ ...emptyStateStyle, gap: 8 }}>
+              <span>This folder has not been assigned an email</span>
+              <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>
+            </div>
+          ) : messages.length === 0 && !loadingMessages ? (
             <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;

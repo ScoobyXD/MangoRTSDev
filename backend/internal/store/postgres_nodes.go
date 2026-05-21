@@ -259,6 +259,16 @@ select exists(
 	if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
 		return domain.Node{}, err
 	}
+	if assigneeUserID != "" {
+		if _, err := tx.ExecContext(ctx, `
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`, companyID, item.NodeID, assigneeUserID); err != nil {
+			return domain.Node{}, err
+		}
+	}
 	return scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n

@@ -120,7 +120,7 @@ func userGroupMemberKey(companyID, groupID, userID string) string {
 }
 
 func entityPermissionKey(companyID, entityType, entityID, subjectType, subjectID, permission string) string {
-	return companyID + ":" + entityType + ":" + entityID + ":" + subjectType + ":" + subjectID + ":" + permission
+	return companyID + ":" + entityType + ":" + entityID + ":" + subjectType + ":" + subjectID
 }
 
 func triageItemKey(userID, messageID string) string {

@@ -405,13 +405,13 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     gap: 7,
     border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_CYAN_MEDIUM}`,
     borderRadius: 7,
-    background: selected ? HOME_CYAN_SOFT : HOME_CYAN_FAINT,
+    background: "#ffffff",
     color: "#24120a",
     cursor: "grab",
     font: "inherit",
     padding: "10px 8px",
     minWidth: 0,
-    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_SOFT} inset` : "none",
+    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_SOFT}` : "none",
   };
 }
 
@@ -421,7 +421,7 @@ export const myLogicGateTileIconStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   borderRadius: 6,
-  background: HOME_CYAN_SOFT,
+  background: "#ffffff",
   transform: "scale(1.35)",
 };
 
