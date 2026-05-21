@@ -6,6 +6,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
@@ -701,6 +702,8 @@ export function HomeSidebar({
 }) {
   const [sharedRootOpen, setSharedRootOpen] = useState(true);
   const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
+  const [selectedSharedTreeIDs, setSelectedSharedTreeIDs] = useState<Set<string>>(new Set());
+  const [sharedSelectionAnchorTreeID, setSharedSelectionAnchorTreeID] = useState("");
   const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
@@ -750,6 +753,12 @@ export function HomeSidebar({
     }, 0);
   }, [renamingSharedFolderID]);
 
+  useEffect(() => {
+    if (activeViewID.startsWith("shared:")) return;
+    setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
+    setSharedSelectionAnchorTreeID("");
+  }, [activeViewID]);
+
   const toggleSharedFolder = useCallback((folderID: string) => {
     setExpandedSharedFolderIDs((previous) => {
       const next = new Set(previous);
@@ -789,18 +798,6 @@ export function HomeSidebar({
     setRenameDraft(folder.name);
   }, [onCreateSharedInbox]);
 
-  const createSharedInboxWithAssignedEmail = useCallback(async (parentFolderID: string) => {
-    const accountEmail = promptSharedInboxEmail(cleanConnectedAccountEmail);
-    if (!accountEmail) return;
-    setSharedContextMenu(null);
-    const folder = await onCreateSharedInbox(parentFolderID, accountEmail, accountEmail);
-    if (!folder) return;
-    if (parentFolderID) {
-      setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
-    }
-    setSharedRootOpen(true);
-  }, [cleanConnectedAccountEmail, onCreateSharedInbox]);
-
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     setSharedContextMenu(null);
     await onSetSharedInboxAccountEmail(folderID, accountEmail);
@@ -826,6 +823,25 @@ export function HomeSidebar({
     event.stopPropagation();
     setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
   }, []);
+
+  const selectSharedFolderRow = useCallback((row: SharedInboxTreeRow, event?: React.MouseEvent) => {
+    const orderedIDs = sharedRows.map((item) => item.treeID);
+    const selected = resolveExplorerClickSelection({
+      orderedIDs,
+      previousSelectedIDs: selectedSharedTreeIDs,
+      anchorID: sharedSelectionAnchorTreeID,
+      clickedID: row.treeID,
+      shiftKey: !!event?.shiftKey,
+      ctrlKey: !!event?.ctrlKey || !!event?.metaKey,
+    });
+    if (selected.selectedIDs.size === 0) selected.selectedIDs.add(row.treeID);
+    const orderedSelectedIDs = orderedIDs.filter((id) => selected.selectedIDs.has(id));
+    const nextSelectedIDs = orderedSelectedIDs.length > 0 ? orderedSelectedIDs : [row.treeID];
+    setSelectedSharedTreeIDs(new Set(nextSelectedIDs));
+    setSharedSelectionAnchorTreeID(selected.anchorID);
+    const primaryTreeID = (selected.selectedIDs.has(row.treeID) ? row.treeID : nextSelectedIDs[0]) ?? row.treeID;
+    onSelectView(primaryTreeID as HomeViewID, "primary");
+  }, [onSelectView, selectedSharedTreeIDs, sharedRows, sharedSelectionAnchorTreeID]);
 
   const canDropSharedFolder = useCallback((sourceFolderID: string, targetFolderID: string) => {
     if (!sourceFolderID || sourceFolderID === targetFolderID) return false;
@@ -910,7 +926,7 @@ export function HomeSidebar({
   const renderSharedRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
     const isRenaming = renamingSharedFolderID === folder.folder_id;
-    const active = activeViewID === row.treeID;
+    const active = activeViewID === row.treeID || selectedSharedTreeIDs.has(row.treeID);
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
     return (
       <div
@@ -919,11 +935,11 @@ export function HomeSidebar({
         tabIndex={0}
         draggable={!isRenaming && !sharedBusy}
         style={sharedInboxFolderRowStyle(row.depth, active, rowDropPlacement)}
-        onClick={() => onSelectView(row.treeID, "primary")}
+        onClick={(event) => selectSharedFolderRow(row, event)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
-          onSelectView(row.treeID, "primary");
+          selectSharedFolderRow(row);
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -1100,14 +1116,6 @@ export function HomeSidebar({
             onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "")}
           >
             {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
-          </button>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            disabled={sharedBusy}
-            onClick={() => void createSharedInboxWithAssignedEmail(sharedContextMenu.folder?.folder_id ?? "")}
-          >
-            Assign email and create inbox
           </button>
           {sharedContextMenu.folder && (
             <>
