@@ -345,6 +345,9 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
+		}
 		return nil, err
 	}
 	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
@@ -378,7 +381,7 @@ with recursive subtree as (
    and child.parent_folder_id=parent.folder_id
   where ($3::text is null or child.folder_kind=$3)
 )
-select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
 from subtree
 where system_key is null or system_key <> 'kanban_boards'
 order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(folderID), kindParam)
@@ -399,6 +402,9 @@ order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(fold
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, false)
+		}
 		return nil, err
 	}
 	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)

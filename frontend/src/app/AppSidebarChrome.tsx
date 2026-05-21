@@ -163,6 +163,20 @@ async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEm
   return true;
 }
 
+function formatSidebarSharedInboxError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (message.includes("shared_inbox_storage_unavailable")) {
+    return `${fallback}: Shared Triage storage is not ready. Run the pending database migrations, then try again.`;
+  }
+  if (message.includes("failed_to_list_shared_inboxes")) {
+    return `${fallback}: the shared inbox list could not be loaded.`;
+  }
+  if (message.includes("failed_to_create_shared_inbox")) {
+    return `${fallback}: the folder could not be created.`;
+  }
+  return message ? `${fallback}: ${message}` : fallback;
+}
+
 function usePersistedSidebarSectionOpen(sectionID: SidebarSectionID, fallback: boolean): [boolean, React.Dispatch<React.SetStateAction<boolean>>] {
   const [open, setOpen] = useState(() => readSidebarSectionOpen(sectionID, fallback));
   useEffect(() => {
@@ -198,6 +212,7 @@ export function AppSidebar({
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [sharedBusy, setSharedBusy] = useState(false);
+  const [sharedError, setSharedError] = useState("");
   const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
   const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
@@ -371,10 +386,16 @@ export function AppSidebar({
     setLoadingSharedInboxes(true);
     listCommunicationsSharedInboxes(companyID)
       .then((folders) => {
-        if (!cancelled) setSharedInboxes(folders);
+        if (!cancelled) {
+          setSharedError("");
+          setSharedInboxes(folders);
+        }
       })
       .catch((error) => {
-        if (!cancelled) console.error("Failed to load shared triage folders", error);
+        if (!cancelled) {
+          setSharedError(formatSidebarSharedInboxError(error, "Failed to load Shared Triage folders"));
+          console.error("Failed to load shared triage folders", error);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingSharedInboxes(false);
@@ -405,8 +426,14 @@ export function AppSidebar({
       if (detail?.companyID && detail.companyID !== companyID) return;
       setLoadingSharedInboxes(true);
       listCommunicationsSharedInboxes(companyID)
-        .then(setSharedInboxes)
-        .catch((error) => console.error("Failed to refresh shared triage folders", error))
+        .then((folders) => {
+          setSharedError("");
+          setSharedInboxes(folders);
+        })
+        .catch((error) => {
+          setSharedError(formatSidebarSharedInboxError(error, "Failed to refresh Shared Triage folders"));
+          console.error("Failed to refresh shared triage folders", error);
+        })
         .finally(() => setLoadingSharedInboxes(false));
     };
     window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
@@ -482,6 +509,7 @@ export function AppSidebar({
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     setSharedBusy(true);
+    setSharedError("");
     try {
       const name = accountEmail.trim() || "New Folder";
       const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name, accountEmail });
@@ -495,6 +523,7 @@ export function AppSidebar({
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
       if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to create Shared Triage folder"));
       console.error("Failed to create shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -511,11 +540,13 @@ export function AppSidebar({
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     setSharedBusy(true);
+    setSharedError("");
     try {
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, accountEmail });
       replaceSharedFolder(updated);
     } catch (error) {
       if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to update Shared Triage email"));
       console.error("Failed to update shared triage email account", error);
     } finally {
       setSharedBusy(false);
@@ -537,10 +568,12 @@ export function AppSidebar({
     setRenameDraft("");
     if (!companyID || !name || name === current?.name) return;
     setSharedBusy(true);
+    setSharedError("");
     try {
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, name });
       replaceSharedFolder(updated);
     } catch (error) {
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to rename Shared Triage folder"));
       console.error("Failed to rename shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -571,10 +604,12 @@ export function AppSidebar({
     }
     setDropTarget(null);
     setSharedBusy(true);
+    setSharedError("");
     try {
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID: sourceFolderID, parentFolderID, position });
       replaceSharedFolder(updated);
     } catch (error) {
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to move Shared Triage folder"));
       console.error("Failed to move shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -590,12 +625,14 @@ export function AppSidebar({
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
     if (!window.confirm(`Delete ${detail}: ${label}?`)) return;
     setSharedBusy(true);
+    setSharedError("");
     try {
       await deleteCommunicationsSharedInbox(companyID, folder.folder_id);
       setSharedInboxes((previous) => previous.filter((item) => !subtreeIDs.has(item.folder_id)));
       const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
       if (activeFolderID && subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
     } catch (error) {
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to delete Shared Triage folder"));
       console.error("Failed to delete shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -794,6 +831,7 @@ export function AppSidebar({
               {sharedRows.map(renderSharedFolderRow)}
             </div>
           )}
+          {sharedError && <div style={appSidebarSharedErrorStyle}>{sharedError}</div>}
         </div>
         <AppSidebarButton
           label="ACIO Nodes"
@@ -1686,6 +1724,14 @@ const appSidebarSharedRowsStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 2,
   padding: "0 0 0 2px",
+};
+
+const appSidebarSharedErrorStyle: React.CSSProperties = {
+  padding: "3px 6px 2px 8px",
+  color: "#8b123f",
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1.25,
 };
 
 function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null): React.CSSProperties {

@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	postgresUndefinedTableCode  = "42P01"
-	postgresUndefinedColumnCode = "42703"
+	postgresUndefinedTableCode            = "42P01"
+	postgresUndefinedColumnCode           = "42703"
+	postgresInvalidTextRepresentationCode = "22P02"
 )
 
 func isPostgresUndefinedTable(err error, tableName string) bool {
@@ -36,6 +37,11 @@ func isPostgresUndefinedColumn(err error, columnName string) bool {
 		return true
 	}
 	return strings.Contains(pgErr.Message, columnName)
+}
+
+func isPostgresInvalidTextRepresentation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == postgresInvalidTextRepresentationCode
 }
 
 func scanLogicGateRaciAssignment(row interface {
