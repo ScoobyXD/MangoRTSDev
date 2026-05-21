@@ -403,9 +403,7 @@ where company_id=$1 and node_id=$4`,
 
 func assignNodeToLogicGateResponsibleSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, logicGateID, nodeID string) error {
 	_, err := exec.ExecContext(ctx, `
-update nodes
-set assignee_user_id = responsible.user_id
-from (
+with responsible as (
   select user_id
   from logic_gate_raci_assignments
   where company_id=$1
@@ -413,9 +411,25 @@ from (
     and role=$4
   order by created_timestamp asc, user_id asc
   limit 1
-) responsible
-where nodes.company_id=$1
-  and nodes.node_id=$3`,
+),
+updated_node as (
+  update nodes
+  set assignee_user_id = responsible.user_id
+  from responsible
+  where nodes.company_id=$1
+    and nodes.node_id=$3
+  returning nodes.company_id, nodes.node_id, responsible.user_id
+)
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+select company_id, 'node', node_id, 'user', user_id, 'edit', now()
+from updated_node
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=case
+    when mangorts_access_level_rank(resource_access_grants.access_level) >= mangorts_access_level_rank(excluded.access_level)
+      then resource_access_grants.access_level
+    else excluded.access_level
+  end`,
 		companyID, logicGateID, nodeID, domain.LogicGateRaciRoleResponsible,
 	)
 	if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {

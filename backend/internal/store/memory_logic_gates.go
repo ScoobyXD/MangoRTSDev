@@ -268,6 +268,9 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	}
 	sortLogicGateRaciAssignments(assignments)
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
+	for _, assignment := range assignments {
+		r.grantEntityAccessAtLeastLocked(companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, assignment.UserID, EntityPermissionEdit, now)
+	}
 	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil
 }

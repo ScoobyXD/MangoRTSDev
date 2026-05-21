@@ -261,12 +261,7 @@ select exists(
 		return domain.Node{}, err
 	}
 	if assigneeUserID != "" {
-		if _, err := tx.ExecContext(ctx, `
-insert into resource_access_grants
-  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level=excluded.access_level`, companyID, item.NodeID, assigneeUserID); err != nil {
+		if err := grantResourceAccessAtLeastSQL(ctx, tx, companyID, EntityTypeNode, item.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin); err != nil {
 			return domain.Node{}, err
 		}
 	}
@@ -378,6 +373,11 @@ where company_id = $1 and node_id = $2`,
 	)
 	if err != nil {
 		return domain.Node{}, err
+	}
+	if input.AssigneeUserIDSet && assigneeUserID != nil && *assigneeUserID != "" {
+		if err := grantResourceAccessAtLeastSQL(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID, EntityPermissionSubjectUser, *assigneeUserID, EntityPermissionEdit); err != nil {
+			return domain.Node{}, err
+		}
 	}
 	if input.TitleSet {
 		if _, err := tx.ExecContext(ctx, `

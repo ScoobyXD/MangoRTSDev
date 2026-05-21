@@ -101,3 +101,68 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 		t.Fatalf("allowed direct status = %d, want %d body=%s", allowedRes.Code, http.StatusOK, strings.TrimSpace(allowedRes.Body.String()))
 	}
 }
+
+func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111115"
+	adminCompanyID := "11111111-1111-4111-8111-111111111116"
+	repo.EnsureCompany(companyID, "Permission Save Co")
+	repo.EnsureCompany(adminCompanyID, "Admin Co")
+
+	targetUser, err := repo.UpsertAuthUser("permission-target-user", "target@example.com", "Target User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser target: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-target-user", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership target: %v", err)
+	}
+	if _, err := repo.UpsertAuthUser("permission-dev-admin", "dev-admin@example.com", "Dev Admin"); err != nil {
+		t.Fatalf("UpsertAuthUser dev admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-dev-admin", adminCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership dev admin: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Saved permission gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", "permission-dev-admin", "dev-admin@example.com")
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"permissions": []map[string]string{{
+			"subject_type": "user",
+			"subject_id":   targetUser.UserID,
+			"access_level": store.EntityPermissionEdit,
+		}},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq.Header.Set("Authorization", token)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRes := httptest.NewRecorder()
+	handler.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq.Header.Set("Authorization", token)
+	getRes := httptest.NewRecorder()
+	handler.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
+	}
+	var payload struct {
+		Permissions []domain.EntityPermission `json:"permissions"`
+	}
+	if err := json.Unmarshal(getRes.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode permissions: %v", err)
+	}
+	if len(payload.Permissions) != 1 || payload.Permissions[0].SubjectID != targetUser.UserID || payload.Permissions[0].AccessLevel != store.EntityPermissionEdit {
+		t.Fatalf("permissions = %+v, want saved edit grant for target", payload.Permissions)
+	}
+}

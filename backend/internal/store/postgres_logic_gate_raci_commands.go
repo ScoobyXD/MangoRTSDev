@@ -158,6 +158,11 @@ where company_id=$1::uuid
 		if affected > 0 {
 			changed = true
 		}
+		if operation == LogicGateRaciCommandAdd {
+			if err := grantResourceAccessAtLeastSQL(ctx, tx, companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, assignment.userID, EntityPermissionEdit); err != nil {
+				return LogicGateRaciAssignmentCommandResult{}, err
+			}
+		}
 	}
 
 	assignmentsByGate, err := listLogicGateRaciAssignmentsTx(ctx, tx, companyID, []string{logicGateID})
