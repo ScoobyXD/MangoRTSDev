@@ -257,6 +257,13 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		actor, hasActor, ok := sharedInboxActorForCompany(w, r, companyID)
+		if !ok {
+			return
+		}
+		if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionView) {
+			return
+		}
 		folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
@@ -292,6 +299,13 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
 	if req.CompanyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	actor, hasActor, ok := sharedInboxActorForCompany(w, r, req.CompanyID)
+	if !ok {
+		return
+	}
+	if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {
 		return
 	}
 	assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
@@ -356,10 +370,6 @@ func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.Co
 		return []domain.CompanyExplorerFolder{}
 	}
 	userGroupIDs := sharedInboxAccessGroupIDsForUser(userID, groups, members)
-	folderByID := make(map[string]domain.CompanyExplorerFolder, len(folders))
-	for _, folder := range folders {
-		folderByID[folder.FolderID] = folder
-	}
 	accessByFolderID := make(map[string]string, len(folders))
 	includeFolderIDs := make(map[string]bool, len(folders))
 	for _, folder := range folders {
@@ -371,16 +381,7 @@ func filterCommunicationsSharedInboxFoldersForUserWithGroups(folders []domain.Co
 		if !store.EntityPermissionSatisfies(accessLevel, store.EntityPermissionView) {
 			continue
 		}
-		seen := map[string]bool{}
-		for currentID := folder.FolderID; strings.TrimSpace(currentID) != "" && !seen[currentID]; {
-			seen[currentID] = true
-			includeFolderIDs[currentID] = true
-			current, ok := folderByID[currentID]
-			if !ok || current.ParentFolderID == nil {
-				break
-			}
-			currentID = strings.TrimSpace(*current.ParentFolderID)
-		}
+		includeFolderIDs[folder.FolderID] = true
 	}
 	out := make([]domain.CompanyExplorerFolder, 0, len(folders))
 	for _, folder := range folders {

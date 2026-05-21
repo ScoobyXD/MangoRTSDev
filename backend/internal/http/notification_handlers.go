@@ -522,7 +522,13 @@ func logicGateRaciFingerprint(assignments []domain.LogicGateRaciAssignment) stri
 func sharedInboxRaciFingerprint(assignments []domain.SharedInboxRaciAssignment) string {
 	parts := make([]string, 0, len(assignments))
 	for _, assignment := range assignments {
-		parts = append(parts, strings.TrimSpace(assignment.Role)+":"+strings.TrimSpace(assignment.UserID))
+		subjectType := strings.TrimSpace(assignment.SubjectType)
+		subjectID := strings.TrimSpace(assignment.SubjectID)
+		if subjectType == "" {
+			subjectType = "user"
+			subjectID = strings.TrimSpace(assignment.UserID)
+		}
+		parts = append(parts, strings.TrimSpace(assignment.Role)+":"+subjectType+":"+subjectID)
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")

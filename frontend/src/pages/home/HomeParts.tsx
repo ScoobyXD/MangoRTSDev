@@ -3,7 +3,8 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import type { BoundRequestJSON } from "../../modules/api/requestJSON";
+import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CommunicationsSharedInboxRaciSubjectType, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
@@ -806,17 +807,24 @@ export function HomeSidebar({
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     setSharedContextMenu(null);
+    if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
+      return;
+    }
     await onSetSharedInboxAccountEmail(folderID, accountEmail);
-  }, [onSetSharedInboxAccountEmail]);
+  }, [onSetSharedInboxAccountEmail, sharedInboxes]);
 
   const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
+    if (sharedInboxes.some((item) => (item.parent_folder_id ?? "").trim() === folder.folder_id)) {
+      setSharedContextMenu(null);
+      return;
+    }
     setSharedContextMenu(null);
     setSharedEmailDialog({
       folder,
       draft: (folder.account_email ?? cleanConnectedAccountEmail).trim().toLowerCase(),
       error: "",
     });
-  }, [cleanConnectedAccountEmail]);
+  }, [cleanConnectedAccountEmail, sharedInboxes]);
 
   const submitSharedEmailDialog = useCallback(() => {
     if (!sharedEmailDialog || sharedBusy) return;
@@ -1156,55 +1164,61 @@ export function HomeSidebar({
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
-      {sharedContextMenu && (
-        <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            disabled={sharedBusy}
-            onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "")}
-          >
-            {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
-          </button>
-          {sharedContextMenu.folder && (
-            <>
-              <button
-                type="button"
-                style={sharedInboxContextMenuButtonStyle}
-                disabled={sharedBusy}
-                onClick={() => openSharedEmailDialog(sharedContextMenu.folder!)}
-              >
-                Assign email to inbox
-              </button>
-              {sharedContextMenu.folder.account_email && (
+      {sharedContextMenu && (() => {
+        const contextFolder = sharedContextMenu.folder;
+        const contextFolderHasChildren = !!contextFolder && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === contextFolder.folder_id);
+        return (
+          <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              disabled={sharedBusy}
+              onClick={() => void createSharedFolder(contextFolder?.folder_id ?? "")}
+            >
+              {contextFolder ? "New Child Folder" : "New Folder"}
+            </button>
+            {contextFolder && (
+              <>
+                {!contextFolderHasChildren && (
+                  <button
+                    type="button"
+                    style={sharedInboxContextMenuButtonStyle}
+                    disabled={sharedBusy}
+                    onClick={() => openSharedEmailDialog(contextFolder)}
+                  >
+                    Assign email to inbox
+                  </button>
+                )}
+                {!contextFolderHasChildren && contextFolder.account_email && (
+                  <button
+                    type="button"
+                    style={sharedInboxContextMenuButtonStyle}
+                    disabled={sharedBusy}
+                    onClick={() => void setSharedFolderAccountEmail(contextFolder.folder_id, "")}
+                  >
+                    Detach Email
+                  </button>
+                )}
                 <button
                   type="button"
                   style={sharedInboxContextMenuButtonStyle}
-                  disabled={sharedBusy}
-                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, "")}
+                  onClick={() => startSharedRename(contextFolder)}
                 >
-                  Detach Email
+                  Rename
                 </button>
-              )}
-              <button
-                type="button"
-                style={sharedInboxContextMenuButtonStyle}
-                onClick={() => startSharedRename(sharedContextMenu.folder!)}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                style={{ ...sharedInboxContextMenuButtonStyle, color: "#8b123f" }}
-                disabled={sharedBusy}
-                onClick={() => void requestDeleteSharedFolder(sharedContextMenu.folder!)}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </FrameRightClickMenu>
-      )}
+                <button
+                  type="button"
+                  style={{ ...sharedInboxContextMenuButtonStyle, color: "#8b123f" }}
+                  disabled={sharedBusy}
+                  onClick={() => void requestDeleteSharedFolder(contextFolder)}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </FrameRightClickMenu>
+        );
+      })()}
       {sharedEmailDialog && (
         <SharedInboxEmailDialog
           inputRef={sharedEmailInputRef}
@@ -1270,93 +1284,204 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
   );
 }
 
-const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string; help: string }> = [
-  { role: "responsible", label: "Triage", help: "Can triage and archive" },
-  { role: "accountable", label: "Manage", help: "Can triage and archive" },
-  { role: "consulted", label: "Collaborate", help: "Can view and comment" },
-  { role: "informed", label: "View", help: "Can view and comment" },
+type CompanyUserGroup = {
+  company_id: string;
+  group_id: string;
+  parent_group_id?: string;
+  name: string;
+  position: number;
+};
+
+type CompanyUserGroupMember = {
+  company_id: string;
+  group_id: string;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
+};
+
+const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string }> = [
+  { role: "responsible", label: "Responsible" },
+  { role: "accountable", label: "Accountable" },
+  { role: "consulted", label: "Consulted" },
+  { role: "informed", label: "Informed" },
 ];
 
 function companyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
   return user.display_name?.trim() || user.email?.trim() || user.user_id;
 }
 
+function companyGroupLabel(group: Pick<CompanyUserGroup, "group_id" | "name">): string {
+  return group.name?.trim() || group.group_id;
+}
+
+function sharedInboxRaciAssignmentSubjectKey(assignment: { subject_type?: string; subject_id?: string; user_id: string }): string {
+  const subjectType = assignment.subject_type?.trim() || "user";
+  const subjectID = assignment.subject_id?.trim() || assignment.user_id.trim();
+  return `${subjectType}:${subjectID}`;
+}
+
 function sharedInboxRaciAssignmentLabel(
-  assignment: { user_id: string; user_display_name?: string; user_email?: string },
+  assignment: { subject_type?: string; subject_id?: string; subject_name?: string; user_id: string; user_display_name?: string; user_email?: string },
   userByID: Map<string, CompanyUser>,
+  groupByID: Map<string, CompanyUserGroup>,
 ): string {
+  if ((assignment.subject_type ?? "user") === "group") {
+    const groupID = assignment.subject_id?.trim() ?? "";
+    const group = groupByID.get(groupID);
+    return assignment.subject_name?.trim() || (group ? companyGroupLabel(group) : groupID || "Department");
+  }
   const user = userByID.get(assignment.user_id);
   return assignment.user_display_name?.trim() || assignment.user_email?.trim() || (user ? companyUserLabel(user) : assignment.user_id);
 }
 
 export function SharedInboxRaciSettingsModal({
+  requestJSON,
+  companyID,
   folder,
   companyUsers,
   busy,
-  onAddUser,
-  onRemoveUser,
+  onAddSubject,
+  onRemoveSubject,
   onClose,
 }: {
+  requestJSON: BoundRequestJSON;
+  companyID: string;
   folder: CommunicationsSharedInbox;
   companyUsers: CompanyUser[];
   busy: boolean;
-  onAddUser: (folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => void;
-  onRemoveUser: (folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => void;
+  onAddSubject: (folderID: string, role: CommunicationsSharedInboxRaciRole, subjectType: CommunicationsSharedInboxRaciSubjectType, subjectID: string, subjectName?: string) => void;
+  onRemoveSubject: (folderID: string, role: CommunicationsSharedInboxRaciRole, subjectType: CommunicationsSharedInboxRaciSubjectType, subjectID: string) => void;
   onClose: () => void;
 }) {
-  const [draftByRole, setDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
+  const [userDraftByRole, setUserDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
     responsible: "",
     accountable: "",
     consulted: "",
     informed: "",
   });
+  const [groupDraftByRole, setGroupDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
+    responsible: "",
+    accountable: "",
+    consulted: "",
+    informed: "",
+  });
+  const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
+  const [groupMembers, setGroupMembers] = useState<CompanyUserGroupMember[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
+  const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id, group])), [groups]);
   const assignments = folder.raci_assignments ?? [];
-  const updateDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
-    setDraftByRole((previous) => ({ ...previous, [role]: value }));
+  const updateUserDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
+    setUserDraftByRole((previous) => ({ ...previous, [role]: value }));
+  };
+  const updateGroupDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
+    setGroupDraftByRole((previous) => ({ ...previous, [role]: value }));
+  };
+
+  const groupsByParent = useMemo(() => {
+    const grouped = new Map<string, CompanyUserGroup[]>();
+    for (const group of groups) {
+      const parentID = group.parent_group_id?.trim() ?? "";
+      const list = grouped.get(parentID) ?? [];
+      list.push(group);
+      grouped.set(parentID, list);
+    }
+    for (const list of grouped.values()) list.sort((a, b) => a.position - b.position || companyGroupLabel(a).localeCompare(companyGroupLabel(b)));
+    return grouped;
+  }, [groups]);
+
+  const memberCountByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const member of groupMembers) counts.set(member.group_id, (counts.get(member.group_id) ?? 0) + 1);
+    return counts;
+  }, [groupMembers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingGroups(true);
+    setLoadError("");
+    requestJSON<{ groups?: CompanyUserGroup[]; members?: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`)
+      .then((payload) => {
+        if (cancelled) return;
+        setGroups(payload.groups ?? []);
+        setGroupMembers(payload.members ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load shared inbox RACI departments", error);
+        setLoadError("Departments could not be loaded.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGroups(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyID, requestJSON]);
+
+  const groupOptions = (selectableGroupIDs: Set<string>, parentID = "", depth = 0): React.ReactNode[] => {
+    const out: React.ReactNode[] = [];
+    for (const group of groupsByParent.get(parentID) ?? []) {
+      if (selectableGroupIDs.has(group.group_id)) {
+        out.push(
+          <option key={group.group_id} value={group.group_id}>
+            {`${"  ".repeat(depth)}${companyGroupLabel(group)} (${memberCountByGroup.get(group.group_id) ?? 0})`}
+          </option>,
+        );
+      }
+      out.push(...groupOptions(selectableGroupIDs, group.group_id, depth + 1));
+    }
+    return out;
   };
 
   return (
     <div style={sharedRaciBackdropStyle}>
-      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} access settings`}>
+      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} RACI assignments`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={panelTitleStyle}>{folder.name} Access</h2>
-            <div style={mutedSmallStyle}>Triage and Manage can archive. Collaborate and View are view/comment only.</div>
+            <h2 style={panelTitleStyle}>{folder.name} RACI assignments</h2>
+            {loadError && <div style={{ ...mutedSmallStyle, color: "#8b123f" }}>{loadError}</div>}
           </div>
           <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
         </div>
         <div style={sharedRaciRoleGridStyle}>
-          {SHARED_INBOX_RACI_ROLES.map(({ role, label, help }) => {
+          {SHARED_INBOX_RACI_ROLES.map(({ role, label }) => {
             const roleAssignments = assignments.filter((assignment) => assignment.role === role);
-            const assignedIDs = new Set(roleAssignments.map((assignment) => assignment.user_id));
-            const selectableUsers = companyUsers.filter((user) => !assignedIDs.has(user.user_id));
-            const draft = draftByRole[role];
+            const assignedSubjectKeys = new Set(roleAssignments.map(sharedInboxRaciAssignmentSubjectKey));
+            const selectableUsers = companyUsers.filter((user) => !assignedSubjectKeys.has(`user:${user.user_id}`));
+            const selectableGroups = groups.filter((group) => !assignedSubjectKeys.has(`group:${group.group_id}`));
+            const selectableGroupIDs = new Set(selectableGroups.map((group) => group.group_id));
+            const userDraft = userDraftByRole[role];
+            const groupDraft = groupDraftByRole[role];
             return (
               <section key={role} style={sharedRaciRoleColumnStyle}>
                 <div style={{ display: "grid", gap: 2 }}>
                   <strong style={{ fontSize: 12 }}>{label}</strong>
-                  <span style={mutedSmallStyle}>{help}</span>
                 </div>
                 <div style={sharedRaciChipListStyle}>
                   {roleAssignments.length === 0 ? (
                     <span style={mutedSmallStyle}>No one assigned</span>
                   ) : roleAssignments.map((assignment) => {
                     const inherited = assignment.folder_id !== folder.folder_id;
+                    const subjectType = (assignment.subject_type ?? "user") as CommunicationsSharedInboxRaciSubjectType;
+                    const subjectID = assignment.subject_id?.trim() || assignment.user_id.trim();
+                    const labelText = sharedInboxRaciAssignmentLabel(assignment, userByID, groupByID);
                     return (
-                      <span key={`${role}:${assignment.folder_id}:${assignment.user_id}`} style={sharedRaciChipStyle}>
+                      <span key={`${role}:${assignment.folder_id}:${subjectType}:${subjectID}`} style={sharedRaciChipStyle}>
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {sharedInboxRaciAssignmentLabel(assignment, userByID)}
+                          {labelText}
                         </span>
                         {inherited ? (
                           <span style={mutedSmallStyle}>Inherited</span>
                         ) : (
                           <button
                             type="button"
-                            aria-label={`Remove ${sharedInboxRaciAssignmentLabel(assignment, userByID)} from ${label}`}
+                            aria-label={`Remove ${labelText} from ${label}`}
                             style={shortcutRemoveStyle}
                             disabled={busy}
-                            onClick={() => onRemoveUser(folder.folder_id, role, assignment.user_id)}
+                            onClick={() => onRemoveSubject(folder.folder_id, role, subjectType, subjectID)}
                           >
                             X
                           </button>
@@ -1365,29 +1490,55 @@ export function SharedInboxRaciSettingsModal({
                     );
                   })}
                 </div>
-                <div style={sharedRaciAddRowStyle}>
-                  <select
-                    style={sharedRaciSelectStyle}
-                    value={draft}
-                    disabled={busy || selectableUsers.length === 0}
-                    onChange={(event) => updateDraft(role, event.target.value)}
-                  >
-                    <option value="">{selectableUsers.length === 0 ? "All users added" : "Add user"}</option>
-                    {selectableUsers.map((user) => (
-                      <option key={user.user_id} value={user.user_id}>{companyUserLabel(user)}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    style={smallButtonStyle}
-                    disabled={busy || !draft}
-                    onClick={() => {
-                      onAddUser(folder.folder_id, role, draft);
-                      updateDraft(role, "");
-                    }}
-                  >
-                    Add
-                  </button>
+                <div style={sharedRaciControlStackStyle}>
+                  <div style={sharedRaciAddRowStyle}>
+                    <select
+                      style={sharedRaciSelectStyle}
+                      value={userDraft}
+                      disabled={busy || selectableUsers.length === 0}
+                      onChange={(event) => updateUserDraft(role, event.target.value)}
+                    >
+                      <option value="">{selectableUsers.length === 0 ? "All people added" : "Add person"}</option>
+                      {selectableUsers.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>{companyUserLabel(user)}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      style={smallButtonStyle}
+                      disabled={busy || !userDraft}
+                      onClick={() => {
+                        const user = userByID.get(userDraft);
+                        onAddSubject(folder.folder_id, role, "user", userDraft, user ? companyUserLabel(user) : userDraft);
+                        updateUserDraft(role, "");
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div style={sharedRaciAddRowStyle}>
+                    <select
+                      style={sharedRaciSelectStyle}
+                      value={groupDraft}
+                      disabled={busy || loadingGroups || selectableGroups.length === 0}
+                      onChange={(event) => updateGroupDraft(role, event.target.value)}
+                    >
+                      <option value="">{selectableGroups.length === 0 ? "All departments added" : "Add department"}</option>
+                      {groupOptions(selectableGroupIDs)}
+                    </select>
+                    <button
+                      type="button"
+                      style={smallButtonStyle}
+                      disabled={busy || !groupDraft}
+                      onClick={() => {
+                        const group = groupByID.get(groupDraft);
+                        onAddSubject(folder.folder_id, role, "group", groupDraft, group ? companyGroupLabel(group) : groupDraft);
+                        updateGroupDraft(role, "");
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               </section>
             );
@@ -1426,7 +1577,7 @@ const sharedRaciModalStyle: React.CSSProperties = {
 const sharedRaciRoleGridStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
   gap: 10,
   overflow: "auto",
 };
@@ -1441,6 +1592,12 @@ const sharedRaciRoleColumnStyle: React.CSSProperties = {
   border: "1px solid rgba(255, 136, 32, 0.2)",
   borderRadius: 8,
   background: "#fffaf4",
+};
+
+const sharedRaciControlStackStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  minWidth: 0,
 };
 
 const sharedRaciChipListStyle: React.CSSProperties = {

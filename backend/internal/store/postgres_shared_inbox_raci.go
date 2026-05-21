@@ -81,6 +81,12 @@ order by assignment.folder_id::text asc,
 		if err != nil {
 			return nil, err
 		}
+		item.SubjectType = EntityPermissionSubjectUser
+		item.SubjectID = item.UserID
+		item.SubjectName = item.UserDisplayName
+		if item.SubjectName == "" {
+			item.SubjectName = item.UserEmail
+		}
 		assignmentsByFolder[item.FolderID] = append(assignmentsByFolder[item.FolderID], item)
 	}
 	if err := rows.Err(); err != nil {
@@ -91,6 +97,67 @@ order by assignment.folder_id::text asc,
 			return assignmentsByFolder, nil
 		}
 		return nil, err
+	}
+	groupRows, err := r.db.QueryContext(ctx, `
+select
+  assignment.company_id::text,
+  assignment.folder_id::text,
+  assignment.role,
+  assignment.group_id::text,
+  user_group.name,
+  assignment.created_timestamp
+from communications_shared_inbox_raci_group_assignments assignment
+join company_user_groups user_group
+  on user_group.company_id = assignment.company_id
+ and user_group.group_id = assignment.group_id
+where assignment.company_id = $1
+  and assignment.folder_id = any(string_to_array($2, ',')::uuid[])
+order by assignment.folder_id::text asc,
+  case assignment.role
+    when 'responsible' then 1
+    when 'accountable' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  lower(user_group.name) asc,
+  assignment.group_id::text asc`,
+		companyID, strings.Join(folderIDs, ","),
+	)
+	if err != nil {
+		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") || isPostgresInvalidTextRepresentation(err) {
+			for folderID := range assignmentsByFolder {
+				sortSharedInboxRaciAssignments(assignmentsByFolder[folderID])
+			}
+			return assignmentsByFolder, nil
+		}
+		return nil, err
+	}
+	defer groupRows.Close()
+	for groupRows.Next() {
+		var item domain.SharedInboxRaciAssignment
+		err := groupRows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.Role,
+			&item.SubjectID,
+			&item.SubjectName,
+			&item.CreatedTimestamp,
+		)
+		if err != nil {
+			return nil, err
+		}
+		item.SubjectType = EntityPermissionSubjectGroup
+		assignmentsByFolder[item.FolderID] = append(assignmentsByFolder[item.FolderID], item)
+	}
+	if err := groupRows.Err(); err != nil {
+		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
+			return assignmentsByFolder, nil
+		}
+		return nil, err
+	}
+	for folderID := range assignmentsByFolder {
+		sortSharedInboxRaciAssignments(assignmentsByFolder[folderID])
 	}
 	return assignmentsByFolder, nil
 }
@@ -157,7 +224,13 @@ func sharedInboxRaciAssignmentsForFolder(folderID string, parentByFolder map[str
 		}
 		seenFolders[currentID] = true
 		for _, assignment := range assignmentsByFolder[currentID] {
-			seenKey := assignment.Role + ":" + assignment.UserID
+			subjectType := strings.TrimSpace(assignment.SubjectType)
+			subjectID := strings.TrimSpace(assignment.SubjectID)
+			if subjectType == "" {
+				subjectType = EntityPermissionSubjectUser
+				subjectID = strings.TrimSpace(assignment.UserID)
+			}
+			seenKey := assignment.Role + ":" + subjectType + ":" + subjectID
 			if seenAssignments[seenKey] {
 				continue
 			}
@@ -227,36 +300,64 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 	}
 
 	type normalizedAssignment struct {
-		role   string
-		userID string
+		role        string
+		subjectType string
+		subjectID   string
 	}
 	normalized := make([]normalizedAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
 		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
+		subjectID := strings.TrimSpace(assignment.SubjectID)
 		userID := strings.TrimSpace(assignment.UserID)
-		if !ok || userID == "" {
+		if subjectType == "" && userID != "" {
+			subjectType = EntityPermissionSubjectUser
+			subjectID = userID
+		}
+		if subjectType == EntityPermissionSubjectUser && subjectID == "" {
+			subjectID = userID
+		}
+		if !ok || subjectID == "" {
 			return nil, ErrInvalid
 		}
-		key := role + ":" + userID
+		key := role + ":" + subjectType + ":" + subjectID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 
-		var userInCompany bool
-		if err := tx.QueryRowContext(ctx, `
+		switch subjectType {
+		case EntityPermissionSubjectUser:
+			var userInCompany bool
+			if err := tx.QueryRowContext(ctx, `
 select exists(
   select 1
   from company_memberships
   where company_id=$1 and user_id::text=$2
-)`, companyID, userID).Scan(&userInCompany); err != nil {
-			return nil, err
+)`, companyID, subjectID).Scan(&userInCompany); err != nil {
+				return nil, err
+			}
+			if !userInCompany {
+				return nil, ErrAssigneeNotInCompany
+			}
+		case EntityPermissionSubjectGroup:
+			var groupInCompany bool
+			if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_user_groups
+  where company_id=$1 and group_id::text=$2
+)`, companyID, subjectID).Scan(&groupInCompany); err != nil {
+				return nil, err
+			}
+			if !groupInCompany {
+				return nil, ErrAssigneeNotInCompany
+			}
+		default:
+			return nil, ErrInvalid
 		}
-		if !userInCompany {
-			return nil, ErrAssigneeNotInCompany
-		}
-		normalized = append(normalized, normalizedAssignment{role: role, userID: userID})
+		normalized = append(normalized, normalizedAssignment{role: role, subjectType: subjectType, subjectID: subjectID})
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -268,7 +369,45 @@ select exists(
 		}
 		return nil, err
 	}
+	hasGroupAssignments := false
 	for _, assignment := range normalized {
+		if assignment.subjectType == EntityPermissionSubjectGroup {
+			hasGroupAssignments = true
+			break
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from communications_shared_inbox_raci_group_assignments where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	); err != nil {
+		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
+			if hasGroupAssignments {
+				return nil, ErrRaciStorageUnavailable
+			}
+		} else {
+			return nil, err
+		}
+	}
+	for _, assignment := range normalized {
+		if assignment.subjectType == EntityPermissionSubjectGroup {
+			if _, err := tx.ExecContext(ctx, `
+insert into communications_shared_inbox_raci_group_assignments (
+  company_id,
+  folder_id,
+  role,
+  group_id,
+  created_timestamp
+) values ($1, $2, $3, $4, now())
+on conflict (company_id, folder_id, role, group_id) do nothing`,
+				companyID, folderID, assignment.role, assignment.subjectID,
+			); err != nil {
+				if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
+					return nil, ErrRaciStorageUnavailable
+				}
+				return nil, err
+			}
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `
 insert into communications_shared_inbox_raci_assignments (
   company_id,
@@ -278,7 +417,7 @@ insert into communications_shared_inbox_raci_assignments (
   created_timestamp
 ) values ($1, $2, $3, $4, now())
 on conflict (company_id, folder_id, role, user_id) do nothing`,
-			companyID, folderID, assignment.role, assignment.userID,
+			companyID, folderID, assignment.role, assignment.subjectID,
 		); err != nil {
 			if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
 				return nil, ErrRaciStorageUnavailable

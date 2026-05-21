@@ -523,6 +523,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-raci-test"
+	repo.EnsureCompany(companyID, "Shared Inbox RACI Test")
 
 	responsible, err := repo.UpsertAuthUser("subject-shared-raci-responsible", "responsible@example.com", "R Person")
 	if err != nil {
@@ -538,6 +539,10 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(accountable.CognitoSubject, companyID, "company_user"); err != nil {
 		t.Fatalf("AddCompanyMembership accountable error = %v", err)
 	}
+	department, err := repo.CreateCompanyUserGroup(companyID, "", "Finance")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup error = %v", err)
+	}
 
 	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "AR")
 	if err != nil {
@@ -548,6 +553,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		"assignments": []map[string]string{
 			{"role": "responsible", "user_id": responsible.UserID},
 			{"role": "accountable", "user_id": accountable.UserID},
+			{"role": "informed", "subject_type": "group", "subject_id": department.GroupID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+folder.FolderID+"/raci", bytes.NewReader(body))
@@ -569,8 +575,8 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&updatePayload); err != nil {
 		t.Fatalf("decode PUT shared inbox RACI: %v", err)
 	}
-	if len(updatePayload.Assignments) != 2 {
-		t.Fatalf("PUT shared inbox RACI assignment count = %d, want 2", len(updatePayload.Assignments))
+	if len(updatePayload.Assignments) != 3 {
+		t.Fatalf("PUT shared inbox RACI assignment count = %d, want 3", len(updatePayload.Assignments))
 	}
 	if updatePayload.Assignments[0].FolderID != folder.FolderID || updatePayload.Assignments[0].Role != "responsible" || updatePayload.Assignments[0].UserID != responsible.UserID || updatePayload.Assignments[0].UserDisplayName != "R Person" {
 		t.Fatalf("first assignment = %+v", updatePayload.Assignments[0])
@@ -586,8 +592,10 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		Folders []struct {
 			FolderID    string `json:"folder_id"`
 			Assignments []struct {
-				Role   string `json:"role"`
-				UserID string `json:"user_id"`
+				Role        string `json:"role"`
+				SubjectType string `json:"subject_type"`
+				SubjectID   string `json:"subject_id"`
+				UserID      string `json:"user_id"`
 			} `json:"raci_assignments"`
 		} `json:"folders"`
 	}
@@ -598,8 +606,17 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		if listed.FolderID != folder.FolderID {
 			continue
 		}
-		if len(listed.Assignments) != 2 {
-			t.Fatalf("listed assignment count = %d, want 2", len(listed.Assignments))
+		if len(listed.Assignments) != 3 {
+			t.Fatalf("listed assignment count = %d, want 3", len(listed.Assignments))
+		}
+		foundGroup := false
+		for _, assignment := range listed.Assignments {
+			if assignment.Role == "informed" && assignment.SubjectType == "group" && assignment.SubjectID == department.GroupID {
+				foundGroup = true
+			}
+		}
+		if !foundGroup {
+			t.Fatalf("listed assignments = %+v, want informed department assignment", listed.Assignments)
 		}
 		return
 	}
@@ -1020,7 +1037,7 @@ func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	}
 }
 
-func TestFilterCommunicationsSharedInboxFoldersForUserKeepsGrantedFoldersAndAncestors(t *testing.T) {
+func TestFilterCommunicationsSharedInboxFoldersForUserKeepsGrantedFoldersOnly(t *testing.T) {
 	t.Parallel()
 
 	parentID := "shared-root"
@@ -1049,7 +1066,7 @@ func TestFilterCommunicationsSharedInboxFoldersForUserKeepsGrantedFoldersAndAnce
 		ids = append(ids, folder.FolderID)
 	}
 
-	want := []string{"shared-root", "ar"}
+	want := []string{"ar"}
 	if len(ids) != len(want) {
 		t.Fatalf("filtered IDs = %v, want %v", ids, want)
 	}

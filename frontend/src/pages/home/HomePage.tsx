@@ -31,6 +31,7 @@ import {
   type CompanyUser,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxRaciRole,
+  type CommunicationsSharedInboxRaciSubjectType,
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
@@ -60,11 +61,10 @@ import {
 } from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix } from "./HomeParts";
-import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
+import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -205,7 +205,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
     [activeSharedInboxFolderID, sharedInboxes],
   );
-  const activeSharedInboxNeedsEmail = !!activeSharedInbox && !(activeSharedInbox.account_email ?? "").trim();
+  const activeSharedInboxIsParent = !!activeSharedInbox && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === activeSharedInbox.folder_id);
+  const activeSharedInboxNeedsEmail = !!activeSharedInbox && !activeSharedInboxIsParent && !(activeSharedInbox.account_email ?? "").trim();
+  const activeSharedInboxBlocksEmail = !!activeSharedInbox && activeSharedInboxIsParent;
   const sharedInboxRaciFolder = useMemo(
     () => sharedInboxRaciFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxRaciFolderID) ?? null : null,
     [sharedInboxRaciFolderID, sharedInboxes],
@@ -422,6 +424,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }, [cancelPendingAutoArchiveMessages, loadStatus]);
   const loadFolders = useCallback(async (): Promise<boolean> => {
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    if (sharedInboxID && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === sharedInboxID)) {
+      setFolders([]);
+      return true;
+    }
     const requestSeq = foldersRequestSeqRef.current + 1;
     foldersRequestSeqRef.current = requestSeq;
     try {
@@ -440,7 +446,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setError(formatError(folderError, "Failed to load folders"));
       return false;
     }
-  }, [companyID, handleEmailAccessExpired]);
+  }, [companyID, handleEmailAccessExpired, sharedInboxes]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
     if (sharedInboxesRequestInFlightRef.current) return false;
     sharedInboxesRequestInFlightRef.current = true;
@@ -526,7 +532,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setNextPageToken("");
       return;
     }
-    if (activeSharedInboxNeedsEmail) {
+    if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail) {
       setMessages([]);
       setSelectedMessage(null);
       setSelectedMessageID("");
@@ -536,7 +542,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       messageRequestKeyRef.current = "";
       messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
       return;
-    }    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+    }
+    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
@@ -586,7 +593,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         }
       }
     }
-  }, [activeSharedInboxNeedsEmail, activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
   const loadMoreMessages = useCallback(async () => {
     if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
@@ -1180,6 +1187,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }, [companyID, selectMailbox]);
 
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
+    if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
+      setError("Parent folders cannot have emails assigned.");
+      return;
+    }
     setBusy("shared-inbox");
     setError("");
     setNotice("");
@@ -1195,10 +1206,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [companyID]);
+  }, [companyID, sharedInboxes]);
 
   const assignActiveSharedInboxEmail = useCallback(() => {
     if (!activeSharedInbox) return;
+    if (activeSharedInboxIsParent) {
+      setError("Parent folders cannot have emails assigned.");
+      return;
+    }
     const initialEmail = (activeSharedInbox.account_email ?? connection?.account_email ?? "").trim().toLowerCase();
     const rawEmail = window.prompt("Email for shared inbox", initialEmail);
     if (rawEmail === null) return;
@@ -1208,7 +1223,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       return;
     }
     void setSharedInboxAccountEmail(activeSharedInbox.folder_id, accountEmail);
-  }, [activeSharedInbox, connection?.account_email, setSharedInboxAccountEmail]);
+  }, [activeSharedInbox, activeSharedInboxIsParent, connection?.account_email, setSharedInboxAccountEmail]);
   const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
     setBusy("shared-inbox");
     setError("");
@@ -1259,6 +1274,63 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [companyID, sharedInboxes]);
+
+  const addSharedInboxRaciSubject = useCallback(async (
+    folderID: string,
+    role: CommunicationsSharedInboxRaciRole,
+    subjectType: CommunicationsSharedInboxRaciSubjectType,
+    subjectID: string,
+    subjectName?: string,
+  ): Promise<void> => {
+    setBusy("shared-inbox-raci");
+    setError("");
+    setNotice("");
+    try {
+      const result = await addSharedInboxRaciSubjectCommand({
+        companyID,
+        folderID,
+        role,
+        subjectType,
+        subjectID,
+        subjectName,
+        sharedInboxes,
+        companyUsers,
+      });
+      if (!result) return;
+      await loadSharedInboxes();
+    } catch (raciError) {
+      setError(formatError(raciError, "Failed to update Shared Triage RACI assignments"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID, companyUsers, loadSharedInboxes, sharedInboxes]);
+
+  const removeSharedInboxRaciSubject = useCallback(async (
+    folderID: string,
+    role: CommunicationsSharedInboxRaciRole,
+    subjectType: CommunicationsSharedInboxRaciSubjectType,
+    subjectID: string,
+  ): Promise<void> => {
+    setBusy("shared-inbox-raci");
+    setError("");
+    setNotice("");
+    try {
+      const result = await removeSharedInboxRaciSubjectCommand({
+        companyID,
+        folderID,
+        role,
+        subjectType,
+        subjectID,
+        sharedInboxes,
+      });
+      if (!result) return;
+      await loadSharedInboxes();
+    } catch (raciError) {
+      setError(formatError(raciError, "Failed to update Shared Triage RACI assignments"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID, loadSharedInboxes, sharedInboxes]);
 
   const submitSharedInbox = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2066,7 +2138,11 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             selectedMessageID={selectedMessageID}
             selectedMessageIDs={selectedMessageIDs}
             sharedInboxSettings={activeSharedInbox ? { onOpen: () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id) } : undefined}
-            unassignedSharedInbox={activeSharedInboxNeedsEmail && activeSharedInbox ? { folderName: activeSharedInbox.name, onAssignEmail: assignActiveSharedInboxEmail } : undefined}
+            unassignedSharedInbox={activeSharedInboxBlocksEmail && activeSharedInbox
+              ? { folderName: activeSharedInbox.name, message: "Parent folders cannot have emails assigned." }
+              : activeSharedInboxNeedsEmail && activeSharedInbox
+                ? { folderName: activeSharedInbox.name, onAssignEmail: assignActiveSharedInboxEmail }
+                : undefined}
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}
@@ -2151,14 +2227,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         </main>
       )}
       {sharedInboxRaciFolder && (
-        <EntityPermissionsDialog
+        <SharedInboxRaciSettingsModal
           requestJSON={permissionsRequestJSON}
           companyID={companyID}
-          entityType="shared_triage_folder"
-          entityID={sharedInboxRaciFolder.folder_id}
-          title={`Shared Triage / ${sharedInboxRaciFolder.name}`}
+          folder={sharedInboxRaciFolder}
+          companyUsers={companyUsers}
+          busy={busy === "shared-inbox-raci"}
           onClose={() => setSharedInboxRaciFolderID("")}
-          onSaved={() => { void loadSharedInboxes(); }}
+          onAddSubject={(folderID, role, subjectType, subjectID, subjectName) => { void addSharedInboxRaciSubject(folderID, role, subjectType, subjectID, subjectName); }}
+          onRemoveSubject={(folderID, role, subjectType, subjectID) => { void removeSharedInboxRaciSubject(folderID, role, subjectType, subjectID); }}
         />
       )}
       <HomeBulkEditMenu

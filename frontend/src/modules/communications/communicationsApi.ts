@@ -78,11 +78,15 @@ export type ListEmailFoldersParams = {
 };
 
 export type CommunicationsSharedInboxRaciRole = LogicGateRaciRole;
+export type CommunicationsSharedInboxRaciSubjectType = "user" | "group";
 
 export type CommunicationsSharedInboxRaciAssignment = {
   company_id: string;
   folder_id: string;
   role: CommunicationsSharedInboxRaciRole;
+  subject_type?: CommunicationsSharedInboxRaciSubjectType;
+  subject_id?: string;
+  subject_name?: string;
   user_id: string;
   user_display_name?: string;
   user_email?: string;
@@ -373,7 +377,7 @@ export async function listCommunicationsSharedInboxes(companyID: string): Promis
       company_id: cleanCompanyID,
     });
     const payload = await apiFetchJSON<{ shared_inboxes?: CommunicationsSharedInbox[]; folders?: CommunicationsSharedInbox[] }>(`/v1/communications/shared-inboxes?${params.toString()}`);
-    return cloneSharedInboxes(payload.shared_inboxes ?? payload.folders ?? []);
+    return cloneSharedInboxes((payload.shared_inboxes ?? payload.folders ?? []).filter((folder) => folder.effective_access_level !== "no_access"));
   }, cloneSharedInboxes);
 }
 
@@ -438,11 +442,11 @@ export async function deleteCommunicationsSharedInbox(companyID: string, folderI
 export async function updateCommunicationsSharedInboxRaciAssignments(
   companyID: string,
   folderID: string,
-  assignments: Array<{ role: CommunicationsSharedInboxRaciRole; user_id: string }>,
+  assignments: Array<{ role: CommunicationsSharedInboxRaciRole; subject_type?: CommunicationsSharedInboxRaciSubjectType; subject_id?: string; user_id?: string }>,
 ): Promise<CommunicationsSharedInboxRaciAssignment[]> {
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
-  const payload = await apiFetchJSON<{ access_assignments?: CommunicationsSharedInboxRaciAssignment[]; raci_assignments?: CommunicationsSharedInboxRaciAssignment[] }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}/access`, {
+  const payload = await apiFetchJSON<{ raci_assignments?: CommunicationsSharedInboxRaciAssignment[] }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}/raci`, {
     method: "PUT",
     body: JSON.stringify({
       company_id: cleanCompanyID,
@@ -451,7 +455,7 @@ export async function updateCommunicationsSharedInboxRaciAssignments(
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
   dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
-  return cloneSharedInboxRaciAssignments(payload.access_assignments ?? payload.raci_assignments ?? []);
+  return cloneSharedInboxRaciAssignments(payload.raci_assignments ?? []);
 }
 
 export async function listCommunicationsTriageItems(): Promise<CommunicationsTriageItem[]> {
