@@ -2624,20 +2624,28 @@ export function AciInboxMatrix({
       <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
         <div style={inboxMatrixGridStyle(ACI_COLUMNS.length)}>
           <div style={logicGateRaciCornerStyle} />
-          {ACI_COLUMNS.map((column) => (
-            <div key={column.role} style={logicGateRaciColumnHeaderStyle}>
+          {ACI_COLUMNS.map((column, columnIndex) => (
+            <div key={column.role} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
               <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
               <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
             </div>
           ))}
-          {INBOX_PRIORITIES.map((priority) => (
+          {INBOX_PRIORITIES.map((priority, priorityIndex) => (
             <React.Fragment key={priority.value}>
-              <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
-              {ACI_COLUMNS.map((column) => {
+              <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
+              {ACI_COLUMNS.map((column, columnIndex) => {
                 const cellKey = aciCellKey(column.role, priority.value);
                 const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
+                const cellStyle = logicGateRaciCellStyle(false);
                 return (
-                  <div key={cellKey} style={logicGateRaciCellStyle(false)}>
+                  <div
+                    key={cellKey}
+                    style={{
+                      ...cellStyle,
+                      borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
+                      borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
+                    }}
+                  >
                     {logicGateGroups.map((group) => {
                       const resizeKey = inboxGroupResizeKey(cellKey, group);
                       const notificationRole = aciColumnNotificationRole(column.role);
@@ -2823,24 +2831,32 @@ export function ResponsibleInboxMatrix({
       <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
         <div style={inboxMatrixGridStyle(RESPONSIBLE_STATUS_COLUMNS.length)}>
           <div style={logicGateRaciCornerStyle} />
-          {RESPONSIBLE_STATUS_COLUMNS.map((column) => {
+          {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
             const statusColor = responsibleStatusColor(column.status);
             return (
-              <div key={column.status} style={logicGateRaciColumnHeaderStyle}>
+              <div key={column.status} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
                 <strong style={{ ...logicGateRaciColumnLetterStyle, borderColor: statusColor, background: homeColorWithAlpha(statusColor, 0.12), color: statusColor }}>{column.letter}</strong>
                 <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
               </div>
             );
           })}
-          {INBOX_PRIORITIES.map((priority) => (
+          {INBOX_PRIORITIES.map((priority, priorityIndex) => (
             <React.Fragment key={priority.value}>
-              <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
-              {RESPONSIBLE_STATUS_COLUMNS.map((column) => {
+              <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
+              {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
                 const cellKey = responsibleCellKey(column.status, priority.value);
                 const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                 const statusColor = responsibleStatusColor(column.status);
+                const cellStyle = logicGateRaciCellStyle(false);
                 return (
-                  <div key={cellKey} style={logicGateRaciCellStyle(false)}>
+                  <div
+                    key={cellKey}
+                    style={{
+                      ...cellStyle,
+                      borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
+                      borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
+                    }}
+                  >
                     {logicGateGroups.map((group) => {
                       const resizeKey = inboxGroupResizeKey(cellKey, group);
                       return (
