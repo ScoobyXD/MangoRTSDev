@@ -67,8 +67,7 @@ const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
 const TIMELINE_NODE_ACCENT = "rgb(0, 233, 255)";
 const TIMELINE_LOGIC_GATE_ACCENT = "rgb(0, 255, 132)";
 const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
-const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
-const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
+const TIMELINE_ITEM_CHECK_SIZE = 15;
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -320,6 +319,13 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                           onChange={(event) => onChange(updateTimelineItemCompleted(state, item.id, event.currentTarget.checked))}
                           style={timelineCheckboxStyle}
                         />
+                        <span aria-hidden="true" style={timelineCheckboxCircleStyle(item.completed)}>
+                          {item.completed && (
+                            <svg width="10" height="10" viewBox="0 0 16 16" style={{ display: "block" }}>
+                              <path d="M3.2 8.3 6.4 11.4 12.8 4.7" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                        </span>
                       </label>
                       <span
                         title="Adjust end time"
@@ -718,8 +724,7 @@ function timelineItemStyle(
     width,
     height: "100%",
     minWidth: 0,
-    display: "grid",
-    gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
+    display: "block",
     border: `1px solid ${accent}`,
     borderRadius: 0,
     background: nodeBackground,
@@ -764,18 +769,17 @@ function timelineItemMainStyle(compact: boolean): React.CSSProperties {
 const timelineItemTopRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
-  alignItems: "start",
+  alignItems: "center",
   gap: 5,
 };
 
 function timelineItemIconStyle(compact: boolean): React.CSSProperties {
   return {
-    width: compact ? 19 : 20,
-    height: compact ? 19 : 20,
+    width: compact ? 21 : 22,
+    height: compact ? 21 : 22,
     display: "grid",
     placeItems: "center",
     flex: "0 0 auto",
-    marginTop: 1,
   };
 }
 
@@ -787,7 +791,7 @@ function timelineItemTextStyle(compact: boolean, completed: boolean): React.CSSP
     whiteSpace: "nowrap",
     fontSize: compact ? 10.5 : 12,
     fontWeight: 900,
-    lineHeight: "18px",
+    lineHeight: compact ? "21px" : "22px",
     textDecoration: completed ? "line-through" : "none",
     color: completed ? "#166534" : "#0f172a",
   };
@@ -810,23 +814,45 @@ function timelineItemBottomRowStyle(compact: boolean, completed: boolean): React
 function timelineCheckboxWrapStyle(compact: boolean, width: number): React.CSSProperties {
   const visible = !compact || width >= 34;
   return {
+    position: "absolute",
+    top: 4,
+    right: TIMELINE_ITEM_EDGE_WIDTH + 4,
+    zIndex: 3,
     display: visible ? "grid" : "none",
     placeItems: "center",
     minWidth: 0,
-    width: TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH,
-    paddingRight: TIMELINE_ITEM_EDGE_WIDTH,
+    width: TIMELINE_ITEM_CHECK_SIZE,
+    height: TIMELINE_ITEM_CHECK_SIZE,
     boxSizing: "border-box",
     cursor: "pointer",
   };
 }
 
 const timelineCheckboxStyle: React.CSSProperties = {
-  width: 15,
-  height: 15,
+  position: "absolute",
+  inset: 0,
+  zIndex: 2,
+  width: "100%",
+  height: "100%",
   margin: 0,
-  accentColor: "#16a34a",
+  opacity: 0,
   cursor: "pointer",
 };
+
+function timelineCheckboxCircleStyle(completed: boolean): React.CSSProperties {
+  return {
+    width: TIMELINE_ITEM_CHECK_SIZE,
+    height: TIMELINE_ITEM_CHECK_SIZE,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${completed ? "#16a34a" : "rgba(15, 23, 42, 0.42)"}`,
+    borderRadius: 999,
+    background: completed ? "#16a34a" : "#ffffff",
+    color: "#ffffff",
+    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.16)",
+    pointerEvents: "none",
+  };
+}
 
 function timelineHistoryCheckStyle(completed: boolean): React.CSSProperties {
   return {
