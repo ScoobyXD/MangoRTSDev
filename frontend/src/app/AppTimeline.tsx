@@ -60,7 +60,8 @@ type TimelineTick = {
 };
 
 const PIXELS_PER_QUARTER_HOUR = 31;
-const COMPACT_HEADER_HEIGHT = 24;
+const TIMELINE_VISUAL_STEP_MINUTES = 15;
+const COMPACT_HEADER_HEIGHT = 22;
 const EXPANDED_TRACK_HEIGHT = 108;
 const EXPANDED_LANE_TOP = 37;
 
@@ -268,7 +269,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                 {state.items.map((item) => {
                   const selected = selectedItemID === item.id;
                   const left = (item.startMinute - state.startMinute) * metrics.pxPerMinute;
-                  const width = Math.max(compact ? 112 : 88, (item.endMinute - item.startMinute) * metrics.pxPerMinute - 2);
+                  const width = Math.max(compact ? APP_TIMELINE_STEP_MINUTES * metrics.pxPerMinute : 88, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
                   return (
                     <div
                       key={item.id}
@@ -305,7 +306,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                       <label
                         title={item.completed ? "Mark incomplete" : "Mark complete"}
                         aria-label={item.completed ? "Mark incomplete" : "Mark complete"}
-                        style={timelineCheckboxWrapStyle}
+                        style={timelineCheckboxWrapStyle(compact, width)}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => event.stopPropagation()}
                       >
@@ -374,7 +375,7 @@ function TimelineHistoryDay({
           <div style={timelineLaneStyle(false)}>
             {day.items.map((item) => {
               const left = (item.startMinute - day.startMinute) * metrics.pxPerMinute;
-              const width = Math.max(88, (item.endMinute - item.startMinute) * metrics.pxPerMinute - 2);
+              const width = Math.max(88, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
               return (
                 <div
                   key={item.id}
@@ -442,7 +443,7 @@ function HistoryCompletedIcon({ completed }: { completed: boolean }) {
 
 function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, compact: boolean, availableWidth = 0): TimelineMetrics {
   const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, range.endMinute - range.startMinute);
-  const intervalCount = Math.max(1, rangeMinutes / APP_TIMELINE_STEP_MINUTES);
+  const intervalCount = Math.max(1, rangeMinutes / TIMELINE_VISUAL_STEP_MINUTES);
   const expandedContentWidth = Math.max(680, intervalCount * PIXELS_PER_QUARTER_HOUR);
   const contentWidth = compact
     ? Math.max(1, availableWidth || expandedContentWidth)
@@ -481,7 +482,14 @@ function timelineDropsFromDataTransfer(dataTransfer: DataTransfer): AppTimelineD
 function buildTimelineTicks(startMinute: number, endMinute: number, contentWidth: number): TimelineTick[] {
   const range = Math.max(APP_TIMELINE_STEP_MINUTES, endMinute - startMinute);
   const ticks: TimelineTick[] = [];
-  for (let minute = startMinute; minute <= endMinute; minute += APP_TIMELINE_STEP_MINUTES) {
+  const tickStep = TIMELINE_VISUAL_STEP_MINUTES;
+  const firstTick = Math.ceil(startMinute / tickStep) * tickStep;
+  const tickMinutes = [
+    startMinute,
+    ...Array.from({ length: Math.max(0, Math.floor((endMinute - firstTick) / tickStep) + 1) }, (_, index) => firstTick + index * tickStep),
+    endMinute,
+  ].filter((minute, index, values) => minute >= startMinute && minute <= endMinute && values.indexOf(minute) === index);
+  for (const minute of tickMinutes) {
     const left = ((minute - startMinute) / range) * contentWidth;
     const major = minute === startMinute || minute === endMinute || minute % 60 === 0;
     ticks.push({
@@ -654,6 +662,7 @@ function timelineTickLabelStyle(left: number, align: TimelineTick["labelAlign"])
     color: "#64748b",
     fontSize: 10,
     fontWeight: 800,
+    lineHeight: "12px",
     whiteSpace: "nowrap",
     pointerEvents: "none",
   };
@@ -706,9 +715,9 @@ function timelineItemStyle(
     top: compact ? 0 : 5,
     width,
     height: compact ? "100%" : 46,
-    minWidth: compact ? 112 : 88,
+    minWidth: compact ? 0 : 88,
     display: "grid",
-    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "7px minmax(0, 1fr) 24px 7px",
+    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "minmax(0, 1fr) auto",
     border: `1px solid ${selected || completed ? accent : "rgba(100, 116, 139, 0.28)"}`,
     borderRadius: compact ? 0 : 7,
     background: nodeBackground,
@@ -724,8 +733,12 @@ function timelineItemStyle(
 
 function timelineItemHandleStyle(side: "left" | "right"): React.CSSProperties {
   return {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    [side]: 0,
+    zIndex: 2,
     width: 7,
-    height: "100%",
     cursor: "ew-resize",
     background: side === "left"
       ? "linear-gradient(90deg, rgba(15, 23, 42, 0.15), transparent)"
@@ -787,12 +800,16 @@ function timelineItemBottomRowStyle(compact: boolean, completed: boolean): React
   };
 }
 
-const timelineCheckboxWrapStyle: React.CSSProperties = {
-  display: "grid",
-  placeItems: "center",
-  minWidth: 0,
-  cursor: "pointer",
-};
+function timelineCheckboxWrapStyle(compact: boolean, width: number): React.CSSProperties {
+  const visible = !compact || width >= 34;
+  return {
+    display: visible ? "grid" : "none",
+    placeItems: "center",
+    minWidth: 0,
+    width: 24,
+    cursor: "pointer",
+  };
+}
 
 const timelineCheckboxStyle: React.CSSProperties = {
   width: 15,
