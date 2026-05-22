@@ -714,7 +714,7 @@ export function HomeSidebar({
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
   const mentionUnreadCount = notificationCountForType(notificationSummary, "mention.created");
-  const aciChangedNodeCount = notificationCountForRoles(notificationSummary, "aci_inbox", ["accountable", "consulted", "informed", "other"]);
+  const aciChangedNodeCount = notificationCountForRoles(notificationSummary, "aci_inbox", ["accountable", "consulted", "informed"]);
   const responsibleChangedNodeCount = notificationCountForRole(notificationSummary, "r_inbox", "responsible");
 
   useEffect(() => {
@@ -2306,7 +2306,6 @@ function notificationCountForInboxNode(summary: NotificationSummary | undefined,
 
 function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | undefined {
   if (role === "accountable" || role === "consulted" || role === "informed") return role;
-  if (role === "other") return "other";
   return undefined;
 }
 

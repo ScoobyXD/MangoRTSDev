@@ -369,16 +369,12 @@ export function buildAciInboxGroupsByCell(
   for (const node of nodes) {
     const priority = normalizeInboxPriority(node.priority);
     if (priority === null) continue;
-    const assignedToCurrentUser = node.assignee_user_id?.trim() === currentUserID.trim();
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
       for (const column of ACI_COLUMNS) {
         if (!isAciRaciRole(column.role)) continue;
         if (!logicGateHasRaciRole(logicGate, column.role, currentUserID)) continue;
         addRaciInboxGroupNode(byCell, aciCellKey(column.role, priority), logicGateID, node.node_id);
-      }
-      if (assignedToCurrentUser && !logicGateHasAnyRaciRole(logicGate, currentUserID)) {
-        addRaciInboxGroupNode(byCell, aciCellKey("other", priority), logicGateID, node.node_id);
       }
     }
   }
