@@ -47,6 +47,9 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 1)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 1, true)
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany after add: %v", err)
+	}
 
 	myGates, err := repo.ListMyLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: responsible.UserID, Limit: 10})
 	if err != nil {
@@ -86,6 +89,9 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 2)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany after remove: %v", err)
+	}
 
 	myGates, err = repo.ListMyLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: responsible.UserID, Limit: 10})
 	if err != nil {

@@ -326,6 +326,69 @@ func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string)
 	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleLogicGates(companyID, userID)
+	}
+
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`with recursive folder_scope as (
+		   select company_id, folder_id
+		   from company_explorer_folders
+		   where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='logic_gate'
+		   union all
+		   select child.company_id, child.folder_id
+		   from company_explorer_folders child
+		   join folder_scope parent
+		     on child.company_id=parent.company_id
+		    and child.parent_folder_id=parent.folder_id
+		   where child.folder_kind='logic_gate'
+		 ), folder_gates as (
+		   select distinct item.item_id::uuid as logic_gate_id
+		   from company_explorer_folder_items item
+		   join folder_scope folder on folder.folder_id=item.folder_id
+		   where item.company_id=$1::uuid and item.item_type='logic_gate'
+		 ), visible_gates as (
+		   select distinct access.resource_id as logic_gate_id
+		   from effective_resource_access access
+		   join folder_gates folder_gate on folder_gate.logic_gate_id=access.resource_id
+		   where access.company_id=$1::uuid
+		     and access.user_id=$3::uuid
+		     and access.resource_type='logic_gate'
+		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+		 )
+		 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+		 from logic_gates gate
+		 join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+		 where gate.company_id=$1::uuid
+		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
+		companyID, folderID, userID, EntityPermissionView,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+}
+
 const postgresLogicGateMapWindowCTE = `
 with recursive folder_scope as (
   select company_id, folder_id
@@ -400,6 +463,73 @@ func (r *PostgresRepo) QueryLogicGates(companyID string, query LogicGateQuery) (
 	}
 	sqlText := `select logic_gate.company_id, logic_gate.logic_gate_id, logic_gate.header, logic_gate.created_timestamp
 from logic_gates logic_gate
+where ` + strings.Join(conditions, " and ") + `
+order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
+	if query.Limit > 0 {
+		args = append(args, query.Limit)
+		sqlText += "\nlimit $" + strconv.Itoa(len(args))
+	}
+	rows, err := r.db.QueryContext(ctx, sqlText, args...)
+	if err != nil {
+		if assignedUserID != "" && isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return []domain.LogicGate{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+}
+
+func (r *PostgresRepo) QueryVisibleLogicGates(companyID, userID string, query LogicGateQuery) ([]domain.LogicGate, error) {
+	ctx := context.Background()
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	args := []any{companyID, userID, EntityPermissionView}
+	conditions := []string{"logic_gate.company_id = $1::uuid"}
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	if search != "" {
+		args = append(args, "%"+search+"%")
+		placeholder := len(args)
+		conditions = append(conditions, "(lower(logic_gate.header) like $"+strconv.Itoa(placeholder)+" or logic_gate.logic_gate_id::text like $"+strconv.Itoa(placeholder)+")")
+	}
+	assignedUserID := strings.TrimSpace(query.AssignedUserID)
+	if assignedUserID != "" {
+		args = append(args, assignedUserID)
+		placeholder := len(args)
+		conditions = append(conditions, `exists (
+			select 1
+			from logic_gate_raci_assignments assignment
+			where assignment.company_id = logic_gate.company_id
+			  and assignment.logic_gate_id = logic_gate.logic_gate_id
+			  and assignment.user_id = $`+strconv.Itoa(placeholder)+`
+		)`)
+	}
+	sqlText := `select logic_gate.company_id, logic_gate.logic_gate_id, logic_gate.header, logic_gate.created_timestamp
+from logic_gates logic_gate
+join (
+  select distinct access.resource_id
+  from effective_resource_access access
+  where access.company_id=$1::uuid
+    and access.user_id=$2::uuid
+    and access.resource_type='logic_gate'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+) visible on visible.resource_id=logic_gate.logic_gate_id
 where ` + strings.Join(conditions, " and ") + `
 order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
 	if query.Limit > 0 {

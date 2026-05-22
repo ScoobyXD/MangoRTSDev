@@ -66,8 +66,17 @@ where entry.entry_kind='node'
   and entry.company_id=$1
   and entry.user_id::text=$2
   and entry.role=$3
+  and exists (
+    select 1
+    from effective_resource_access access
+    where access.company_id=entry.company_id
+      and access.user_id=entry.user_id
+      and access.resource_type='node'
+      and access.resource_id=entry.node_id
+      and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+  )
 order by entry.node_created_timestamp asc, entry.node_id::text asc
-limit $4`, query.CompanyID, query.UserID, role, query.Limit)
+limit $4`, query.CompanyID, query.UserID, role, query.Limit, EntityPermissionView)
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +137,18 @@ from work_item_inbox_entries entry
 where entry.entry_kind='logic_gate'
   and entry.company_id=$1
   and entry.user_id::text=$2`+roleFilter+`
+  and exists (
+    select 1
+    from effective_resource_access access
+    where access.company_id=entry.company_id
+      and access.user_id=entry.user_id
+      and access.resource_type='logic_gate'
+      and access.resource_id=entry.logic_gate_id
+      and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+  )
 group by entry.company_id, entry.logic_gate_id, entry.logic_gate_header, entry.logic_gate_created_timestamp
 order by lower(entry.logic_gate_header) asc, entry.logic_gate_id::text asc
-limit $3`, query.CompanyID, query.UserID, query.Limit)
+limit $3`, query.CompanyID, query.UserID, query.Limit, EntityPermissionView)
 	if err != nil {
 		return nil, err
 	}

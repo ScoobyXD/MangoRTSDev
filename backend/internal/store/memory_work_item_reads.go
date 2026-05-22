@@ -85,6 +85,9 @@ func (r *MemoryRepo) listWorkItemInboxNodes(ctx context.Context, query WorkItemI
 		if entry.CompanyID != query.CompanyID || entry.UserID != query.UserID || entry.EntryKind != memoryWorkItemInboxEntryKindNode || entry.Role != role {
 			continue
 		}
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, EntityTypeNode, entry.Node.NodeID, EntityPermissionView) {
+			continue
+		}
 		items = append(items, entry.Node)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -138,6 +141,9 @@ func (r *MemoryRepo) listWorkItemLogicGateInboxItems(ctx context.Context, query 
 			continue
 		}
 		if allowedRoles != nil && !allowedRoles[entry.Role] {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, EntityTypeLogicGate, entry.LogicGateID, EntityPermissionView) {
 			continue
 		}
 		item := itemsByGate[entry.LogicGateID]

@@ -64,6 +64,9 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
 	deniedToken := "Bearer " + testJWT(t, key, "kid", "denied-user", "denied@example.com")

@@ -17,6 +17,9 @@ func TestInboxPriorityMoveCommandKeepsSourceProjectionReadsAndEventsConsistent(t
 	companyID := "11111111-1111-4111-8111-123456789abc"
 	repo.EnsureCompany(companyID, "Inbox Command Company")
 	logicGate, node, responsibleUserID := setupInboxCommandAssignedNode(t, repo, companyID, "inbox-command-priority", 4)
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 
 	stream := server.hub.subscribe(companyID)
 	defer server.hub.unsubscribe(companyID, stream)

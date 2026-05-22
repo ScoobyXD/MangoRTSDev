@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strconv"
@@ -27,14 +28,15 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		if notModified {
 			return
 		}
-		items, err := s.repo.ListNodes(companyID)
+		userID := s.entityPermissionActorUserID(r, companyID)
+		var items []domain.Node
+		if userID != "" {
+			items, err = s.repo.ListVisibleNodes(companyID, userID)
+		} else {
+			items, err = s.repo.ListNodes(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
-			return
-		}
-		items, err = s.filterVisibleNodes(r, companyID, items)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"nodes": items}, etag)

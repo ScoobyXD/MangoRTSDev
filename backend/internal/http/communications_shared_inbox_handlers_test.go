@@ -115,6 +115,7 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-filter-test"
+	repo.EnsureCompany(companyID, "Shared Inbox Filter Company")
 
 	currentUser, err := repo.UpsertAuthUser("subject-shared-current", "current@example.com", "Current User")
 	if err != nil {
@@ -163,6 +164,9 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions unrelated error = %v", err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
 	req = req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
@@ -200,6 +204,10 @@ type sharedInboxListErrorRepo struct {
 }
 
 func (r sharedInboxListErrorRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	return nil, r.err
+}
+
+func (r sharedInboxListErrorRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	return nil, r.err
 }
 

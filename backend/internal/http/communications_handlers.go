@@ -610,26 +610,23 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 }
 
 func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID, accessLevel string) (domain.CompanyExplorerFolder, bool) {
-	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
+	folder, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
 	if err != nil {
 		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 			return domain.CompanyExplorerFolder{}, false
 		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+			return domain.CompanyExplorerFolder{}, false
+		}
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return domain.CompanyExplorerFolder{}, false
 	}
-	for _, folder := range folders {
-		if folder.FolderID != folderID {
-			continue
-		}
-		if !s.requireCommunicationsSharedInboxAccess(w, nil, actor, companyID, folderID, accessLevel) {
-			return domain.CompanyExplorerFolder{}, false
-		}
-		return folder, true
+	if !s.requireCommunicationsSharedInboxAccess(w, nil, actor, companyID, folderID, accessLevel) {
+		return domain.CompanyExplorerFolder{}, false
 	}
-	writeError(w, http.StatusNotFound, "shared_inbox_not_found")
-	return domain.CompanyExplorerFolder{}, false
+	return folder, true
 }
 
 func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, err error) {

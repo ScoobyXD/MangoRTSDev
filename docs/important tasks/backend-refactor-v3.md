@@ -318,10 +318,10 @@ This slice should not replace HTTP handlers yet except through a narrow compatib
 ### Phase 3: Visible Query Methods
 
 - [x] Add v2 visible query methods for nodes and Logic Gates.
-- [ ] Add v2 visible query methods for shared triage folders, company explorer reads, and work item reads.
-- [ ] Replace company-wide list-then-filter paths with SQL visible queries.
-- [ ] Keep old endpoints compatible where necessary, but route internals through the new read model.
-- [ ] Stop adding new Go-side filtering after loading full company datasets.
+- [x] Add v2 visible query methods for shared triage folders, company explorer reads, and work item reads.
+- [x] Replace company-wide list-then-filter paths with SQL visible queries.
+- [x] Keep old endpoints compatible where necessary, but route internals through the new read model.
+- [x] Stop adding new Go-side filtering after loading full company datasets.
 
 ### Phase 4: Logic Gate Work Rebuild
 
@@ -468,6 +468,10 @@ Use this section to record completed slices and important decisions.
 - 2026-05-22: Added focused store tests for direct user grants, direct group grants, nested group inheritance, RACI-to-edit, shared-triage folder inheritance, Logic Gate assigned-node contextual visibility, and source-specific revoke/reprojection. Verified with `go test ./internal/store` and full backend `go test ./...`.
 - 2026-05-22: Started Phase 3 with focused store-visible methods for nodes and Logic Gates. Added `ListVisibleNodes(companyID, userID)` and `ListVisibleLogicGates(companyID, userID)` to the store interfaces with Postgres implementations that join distinct resources from `effective_resource_access` and require at least `view`; `edit` and `admin` satisfy visibility through the existing access rank function. Added memory implementations against the effective-access read model for unit coverage. No legacy HTTP handlers were broadly replaced in this slice, and no new recursive permission checks or `ListAccessibleEntityIDs` usage were added.
 - 2026-05-22: Added tests proving visible node and Logic Gate reads include direct `view`/`edit` effective grants, exclude resources without effective access, and include nodes visible only through Logic Gate assigned-node contextual access. Added source-shape coverage for the Postgres visible SQL to ensure it uses `effective_resource_access` and does not call the recursive legacy permission function. Verified with `go test ./internal/store` and full backend `go test ./...`.
+- 2026-05-22: Completed the rest of Phase 3 visible query replacements for the active list/search/folder read hot paths. Added visible store methods for node and Logic Gate folder-subtree reads, Logic Gate search/query reads, shared triage folder reads, company explorer folder-item and summary reads, and work-item inbox reads. Postgres implementations query or join against `effective_resource_access`; memory implementations use the in-memory effective-access facts. No new visible store method calls `ListAccessibleEntityIDs` or `mangorts_user_can_access_resource`.
+- 2026-05-22: Routed legacy-compatible HTTP reads through the new visible methods where the request has a non-admin actor: node list, Logic Gate list/search, node/Logic Gate relationship list visibility inputs, company explorer folder/item reads, shared inbox list reads, work-item inbox reads, and workspace snapshot node/Logic Gate/company-explorer payloads. Admin and unauthenticated compatibility branches keep the legacy response shapes.
+- 2026-05-22: Phase 3 read-model decision: visible reads now assume `effective_resource_access` is current. Tests that mutate grants/RACI/assignments rebuild the effective-access read model before visible reads. A future slice should replace full rebuild calls with incremental projector/write-side maintenance before relying on these paths under high write volume.
+- 2026-05-22: Added focused Phase 3 tests for node and Logic Gate folder/search visibility, direct `view`/`edit`/`admin` satisfying visible reads, Logic Gate assigned-node contextual node visibility, shared triage folder visibility, company explorer folder-item/summary visibility, work-item inbox no-leak behavior, and source-shape checks that the new Postgres visible paths use `effective_resource_access` without the legacy recursive permission function.
 
 ## Open Questions
 
@@ -475,10 +479,12 @@ Use this section to record completed slices and important decisions.
 - Should legacy explicit `no_access` rows be migrated into absence of facts, or retained only as a compatibility deny source during the transition?
 - Legacy RACI mutation paths still write compatibility rows into `resource_access_grants` for old hot paths. During migration, these rows are treated as editable grant input because they have no provenance; future slices should decide when to stop creating those compatibility grants or add source metadata before relying on source-specific incremental cleanup.
 - Should global visible node lists expose existing assignment-derived node read-model fields (`status`, `status_color`, and `logic_gate_ids`) from all Logic Gate assignments, or only from Logic Gate contexts the actor can view? The first Phase 3 slice keeps the legacy node read model shape for compatibility and only scopes the returned node set.
+- Should effective-access maintenance become incremental on each grant/RACI/assignment/company-membership write before Phase 4, or remain a full-company rebuild job until the consolidated v2 views land?
 
 ## Next Steps
 
-- Add visible query methods for shared triage folders, company explorer reads, and any remaining work item reads that still depend on legacy visibility helpers.
-- Route the narrow node and Logic Gate list/search internals through `ListVisibleNodes` and `ListVisibleLogicGates` where it can be done without broad handler churn.
-- Decide whether visible node read models need actor-scoped assignment metadata before replacing workspace and explorer hot paths.
+- Begin Phase 4: add Logic Gate work endpoints backed directly by `logic_gate_node_assignments`.
+- Keep old Kanban routes and workspace/map-window compatibility paths as compatibility only; do not promote Kanban back into the V3 domain model.
+- Decide whether visible node read models need actor-scoped assignment metadata before consolidated node and Logic Gate views.
+- Add incremental effective-access maintenance or an explicit projector job strategy for writes that change grants, RACI, group membership, node assignees, shared triage hierarchy, or Logic Gate assignments.
 - Continue avoiding new recursive permission checks; recursive/group traversal belongs in the projector/backfill path only.

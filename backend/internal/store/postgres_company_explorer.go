@@ -45,6 +45,43 @@ func scanCompanyExplorerFolder(row companyExplorerFolderScanner) (domain.Company
 	return item, err
 }
 
+func scanCompanyExplorerFolderWithEffectiveAccess(row companyExplorerFolderScanner) (domain.CompanyExplorerFolder, error) {
+	var item domain.CompanyExplorerFolder
+	var parent sql.NullString
+	var systemKey sql.NullString
+	var accountEmail sql.NullString
+	var effectiveAccess sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parent,
+		&item.FolderKind,
+		&systemKey,
+		&item.Name,
+		&accountEmail,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+		&effectiveAccess,
+	)
+	if err != nil {
+		return item, err
+	}
+	if parent.Valid {
+		item.ParentFolderID = &parent.String
+	}
+	if systemKey.Valid {
+		item.SystemKey = &systemKey.String
+	}
+	if accountEmail.Valid {
+		item.AccountEmail = &accountEmail.String
+	}
+	if effectiveAccess.Valid {
+		item.EffectiveAccess = effectiveAccess.String
+	}
+	return item, nil
+}
+
 func companyExplorerFolderAccountEmailColumn(includeAccountEmail bool, qualifier string) string {
 	if !includeAccountEmail {
 		return "null::text as account_email"
@@ -328,6 +365,11 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, true)
 }
 
+func (r *PostgresRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	ctx := context.Background()
+	return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, true)
+}
+
 func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
 	var kindParam any
 	if folderKind != "" {
@@ -377,12 +419,87 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, companyID, folderKind, userID string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	var kindParam any
+	if folderKind != "" {
+		kindParam = folderKind
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`with visible_shared_triage as (
+		   select access.resource_id,
+		          (array_agg(access.access_level order by mangorts_access_level_rank(access.access_level) desc))[1]::text as access_level
+		   from effective_resource_access access
+		   where access.company_id=$1::uuid
+		     and access.user_id=$3::uuid
+		     and access.resource_type='shared_triage_folder'
+		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+		   group by access.resource_id
+		 )
+		 select folder.company_id, folder.folder_id, folder.parent_folder_id, folder.folder_kind, folder.system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
+		        visible_shared_triage.access_level
+		 from company_explorer_folders folder
+		 left join visible_shared_triage on visible_shared_triage.resource_id=folder.folder_id
+		 where folder.company_id=$1::uuid
+		   and ($2::text is null or folder.folder_kind=$2)
+		   and (folder.system_key is null or folder.system_key <> 'kanban_boards')
+		   and (folder.folder_kind <> 'communications' or visible_shared_triage.resource_id is not null)
+		 order by folder.position asc, folder.created_timestamp asc`,
+		companyID, kindParam, userID, EntityPermissionView,
+	)
+	if err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, false)
+		}
+		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
+			return nil, ErrSharedInboxStorageUnavailable
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.CompanyExplorerFolder, 0)
+	for rows.Next() {
+		item, err := scanCompanyExplorerFolderWithEffectiveAccess(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, false)
+		}
+		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
+			return nil, ErrSharedInboxStorageUnavailable
+		}
+		return nil, err
+	}
+	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+}
+
 func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	if strings.TrimSpace(folderID) == "" {
 		return r.ListCompanyExplorerFolders(companyID, folderKind)
 	}
 	ctx := context.Background()
 	return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, true)
+}
+
+func (r *PostgresRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderID) == "" {
+		return r.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
+	}
+	ctx := context.Background()
+	return r.queryVisibleCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, userID, true)
 }
 
 func (r *PostgresRepo) queryCompanyExplorerFolderSubtree(ctx context.Context, companyID, folderID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
@@ -428,6 +545,77 @@ order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(fold
 	if err := rows.Err(); err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, false)
+		}
+		return nil, err
+	}
+	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+}
+
+func (r *PostgresRepo) queryVisibleCompanyExplorerFolderSubtree(ctx context.Context, companyID, folderID, folderKind, userID string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	folderID = strings.TrimSpace(folderID)
+	if companyID == "" || userID == "" || folderID == "" {
+		return nil, ErrInvalid
+	}
+	var kindParam any
+	if strings.TrimSpace(folderKind) != "" {
+		kindParam = strings.TrimSpace(folderKind)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+with recursive subtree as (
+  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, position, created_timestamp, updated_timestamp
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_id=$2::uuid
+    and ($3::text is null or folder_kind=$3)
+  union all
+  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, child.position, child.created_timestamp, child.updated_timestamp
+  from company_explorer_folders child
+  join subtree parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where ($3::text is null or child.folder_kind=$3)
+), visible_shared_triage as (
+  select access.resource_id,
+         (array_agg(access.access_level order by mangorts_access_level_rank(access.access_level) desc))[1]::text as access_level
+  from effective_resource_access access
+  where access.company_id=$1::uuid
+    and access.user_id=$4::uuid
+    and access.resource_type='shared_triage_folder'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+  group by access.resource_id
+)
+select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.folder_kind, subtree.system_key, subtree.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "subtree")+`, subtree.position, subtree.created_timestamp, subtree.updated_timestamp,
+       visible_shared_triage.access_level
+from subtree
+left join visible_shared_triage on visible_shared_triage.resource_id=subtree.folder_id
+where (subtree.system_key is null or subtree.system_key <> 'kanban_boards')
+  and (subtree.folder_kind <> 'communications' or visible_shared_triage.resource_id is not null)
+order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, kindParam, userID, EntityPermissionView)
+	if err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryVisibleCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, userID, false)
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.CompanyExplorerFolder, 0)
+	for rows.Next() {
+		item, err := scanCompanyExplorerFolderWithEffectiveAccess(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
+			return r.queryVisibleCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, userID, false)
 		}
 		return nil, err
 	}
@@ -1410,6 +1598,70 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error) {
+	ctx := context.Background()
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
+	var folderParam any
+	if folderID != "" {
+		folderParam = folderID
+	}
+	var itemTypeParam any
+	if itemType != "" {
+		itemTypeParam = itemType
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
+		 from company_explorer_folder_items item
+		 where item.company_id=$1::uuid
+		   and ($2::uuid is null or item.folder_id=$2::uuid)
+		   and ($3::text is null or item.item_type=$3)
+		   and item.item_type <> 'kanban'
+		   and (
+		     item.item_type not in ('node', 'logic_gate')
+		     or exists (
+		       select 1
+		       from effective_resource_access access
+		       where access.company_id=item.company_id
+		         and access.user_id=$4::uuid
+		         and access.resource_type=case item.item_type when 'node' then 'node' else 'logic_gate' end
+		         and access.resource_id::text=item.item_id
+		         and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+		     )
+		   )
+		 order by item.position asc, item.created_timestamp asc`,
+		companyID, folderParam, itemTypeParam, userID, EntityPermissionView,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	for rows.Next() {
+		var item domain.CompanyExplorerFolderItem
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.Position,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -1441,6 +1693,77 @@ where item.company_id=$1
   and ($3::text is null or item.item_type=$3)
   and item.item_type <> 'kanban'
 order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	for rows.Next() {
+		var item domain.CompanyExplorerFolderItem
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.Position,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerFolderItems(companyID, "", itemType, userID)
+	}
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
+	var itemTypeParam any
+	if strings.TrimSpace(itemType) != "" {
+		itemTypeParam = strings.TrimSpace(itemType)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive subtree as (
+  select folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_id=$2::uuid
+  union all
+  select child.folder_id
+  from company_explorer_folders child
+  join subtree parent on child.parent_folder_id=parent.folder_id
+  where child.company_id=$1::uuid
+)
+select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_folder_items item
+join subtree folder_scope on folder_scope.folder_id=item.folder_id
+where item.company_id=$1::uuid
+  and ($3::text is null or item.item_type=$3)
+  and item.item_type <> 'kanban'
+  and (
+    item.item_type not in ('node', 'logic_gate')
+    or exists (
+      select 1
+      from effective_resource_access access
+      where access.company_id=item.company_id
+        and access.user_id=$4::uuid
+        and access.resource_type=case item.item_type when 'node' then 'node' else 'logic_gate' end
+        and access.resource_id::text=item.item_id
+        and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+    )
+  )
+order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
 	}
@@ -1500,6 +1823,31 @@ order by created_timestamp asc`, companyID)
 	return scanCompanyExplorerNodeSummaryRows(rows)
 }
 
+func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID string) ([]domain.Node, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+from nodes n
+join (
+  select distinct access.resource_id
+  from effective_resource_access access
+  where access.company_id=$1::uuid
+    and access.user_id=$2::uuid
+    and access.resource_type='node'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+) visible on visible.resource_id=n.node_id
+where n.company_id=$1::uuid
+order by n.created_timestamp asc, n.node_id::text asc`, companyID, userID, EntityPermissionView)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerNodeSummaryRows(rows)
+}
+
 func (r *PostgresRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -1537,6 +1885,56 @@ order by n.created_timestamp asc`, companyID, folderID)
 	return scanCompanyExplorerNodeSummaryRows(rows)
 }
 
+func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_id=$2::uuid
+    and folder_kind='node'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='node'
+), folder_nodes as (
+  select distinct item.item_id::uuid as node_id
+  from company_explorer_folder_items item
+  join folder_scope folder on folder.folder_id=item.folder_id
+  where item.company_id=$1::uuid
+    and item.item_type='node'
+), visible_nodes as (
+  select distinct access.resource_id as node_id
+  from effective_resource_access access
+  join folder_nodes folder_node on folder_node.node_id=access.resource_id
+  where access.company_id=$1::uuid
+    and access.user_id=$3::uuid
+    and access.resource_type='node'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+)
+select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+from nodes n
+join visible_nodes visible on visible.node_id=n.node_id
+where n.company_id=$1::uuid
+order by n.created_timestamp asc, n.node_id::text asc`, companyID, folderID, userID, EntityPermissionView)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerNodeSummaryRows(rows)
+}
+
 func scanCompanyExplorerLogicGateSummaryRows(rows *sql.Rows) ([]domain.LogicGate, error) {
 	defer rows.Close()
 
@@ -1562,6 +1960,31 @@ select company_id, logic_gate_id, header, created_timestamp
 from logic_gates
 where company_id=$1
 order by created_timestamp asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerLogicGateSummaryRows(rows)
+}
+
+func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+from logic_gates gate
+join (
+  select distinct access.resource_id
+  from effective_resource_access access
+  where access.company_id=$1::uuid
+    and access.user_id=$2::uuid
+    and access.resource_type='logic_gate'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+) visible on visible.resource_id=gate.logic_gate_id
+where gate.company_id=$1::uuid
+order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
 	}
@@ -1599,6 +2022,56 @@ from logic_gates gate
 join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
 where gate.company_id=$1
 order by gate.created_timestamp asc`, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerLogicGateSummaryRows(rows)
+}
+
+func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_id=$2::uuid
+    and folder_kind='logic_gate'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='logic_gate'
+), folder_gates as (
+  select distinct item.item_id::uuid as logic_gate_id
+  from company_explorer_folder_items item
+  join folder_scope folder on folder.folder_id=item.folder_id
+  where item.company_id=$1::uuid
+    and item.item_type='logic_gate'
+), visible_gates as (
+  select distinct access.resource_id as logic_gate_id
+  from effective_resource_access access
+  join folder_gates folder_gate on folder_gate.logic_gate_id=access.resource_id
+  where access.company_id=$1::uuid
+    and access.user_id=$3::uuid
+    and access.resource_type='logic_gate'
+    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+)
+select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+from logic_gates gate
+join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+where gate.company_id=$1::uuid
+order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, folderID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
 	}

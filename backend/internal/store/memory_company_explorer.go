@@ -347,6 +347,71 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderKind = strings.TrimSpace(folderKind)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.CompanyExplorerFolder, 0)
+	for _, folder := range r.folders {
+		if folder.CompanyID != companyID {
+			continue
+		}
+		if folderKind != "" && folder.FolderKind != folderKind {
+			continue
+		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
+		item := r.withSharedInboxRaciLocked(folder)
+		if folder.FolderKind == "communications" {
+			accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView)
+			if accessLevel == "" {
+				continue
+			}
+			item.EffectiveAccess = accessLevel
+		}
+		items = append(items, item)
+	}
+	sortCompanyExplorerFolders(items)
+	return items, nil
+}
+
+func sortCompanyExplorerFolders(items []domain.CompanyExplorerFolder) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			return items[i].FolderID < items[j].FolderID
+		}
+		return items[i].Position < items[j].Position
+	})
+}
+
+func (r *MemoryRepo) effectiveAccessLevelLocked(companyID, userID, resourceType, resourceID, accessLevel string) string {
+	best := ""
+	for _, access := range r.effectiveAccess {
+		if access.CompanyID != companyID ||
+			access.UserID != userID ||
+			access.ResourceType != resourceType ||
+			access.ResourceID != resourceID ||
+			!EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
+			continue
+		}
+		if best == "" || EntityPermissionRank(access.AccessLevel) > EntityPermissionRank(best) {
+			best = access.AccessLevel
+		}
+	}
+	return best
+}
+
 func companyExplorerFolderSubtreeIDsLocked(folders map[string]domain.CompanyExplorerFolder, companyID, folderID, folderKind string) map[string]bool {
 	ids := map[string]bool{}
 	folderID = strings.TrimSpace(folderID)
@@ -409,6 +474,44 @@ func (r *MemoryRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folde
 		}
 		return items[i].Position < items[j].Position
 	})
+	return items, nil
+}
+
+func (r *MemoryRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	folderKind = strings.TrimSpace(folderKind)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, folderKind)
+	items := make([]domain.CompanyExplorerFolder, 0, len(ids))
+	for _, folder := range r.folders {
+		if !ids[folder.FolderID] {
+			continue
+		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
+		item := r.withSharedInboxRaciLocked(folder)
+		if folder.FolderKind == "communications" {
+			accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView)
+			if accessLevel == "" {
+				continue
+			}
+			item.EffectiveAccess = accessLevel
+		}
+		items = append(items, item)
+	}
+	sortCompanyExplorerFolders(items)
 	return items, nil
 }
 func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
@@ -861,6 +964,65 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	if itemType == "kanban" {
+		return items, nil
+	}
+	for _, item := range r.folderItems {
+		if item.CompanyID != companyID || item.ItemType == "kanban" {
+			continue
+		}
+		if folderID != "" && item.FolderID != folderID {
+			continue
+		}
+		if itemType != "" && item.ItemType != itemType {
+			continue
+		}
+		if !r.companyExplorerFolderItemVisibleLocked(companyID, userID, item) {
+			continue
+		}
+		items = append(items, item)
+	}
+	sortCompanyExplorerFolderItems(items)
+	return items, nil
+}
+
+func sortCompanyExplorerFolderItems(items []domain.CompanyExplorerFolderItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			if items[i].ItemType == items[j].ItemType {
+				return items[i].ItemID < items[j].ItemID
+			}
+			return items[i].ItemType < items[j].ItemType
+		}
+		return items[i].Position < items[j].Position
+	})
+}
+
+func (r *MemoryRepo) companyExplorerFolderItemVisibleLocked(companyID, userID string, item domain.CompanyExplorerFolderItem) bool {
+	switch item.ItemType {
+	case "node":
+		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, item.ItemID, EntityPermissionView)
+	case "logic_gate":
+		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, item.ItemID, EntityPermissionView)
+	default:
+		return true
+	}
+}
+
 func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -897,6 +1059,41 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, fo
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerFolderItems(companyID, "", itemType, userID)
+	}
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "")
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	for _, item := range r.folderItems {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || !ids[item.FolderID] {
+			continue
+		}
+		if itemType != "" && item.ItemType != itemType {
+			continue
+		}
+		if !r.companyExplorerFolderItemVisibleLocked(companyID, userID, item) {
+			continue
+		}
+		items = append(items, item)
+	}
+	sortCompanyExplorerFolderItems(items)
+	return items, nil
+}
+
 func companyExplorerNodeSummary(node domain.Node) domain.Node {
 	return domain.Node{
 		CompanyID:        node.CompanyID,
@@ -928,6 +1125,30 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domai
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID string) ([]domain.Node, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.Node, 0)
+	for _, node := range r.nodes {
+		if node.CompanyID != companyID {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, companyExplorerNodeSummary(node))
+	}
+	sortCompanyExplorerNodeSummaries(items)
+	return items, nil
+}
+
 func (r *MemoryRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -941,6 +1162,41 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, 
 	seen := map[string]bool{}
 	for _, folderItem := range r.folderItems {
 		if folderItem.CompanyID != companyID || folderItem.ItemType != "node" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		node, ok := r.nodes[key(companyID, folderItem.ItemID)]
+		if !ok {
+			continue
+		}
+		seen[folderItem.ItemID] = true
+		items = append(items, companyExplorerNodeSummary(node))
+	}
+	sortCompanyExplorerNodeSummaries(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	items := make([]domain.Node, 0)
+	seen := map[string]bool{}
+	for _, folderItem := range r.folderItems {
+		if folderItem.CompanyID != companyID || folderItem.ItemType != "node" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, folderItem.ItemID, EntityPermissionView) {
 			continue
 		}
 		node, ok := r.nodes[key(companyID, folderItem.ItemID)]
@@ -984,6 +1240,30 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, companyExplorerLogicGateSummary(gate))
+	}
+	sortCompanyExplorerLogicGateSummaries(items)
+	return items, nil
+}
+
 func (r *MemoryRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
@@ -997,6 +1277,41 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(compan
 	seen := map[string]bool{}
 	for _, folderItem := range r.folderItems {
 		if folderItem.CompanyID != companyID || folderItem.ItemType != "logic_gate" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		gate, ok := r.logicGates[key(companyID, folderItem.ItemID)]
+		if !ok {
+			continue
+		}
+		seen[folderItem.ItemID] = true
+		items = append(items, companyExplorerLogicGateSummary(gate))
+	}
+	sortCompanyExplorerLogicGateSummaries(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	items := make([]domain.LogicGate, 0)
+	seen := map[string]bool{}
+	for _, folderItem := range r.folderItems {
+		if folderItem.CompanyID != companyID || folderItem.ItemType != "logic_gate" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, folderItem.ItemID, EntityPermissionView) {
 			continue
 		}
 		gate, ok := r.logicGates[key(companyID, folderItem.ItemID)]

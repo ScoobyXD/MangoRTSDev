@@ -28,6 +28,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			return
 		}
 
+		userID := s.entityPermissionActorUserID(r, companyID)
 		var items []domain.CompanyExplorerFolder
 		var err error
 		if folderID != "" {
@@ -35,13 +36,21 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 				writeError(w, http.StatusBadRequest, "folder_kind_required")
 				return
 			}
-			items, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+			if userID != "" {
+				items, err = s.repo.ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID)
+			} else {
+				items, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+			}
 			if err == nil && len(items) == 0 {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
 			}
 		} else {
-			items, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+			if userID != "" {
+				items, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
+			} else {
+				items, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+			}
 		}
 		if err != nil {
 			log.Printf("company explorer folders: failed to list folders company_id=%s folder_kind=%s folder_id=%s: %v", companyID, folderKind, folderID, err)
@@ -820,6 +829,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		}
 
 		var items []domain.CompanyExplorerFolderItem
+		userID := s.entityPermissionActorUserID(r, companyID)
 		if includeDescendants {
 			folders, listErr := s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, itemType)
 			if listErr != nil {
@@ -830,17 +840,20 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
 			}
-			items, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+			if userID != "" {
+				items, err = s.repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID)
+			} else {
+				items, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+			}
 		} else {
-			items, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
+			if userID != "" {
+				items, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, folderID, itemType, userID)
+			} else {
+				items, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
+			}
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
-			return
-		}
-		items, err = s.filterVisibleCompanyExplorerFolderItems(r, companyID, items)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_company_explorer_folder_items")
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"folder_items": items}, etag)

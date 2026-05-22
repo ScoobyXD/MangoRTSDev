@@ -567,6 +567,71 @@ func (r *PostgresRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]d
 	}
 	return items, nil
 }
+
+func (r *PostgresRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleNodes(companyID, userID)
+	}
+
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`with recursive folder_scope as (
+		   select company_id, folder_id
+		   from company_explorer_folders
+		   where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='node'
+		   union all
+		   select child.company_id, child.folder_id
+		   from company_explorer_folders child
+		   join folder_scope parent
+		     on child.company_id=parent.company_id
+		    and child.parent_folder_id=parent.folder_id
+		   where child.folder_kind='node'
+		 ), folder_nodes as (
+		   select distinct item.item_id::uuid as node_id
+		   from company_explorer_folder_items item
+		   join folder_scope folder on folder.folder_id=item.folder_id
+		   where item.company_id=$1::uuid and item.item_type='node'
+		 ), visible_nodes as (
+		   select distinct access.resource_id as node_id
+		   from effective_resource_access access
+		   join folder_nodes folder_node on folder_node.node_id=access.resource_id
+		   where access.company_id=$1::uuid
+		     and access.user_id=$3::uuid
+		     and access.resource_type='node'
+		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
+		 )
+		 select `+nodeSelectColumns+`
+		 from nodes n
+		 join visible_nodes visible on visible.node_id=n.node_id
+		 `+nodeStatusJoin+`
+		 where n.company_id=$1::uuid
+		 order by n.created_timestamp asc, n.node_id::text asc`,
+		companyID, folderID, userID, EntityPermissionView,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.Node, 0)
+	for rows.Next() {
+		item, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *PostgresRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx,
