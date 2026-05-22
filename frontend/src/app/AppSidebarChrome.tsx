@@ -1020,6 +1020,7 @@ export function AppSidebar({
           open={logicGatesByFunctionOpen}
           icon={<HeaderLogicGateArenaIcon />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
+          floating
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
         />
@@ -1286,6 +1287,7 @@ function AppSidebarScopedExplorerSection({
   open,
   icon,
   widgetId,
+  floating = false,
   selectionTargetFrameIDs,
   onToggle,
 }: {
@@ -1293,15 +1295,16 @@ function AppSidebarScopedExplorerSection({
   open: boolean;
   icon: React.ReactNode;
   widgetId: string;
+  floating?: boolean;
   selectionTargetFrameIDs: string[];
   onToggle: () => void;
 }): React.ReactElement {
   return (
-    <div style={appSidebarMiniExplorerBlockStyle}>
-      <div style={appSidebarMiniExplorerRowStyle(open)}>
+    <div style={appSidebarMiniExplorerBlockStyle(floating)}>
+      <div style={appSidebarMiniExplorerRowStyle(open, floating)}>
         <button
           type="button"
-          style={appSidebarMiniExplorerLabelButtonStyle}
+          style={appSidebarMiniExplorerLabelButtonStyle(floating)}
           onClick={onToggle}
         >
           <span style={appSidebarMiniExplorerIconStyle}>{icon}</span>
@@ -1321,7 +1324,7 @@ function AppSidebarScopedExplorerSection({
         </button>
       </div>
       {open && (
-        <div style={appSidebarMiniExplorerFrameStyle}>
+        <div style={appSidebarMiniExplorerFrameStyle(floating)}>
           <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
             <SidebarCompanyExplorerContent
               accent={SIDEBAR_ACTIVE_TEXT}
@@ -1736,13 +1739,37 @@ const appSidebarSharedRootBlockStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const appSidebarMiniExplorerBlockStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 3,
-  minWidth: 0,
-};
+function appSidebarMiniExplorerBlockStyle(floating: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gap: floating ? 0 : 3,
+    minWidth: 0,
+    margin: floating ? "2px 0 7px" : 0,
+    border: floating ? "1px solid rgba(148, 163, 184, 0.38)" : undefined,
+    borderRadius: floating ? 14 : undefined,
+    background: floating ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
+    boxShadow: floating ? "0 18px 42px rgba(15, 23, 42, 0.18), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : undefined,
+    backdropFilter: floating ? "blur(18px)" : undefined,
+    WebkitBackdropFilter: floating ? "blur(18px)" : undefined,
+    overflow: floating ? "hidden" : "visible",
+  };
+}
 
-function appSidebarMiniExplorerRowStyle(open: boolean): React.CSSProperties {
+function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React.CSSProperties {
+  if (floating) {
+    return {
+      width: "100%",
+      minHeight: 36,
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 1fr) 28px",
+      alignItems: "center",
+      border: "none",
+      borderRadius: open ? "13px 13px 0 0" : 13,
+      background: open ? "rgba(0, 233, 255, 0.12)" : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+      color: SIDEBAR_ACTIVE_TEXT,
+      minWidth: 0,
+    };
+  }
   return {
     width: "100%",
     minHeight: 31,
@@ -1757,24 +1784,26 @@ function appSidebarMiniExplorerRowStyle(open: boolean): React.CSSProperties {
   };
 }
 
-const appSidebarMiniExplorerLabelButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 29,
-  display: "grid",
-  gridTemplateColumns: "18px minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 6,
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: 0,
-  padding: "0 0 0 8px",
-  textAlign: "left",
-};
+function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: floating ? 34 : 29,
+    display: "grid",
+    gridTemplateColumns: "18px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: floating ? 7 : 6,
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: 0,
+    padding: floating ? "0 0 0 10px" : "0 0 0 8px",
+    textAlign: "left",
+  };
+}
 
 const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
   width: 18,
@@ -1784,13 +1813,16 @@ const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
   color: SIDEBAR_CYAN_ACCENT,
 };
 
-const appSidebarMiniExplorerFrameStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "visible",
-  border: "1px solid rgba(17, 17, 17, 0.22)",
-  borderRadius: 6,
-  background: "#ffffff",
-};
+function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "visible",
+    border: floating ? "none" : "1px solid rgba(17, 17, 17, 0.22)",
+    borderTop: floating ? "1px solid rgba(100, 116, 139, 0.22)" : undefined,
+    borderRadius: floating ? 0 : 6,
+    background: floating ? "transparent" : "#ffffff",
+  };
+}
 
 function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): React.CSSProperties {
   return {
