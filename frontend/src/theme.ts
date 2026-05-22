@@ -1,4 +1,4 @@
-export const MANGO_FONT_FAMILY = "\"Helvetica Neue\", Helvetica, Arial, sans-serif";
+export const MANGO_FONT_FAMILY = "\"Inter\", \"Inter var\", system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
 
 export const MANGO_ORANGE_COLUMNS = [
   "rgba(251, 177, 82, 1)",

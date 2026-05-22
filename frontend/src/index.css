@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap");
+
 /* Global reset and predictable box model for full-canvas dashboard layout. */
 * {
   margin: 0;
@@ -14,7 +16,7 @@
 }
 
 :root {
-  --mango-font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mango-font-family: "Inter", "Inter var", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mango-orange-1: rgba(251, 177, 82, 1);
   --mango-orange-2: rgba(254, 169, 78, 1);
   --mango-orange-3: rgba(254, 155, 70, 1);

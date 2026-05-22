@@ -444,7 +444,9 @@ function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinu
   const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, range.endMinute - range.startMinute);
   const intervalCount = Math.max(1, rangeMinutes / APP_TIMELINE_STEP_MINUTES);
   const expandedContentWidth = Math.max(680, intervalCount * PIXELS_PER_QUARTER_HOUR);
-  const contentWidth = compact ? Math.max(1, availableWidth || expandedContentWidth) : expandedContentWidth;
+  const contentWidth = compact
+    ? Math.max(1, availableWidth || expandedContentWidth)
+    : Math.max(expandedContentWidth, availableWidth || 0);
   const pxPerMinute = contentWidth / rangeMinutes;
   const ticks = useMemo(() => buildTimelineTicks(range.startMinute, range.endMinute, contentWidth), [contentWidth, range.endMinute, range.startMinute]);
   return { rangeMinutes, contentWidth, pxPerMinute, ticks };
@@ -614,7 +616,7 @@ function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProp
     overflowY: "hidden",
     border: compact ? 0 : `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
     borderRadius: compact ? "0 15px 15px 0" : 8,
-    background: active ? "linear-gradient(180deg, #ecfeff 0%, #ffffff 100%)" : "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+    background: "#ffffff",
     boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
     scrollbarWidth: compact ? "none" : "thin",
   };
@@ -667,7 +669,7 @@ function timelineLaneStyle(compact: boolean): React.CSSProperties {
     height: compact ? undefined : 56,
     borderTop: "1px solid rgba(100, 116, 139, 0.18)",
     borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
-    background: "rgba(226, 232, 240, 0.24)",
+    background: "#ffffff",
   };
 }
 
