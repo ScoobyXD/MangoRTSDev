@@ -400,32 +400,39 @@ func (s *Server) requireCommunicationsSharedInboxAccess(w http.ResponseWriter, r
 		return true
 	}
 	accessLevel, ok := store.NormalizeEntityPermission(accessLevel)
-	if !ok {
+	if !ok || store.EntityPermissionRank(accessLevel) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_level")
 		return false
 	}
-	allowed, err := s.repo.UserCanAccessEntity(companyID, store.EntityTypeSharedTriageFolder, folderID, actor.User.UserID, accessLevel)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedTriageFolder, folderID, accessLevel)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
-		return false
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 		return false
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_check_shared_inbox_access")
 		return false
 	}
-	if !allowed {
-		if accessLevel == store.EntityPermissionView {
-			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
-		} else {
-			writeError(w, http.StatusForbidden, "shared_inbox_access_denied")
-		}
-		return false
+	if allowed {
+		return true
 	}
-	return true
+	if accessLevel != store.EntityPermissionView {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedTriageFolder, folderID, store.EntityPermissionView)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
+			return false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_shared_inbox_access")
+			return false
+		}
+		if canView {
+			writeAccessActionDenied(w)
+			return false
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
 }
 func sharedInboxActorForCompany(w http.ResponseWriter, r *http.Request, companyID string) (ActorContext, bool, bool) {
 	companyID = strings.TrimSpace(companyID)

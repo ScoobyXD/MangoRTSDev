@@ -11,10 +11,10 @@ export type NodeProjectionItem = {
   updated_timestamp: string;
 };
 
-type NodeProjectionResponse = {
-  company_id: string;
-  node_id: string;
-  items: NodeProjectionItem[];
+type NodeViewResponse = NodeDetails & {
+  company_id?: string;
+  node_id?: string;
+  projections?: NodeProjectionItem[];
 };
 
 const detailsCache = new Map<string, NodeDetails>();
@@ -25,6 +25,19 @@ const projectionInflight = new Map<string, Promise<NodeProjectionItem[]>>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
   return `${apiBase}:${companyID}:${nodeID}`;
+}
+
+function cacheNodeViewPayload(cacheKey: string, payload: NodeViewResponse): NodeDetails {
+  const details: NodeDetails = {
+    node: payload.node,
+    information: payload.information ?? [],
+    relationships: payload.relationships ?? [],
+    information_count: payload.information_count,
+    relationships_count: payload.relationships_count,
+  };
+  detailsCache.set(cacheKey, details);
+  projectionCache.set(cacheKey, payload.projections ?? []);
+  return details;
 }
 
 export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: string, nodeID: string): void {
@@ -57,11 +70,11 @@ export async function getNodeRecordSingleFlight(apiBase: string, companyID: stri
   if (cached) return cached;
   const inflight = detailsInflight.get(cacheKey);
   if (inflight) return inflight;
-  const promise = requestJSON<NodeDetails>(apiBase, `/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}&include_information=0`)
+  const promise = requestJSON<NodeViewResponse>(apiBase, `/v2/nodes/${encodeURIComponent(nodeID)}/view?company_id=${encodeURIComponent(companyID)}`)
     .then((payload) => {
-      detailsCache.set(cacheKey, payload);
+      const details = cacheNodeViewPayload(cacheKey, payload);
       detailsInflight.delete(cacheKey);
-      return payload;
+      return details;
     })
     .catch((error) => {
       detailsInflight.delete(cacheKey);
@@ -77,10 +90,10 @@ export async function getNodeInformationProjectionSingleFlight(apiBase: string, 
   if (cached) return cached;
   const inflight = projectionInflight.get(cacheKey);
   if (inflight) return inflight;
-  const promise = requestJSON<NodeProjectionResponse>(apiBase, `/v1/nodes/${nodeID}/projection?company_id=${encodeURIComponent(companyID)}`)
+  const promise = requestJSON<NodeViewResponse>(apiBase, `/v2/nodes/${encodeURIComponent(nodeID)}/view?company_id=${encodeURIComponent(companyID)}`)
     .then((payload) => {
-      const items = payload.items ?? [];
-      projectionCache.set(cacheKey, items);
+      cacheNodeViewPayload(cacheKey, payload);
+      const items = payload.projections ?? [];
       projectionInflight.delete(cacheKey);
       return items;
     })

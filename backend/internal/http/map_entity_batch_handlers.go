@@ -28,6 +28,10 @@ type mapEntityBatchRelationshipRequest struct {
 }
 
 func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) {
+	if !s.legacyMapRoutesEnabled {
+		writeLegacyMapRoutesDisabled(w)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return

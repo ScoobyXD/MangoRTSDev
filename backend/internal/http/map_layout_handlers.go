@@ -32,7 +32,15 @@ func validMapLayoutCoordinate(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }
 
+func writeLegacyMapRoutesDisabled(w http.ResponseWriter) {
+	writeErrorMessage(w, http.StatusNotFound, "legacy_map_routes_disabled", "This legacy map endpoint is disabled.")
+}
+
 func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
+	if !s.legacyMapRoutesEnabled {
+		writeLegacyMapRoutesDisabled(w)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))

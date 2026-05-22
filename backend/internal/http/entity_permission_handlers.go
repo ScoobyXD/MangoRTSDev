@@ -14,6 +14,19 @@ type entityPermissionUpdateRequest struct {
 	Permissions []store.EntityPermissionInput `json:"permissions"`
 }
 
+const (
+	accessDeniedResourceMessage = "You do not have access to this resource."
+	accessDeniedActionMessage   = "You do not have access to perform this action."
+)
+
+func writeAccessResourceNotFound(w http.ResponseWriter) {
+	writeErrorMessage(w, http.StatusNotFound, "access_denied", accessDeniedResourceMessage)
+}
+
+func writeAccessActionDenied(w http.ResponseWriter) {
+	writeErrorMessage(w, http.StatusForbidden, "access_denied", accessDeniedActionMessage)
+}
+
 func (s *Server) entityPermissionActorUserID(r *http.Request, companyID string) string {
 	actor, ok := authenticatedActor(r)
 	if !ok || actorCanManageCompany(actor, companyID) {
@@ -41,32 +54,39 @@ func (s *Server) requireEntityAccess(w http.ResponseWriter, r *http.Request, com
 		return true
 	}
 	accessLevel, ok = store.NormalizeEntityPermission(accessLevel)
-	if !ok {
+	if !ok || store.EntityPermissionRank(accessLevel) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 		return false
 	}
-	allowed, err := s.repo.UserCanAccessEntity(companyID, entityType, entityID, actor.User.UserID, accessLevel)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, entityType, entityID, accessLevel)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
-		return false
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, notFoundCode)
 		return false
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
 		return false
 	}
-	if !allowed {
-		if accessLevel == store.EntityPermissionView {
-			writeError(w, http.StatusNotFound, notFoundCode)
-		} else {
-			writeError(w, http.StatusForbidden, "entity_access_denied")
-		}
-		return false
+	if allowed {
+		return true
 	}
-	return true
+	if accessLevel != store.EntityPermissionView {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, entityType, entityID, store.EntityPermissionView)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+			return false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+			return false
+		}
+		if canView {
+			writeAccessActionDenied(w)
+			return false
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
 }
 
 func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, companyID, entityType, entityID, notFoundCode string) bool {
@@ -74,13 +94,9 @@ func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, compa
 	if userID == "" {
 		return true
 	}
-	allowed, err := s.repo.UserCanAccessEntity(companyID, entityType, entityID, userID, store.EntityPermissionView)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, store.EntityPermissionView)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
-		return false
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, notFoundCode)
 		return false
 	}
 	if err != nil {
@@ -88,7 +104,7 @@ func (s *Server) requireEntityView(w http.ResponseWriter, r *http.Request, compa
 		return false
 	}
 	if !allowed {
-		writeError(w, http.StatusNotFound, notFoundCode)
+		writeAccessResourceNotFound(w)
 		return false
 	}
 	return true
@@ -124,7 +140,7 @@ func (s *Server) visibleEntityIDSet(r *http.Request, companyID, entityType strin
 		}
 		return out, nil
 	}
-	return s.repo.ListAccessibleEntityIDs(companyID, entityType, userID, store.EntityPermissionView, cleanIDs)
+	return s.repo.ListEffectiveResourceIDsForUser(companyID, userID, entityType, store.EntityPermissionView, cleanIDs)
 }
 
 func (s *Server) filterVisibleNodes(r *http.Request, companyID string, nodes []domain.Node) ([]domain.Node, error) {

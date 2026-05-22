@@ -75,16 +75,16 @@ Problem solved by this phase:
 
 Tasks:
 
-- [ ] Audit all active callers of `requireEntityView`.
-- [ ] Audit all active callers of `requireEntityEdit`.
-- [ ] Audit all active callers of `requireEntityAdmin`.
-- [ ] Replace helper internals with effective-access checks.
-- [ ] Preserve company membership validation before entity checks.
-- [ ] Preserve 404 for invisible resources.
-- [ ] Preserve 403 for visible-but-insufficient access.
-- [ ] Add tests for no access, view, edit, and admin.
-- [ ] Add a guard test that fails if a selected active route calls `UserCanAccessEntity`.
-- [ ] Update the project journal with the exact callsites changed.
+- [x] Audit all active callers of `requireEntityView`.
+- [x] Audit all active callers of `requireEntityEdit`.
+- [x] Audit all active callers of `requireEntityAdmin`.
+- [x] Replace helper internals with effective-access checks.
+- [x] Preserve company membership validation before entity checks.
+- [x] Preserve 404 for invisible resources.
+- [x] Preserve 403 for visible-but-insufficient access.
+- [x] Add tests for no access, view, edit, and admin.
+- [x] Add a guard test that fails if a selected active route calls `UserCanAccessEntity`.
+- [x] Update the project journal with the exact callsites changed.
 
 Success criteria:
 
@@ -99,20 +99,20 @@ The v1 node, Logic Gate, projection, Kanban, map, and workspace endpoints are st
 
 Tasks:
 
-- [ ] Audit active `/v1/nodes/*` detail/projection routes.
-- [ ] Audit active `/v1/logic-gates/*` detail/projection routes.
-- [ ] Audit active `/v1/map-layout` and `/v1/map-entity-batches` routes.
-- [ ] Audit workspace snapshot payloads for map and Kanban data.
-- [ ] Audit frontend callsites still using old v1 node, Logic Gate, projection, Kanban, map, and workspace APIs.
-- [ ] Decide for each old route: keep as effective-access compatibility, wrap over V2/consolidated behavior, or disable.
-- [ ] Prefer `/v2/nodes/{id}/view` for node read workflows.
-- [ ] Prefer `/v2/logic-gates/{id}/view` for Logic Gate read workflows.
+- [x] Audit active `/v1/nodes/*` detail/projection routes.
+- [x] Audit active `/v1/logic-gates/*` detail/projection routes.
+- [x] Audit active `/v1/map-layout` and `/v1/map-entity-batches` routes.
+- [x] Audit workspace snapshot payloads for map and Kanban data.
+- [x] Audit frontend callsites still using old v1 node, Logic Gate, projection, Kanban, map, and workspace APIs.
+- [x] Decide for each old route: keep as effective-access compatibility, wrap over V2/consolidated behavior, or disable.
+- [x] Prefer `/v2/nodes/{id}/view` for node read workflows.
+- [x] Prefer `/v2/logic-gates/{id}/view` for Logic Gate read workflows.
 - [ ] Prefer `/v2/logic-gates/{id}/work` for Logic Gate work/Kanban workflows.
-- [ ] Disable map routes by default.
-- [ ] Remove map payloads from normal workspace snapshots by default.
-- [ ] Remove Kanban legacy payloads from normal workspace snapshots by default.
-- [ ] Add tests for disabled/gated route behavior and workspace snapshot shape.
-- [ ] Update the project journal with the final route policy.
+- [x] Disable map routes by default.
+- [x] Remove map payloads from normal workspace snapshots by default.
+- [x] Remove Kanban legacy payloads from normal workspace snapshots by default.
+- [x] Add tests for disabled/gated route behavior and workspace snapshot shape.
+- [x] Update the project journal with the final route policy.
 
 Success criteria:
 
@@ -159,6 +159,69 @@ The mini project only targets:
 - legacy Kanban authorization
 
 Anything beyond that belongs in the full V4 tracker.
+
+### Entry 2 - Phase 1 Follow-up And Phase 2 Route Policy
+
+Phase 1 follow-up:
+
+- `backend/internal/http/entity_permission_handlers.go`
+  - `requireEntityView`, `requireEntityEdit`, and `requireEntityAdmin` now authorize through `UserHasEffectiveAccess`.
+  - `visibleEntityIDSet` now uses `ListEffectiveResourceIDsForUser`, not `ListAccessibleEntityIDs`.
+  - Direct no-view/no-positive-effective-access responses return HTTP 404 with `You do not have access to this resource.`
+  - Visible-but-insufficient edit/admin responses return HTTP 403 with `You do not have access to perform this action.`
+- `backend/internal/http/consolidated_view_handlers.go`
+  - `/v2/nodes/{id}/view` and `/v2/logic-gates/{id}/view` use the same generic 404 no-access body.
+- `backend/internal/http/logic_gate_work_handlers.go`
+  - `/v2/logic-gates/{id}/work` edit/admin denial now uses the generic action-denied body, and no-view remains a generic 404.
+- `backend/internal/http/communications_shared_inbox_handlers.go`
+  - Shared inbox folder access now uses effective access and the same generic no-access/action-denied response bodies.
+- `backend/internal/http/http_helpers.go`
+  - Added `writeErrorMessage` for generic access-denied JSON bodies.
+
+Phase 2 route policy:
+
+- `/v1/nodes` and `/v1/logic-gates`
+  - Kept as effective-access compatibility list/create routes.
+  - GET list responses continue to omit resources without view access.
+- `/v1/nodes/{id}` and `/v1/logic-gates/{id}`
+  - Kept as effective-access compatibility detail/mutation routes.
+  - Read workflows should prefer `/v2/nodes/{id}/view` and `/v2/logic-gates/{id}/view`.
+- `/v1/nodes/{id}/projection` and `/v1/logic-gates/{id}/projection`
+  - Kept as effective-access compatibility routes for legacy projection consumers and mutations.
+  - Frontend record stores now read projections through the V2 consolidated view endpoints.
+- `/v1/map-layout` and `/v1/map-entity-batches`
+  - Disabled by default.
+  - Temporary compatibility can be enabled with `ServerOptions.LegacyMapRoutesEnabled` or `MANGORTS_ENABLE_LEGACY_MAP_ROUTES=1`.
+- `/v1/workspace/snapshot`
+  - Default `company_explorer` snapshots remain the normal workspace shape and omit no-view resources/items.
+  - `scope=full` now omits `node_map_positions`, `logic_gate_map_positions`, and `kanban_boards` by default.
+  - Full snapshots only include map payloads when legacy map routes are enabled and `include_legacy_map=1` or `include_map_payloads=1` is set.
+  - Full snapshots only include legacy Kanban boards when `include_legacy_kanban=1` or `include_kanban_payloads=1` is set.
+  - Scoped map snapshots remain compatibility reads for now; direct map mutation/layout routes are disabled by default.
+- `/v1/kanban/*`
+  - Kept as legacy compatibility for now.
+  - Full workspace snapshots no longer include legacy Kanban board payloads by default.
+  - Full Kanban authorization cleanup remains Phase 3.
+
+Frontend callsite audit:
+
+- Updated `frontend/src/modules/node-map/NodeRecordStore.ts` to read details and projections from `/v2/nodes/{id}/view`.
+- Updated `frontend/src/modules/logic-gate-map/LogicGateRecordStore.ts` to read details and projections from `/v2/logic-gates/{id}/view`.
+- Remaining old v1 frontend usages are intentional for Phase 2: list/search compatibility, mutations, permissions, content-change reads, map code paths that now depend on the legacy map feature gate, and Kanban paths deferred to Phase 3.
+
+Tests added or updated:
+
+- `backend/internal/http/v4_mini_phase2_test.go`
+  - proves no-view resources are omitted from lists and workspace snapshots
+  - proves direct no-view access returns 404 with the generic no-access message
+  - proves visible-but-insufficient access returns 403 with the generic action-denied message
+  - proves old v1 node/Logic Gate detail/projection reads are intentional compatibility routes and do not call legacy recursive access helpers
+  - proves map routes are disabled by default and full snapshots omit map/Kanban legacy payloads by default
+- `backend/internal/http/server_test.go`
+  - legacy map-specific tests now opt in with `ServerOptions.LegacyMapRoutesEnabled`.
+  - full snapshot map payload checks now opt in with `include_legacy_map=1`.
+- `backend/internal/http/communications_handlers_test.go`
+  - shared inbox fixture rebuilds effective access before asserting view access.
 
 ## Files To Inspect First
 

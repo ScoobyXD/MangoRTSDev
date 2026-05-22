@@ -46,6 +46,7 @@ type Server struct {
 	nylasClient              NylasClient
 	nylasConfig              NylasConfig
 	maxBodyBytes             int64
+	legacyMapRoutesEnabled   bool
 }
 
 type ServerOptions struct {
@@ -57,6 +58,7 @@ type ServerOptions struct {
 	NylasClient                   NylasClient
 	NylasConfig                   NylasConfig
 	MaxRequestBodyBytes           int64
+	LegacyMapRoutesEnabled        bool
 	WorkspaceEventFanout          store.WorkspaceEventFanout
 	WorkspaceCatchupInterval      time.Duration
 	Metrics                       MetricsRecorder
@@ -96,6 +98,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasClient:              options.NylasClient,
 		nylasConfig:              options.NylasConfig,
 		maxBodyBytes:             options.MaxRequestBodyBytes,
+		legacyMapRoutesEnabled:   options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
 	server.startWorkspaceEventFanout()
 	return server

@@ -85,3 +85,7 @@ func requestETagMatches(r *http.Request, etag string) bool {
 func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
+
+func writeErrorMessage(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]string{"error": code, "message": message})
+}

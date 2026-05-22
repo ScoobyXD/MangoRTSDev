@@ -112,24 +112,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nodeIDs, logicGateIDs)
-	nodeMapPositions, err := s.repo.ListNodeMapPositions(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
-		return
-	}
-	nodeMapPositions = filterNodeMapPositionsByVisibleNodes(nodeMapPositions, nodeIDs)
-	logicGateMapPositions, err := s.repo.ListLogicGateMapPositions(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
-		return
-	}
-	logicGateMapPositions = filterLogicGateMapPositionsByVisibleGates(logicGateMapPositions, logicGateIDs)
-	kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
-		return
-	}
-	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"scope":                    "full",
 		"nodes":                    nodes,
 		"relationships":            relationships,
@@ -137,10 +120,30 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		"logic_gate_relationships": logicGateRelationships,
 		"folders":                  folders,
 		"folder_items":             folderItems,
-		"node_map_positions":       nodeMapPositions,
-		"logic_gate_map_positions": logicGateMapPositions,
-		"kanban_boards":            kanbanBoards,
-	}, etag)
+	}
+	if s.legacyMapRoutesEnabled && isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_map", "include_map_payloads")) {
+		nodeMapPositions, err := s.repo.ListNodeMapPositions(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
+			return
+		}
+		payload["node_map_positions"] = filterNodeMapPositionsByVisibleNodes(nodeMapPositions, nodeIDs)
+		logicGateMapPositions, err := s.repo.ListLogicGateMapPositions(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
+			return
+		}
+		payload["logic_gate_map_positions"] = filterLogicGateMapPositionsByVisibleGates(logicGateMapPositions, logicGateIDs)
+	}
+	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
+		kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
+			return
+		}
+		payload["kanban_boards"] = kanbanBoards
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, payload, etag)
 }
 
 func (s *Server) workspaceSnapshotETag(r *http.Request, companyID, scope string) (string, error) {
