@@ -520,7 +520,7 @@ export const logicGateRaciPanelStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 8,
   padding: 10,
-  border: `1px solid ${HOME_BLACK}`,
+  border: "none",
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
