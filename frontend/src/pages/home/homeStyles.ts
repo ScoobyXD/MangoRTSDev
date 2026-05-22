@@ -10,6 +10,9 @@ const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
 const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
+const HOME_MATRIX_LINE = "rgba(36, 18, 10, 0.22)";
+const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
+const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
@@ -516,14 +519,26 @@ export const logicGateTreeRowTextStyle: React.CSSProperties = {
 export const logicGateRaciPanelStyle: React.CSSProperties = {
   minHeight: 0,
   minWidth: 0,
-  display: "grid",
-  gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 8,
   padding: 10,
   border: "none",
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
+};
+
+export const logicGateRaciMatrixSurfaceStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: "100%",
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, auto)",
+  gap: 10,
+  alignSelf: "start",
+  padding: "14px 14px 16px",
+  border: `1px solid ${HOME_SURFACE_BORDER}`,
+  borderRadius: 8,
+  background: "linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%)",
+  boxShadow: "0 14px 34px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
+  boxSizing: "border-box",
 };
 
 export const logicGateRaciHeaderStyle: React.CSSProperties = {
@@ -546,8 +561,9 @@ export const logicGateRaciMetaStyle: React.CSSProperties = {
 
 export const logicGateRaciScrollStyle: React.CSSProperties = {
   minHeight: 0,
+  maxHeight: "min(760px, calc(100vh - 240px))",
   overflow: "auto",
-  padding: "0 2px 4px 0",
+  padding: "2px 4px 8px 0",
   ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
@@ -556,17 +572,19 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
   return {
     minWidth: columnCount >= 4 ? 920 : 760,
     display: "grid",
-    gridTemplateColumns: `120px repeat(${columnCount}, minmax(190px, 1fr))`,
-    gridTemplateRows: `46px repeat(${INBOX_PRIORITIES.length}, minmax(112px, auto))`,
+    gridTemplateColumns: `116px repeat(${columnCount}, minmax(210px, 1fr))`,
+    gridTemplateRows: `54px repeat(${INBOX_PRIORITIES.length}, minmax(112px, auto))`,
     alignItems: "stretch",
+    background: "#ffffff",
   };
 }
 
 export const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
-  borderRight: `1px solid ${HOME_BLACK}`,
-  borderBottom: `1px solid ${HOME_BLACK}`,
+  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
+  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
+  background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
 };
 
 export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
@@ -574,10 +592,10 @@ export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  borderBottom: `1px solid ${HOME_BLACK}`,
-  borderRight: `1px solid ${HOME_BLACK}`,
-  background: "#ffffff",
-  padding: "0 10px",
+  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
+  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
+  background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  padding: "0 12px",
 };
 
 export const logicGateRaciColumnLetterStyle: React.CSSProperties = {
@@ -587,6 +605,7 @@ export const logicGateRaciColumnLetterStyle: React.CSSProperties = {
   placeItems: "center",
   border: `1px solid ${HOME_CYAN_BORDER}`,
   borderRadius: 5,
+  background: HOME_CYAN_FAINT,
   color: HOME_CYAN,
   fontSize: 13,
   fontWeight: 800,
@@ -606,9 +625,10 @@ export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignItems: "start",
-  borderRight: `1px solid ${HOME_BLACK}`,
-  borderBottom: `1px solid ${HOME_BLACK}`,
-  color: "rgba(36, 18, 10, 0.66)",
+  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
+  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
+  background: "#fbfdfe",
+  color: "rgba(36, 18, 10, 0.62)",
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1.2,
@@ -621,27 +641,32 @@ export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties
     minHeight: 112,
     minWidth: 0,
     display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(184px, 196px))",
     alignContent: "start",
-    gap: 7,
-    borderRight: `1px solid ${HOME_BLACK}`,
-    borderBottom: `1px solid ${HOME_BLACK}`,
-    background: activeDrop ? HOME_CYAN_FAINT : "#ffffff",
+    alignItems: "start",
+    justifyContent: "start",
+    gap: 10,
+    borderRight: `2px solid ${HOME_MATRIX_LINE}`,
+    borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
+    background: activeDrop ? HOME_CYAN_FAINT : "rgba(248, 250, 252, 0.42)",
     boxShadow: activeDrop ? `inset 0 0 0 2px ${HOME_CYAN_MEDIUM}` : "none",
-    padding: 8,
+    padding: 10,
     transition: "background 120ms ease, box-shadow 120ms ease",
   };
 }
 
 export const logicGateInboxGroupStyle: React.CSSProperties = {
   position: "relative",
+  width: "min(100%, 196px)",
+  aspectRatio: "1 / 1",
   minWidth: 0,
   display: "grid",
-  gridTemplateRows: "30px minmax(0, auto)",
-  border: `1px solid ${HOME_BLACK}`,
-  borderRadius: 7,
+  gridTemplateRows: "44px minmax(0, 1fr)",
+  border: `1px solid ${HOME_CARD_BORDER}`,
+  borderRadius: 8,
   background: "#ffffff",
   overflow: "hidden",
-  boxShadow: "0 2px 7px rgba(36, 18, 10, 0.05)",
+  boxShadow: "0 10px 22px rgba(15, 23, 42, 0.09), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
 };
 
 export const logicGateInboxGroupResizeHandleStyle: React.CSSProperties = {
@@ -659,28 +684,29 @@ export const logicGateInboxGroupResizeHandleStyle: React.CSSProperties = {
 };
 
 export const logicGateInboxGroupResizeGripStyle: React.CSSProperties = {
-  width: 42,
-  height: 2,
+  width: 36,
+  height: 3,
   marginBottom: 2,
   borderRadius: 2,
-  background: HOME_BLACK,
+  background: "rgba(15, 23, 42, 0.34)",
 };
 
 export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: string): React.CSSProperties {
-  const tint = color ? homeColorWithAlpha(color, 0.13) : "#ffffff";
+  const tint = color ? homeColorWithAlpha(color, 0.13) : "rgba(248, 250, 252, 0.92)";
+  const strongerTint = color ? homeColorWithAlpha(color, 0.20) : "#ffffff";
   return {
     width: "100%",
-    height: 30,
+    minHeight: 44,
     display: "grid",
-    gridTemplateColumns: "22px minmax(0, 1fr) auto auto auto",
+    gridTemplateColumns: "30px minmax(0, 1fr) auto auto auto",
     alignItems: "center",
-    gap: 7,
+    gap: 6,
     border: "none",
-    borderBottom: `1px solid ${HOME_BLACK}`,
-    background: tint,
+    borderBottom: `1px solid rgba(15, 23, 42, 0.10)`,
+    background: `linear-gradient(180deg, ${strongerTint} 0%, ${tint} 100%)`,
     color: "#24120a",
     cursor: interactive ? "pointer" : "default",
-    padding: "0 8px",
+    padding: "0 9px",
     minWidth: 0,
     textAlign: "left",
     opacity: 1,
@@ -688,19 +714,23 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: str
 }
 
 export const logicGateInboxGroupIconStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
+  width: 28,
+  height: 28,
   display: "grid",
   placeItems: "center",
-  transform: "scale(1.24)",
+  border: `1px solid ${HOME_CYAN_MEDIUM}`,
+  borderRadius: 6,
+  background: HOME_CYAN_FAINT,
 };
 
 export const logicGateInboxGroupTitleStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  display: "-webkit-box",
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: "vertical",
   fontSize: 11,
+  lineHeight: 1.15,
   fontWeight: 800,
 };
 
@@ -754,15 +784,16 @@ export const logicGateInboxGroupCountStyle: React.CSSProperties = {
 };
 
 export const logicGateInboxNodeListStyle: React.CSSProperties = {
-  maxHeight: 124,
+  height: "100%",
+  maxHeight: "none",
   minHeight: 0,
   display: "grid",
   alignContent: "start",
-  gap: 3,
+  gap: 5,
   overflowY: "auto",
   overflowX: "hidden",
-  padding: "5px 5px 6px 7px",
-  background: "#ffffff",
+  padding: "8px 8px 12px",
+  background: "linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%)",
   ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
@@ -776,25 +807,25 @@ export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0, hasUnre
     gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto auto`,
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(255, 136, 32, 0.42)" : HOME_BLACK_SOFT}`,
-    borderRadius: 5,
-    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#fff7eb" : "#ffffff",
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(255, 136, 32, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
+    borderRadius: 6,
+    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#fff7eb" : "rgba(255, 255, 255, 0.94)",
     color: "#24120a",
     cursor: "grab",
-    padding: "3px 4px 3px 0",
+    padding: "4px 5px 4px 0",
     boxShadow: selected
       ? `0 0 0 2px ${HOME_CYAN_FAINT} inset`
       : hasUnreadNotification
         ? "0 0 0 1px rgba(255, 136, 32, 0.16) inset"
-        : "none",
+        : "0 1px 2px rgba(15, 23, 42, 0.04)",
   };
 }
 
 export const logicGateInboxNodeGuideStyle: React.CSSProperties = {
   width: 10,
   height: "100%",
-  borderLeft: `1px solid ${HOME_BLACK_SOFT}`,
-  borderBottom: `1px solid ${HOME_BLACK_SOFT}`,
+  borderLeft: "1px solid rgba(15, 23, 42, 0.18)",
+  borderBottom: "1px solid rgba(15, 23, 42, 0.18)",
   justifySelf: "end",
 };
 
