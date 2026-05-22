@@ -512,7 +512,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
   }, [companyID]);
   const scheduleWorkspacePanelReload = useCallback(() => {
-    if (!companyID) return;
+    if (!companyID || !isWorkspacePanelHomeViewID(activeViewIDRef.current)) return;
     invalidateCommunicationsWorkspacePanelCache(companyID);
     if (workspacePanelReloadTimerRef.current !== null) {
       window.clearTimeout(workspacePanelReloadTimerRef.current);
@@ -696,7 +696,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
     return () => window.removeEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
   }, [companyID, loadSharedInboxes]);
-  useEffect(() => { void loadLogicGatePanel(); }, [loadLogicGatePanel]);
   useEffect(() => {
     if (!isWorkspacePanelHomeViewID(activeViewID)) return;
     void loadLogicGatePanel();
@@ -837,8 +836,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         ));
         const touchesWorkspacePanel = gap.scopes.some((scope) => (
           scope.kind === "company_explorer" ||
-          scope.kind === "node_graph" ||
-          scope.kind === "logic_gate_graph" ||
+          (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
+          (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
           scope.kind === "kanban_board" ||
           scope.kind === "kanban_board_list" ||
           scope.kind === "work_item_assignment" ||

@@ -917,13 +917,20 @@ export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
 export function workspaceEventTouchesHomePanel(type: string): boolean {
   const cleanType = type.trim();
   if (!cleanType) return false;
-  return cleanType === "logic_gate_raci_updated"
+  return cleanType === "node_created"
+    || cleanType === "node_updated"
+    || cleanType === "node_deleted"
+    || cleanType === "node_permissions_updated"
+    || cleanType === "logic_gate_created"
+    || cleanType === "logic_gate_updated"
+    || cleanType === "logic_gate_deleted"
+    || cleanType === "logic_gate_raci_updated"
+    || cleanType === "logic_gate_permissions_updated"
     || cleanType === "communications_shared_inbox_raci_updated"
     || cleanType === "shared_triage_access_updated"
-    || cleanType.startsWith("node_")
-    || cleanType.startsWith("logic_gate_")
+    || cleanType.startsWith("company_explorer_folder_")
     || cleanType.startsWith("kanban_")
-    || cleanType.startsWith("company_explorer_folder_");
+    || cleanType.startsWith("work_item.");
 }
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {

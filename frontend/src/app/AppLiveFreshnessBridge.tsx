@@ -132,12 +132,10 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
       case "node_graph":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
         invalidateNodeRelationshipGraphSnapshot(apiBase, companyID);
-        workspacePanelTouched = true;
         break;
       case "logic_gate_graph":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "logic_gate_map" });
         invalidateLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-        workspacePanelTouched = true;
         break;
       case "company_explorer":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "company_explorer" });

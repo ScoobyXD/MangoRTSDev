@@ -233,6 +233,7 @@ type NotificationRepository interface {
 
 type DomainEventRepository interface {
 	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
+	AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error)
 	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)

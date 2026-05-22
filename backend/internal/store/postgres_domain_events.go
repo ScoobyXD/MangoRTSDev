@@ -84,6 +84,27 @@ func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainE
 	return item, nil
 }
 
+func (r *PostgresRepo) AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	if len(inputs) == 0 {
+		return []domain.DomainEvent{}, nil
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	events, err := r.appendDomainEventsTx(ctx, tx, inputs)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, error) {
 	input, payloadBytes, err := normalizePostgresDomainEventInput(input)
 	if err != nil {
