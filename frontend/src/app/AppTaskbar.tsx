@@ -214,7 +214,7 @@ function taskbarTimelinePaneStyle(expanded: boolean): React.CSSProperties {
     minWidth: 0,
     minHeight: 0,
     height: "100%",
-    paddingLeft: 18,
+    paddingLeft: 0,
     boxSizing: "border-box",
     display: "grid",
     alignItems: "stretch",

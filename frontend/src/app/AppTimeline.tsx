@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import { getExplorerDropPayloadItems } from "../modules/company-explorer/treePresentation";
@@ -48,10 +48,17 @@ type TimelineMetrics = {
   rangeMinutes: number;
   contentWidth: number;
   pxPerMinute: number;
-  ticks: Array<{ minute: number; left: number; major: boolean; label: string }>;
+  ticks: TimelineTick[];
 };
 
-const MIN_TIMELINE_CONTENT_WIDTH = 460;
+type TimelineTick = {
+  minute: number;
+  left: number;
+  major: boolean;
+  label: string;
+  labelAlign: "after" | "before";
+};
+
 const PIXELS_PER_QUARTER_HOUR = 31;
 const COMPACT_TRACK_HEIGHT = 76;
 const EXPANDED_TRACK_HEIGHT = 108;
@@ -63,8 +70,10 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
   onOpenEntity,
 }) => {
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<TimelineInteraction | null>(null);
   const stateRef = useRef(state);
+  const [scrollerWidth, setScrollerWidth] = useState(0);
   const [selectedItemID, setSelectedItemID] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemID: string } | null>(null);
@@ -129,7 +138,27 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
   }, [onChange, selectedItemID]);
 
   const compact = !expanded;
-  const metrics = useTimelineMetrics(state, compact);
+  const metrics = useTimelineMetrics(state, compact, scrollerWidth);
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return undefined;
+
+    const updateScrollerWidth = () => {
+      setScrollerWidth(Math.max(1, Math.floor(scroller.clientWidth)));
+    };
+
+    updateScrollerWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateScrollerWidth);
+      return () => window.removeEventListener("resize", updateScrollerWidth);
+    }
+
+    const observer = new ResizeObserver(updateScrollerWidth);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
 
   const dropMinuteFromEvent = (event: React.DragEvent<HTMLElement>): number => {
     const content = contentRef.current;
@@ -211,7 +240,8 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
             </div>
           )}
           <div
-            className="mango-home-scroll"
+            ref={scrollerRef}
+            className={compact ? undefined : "mango-home-scroll"}
             style={timelineScrollerStyle(dropActive, compact)}
             onDragOver={(event) => {
               if (!hasExplorerTimelineDrag(event.dataTransfer)) return;
@@ -232,7 +262,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
             }}
           >
             <div ref={contentRef} style={timelineContentStyle(metrics.contentWidth, compact)}>
-              <TimelineTicks ticks={metrics.ticks} />
+              <TimelineTicks ticks={metrics.ticks} compact={compact} />
               <div style={timelineLaneStyle(compact)}>
                 {state.items.map((item) => {
                   const selected = selectedItemID === item.id;
@@ -339,7 +369,7 @@ function TimelineHistoryDay({
       </div>
       <div className="mango-home-scroll" style={timelineScrollerStyle(false, false)}>
         <div style={timelineContentStyle(metrics.contentWidth, false)}>
-          <TimelineTicks ticks={metrics.ticks} />
+          <TimelineTicks ticks={metrics.ticks} compact={false} />
           <div style={timelineLaneStyle(false)}>
             {day.items.map((item) => {
               const left = (item.startMinute - day.startMinute) * metrics.pxPerMinute;
@@ -384,16 +414,14 @@ function TimelineItemMain({ item, compact }: { item: AppTimelineItem; compact: b
   );
 }
 
-function TimelineTicks({ ticks }: { ticks: TimelineMetrics["ticks"] }) {
+function TimelineTicks({ ticks, compact }: { ticks: TimelineMetrics["ticks"]; compact: boolean }) {
   return (
     <>
       {ticks.map((tick) => (
-        <div
-          key={`${tick.minute}:${tick.left}`}
-          style={timelineTickStyle(tick.left, tick.major)}
-        >
-          {tick.label && <span style={timelineTickLabelStyle}>{tick.label}</span>}
-        </div>
+        <React.Fragment key={`${tick.minute}:${tick.left}`}>
+          <div style={timelineTickStyle(tick.left, tick.major, compact)} />
+          {tick.label && <span style={timelineTickLabelStyle(tick.left, tick.labelAlign)}>{tick.label}</span>}
+        </React.Fragment>
       ))}
     </>
   );
@@ -411,10 +439,11 @@ function HistoryCompletedIcon({ completed }: { completed: boolean }) {
   );
 }
 
-function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, compact: boolean): TimelineMetrics {
+function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, compact: boolean, availableWidth = 0): TimelineMetrics {
   const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, range.endMinute - range.startMinute);
   const intervalCount = Math.max(1, rangeMinutes / APP_TIMELINE_STEP_MINUTES);
-  const contentWidth = Math.max(compact ? MIN_TIMELINE_CONTENT_WIDTH : 680, intervalCount * PIXELS_PER_QUARTER_HOUR);
+  const expandedContentWidth = Math.max(680, intervalCount * PIXELS_PER_QUARTER_HOUR);
+  const contentWidth = compact ? Math.max(1, availableWidth || expandedContentWidth) : expandedContentWidth;
   const pxPerMinute = contentWidth / rangeMinutes;
   const ticks = useMemo(() => buildTimelineTicks(range.startMinute, range.endMinute, contentWidth), [contentWidth, range.endMinute, range.startMinute]);
   return { rangeMinutes, contentWidth, pxPerMinute, ticks };
@@ -446,9 +475,9 @@ function timelineDropsFromDataTransfer(dataTransfer: DataTransfer): AppTimelineD
   }));
 }
 
-function buildTimelineTicks(startMinute: number, endMinute: number, contentWidth: number): Array<{ minute: number; left: number; major: boolean; label: string }> {
+function buildTimelineTicks(startMinute: number, endMinute: number, contentWidth: number): TimelineTick[] {
   const range = Math.max(APP_TIMELINE_STEP_MINUTES, endMinute - startMinute);
-  const ticks: Array<{ minute: number; left: number; major: boolean; label: string }> = [];
+  const ticks: TimelineTick[] = [];
   for (let minute = startMinute; minute <= endMinute; minute += APP_TIMELINE_STEP_MINUTES) {
     const left = ((minute - startMinute) / range) * contentWidth;
     const major = minute === startMinute || minute === endMinute || minute % 60 === 0;
@@ -457,6 +486,7 @@ function buildTimelineTicks(startMinute: number, endMinute: number, contentWidth
       left,
       major,
       label: major ? formatTimelineTime(minute).replace(":00", "") : "",
+      labelAlign: minute === endMinute ? "before" : "after",
     });
   }
   return ticks;
@@ -575,13 +605,13 @@ function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProp
   return {
     minWidth: 0,
     height: compact ? COMPACT_TRACK_HEIGHT : EXPANDED_TRACK_HEIGHT,
-    overflowX: "auto",
+    overflowX: compact ? "hidden" : "auto",
     overflowY: "hidden",
     border: `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
     borderRadius: 8,
     background: active ? "linear-gradient(180deg, #ecfeff 0%, #ffffff 100%)" : "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
     boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
-    scrollbarWidth: "thin",
+    scrollbarWidth: compact ? "none" : "thin",
   };
 }
 
@@ -594,28 +624,31 @@ function timelineContentStyle(width: number, compact: boolean): React.CSSPropert
   };
 }
 
-function timelineTickStyle(left: number, major: boolean): React.CSSProperties {
+function timelineTickStyle(left: number, major: boolean, compact: boolean): React.CSSProperties {
   return {
     position: "absolute",
     left,
-    top: 0,
-    bottom: 0,
+    top: compact ? 23 : 37,
+    height: compact ? 46 : 56,
     width: 1,
     background: major ? "rgba(15, 23, 42, 0.18)" : "rgba(15, 23, 42, 0.08)",
     transform: "translateX(-0.5px)",
   };
 }
 
-const timelineTickLabelStyle: React.CSSProperties = {
-  position: "absolute",
-  top: 5,
-  left: 5,
-  color: "#64748b",
-  fontSize: 10,
-  fontWeight: 800,
-  whiteSpace: "nowrap",
-  pointerEvents: "none",
-};
+function timelineTickLabelStyle(left: number, align: TimelineTick["labelAlign"]): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: 5,
+    left: align === "before" ? Math.max(0, left - 5) : left + 5,
+    transform: align === "before" ? "translateX(-100%)" : "none",
+    color: "#64748b",
+    fontSize: 10,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+  };
+}
 
 function timelineLaneStyle(compact: boolean): React.CSSProperties {
   return {
