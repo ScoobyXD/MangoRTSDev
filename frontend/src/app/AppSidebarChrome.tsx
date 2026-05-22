@@ -241,8 +241,7 @@ export function AppSidebar({
   const aciNotificationCount = useMemo(
     () => notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable")
       + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted")
-      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed")
-      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "other"),
+      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
     [notificationSummary],
   );
   const responsibleNotificationCount = useMemo(

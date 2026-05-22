@@ -31,7 +31,6 @@ export const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; la
   { role: "accountable", letter: "A", label: "Accountable" },
   { role: "consulted", letter: "C", label: "Consulted" },
   { role: "informed", letter: "I", label: "Informed" },
-  { role: "other", letter: "O", label: "Others" },
 ];
 
 export const RESPONSIBLE_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus; letter: string; label: string }> = [

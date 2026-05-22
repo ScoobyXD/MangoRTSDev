@@ -153,13 +153,12 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const nodeByID = new Map(nodes.map((item) => [item.node_id, item]));
 
   const aciGroups = buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
-  assert.deepEqual(ACI_COLUMNS.map((column) => column.role), ["accountable", "consulted", "informed", "other"]);
+  assert.deepEqual(ACI_COLUMNS.map((column) => column.role), ["accountable", "consulted", "informed"]);
   assert.deepEqual((aciGroups.get("accountable:1") ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
   assert.deepEqual(aciGroups.get("consulted:1")?.[0]?.nodeIDs, ["node-all"]);
   assert.deepEqual(aciGroups.get("informed:1")?.[0]?.nodeIDs, ["node-all"]);
-  assert.deepEqual(aciGroups.get("other:2")?.[0]?.nodeIDs, ["node-assigned-without-r"]);
-  assert.deepEqual(aciGroups.get("other:3")?.[0]?.nodeIDs, ["node-assigned-other-raci"]);
-  assert.equal((aciGroups.get("other:2") ?? []).some((group) => group.nodeIDs.includes("node-r")), false);
+  assert.equal(aciGroups.has("other:2"), false);
+  assert.equal(aciGroups.has("other:3"), false);
   const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
   assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
   assert.deepEqual((responsibleGroups.get("pending:1") ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);

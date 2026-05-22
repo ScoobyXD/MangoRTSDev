@@ -86,7 +86,7 @@ export type HomeColumnResizeDrag = {
 };
 
 export type AciInboxRaciRole = Extract<LogicGateRaciRole, "accountable" | "consulted" | "informed">;
-export type AciInboxRole = AciInboxRaciRole | "other";
+export type AciInboxRole = AciInboxRaciRole;
 export type ResponsibleInboxStatus = "pending" | "in_progress" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
