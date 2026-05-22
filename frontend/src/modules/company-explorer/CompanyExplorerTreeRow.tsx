@@ -256,7 +256,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         fontSize: 12,
         cursor: "default",
         opacity: isDragging ? 0.55 : 1,
-        ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(255, 136, 32, 0.13)",
+        ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(0, 233, 255, 0.12)",
         background: isDropTarget ? dropRowBackground : (isSelected ? selectedRowBackground : undefined),
         borderBottom: `1px solid ${rowRuleColor}`,
         boxShadow: isDropTarget && dragOverPlacement

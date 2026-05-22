@@ -1029,6 +1029,7 @@ export function AppSidebar({
           open={logicGatesByPersonOpen}
           icon={<HeaderPersonIcon />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
+          floating
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           onToggle={() => setLogicGatesByPersonOpen((open) => !open)}
         />
@@ -1744,7 +1745,7 @@ function appSidebarMiniExplorerBlockStyle(floating: boolean): React.CSSPropertie
     display: "grid",
     gap: floating ? 0 : 3,
     minWidth: 0,
-    margin: floating ? "2px 0 7px" : 0,
+    margin: floating ? "2px -6px 8px" : 0,
     border: floating ? "1px solid rgba(148, 163, 184, 0.38)" : undefined,
     borderRadius: floating ? 14 : undefined,
     background: floating ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
@@ -1765,7 +1766,7 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React
       alignItems: "center",
       border: "none",
       borderRadius: open ? "13px 13px 0 0" : 13,
-      background: open ? "rgba(0, 233, 255, 0.12)" : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+      background: "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
     };
