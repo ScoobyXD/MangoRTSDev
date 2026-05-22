@@ -495,11 +495,15 @@ function shouldUseBrowserOriginForPublicAuth(path: string): boolean {
 function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL): boolean {
   const raw = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
   const url = new URL(raw, window.location.origin);
-  if (url.origin === window.location.origin && (url.pathname.startsWith("/v1/") || url.pathname === "/healthz")) {
+  if (url.origin === window.location.origin && isApiRequestPath(url.pathname)) {
     return true;
   }
   const apiBase = new URL(config.apiBase, window.location.origin);
-  return url.origin === apiBase.origin && (url.pathname.startsWith("/v1/") || url.pathname === "/healthz");
+  return url.origin === apiBase.origin && isApiRequestPath(url.pathname);
+}
+
+function isApiRequestPath(pathname: string): boolean {
+  return pathname.startsWith("/v1/") || pathname.startsWith("/v2/") || pathname === "/healthz";
 }
 
 function writeAuthResult(result: CognitoAuthResult): void {

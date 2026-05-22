@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -107,6 +108,83 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	}
 	if guardedRepo.kanbanReadCount != 0 {
 		t.Fatalf("node view used Kanban read methods %d times", guardedRepo.kanbanReadCount)
+	}
+}
+
+func TestNodeCreateRefreshesEffectiveAccessForV2View(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666521"
+	repo.EnsureCompany(companyID, "Node Create V2 Refresh Co")
+	creator := mustLogicGateWorkHTTPUser(t, repo, companyID, "node-create-refresh")
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	createBody := []byte(`{"company_id":"` + companyID + `","title":"Fresh V2 Node"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq = requestWithLogicGateWorkActorForTest(createReq, creator, companyID)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST node status = %d body=%s, want %d", createRec.Code, createRec.Body.String(), http.StatusCreated)
+	}
+	var created domain.Node
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created node: %v body=%s", err, createRec.Body.String())
+	}
+
+	view, _ := getNodeViewV2ForTest(t, handler, companyID, created.NodeID, creator, http.StatusOK)
+	if view.Node.NodeID != created.NodeID || !view.CanView || !view.CanEdit {
+		t.Fatalf("created node v2 view = %+v, want creator access", view)
+	}
+}
+
+func TestNodeViewV2AllowsCompanyAdminWithoutEffectiveProjection(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666522"
+	repo.EnsureCompany(companyID, "Node Admin V2 Co")
+	admin, err := repo.UpsertAuthUser("node-view-admin", "node-view-admin@example.com", "Node View Admin")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership admin: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Admin Visible Without Projection")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/nodes/"+node.NodeID+"/view?company_id="+companyID, nil)
+	req = requestWithActorForTest(req, admin, companyID)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET admin node view status = %d body=%s, want %d", rr.Code, rr.Body.String(), http.StatusOK)
+	}
+}
+
+func TestNodeViewV2AllowsNoAuthDevRead(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666523"
+	repo.EnsureCompany(companyID, "Node No Auth V2 Co")
+	node, err := repo.CreateNode(companyID, "No Auth Dev Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/nodes/"+node.NodeID+"/view?company_id="+companyID, nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET no-auth node view status = %d body=%s, want %d", rr.Code, rr.Body.String(), http.StatusOK)
 	}
 }
 

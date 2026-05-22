@@ -88,6 +88,9 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 	}
 	actor, ok := authenticatedActor(r)
 	if !ok {
+		if s.authValidator == nil {
+			return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, "", true
+		}
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return domain.EffectiveAccessFlags{}, "", false
 	}
@@ -96,6 +99,9 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 		return domain.EffectiveAccessFlags{}, "", false
 	}
 	actorUserID := strings.TrimSpace(actor.User.UserID)
+	if actorCanManageCompany(actor, companyID) {
+		return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, actorUserID, true
+	}
 	canView, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionView)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_effective_access_check")
