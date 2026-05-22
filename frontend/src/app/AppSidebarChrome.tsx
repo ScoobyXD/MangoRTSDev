@@ -712,6 +712,7 @@ export function AppSidebar({
 
   const renderSharedFolderRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
+    const hasAssignedEmail = Boolean(folder.account_email?.trim());
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
     const treeID = row.treeID as HomeSidebarView;
@@ -783,7 +784,9 @@ export function AppSidebar({
         ) : (
           <span style={{ width: 18, height: 20 }} />
         )}
-        <span style={appSidebarSharedFolderIconStyle}><ExplorerRowIcon kind="folder" /></span>
+        <span style={appSidebarSharedFolderIconStyle}>
+          {hasAssignedEmail ? <SharedInboxAssignedEmailIcon /> : <ExplorerRowIcon kind="folder" />}
+        </span>
         {isRenaming ? (
           <input
             ref={renameInputRef}
@@ -1269,6 +1272,15 @@ function AppSidebarButton({
     </button>
   );
 }
+
+const SharedInboxAssignedEmailIcon: React.FC = () => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+    <path d="M2.2 5.8h11.6l-.95 6.25a1.25 1.25 0 0 1-1.24 1.05H4.39a1.25 1.25 0 0 1-1.24-1.05z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+    <path d="M3.45 7.25 7.2 9.8c.48.33 1.12.33 1.6 0l3.75-2.55" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M4.25 3h7.5c.69 0 1.25.56 1.25 1.25V5.8H3V4.25C3 3.56 3.56 3 4.25 3Z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+  </svg>
+);
+
 function AppSidebarScopedExplorerSection({
   label,
   open,
@@ -1887,7 +1899,7 @@ const appSidebarSharedFolderIconStyle: React.CSSProperties = {
   height: 17,
   display: "grid",
   placeItems: "center",
-  color: "#ff8820",
+  color: "#111111",
 };
 
 const appSidebarSharedRenameInputStyle: React.CSSProperties = {
