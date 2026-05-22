@@ -17,7 +17,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeDragItemsFromExplorerRows, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setKanbanNodeEntityDragData, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, myNodeTileIconStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, myNodeTileIconStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -2613,83 +2613,85 @@ export function AciInboxMatrix({
   return (
     <>
     <section style={logicGateRaciPanelStyle}>
-      <div style={logicGateRaciHeaderStyle}>
-        <h2 style={panelTitleStyle}>ACIO Nodes</h2>
-        <div style={logicGateRaciMetaStyle}>
-          {placedCount > 0 && <span>{placedCount} active</span>}
-          {loading && <span>Loading</span>}
+      <div style={logicGateRaciMatrixSurfaceStyle}>
+        <div style={logicGateRaciHeaderStyle}>
+          <h2 style={panelTitleStyle}>ACIO Nodes</h2>
+          <div style={logicGateRaciMetaStyle}>
+            {placedCount > 0 && <span>{placedCount} active</span>}
+            {loading && <span>Loading</span>}
+          </div>
         </div>
-      </div>
-      <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
-        <div style={inboxMatrixGridStyle(ACI_COLUMNS.length)}>
-          <div style={logicGateRaciCornerStyle} />
-          {ACI_COLUMNS.map((column, columnIndex) => (
-            <div key={column.role} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
-              <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
-              <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
-            </div>
-          ))}
-          {INBOX_PRIORITIES.map((priority, priorityIndex) => (
-            <React.Fragment key={priority.value}>
-              <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
-              {ACI_COLUMNS.map((column, columnIndex) => {
-                const cellKey = aciCellKey(column.role, priority.value);
-                const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
-                const cellStyle = logicGateRaciCellStyle(false);
-                return (
-                  <div
-                    key={cellKey}
-                    style={{
-                      ...cellStyle,
-                      borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
-                      borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
-                    }}
-                  >
-                    {logicGateGroups.map((group) => {
-                      const resizeKey = inboxGroupResizeKey(cellKey, group);
-                      const notificationRole = aciColumnNotificationRole(column.role);
-                      return (
-                        <LogicGateInboxNodeGroupCard
-                          key={group.logicGateID}
-                          group={group}
-                          selectedRowIDs={selectedRowIDs}
-                          selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
-                          orderedLogicGateRowIDs={orderedLogicGateRowIDs}
-                          orderedRowIDs={orderedRowIDs}
-                          nodeByID={nodeByID}
-                          nodeRelationships={nodeRelationships}
-                          nodeFolders={nodeFolders}
-                          nodeFolderItems={nodeFolderItems}
-                          getNodeDragIDs={getNodeDragIDs}
-                          onSelectNode={onSelectNode}
-                          onSelectLogicGate={onSelectLogicGate}
-                          onOpenNode={onOpenNode}
-                          onOpenLogicGate={onOpenLogicGate}
-                          onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-                          onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                          onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
-                          onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
-                          onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
-                          dropActive={activeDropKey === resizeKey}
-                          onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
-                          notificationSummary={notificationSummary}
-                          notificationCount={notificationRole ? notificationCountForInboxGroup(notificationSummary, notificationRole, group) : 0}
-                          notificationRole={notificationRole}
-                          onOpenNotifications={notificationRole ? (event) => openGroupNotifications(event, notificationRole, group) : undefined}
-                          resizeKey={resizeKey}
-                          heightPx={groupHeights[resizeKey]}
-                          onStartResize={startGroupResize}
-                          collapsed={collapsedGroupKeys.has(resizeKey)}
-                          onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
-                          onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                        />
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </React.Fragment>
-          ))}
+        <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
+          <div style={inboxMatrixGridStyle(ACI_COLUMNS.length)}>
+            <div style={logicGateRaciCornerStyle} />
+            {ACI_COLUMNS.map((column, columnIndex) => (
+              <div key={column.role} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
+                <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
+                <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+              </div>
+            ))}
+            {INBOX_PRIORITIES.map((priority, priorityIndex) => (
+              <React.Fragment key={priority.value}>
+                <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
+                {ACI_COLUMNS.map((column, columnIndex) => {
+                  const cellKey = aciCellKey(column.role, priority.value);
+                  const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
+                  const cellStyle = logicGateRaciCellStyle(false);
+                  return (
+                    <div
+                      key={cellKey}
+                      style={{
+                        ...cellStyle,
+                        borderRight: columnIndex === ACI_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
+                        borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
+                      }}
+                    >
+                      {logicGateGroups.map((group) => {
+                        const resizeKey = inboxGroupResizeKey(cellKey, group);
+                        const notificationRole = aciColumnNotificationRole(column.role);
+                        return (
+                          <LogicGateInboxNodeGroupCard
+                            key={group.logicGateID}
+                            group={group}
+                            selectedRowIDs={selectedRowIDs}
+                            selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
+                            orderedLogicGateRowIDs={orderedLogicGateRowIDs}
+                            orderedRowIDs={orderedRowIDs}
+                            nodeByID={nodeByID}
+                            nodeRelationships={nodeRelationships}
+                            nodeFolders={nodeFolders}
+                            nodeFolderItems={nodeFolderItems}
+                            getNodeDragIDs={getNodeDragIDs}
+                            onSelectNode={onSelectNode}
+                            onSelectLogicGate={onSelectLogicGate}
+                            onOpenNode={onOpenNode}
+                            onOpenLogicGate={onOpenLogicGate}
+                            onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                            onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                            onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
+                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
+                            dropActive={activeDropKey === resizeKey}
+                            onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
+                            notificationSummary={notificationSummary}
+                            notificationCount={notificationRole ? notificationCountForInboxGroup(notificationSummary, notificationRole, group) : 0}
+                            notificationRole={notificationRole}
+                            onOpenNotifications={notificationRole ? (event) => openGroupNotifications(event, notificationRole, group) : undefined}
+                            resizeKey={resizeKey}
+                            heightPx={groupHeights[resizeKey]}
+                            onStartResize={startGroupResize}
+                            collapsed={collapsedGroupKeys.has(resizeKey)}
+                            onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
+                            onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -2820,87 +2822,89 @@ export function ResponsibleInboxMatrix({
   return (
     <>
     <section style={logicGateRaciPanelStyle}>
-      <div style={logicGateRaciHeaderStyle}>
-        <h2 style={panelTitleStyle}>R Nodes</h2>
-        <div style={logicGateRaciMetaStyle}>
-          {placedCount > 0 && <span>{placedCount} active</span>}
-          {loading && <span>Loading</span>}
+      <div style={logicGateRaciMatrixSurfaceStyle}>
+        <div style={logicGateRaciHeaderStyle}>
+          <h2 style={panelTitleStyle}>R Nodes</h2>
+          <div style={logicGateRaciMetaStyle}>
+            {placedCount > 0 && <span>{placedCount} active</span>}
+            {loading && <span>Loading</span>}
+          </div>
         </div>
-      </div>
-      <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
-        <div style={inboxMatrixGridStyle(RESPONSIBLE_STATUS_COLUMNS.length)}>
-          <div style={logicGateRaciCornerStyle} />
-          {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
-            const statusColor = responsibleStatusColor(column.status);
-            return (
-              <div key={column.status} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
-                <strong style={{ ...logicGateRaciColumnLetterStyle, borderColor: statusColor, background: homeColorWithAlpha(statusColor, 0.12), color: statusColor }}>{column.letter}</strong>
-                <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
-              </div>
-            );
-          })}
-          {INBOX_PRIORITIES.map((priority, priorityIndex) => (
-            <React.Fragment key={priority.value}>
-              <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
-              {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
-                const cellKey = responsibleCellKey(column.status, priority.value);
-                const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
-                const statusColor = responsibleStatusColor(column.status);
-                const cellStyle = logicGateRaciCellStyle(false);
-                return (
-                  <div
-                    key={cellKey}
-                    style={{
-                      ...cellStyle,
-                      borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
-                      borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
-                    }}
-                  >
-                    {logicGateGroups.map((group) => {
-                      const resizeKey = inboxGroupResizeKey(cellKey, group);
-                      return (
-                        <LogicGateInboxNodeGroupCard
-                          key={group.logicGateID}
-                          group={group}
-                          selectedRowIDs={selectedRowIDs}
-                          selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
-                          orderedLogicGateRowIDs={orderedLogicGateRowIDs}
-                          orderedRowIDs={orderedRowIDs}
-                          nodeByID={nodeByID}
-                          nodeRelationships={nodeRelationships}
-                          nodeFolders={nodeFolders}
-                          nodeFolderItems={nodeFolderItems}
-                          getNodeDragIDs={getNodeDragIDs}
-                          onSelectNode={onSelectNode}
-                          onSelectLogicGate={onSelectLogicGate}
-                          onOpenNode={onOpenNode}
-                          onOpenLogicGate={onOpenLogicGate}
-                          onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-                          onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                          onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
-                          onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
-                          onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
-                          dropActive={activeDropKey === resizeKey}
-                          onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
-                          notificationSummary={notificationSummary}
-                          notificationCount={notificationCountForInboxGroup(notificationSummary, "responsible", group)}
-                          notificationRole="responsible"
-                          onOpenNotifications={(event) => openGroupNotifications(event, "responsible", group)}
-                          groupColor={statusColor}
-                          resizeKey={resizeKey}
-                          heightPx={groupHeights[resizeKey]}
-                          onStartResize={startGroupResize}
-                          collapsed={collapsedGroupKeys.has(resizeKey)}
-                          onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
-                          onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                        />
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </React.Fragment>
-          ))}
+        <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
+          <div style={inboxMatrixGridStyle(RESPONSIBLE_STATUS_COLUMNS.length)}>
+            <div style={logicGateRaciCornerStyle} />
+            {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
+              const statusColor = responsibleStatusColor(column.status);
+              return (
+                <div key={column.status} style={{ ...logicGateRaciColumnHeaderStyle, borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : logicGateRaciColumnHeaderStyle.borderRight }}>
+                  <strong style={{ ...logicGateRaciColumnLetterStyle, borderColor: statusColor, background: homeColorWithAlpha(statusColor, 0.12), color: statusColor }}>{column.letter}</strong>
+                  <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+                </div>
+              );
+            })}
+            {INBOX_PRIORITIES.map((priority, priorityIndex) => (
+              <React.Fragment key={priority.value}>
+                <div style={{ ...logicGateRaciPriorityHeaderStyle, borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : logicGateRaciPriorityHeaderStyle.borderBottom }}>{priority.label}</div>
+                {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
+                  const cellKey = responsibleCellKey(column.status, priority.value);
+                  const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
+                  const statusColor = responsibleStatusColor(column.status);
+                  const cellStyle = logicGateRaciCellStyle(false);
+                  return (
+                    <div
+                      key={cellKey}
+                      style={{
+                        ...cellStyle,
+                        borderRight: columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? "none" : cellStyle.borderRight,
+                        borderBottom: priorityIndex === INBOX_PRIORITIES.length - 1 ? "none" : cellStyle.borderBottom,
+                      }}
+                    >
+                      {logicGateGroups.map((group) => {
+                        const resizeKey = inboxGroupResizeKey(cellKey, group);
+                        return (
+                          <LogicGateInboxNodeGroupCard
+                            key={group.logicGateID}
+                            group={group}
+                            selectedRowIDs={selectedRowIDs}
+                            selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
+                            orderedLogicGateRowIDs={orderedLogicGateRowIDs}
+                            orderedRowIDs={orderedRowIDs}
+                            nodeByID={nodeByID}
+                            nodeRelationships={nodeRelationships}
+                            nodeFolders={nodeFolders}
+                            nodeFolderItems={nodeFolderItems}
+                            getNodeDragIDs={getNodeDragIDs}
+                            onSelectNode={onSelectNode}
+                            onSelectLogicGate={onSelectLogicGate}
+                            onOpenNode={onOpenNode}
+                            onOpenLogicGate={onOpenLogicGate}
+                            onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                            onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                            onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
+                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
+                            dropActive={activeDropKey === resizeKey}
+                            onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
+                            notificationSummary={notificationSummary}
+                            notificationCount={notificationCountForInboxGroup(notificationSummary, "responsible", group)}
+                            notificationRole="responsible"
+                            onOpenNotifications={(event) => openGroupNotifications(event, "responsible", group)}
+                            groupColor={statusColor}
+                            resizeKey={resizeKey}
+                            heightPx={groupHeights[resizeKey]}
+                            onStartResize={startGroupResize}
+                            collapsed={collapsedGroupKeys.has(resizeKey)}
+                            onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
+                            onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -2987,9 +2991,9 @@ export function LogicGateInboxNodeGroupCard({
   const selectedNodeIDsForMenu = useMemo(() => cleanIDList(Array.from(selectedRowIDs).map(nodeIDFromTreeID)).filter((nodeID) => nodeByID.has(nodeID)), [nodeByID, selectedRowIDs]);
   const explicitHeight = !collapsed && typeof heightPx === "number" && Number.isFinite(heightPx);
   const groupStyleBase = explicitHeight
-    ? { ...logicGateInboxGroupStyle, height: clampInboxGroupHeight(heightPx), gridTemplateRows: "30px minmax(0, 1fr)" }
+    ? { ...logicGateInboxGroupStyle, height: clampInboxGroupHeight(heightPx), gridTemplateRows: "44px minmax(0, 1fr)" }
     : collapsed
-      ? { ...logicGateInboxGroupStyle, gridTemplateRows: "30px" }
+      ? { ...logicGateInboxGroupStyle, aspectRatio: "auto", gridTemplateRows: "44px" }
       : logicGateInboxGroupStyle;
   const columnTint = groupColor ? homeColorWithAlpha(groupColor, 0.08) : undefined;
   const groupStyle = {
