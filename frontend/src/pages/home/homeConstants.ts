@@ -45,7 +45,6 @@ export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: stri
   { value: 3, label: "3\u00A0\u00A0Within a few days" },
   { value: 4, label: "4\u00A0\u00A0Within the week" },
   { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
-  { value: 0, label: "Unassigned to a Logic Gate" },
 ];
 
 export const DEFAULT_HOME_MAILBOX: EmailMailbox = "primary";
