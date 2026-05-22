@@ -9,6 +9,7 @@ type AppTaskbarProps = {
   activeTabID: string | null;
   timelineState: AppTimelineState;
   expanded: boolean;
+  leftInset: number;
   onExpandedChange: (expanded: boolean) => void;
   onOpenTab: (tab: AppDockTab) => void;
   onReorderTab: (movingTabID: string, targetTabID: string) => void;
@@ -19,12 +20,14 @@ type AppTaskbarProps = {
 
 const TASKBAR_COLLAPSED_HEIGHT = 96;
 const TASKBAR_EXPANDED_HEIGHT = 330;
+const TASKBAR_FLOATING_GAP = 18;
 
 export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   tabs,
   activeTabID,
   timelineState,
   expanded,
+  leftInset,
   onExpandedChange,
   onOpenTab,
   onReorderTab,
@@ -69,7 +72,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   }, []);
 
   return (
-    <footer style={taskbarShellStyle(expanded)} aria-label="Taskbar">
+    <footer style={taskbarShellStyle(expanded, leftInset)} aria-label="Taskbar">
       <div aria-hidden="true" style={taskbarCenterDividerStyle} />
       <section style={taskbarDockPaneStyle(expanded)} aria-label="Collapsed nodes and Logic Gates">
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
@@ -156,26 +159,29 @@ function shortTaskbarLabel(label: string): string {
   return fallback.length > 18 ? `${fallback.slice(0, 15)}...` : fallback;
 }
 
-function taskbarShellStyle(expanded: boolean): React.CSSProperties {
+function taskbarShellStyle(expanded: boolean, leftInset: number): React.CSSProperties {
   return {
     position: "fixed",
-    left: 10,
-    right: 10,
-    bottom: 10,
+    left: Math.max(TASKBAR_FLOATING_GAP, leftInset + TASKBAR_FLOATING_GAP),
+    right: TASKBAR_FLOATING_GAP,
+    bottom: TASKBAR_FLOATING_GAP,
     height: expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
     gap: 0,
     padding: expanded ? "14px 16px 14px" : "10px 14px",
     boxSizing: "border-box",
-    border: "1px solid rgba(100, 116, 139, 0.28)",
-    borderRadius: 8,
-    background: "rgba(248, 250, 252, 0.98)",
-    boxShadow: "0 14px 34px rgba(15, 23, 42, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.78)",
+    border: "1px solid rgba(148, 163, 184, 0.38)",
+    borderRadius: 16,
+    background: "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%)",
+    boxShadow: "0 28px 64px rgba(15, 23, 42, 0.26), 0 10px 22px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
     zIndex: 116,
     pointerEvents: "auto",
     color: "#0f172a",
     fontFamily: "var(--mango-font-family)",
+    overflow: "visible",
   };
 }
 
