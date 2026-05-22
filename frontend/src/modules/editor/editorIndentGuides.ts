@@ -4,6 +4,19 @@ export type EditorIndentGuideSegment = {
   lineEnd: number;
 };
 
+const EDITOR_INDENT_GUIDE_SPACE_WIDTH_EM = 0.25;
+
+// Indent guide left positions must follow the rendered width of EDITOR_TAB_TEXT's
+// five spaces. Do not use `ch` here: `ch` is the width of "0", which only lined
+// up when the editor was forced to monospace. Node and Logic Gate editors use the
+// app's proportional Inter font, so each nested guide advances by five spaces.
+export function editorIndentGuideLeftForDepth(depth: number, spacesPerIndent: number): string {
+  const visibleDepth = Math.max(0, Math.floor(depth) - 1);
+  const indentWidth = Math.max(1, Math.floor(spacesPerIndent));
+  const leftEm = visibleDepth * indentWidth * EDITOR_INDENT_GUIDE_SPACE_WIDTH_EM;
+  return `${Number(leftEm.toFixed(4))}em`;
+}
+
 function countIndentDepth(line: string, spacesPerIndent: number): number {
   let columns = 0;
   for (const char of line) {

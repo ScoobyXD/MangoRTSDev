@@ -4,7 +4,7 @@ import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type Edi
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
-import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
@@ -856,7 +856,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 style={{
                   position: "absolute",
                   top: segment.lineStart * documentLineHeightPx,
-                  left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                  left: editorIndentGuideLeftForDepth(segment.depth, EDITOR_TAB_TEXT.length),
                   height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
                   borderLeft: `1px solid ${indentGuideColor}`,
                   opacity: 0.9,

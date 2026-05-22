@@ -17,6 +17,8 @@ export const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
 export const EDITOR_DOCUMENT_TOP_PX = 86;
 export const EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY = "var(--mango-font-family)";
 
+// Node and Logic Gate body text must stay on the app font in every outline mode.
+// Indent-guide alignment is handled separately in editorIndentGuides.ts.
 export function getEditorDocumentFontFamily(_outlineStyle: EditorOutlineStyleID): string {
   return EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY;
 }
