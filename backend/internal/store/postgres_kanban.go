@@ -879,11 +879,42 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); e
 		}
 	}
 
+	status := column.Title
+	statusColor := column.ItemColor
+	if card.IsIssue {
+		status = "Issue"
+		statusColor = "#ffd400"
+	}
 	node, err := scanNode(tx.QueryRowContext(ctx, `
-select `+nodeSelectColumns+`
+select
+  n.company_id,
+  n.node_id,
+  n.title,
+  nullif($3, '') as status,
+  nullif($4, '') as status_color,
+  n.due_date::text,
+  n.priority,
+  n.assignee_user_id::text,
+  nullif(assignee.display_name, '') as assignee_name,
+  nullif(assignee.email, '') as assignee_email,
+  n.created_timestamp,
+  coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json
 from nodes n
-`+nodeStatusJoin+`
-where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+left join company_memberships assignee_membership
+  on assignee_membership.company_id = n.company_id
+ and assignee_membership.user_id = n.assignee_user_id
+left join users assignee
+  on assignee.user_id = assignee_membership.user_id
+left join lateral (
+  select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
+  from (
+    select distinct assignment.logic_gate_id::text as logic_gate_id
+    from node_logic_gate_assignments assignment
+    where assignment.company_id = n.company_id
+      and assignment.node_id = n.node_id
+  ) gate
+) node_logic_gates on true
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID, status, statusColor))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

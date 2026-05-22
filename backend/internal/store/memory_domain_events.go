@@ -25,6 +25,12 @@ func (r *MemoryRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEve
 	return r.appendDomainEventLocked(input)
 }
 
+func (r *MemoryRepo) AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.appendDomainEventsLocked(inputs)
+}
+
 func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.DomainEvent, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.StreamType = strings.TrimSpace(input.StreamType)

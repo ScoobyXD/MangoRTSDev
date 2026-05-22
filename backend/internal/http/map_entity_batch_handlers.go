@@ -183,23 +183,35 @@ func buildMapEntityBatchInput(
 }
 
 func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
+	inputs := make([]store.DomainEventInput, 0,
+		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships)+2,
+	)
+	appendEvent := func(eventType string, payload map[string]any) {
+		inputs = append(inputs, store.DomainEventInput{
+			CompanyID:  result.CompanyID,
+			StreamType: workspaceDomainStreamType,
+			StreamID:   result.CompanyID,
+			Type:       eventType,
+			Payload:    payload,
+		})
+	}
 	for _, item := range result.FolderItems {
-		s.publishWorkspaceEvent(result.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
+		appendEvent("company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
 	}
 	for _, item := range result.Nodes {
-		s.publishWorkspaceEvent(result.CompanyID, "node_created", map[string]any{"node_id": item.NodeID, "node": item})
+		appendEvent("node_created", map[string]any{"node_id": item.NodeID, "node": item})
 	}
 	for _, item := range result.LogicGates {
-		s.publishWorkspaceEvent(result.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
+		appendEvent("logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	}
 	if len(result.NodeMapPositions) > 0 {
-		s.publishWorkspaceEvent(result.CompanyID, "node_map_positions_updated", map[string]any{"positions": result.NodeMapPositions})
+		appendEvent("node_map_positions_updated", map[string]any{"positions": result.NodeMapPositions})
 	}
 	if len(result.LogicGateMapPositions) > 0 {
-		s.publishWorkspaceEvent(result.CompanyID, "logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
+		appendEvent("logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
 	}
 	for _, item := range result.Relationships {
-		s.publishWorkspaceEvent(result.CompanyID, "relationship_created", map[string]any{
+		appendEvent("relationship_created", map[string]any{
 			"node_relationship_id": item.NodeRelationshipID,
 			"node_id_a":            item.NodeIDA,
 			"node_id_b":            item.NodeIDB,
@@ -207,11 +219,20 @@ func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
 		})
 	}
 	for _, item := range result.LogicGateRelationships {
-		s.publishWorkspaceEvent(result.CompanyID, "logic_gate_relationship_created", map[string]any{
+		appendEvent("logic_gate_relationship_created", map[string]any{
 			"logic_gate_relationship_id": item.LogicGateRelationshipID,
 			"logic_gate_id_a":            item.LogicGateIDA,
 			"logic_gate_id_b":            item.LogicGateIDB,
 			"logic_gate_relationship":    item,
 		})
 	}
+	if len(inputs) == 0 {
+		return
+	}
+	events, err := s.repo.AppendDomainEvents(inputs)
+	if err != nil {
+		log.Printf("failed to append map entity workspace domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
+		return
+	}
+	s.publishCommittedWorkspaceEvents(events)
 }

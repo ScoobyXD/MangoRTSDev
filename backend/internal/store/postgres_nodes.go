@@ -184,6 +184,52 @@ func cleanStringList(values []string) []string {
 	return out
 }
 
+type postgresNodeAssigneeReadModel struct {
+	UserID string
+	Name   *string
+	Email  *string
+}
+
+func loadPostgresNodeAssigneeReadModel(ctx context.Context, tx *sql.Tx, companyID, userID string) (postgresNodeAssigneeReadModel, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return postgresNodeAssigneeReadModel{}, nil
+	}
+	var item postgresNodeAssigneeReadModel
+	var name sql.NullString
+	var email sql.NullString
+	err := tx.QueryRowContext(ctx, `
+select membership.user_id::text, nullif(app_user.display_name, ''), nullif(app_user.email, '')
+from company_memberships membership
+left join users app_user
+  on app_user.user_id = membership.user_id
+where membership.company_id=$1 and membership.user_id::text=$2`,
+		companyID, userID,
+	).Scan(&item.UserID, &name, &email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return postgresNodeAssigneeReadModel{}, ErrAssigneeNotInCompany
+	}
+	if err != nil {
+		return postgresNodeAssigneeReadModel{}, err
+	}
+	if name.Valid {
+		item.Name = &name.String
+	}
+	if email.Valid {
+		item.Email = &email.String
+	}
+	return item, nil
+}
+
+func applyPostgresNodeAssigneeReadModel(node *domain.Node, assignee postgresNodeAssigneeReadModel) {
+	if assignee.UserID == "" {
+		return
+	}
+	node.AssigneeUserID = &assignee.UserID
+	node.AssigneeName = assignee.Name
+	node.AssigneeEmail = assignee.Email
+}
+
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	return r.CreateNodeWithAssignee(companyID, title, "")
 }
@@ -230,27 +276,22 @@ func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title,
 
 func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx, companyID, title, assigneeUserID string) (domain.Node, error) {
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
+	var assignee postgresNodeAssigneeReadModel
 	if assigneeUserID != "" {
-		var ok bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from company_memberships
-  where company_id=$1 and user_id::text=$2
-)`, companyID, assigneeUserID).Scan(&ok); err != nil {
+		var err error
+		assignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, companyID, assigneeUserID)
+		if err != nil {
 			return domain.Node{}, err
 		}
-		if !ok {
-			return domain.Node{}, ErrAssigneeNotInCompany
-		}
+		assigneeUserID = assignee.UserID
 	}
 	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
-	if _, err := tx.ExecContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
 		 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
-		`,
+		 returning company_id, node_id, title, created_timestamp`,
 		item.CompanyID, item.NodeID, item.Title, assigneeUserID,
-	); err != nil {
+	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 		return domain.Node{}, err
 	}
 	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
@@ -265,11 +306,9 @@ select exists(
 			return domain.Node{}, err
 		}
 	}
-	return scanNode(tx.QueryRowContext(ctx, `
-select `+nodeSelectColumns+`
-from nodes n
-`+nodeStatusJoin+`
-where n.company_id=$1 and n.node_id=$2`, companyID, item.NodeID))
+	applyPostgresNodeAssigneeReadModel(&item, assignee)
+	item.LogicGateIDs = []string{}
+	return item, nil
 }
 
 func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {

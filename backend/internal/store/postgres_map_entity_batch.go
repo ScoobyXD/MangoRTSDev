@@ -23,19 +23,13 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 	}
 
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
+	var creatorAssignee postgresNodeAssigneeReadModel
 	if input.CreatorUserID != "" {
-		var ok bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from company_memberships
-  where company_id=$1 and user_id::text=$2
-)`, input.CompanyID, input.CreatorUserID).Scan(&ok); err != nil {
+		creatorAssignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
+		if err != nil {
 			return MapEntityBatchResult{}, err
 		}
-		if !ok {
-			return MapEntityBatchResult{}, ErrAssigneeNotInCompany
-		}
+		input.CreatorUserID = creatorAssignee.UserID
 	}
 
 	targetFolderID := input.FolderID
@@ -78,7 +72,7 @@ select exists(
 				return MapEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {
-				created.AssigneeUserID = &input.CreatorUserID
+				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
 				if _, err := tx.ExecContext(ctx, `
 insert into resource_access_grants
   (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
@@ -88,13 +82,7 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 					return MapEntityBatchResult{}, err
 				}
 			}
-			created, err = scanNode(tx.QueryRowContext(ctx,
-				"select "+nodeSelectColumns+" from nodes n "+nodeStatusJoin+" where n.company_id=$1 and n.node_id=$2",
-				input.CompanyID, created.NodeID,
-			))
-			if err != nil {
-				return MapEntityBatchResult{}, err
-			}
+			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
