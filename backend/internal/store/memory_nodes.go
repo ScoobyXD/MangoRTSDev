@@ -228,6 +228,35 @@ func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.Node, 0)
+	for _, node := range r.nodes {
+		if node.CompanyID != companyID {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, r.withNodeReadModelLocked(node))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].NodeID < items[j].NodeID
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {

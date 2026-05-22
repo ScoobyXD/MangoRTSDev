@@ -147,6 +147,19 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 	return out, nil
 }
 
+func (r *MemoryRepo) userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel string) bool {
+	for _, access := range r.effectiveAccess {
+		if access.CompanyID == companyID &&
+			access.UserID == userID &&
+			access.ResourceType == resourceType &&
+			access.ResourceID == resourceID &&
+			EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *MemoryRepo) projectLegacyGrantEffectiveAccessLocked(companyID string, facts map[string]domain.EffectiveResourceAccess, now time.Time) {
 	bestByUserResource := map[string]legacyGrantEffectiveAccessCandidate{}
 	for _, permission := range r.entityPermissions {

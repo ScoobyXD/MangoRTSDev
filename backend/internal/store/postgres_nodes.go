@@ -475,6 +475,49 @@ func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	return items, nil
 }
 
+func (r *PostgresRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select `+nodeSelectColumns+`
+		 from nodes n
+		 join (
+		   select distinct access.resource_id
+		   from effective_resource_access access
+		   where access.company_id=$1::uuid
+		     and access.user_id=$2::uuid
+		     and access.resource_type='node'
+		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+		 ) visible on visible.resource_id=n.node_id
+		 `+nodeStatusJoin+`
+		 where n.company_id=$1::uuid
+		 order by n.created_timestamp asc, n.node_id::text asc`,
+		companyID, userID, EntityPermissionView,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Node, 0)
+	for rows.Next() {
+		item, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *PostgresRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
