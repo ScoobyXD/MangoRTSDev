@@ -18,7 +18,18 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 		if !ok {
 			return
 		}
-		items, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
+		var items []domain.CompanyExplorerFolder
+		var err error
+		if hasActor && !actorCanManageCompany(actor, companyID) {
+			items, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "communications", actor.User.UserID)
+		} else {
+			items, err = s.repo.ListCompanyExplorerFolders(companyID, "communications")
+			if hasActor && actorCanManageCompany(actor, companyID) {
+				for index := range items {
+					items[index].EffectiveAccess = store.EntityPermissionAdmin
+				}
+			}
+		}
 		if err != nil {
 			log.Printf("communications shared inboxes: failed to list company_id=%s: %v", companyID, err)
 			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
@@ -27,13 +38,6 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 			}
 			writeError(w, http.StatusInternalServerError, "failed_to_list_shared_inboxes")
 			return
-		}
-		if hasActor {
-			items, err = s.filterCommunicationsSharedInboxFoldersForActor(companyID, actor, items)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_filter_shared_inboxes")
-				return
-			}
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"shared_inboxes": items,
@@ -441,7 +445,7 @@ func sharedInboxActorForCompany(w http.ResponseWriter, r *http.Request, companyI
 }
 
 func (s *Server) loadCommunicationsSharedInboxFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
-	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
+	folders, err := s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "communications")
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}

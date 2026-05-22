@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -30,14 +31,15 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 			return
 		}
-		nodes, err := s.repo.ListNodes(companyID)
+		userID := s.entityPermissionActorUserID(r, companyID)
+		var nodes []domain.Node
+		if userID != "" {
+			nodes, err = s.repo.ListVisibleNodes(companyID, userID)
+		} else {
+			nodes, err = s.repo.ListNodes(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
-			return
-		}
-		nodes, err = s.filterVisibleNodes(r, companyID, nodes)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
 			return
 		}
 		items = filterNodeRelationshipsByVisibleNodes(items, visibleNodeIDs(nodes))

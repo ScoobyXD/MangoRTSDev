@@ -82,6 +82,9 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
 		t.Fatalf("clear responsible node assignee: %v", err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {

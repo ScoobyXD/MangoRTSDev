@@ -64,6 +64,9 @@ func TestMemoryRepoWorkItemInboxProjectionBackfillMatchesJoinBackedReads(t *test
 	if err := repo.RebuildWorkItemInboxEntries(companyID); err != nil {
 		t.Fatalf("RebuildWorkItemInboxEntries: %v", err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 	assertMemoryProjectionCounts(t, repo, companyID, 3, 4)
 
 	query := WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 20}

@@ -97,6 +97,9 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
 		t.Fatalf("clear responsible node assignee: %v", err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 
 	handler := NewServer(repo).Routes()
 	baseQuery := "company_id=" + companyID + "&user_id=" + user.UserID

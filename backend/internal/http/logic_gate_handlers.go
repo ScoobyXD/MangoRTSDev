@@ -54,28 +54,29 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		if notModified {
 			return
 		}
+		userID := s.entityPermissionActorUserID(r, companyID)
 		if query.Search != "" || query.AssignedUserID != "" || query.Limit > 0 {
-			items, err := s.repo.QueryLogicGates(companyID, query)
+			var items []domain.LogicGate
+			if userID != "" {
+				items, err = s.repo.QueryVisibleLogicGates(companyID, userID, query)
+			} else {
+				items, err = s.repo.QueryLogicGates(companyID, query)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_query_logic_gates")
-				return
-			}
-			items, err = s.filterVisibleLogicGates(r, companyID, items)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
 				return
 			}
 			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)
 			return
 		}
-		items, err := s.repo.ListLogicGates(companyID)
+		var items []domain.LogicGate
+		if userID != "" {
+			items, err = s.repo.ListVisibleLogicGates(companyID, userID)
+		} else {
+			items, err = s.repo.ListLogicGates(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
-			return
-		}
-		items, err = s.filterVisibleLogicGates(r, companyID, items)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)

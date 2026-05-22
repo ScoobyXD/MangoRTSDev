@@ -189,6 +189,46 @@ func (r *MemoryRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) (
 	})
 	return items, nil
 }
+
+func (r *MemoryRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleLogicGates(companyID, userID)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	folderGates := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
+			folderGates[item.ItemID] = true
+		}
+	}
+	items := make([]domain.LogicGate, 0, len(folderGates))
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID || !folderGates[gate.LogicGateID] {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, r.withLogicGateRaciLocked(gate))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+	return items, nil
+}
 func logicGateMatchesQuery(gate domain.LogicGate, query string) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -229,6 +269,37 @@ func (r *MemoryRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]
 	items := make([]domain.LogicGate, 0)
 	for _, gate := range r.logicGates {
 		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
+			continue
+		}
+		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
+		if !logicGateAssignedToUser(assignments, query.AssignedUserID) {
+			continue
+		}
+		items = append(items, r.withLogicGateRaciLocked(gate))
+	}
+	sortLogicGateQueryResults(items)
+	if query.Limit > 0 && len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) QueryVisibleLogicGates(companyID, userID string, query LogicGateQuery) ([]domain.LogicGate, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
 			continue
 		}
 		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]

@@ -53,14 +53,15 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		s.handleScopedWorkspaceSnapshot(w, r, companyID, scope, etag)
 		return
 	}
-	nodes, err := s.repo.ListNodes(companyID)
+	userID := s.entityPermissionActorUserID(r, companyID)
+	var nodes []domain.Node
+	if userID != "" {
+		nodes, err = s.repo.ListVisibleNodes(companyID, userID)
+	} else {
+		nodes, err = s.repo.ListNodes(companyID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
-		return
-	}
-	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
 		return
 	}
 	nodeIDs := visibleNodeIDs(nodes)
@@ -70,14 +71,14 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	relationships = filterNodeRelationshipsByVisibleNodes(relationships, nodeIDs)
-	logicGates, err := s.repo.ListLogicGates(companyID)
+	var logicGates []domain.LogicGate
+	if userID != "" {
+		logicGates, err = s.repo.ListVisibleLogicGates(companyID, userID)
+	} else {
+		logicGates, err = s.repo.ListLogicGates(companyID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
-		return
-	}
-	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
 		return
 	}
 	logicGateIDs := visibleLogicGateIDs(logicGates)
@@ -100,7 +101,12 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	folders := append(nodeFolders, logicGateFolders...)
-	folderItems, err := s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
+	var folderItems []domain.CompanyExplorerFolderItem
+	if userID != "" {
+		folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, "", "", userID)
+	} else {
+		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 		return
@@ -224,6 +230,7 @@ func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 
 func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	userID := s.entityPermissionActorUserID(r, companyID)
 	var nodes []domain.Node
 	var relationships []domain.NodeRelationship
 	var positions []domain.NodeMapPosition
@@ -231,7 +238,11 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 	var folderItems []domain.CompanyExplorerFolderItem
 	var err error
 	if folderID == "" {
-		nodes, err = s.repo.ListNodes(companyID)
+		if userID != "" {
+			nodes, err = s.repo.ListVisibleNodes(companyID, userID)
+		} else {
+			nodes, err = s.repo.ListNodes(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
@@ -251,13 +262,21 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "node")
+		if userID != "" {
+			folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, "", "node", userID)
+		} else {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "node")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
 	} else {
-		nodes, err = s.repo.ListNodesInFolderSubtree(companyID, folderID)
+		if userID != "" {
+			nodes, err = s.repo.ListVisibleNodesInFolderSubtree(companyID, folderID, userID)
+		} else {
+			nodes, err = s.repo.ListNodesInFolderSubtree(companyID, folderID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
@@ -277,16 +296,15 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "node")
+		if userID != "" {
+			folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "node", userID)
+		} else {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "node")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
-	}
-	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
-		return
 	}
 	nodeIDs := visibleNodeIDs(nodes)
 	relationships = filterNodeRelationshipsByVisibleNodes(relationships, nodeIDs)
@@ -513,6 +531,7 @@ func (s *Server) handleLogicGateMapWindowWorkspaceSnapshot(w http.ResponseWriter
 }
 func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	userID := s.entityPermissionActorUserID(r, companyID)
 	var logicGates []domain.LogicGate
 	var relationships []domain.LogicGateRelationship
 	var positions []domain.LogicGateMapPosition
@@ -520,7 +539,11 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 	var folderItems []domain.CompanyExplorerFolderItem
 	var err error
 	if folderID == "" {
-		logicGates, err = s.repo.ListLogicGates(companyID)
+		if userID != "" {
+			logicGates, err = s.repo.ListVisibleLogicGates(companyID, userID)
+		} else {
+			logicGates, err = s.repo.ListLogicGates(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
 			return
@@ -540,13 +563,21 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "logic_gate")
+		if userID != "" {
+			folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, "", "logic_gate", userID)
+		} else {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "logic_gate")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
 	} else {
-		logicGates, err = s.repo.ListLogicGatesInFolderSubtree(companyID, folderID)
+		if userID != "" {
+			logicGates, err = s.repo.ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID)
+		} else {
+			logicGates, err = s.repo.ListLogicGatesInFolderSubtree(companyID, folderID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
 			return
@@ -566,16 +597,15 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "logic_gate")
+		if userID != "" {
+			folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "logic_gate", userID)
+		} else {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "logic_gate")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
-	}
-	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
-		return
 	}
 	logicGateIDs := visibleLogicGateIDs(logicGates)
 	relationships = filterLogicGateRelationshipsByVisibleGates(relationships, logicGateIDs)
@@ -611,6 +641,7 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 	}
 
 	itemType := companyExplorerItemTypeForFolderKind(folderKind)
+	userID := s.entityPermissionActorUserID(r, companyID)
 	folders := []domain.CompanyExplorerFolder{}
 	folderItems := []domain.CompanyExplorerFolderItem{}
 	nodes := []domain.Node{}
@@ -618,7 +649,11 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 	var err error
 
 	if folderID != "" {
-		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+		if userID != "" {
+			folders, err = s.repo.ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID)
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
@@ -628,7 +663,11 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 			return
 		}
 		if itemType != "" {
-			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+			if userID != "" {
+				folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID)
+			} else {
+				folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 				return
@@ -636,13 +675,21 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		}
 		switch folderKind {
 		case "node":
-			nodes, err = s.repo.ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID)
+			if userID != "" {
+				nodes, err = s.repo.ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID, userID)
+			} else {
+				nodes, err = s.repo.ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
 				return
 			}
 		case "logic_gate":
-			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID)
+			if userID != "" {
+				logicGates, err = s.repo.ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID)
+			} else {
+				logicGates, err = s.repo.ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
 				return
@@ -651,7 +698,13 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 	} else {
 		if folderKind == "" {
 			for _, kind := range []string{"node", "logic_gate"} {
-				items, listErr := s.repo.ListCompanyExplorerFolders(companyID, kind)
+				var items []domain.CompanyExplorerFolder
+				var listErr error
+				if userID != "" {
+					items, listErr = s.repo.ListVisibleCompanyExplorerFolders(companyID, kind, userID)
+				} else {
+					items, listErr = s.repo.ListCompanyExplorerFolders(companyID, kind)
+				}
 				if listErr != nil {
 					err = listErr
 					break
@@ -659,14 +712,22 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 				folders = append(folders, items...)
 			}
 		} else {
-			folders, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+			if userID != "" {
+				folders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
+			} else {
+				folders, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+			}
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
 		if folderKind == "" || itemType != "" {
-			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", itemType)
+			if userID != "" {
+				folderItems, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, "", itemType, userID)
+			} else {
+				folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", itemType)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 				return
@@ -674,24 +735,40 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		}
 		switch folderKind {
 		case "":
-			nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			if userID != "" {
+				nodes, err = s.repo.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
+			} else {
+				nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
 				return
 			}
-			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			if userID != "" {
+				logicGates, err = s.repo.ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID)
+			} else {
+				logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
 				return
 			}
 		case "node":
-			nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			if userID != "" {
+				nodes, err = s.repo.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
+			} else {
+				nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
 				return
 			}
 		case "logic_gate":
-			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			if userID != "" {
+				logicGates, err = s.repo.ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID)
+			} else {
+				logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
 				return
@@ -699,16 +776,6 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		}
 	}
 
-	nodes, err = s.filterVisibleNodes(r, companyID, nodes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
-		return
-	}
-	logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
-		return
-	}
 	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, visibleNodeIDs(nodes), visibleLogicGateIDs(logicGates))
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":        "company_explorer",

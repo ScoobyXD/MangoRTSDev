@@ -282,6 +282,46 @@ func (r *MemoryRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]dom
 	})
 	return items, nil
 }
+
+func (r *MemoryRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	if folderID == "" {
+		return r.ListVisibleNodes(companyID, userID)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	folderNodes := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
+			folderNodes[item.ItemID] = true
+		}
+	}
+	items := make([]domain.Node, 0, len(folderNodes))
+	for _, node := range r.nodes {
+		if node.CompanyID != companyID || !folderNodes[node.NodeID] {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, r.withNodeReadModelLocked(node))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].NodeID < items[j].NodeID
+	})
+	return items, nil
+}
 func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

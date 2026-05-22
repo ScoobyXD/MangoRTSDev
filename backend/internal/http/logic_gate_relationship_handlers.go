@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -30,14 +31,15 @@ func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 			return
 		}
-		logicGates, err := s.repo.ListLogicGates(companyID)
+		userID := s.entityPermissionActorUserID(r, companyID)
+		var logicGates []domain.LogicGate
+		if userID != "" {
+			logicGates, err = s.repo.ListVisibleLogicGates(companyID, userID)
+		} else {
+			logicGates, err = s.repo.ListLogicGates(companyID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
-			return
-		}
-		logicGates, err = s.filterVisibleLogicGates(r, companyID, logicGates)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
 			return
 		}
 		items = filterLogicGateRelationshipsByVisibleGates(items, visibleLogicGateIDs(logicGates))
