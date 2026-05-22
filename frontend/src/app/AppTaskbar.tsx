@@ -111,6 +111,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
 
   const hideTimeline = () => {
     setTimelineVisible(false);
+    setLeftDockOpen(false);
     onExpandedChange(false);
   };
 
@@ -521,11 +522,15 @@ const dockPinnedStyle: React.CSSProperties = {
 
 function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", timelineVisible: boolean, active: boolean): React.CSSProperties {
   const timelineCenter = layout.dockWidth + layout.timelineWidth / 2;
+  const visibleLeft = side === "left"
+    ? active ? 0 : layout.dockWidth
+    : layout.dockWidth + layout.timelineWidth;
+  const hiddenLeft = side === "left" && active
+    ? 0
+    : timelineCenter + (side === "left" ? -48 : 48);
   return {
     position: "absolute",
-    left: timelineVisible
-      ? side === "left" ? layout.dockWidth : layout.dockWidth + layout.timelineWidth
-      : timelineCenter + (side === "left" ? -48 : 48),
+    left: timelineVisible ? visibleLeft : hiddenLeft,
     top: timelineVisible ? "50%" : undefined,
     bottom: timelineVisible ? undefined : -8,
     width: 28,

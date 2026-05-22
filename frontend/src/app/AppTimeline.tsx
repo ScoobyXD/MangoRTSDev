@@ -688,24 +688,32 @@ function timelineItemStyle(
     : kind === "logic_gate"
       ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
       : "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)";
+  const selectionShadow = kind === "logic_gate" ? "rgba(15, 159, 104, 0.16)" : "rgba(37, 99, 235, 0.16)";
+  const itemShadow = compact
+    ? completed
+      ? "inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
+      : selected
+        ? `inset 0 0 0 2px ${selectionShadow}`
+        : "inset 0 1px 0 rgba(255, 255, 255, 0.62)"
+    : completed
+      ? "0 6px 14px rgba(22, 163, 74, 0.22), inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
+      : selected
+        ? `0 0 0 2px ${selectionShadow}`
+        : "0 4px 10px rgba(15, 23, 42, 0.10)";
   return {
     position: "absolute",
     left,
-    top: compact ? 8 : 5,
+    top: compact ? 0 : 5,
     width,
-    height: compact ? 48 : 46,
+    height: compact ? "100%" : 46,
     minWidth: compact ? 112 : 88,
     display: "grid",
     gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "7px minmax(0, 1fr) 24px 7px",
     border: `1px solid ${selected || completed ? accent : "rgba(100, 116, 139, 0.28)"}`,
-    borderRadius: 7,
+    borderRadius: compact ? 0 : 7,
     background: nodeBackground,
     color: "#0f172a",
-    boxShadow: completed
-      ? "0 6px 14px rgba(22, 163, 74, 0.22), inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
-      : selected
-        ? `0 0 0 2px ${kind === "logic_gate" ? "rgba(15, 159, 104, 0.16)" : "rgba(37, 99, 235, 0.16)"}`
-        : "0 4px 10px rgba(15, 23, 42, 0.10)",
+    boxShadow: itemShadow,
     cursor: readOnly ? "default" : "grab",
     overflow: "hidden",
     userSelect: "none",
