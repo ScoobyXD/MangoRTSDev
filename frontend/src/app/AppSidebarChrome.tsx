@@ -58,6 +58,7 @@ const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
+const SIDEBAR_ELEVATED_RADIUS = 10;
 const SIDEBAR_CYAN_ACCENT = "rgb(0, 233, 255)";
 const SIDEBAR_CYAN_ACTIVE_BG = "rgba(0, 233, 255, 0.13)";
 const SIDEBAR_CYAN_OPEN_BG = "rgba(0, 233, 255, 0.09)";
@@ -1648,7 +1649,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       gap: 7,
       margin: "2px 2px 2px",
       border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
-      borderRadius: 14,
+      borderRadius: SIDEBAR_ELEVATED_RADIUS,
       background: active
         ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
         : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
@@ -1777,7 +1778,7 @@ function appSidebarSharedRootBlockStyle(active: boolean): React.CSSProperties {
     minWidth: 0,
     margin: "2px 2px 2px",
     border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
-    borderRadius: 14,
+    borderRadius: SIDEBAR_ELEVATED_RADIUS,
     background: "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)",
     boxShadow: active
       ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
@@ -1795,7 +1796,7 @@ function appSidebarMiniExplorerBlockStyle(floating: boolean): React.CSSPropertie
     minWidth: 0,
     margin: floating ? "2px 2px 1px" : 0,
     border: floating ? "1px solid rgba(148, 163, 184, 0.38)" : undefined,
-    borderRadius: floating ? 14 : undefined,
+    borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
     background: floating ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
     boxShadow: floating ? "0 18px 42px rgba(15, 23, 42, 0.18), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : undefined,
     backdropFilter: floating ? "blur(18px)" : undefined,
@@ -1813,7 +1814,7 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React
       gridTemplateColumns: "minmax(0, 1fr) 28px",
       alignItems: "center",
       border: "none",
-      borderRadius: open ? "13px 13px 0 0" : 13,
+      borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
       background: "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
@@ -1867,7 +1868,7 @@ function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSPropertie
     minWidth: 0,
     overflow: "visible",
     border: floating ? "none" : "1px solid rgba(17, 17, 17, 0.22)",
-    borderTop: floating ? "1px solid rgba(100, 116, 139, 0.22)" : undefined,
+    borderTop: floating ? "none" : undefined,
     borderRadius: floating ? 0 : 6,
     background: floating ? "transparent" : "#ffffff",
   };
@@ -1883,7 +1884,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
       alignItems: "center",
       gap: 0,
       border: "none",
-      borderRadius: open ? "13px 13px 0 0" : 13,
+      borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
       background: active || dropActive
         ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
         : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
@@ -1955,7 +1956,6 @@ const appSidebarSharedRowsStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 1,
   padding: "2px 0 7px",
-  borderTop: "1px solid rgba(100, 116, 139, 0.22)",
 };
 
 const appSidebarSharedErrorStyle: React.CSSProperties = {
