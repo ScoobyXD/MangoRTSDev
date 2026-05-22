@@ -11,11 +11,11 @@ import {
   upsertTimelineDropsAt,
 } from "../../../frontend/src/app/timelineState.js";
 
-test("timeline ranges and item drops snap to 15 minute increments", () => {
+test("timeline ranges and item drops snap to 5 minute increments", () => {
   const ranged = setTimelineRange(createDefaultAppTimelineState(), 7 * 60 + 7, 16 * 60 + 52);
-  assert.equal(ranged.startMinute, 7 * 60);
-  assert.equal(ranged.endMinute, 16 * 60 + 45);
-  assert.equal(alignTimelineMinute(8 * 60 + 22), 8 * 60 + 15);
+  assert.equal(ranged.startMinute, 7 * 60 + 5);
+  assert.equal(ranged.endMinute, 16 * 60 + 50);
+  assert.equal(alignTimelineMinute(8 * 60 + 22), 8 * 60 + 20);
 
   const next = upsertTimelineDropsAt(ranged, [
     { kind: "node", entityID: "node-1", label: "Draft contract" },
@@ -31,14 +31,14 @@ test("timeline ranges and item drops snap to 15 minute increments", () => {
     {
       kind: "node",
       entityID: "node-1",
-      startMinute: 8 * 60,
-      endMinute: 8 * 60 + APP_TIMELINE_DEFAULT_DURATION_MINUTES,
+      startMinute: 8 * 60 + 5,
+      endMinute: 8 * 60 + 5 + APP_TIMELINE_DEFAULT_DURATION_MINUTES,
     },
     {
       kind: "logic_gate",
       entityID: "gate-1",
-      startMinute: 9 * 60,
-      endMinute: 9 * 60 + APP_TIMELINE_DEFAULT_DURATION_MINUTES,
+      startMinute: 9 * 60 + 5,
+      endMinute: 9 * 60 + 5 + APP_TIMELINE_DEFAULT_DURATION_MINUTES,
     },
   ]);
 });
@@ -53,11 +53,15 @@ test("timeline drops upsert by entity and resizing stays inside the workday", ()
 
   assert.equal(updated.items.length, 1);
   assert.equal(updated.items[0]?.label, "Renamed title");
-  assert.equal(updated.items[0]?.startMinute, 10 * 60);
+  assert.equal(updated.items[0]?.startMinute, 10 * 60 + 5);
 
   const resized = updateTimelineItemTiming(updated, updated.items[0]?.id ?? "", 4 * 60, 23 * 60);
   assert.equal(resized.items[0]?.startMinute, 8 * 60);
   assert.equal(resized.items[0]?.endMinute, 17 * 60);
+
+  const compact = updateTimelineItemTiming(updated, updated.items[0]?.id ?? "", 11 * 60, 11 * 60 + 5);
+  assert.equal(compact.items[0]?.startMinute, 11 * 60);
+  assert.equal(compact.items[0]?.endMinute, 11 * 60 + 5);
 });
 
 test("timeline completion persists on items and daily rollover archives current items", () => {

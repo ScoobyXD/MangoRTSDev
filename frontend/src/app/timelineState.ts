@@ -34,7 +34,7 @@ export type AppTimelineDropInput = {
   label: string;
 };
 
-export const APP_TIMELINE_STEP_MINUTES = 15;
+export const APP_TIMELINE_STEP_MINUTES = 5;
 export const APP_TIMELINE_DEFAULT_DURATION_MINUTES = 60;
 const APP_TIMELINE_MIN_RANGE_MINUTES = 60;
 const APP_TIMELINE_DAY_LAST_MINUTE = 23 * 60 + 45;
