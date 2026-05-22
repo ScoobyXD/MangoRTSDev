@@ -159,7 +159,7 @@ export const sharedInboxRowsStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPlacement: "before" | "after" | "inside" | null): React.CSSProperties {
+export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPlacement: "before" | "after" | "inside" | null, hovered = false): React.CSSProperties {
   return {
     width: "100%",
     minHeight: 30,
@@ -169,7 +169,7 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     gap: 5,
     border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" ? HOME_CYAN_FAINT : "#ffffff",
+    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" || hovered ? HOME_CYAN_FAINT : "#ffffff",
     color: "#24120a",
     cursor: "grab",
     font: "inherit",

@@ -702,6 +702,7 @@ export function HomeSidebar({
   const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
+  const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
@@ -956,6 +957,7 @@ export function HomeSidebar({
     const folder = row.folder;
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const active = activeViewID === row.treeID || selectedSharedTreeIDs.has(row.treeID);
+    const hovered = hoveredSharedFolderID === folder.folder_id;
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
     const folderHasAccess = folder.effective_access_level !== "no_access";
     return (
@@ -964,7 +966,9 @@ export function HomeSidebar({
         role="button"
         tabIndex={0}
         draggable={!isRenaming && !sharedBusy && folderHasAccess}
-        style={sharedInboxFolderRowStyle(row.depth, active, rowDropPlacement)}
+        style={sharedInboxFolderRowStyle(row.depth, active, rowDropPlacement, hovered)}
+        onMouseEnter={() => setHoveredSharedFolderID(folder.folder_id)}
+        onMouseLeave={() => setHoveredSharedFolderID((current) => current === folder.folder_id ? "" : current)}
         onClick={(event) => {
           if (!folderHasAccess) {
             if (row.hasChildren) toggleSharedFolder(folder.folder_id);
