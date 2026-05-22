@@ -71,6 +71,7 @@ import {
 } from "./companyExplorerStore";
 
 const scopedRootCreationKeys = new Set<string>();
+const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(0, 233, 255)";
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
   let current = element.parentElement;
@@ -1503,12 +1504,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const surfaceText = isDarkTheme ? "#f4f7fa" : "#24120a";
   const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(36,18,10,0.14)";
   const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(36,18,10,0.06)";
-  const selectedRowBackground = isDarkTheme ? "rgba(255,136,32,0.2)" : "rgba(255, 136, 32, 0.28)";
+  const selectedRowBackground = isDarkTheme ? "rgba(255,136,32,0.2)" : "rgba(0, 233, 255, 0.24)";
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
   const folderToggleColor = isDarkTheme ? "#f4f7fa" : "#111111";
   const rowIconColor = isDarkTheme ? "#ffd8a6" : "#8a3b10";
-  const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
-  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";
+  const scrollbarAccent = theme === "light" ? LIGHT_EXPLORER_CYAN_ACCENT : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
   const explorerMenuButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",

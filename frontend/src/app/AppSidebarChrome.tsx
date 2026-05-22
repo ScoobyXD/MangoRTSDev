@@ -3,7 +3,7 @@ import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
-import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
+import { UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
@@ -58,6 +58,13 @@ const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
+const SIDEBAR_CYAN_ACCENT = "rgb(0, 233, 255)";
+const SIDEBAR_CYAN_ACTIVE_BG = "rgba(0, 233, 255, 0.13)";
+const SIDEBAR_CYAN_OPEN_BG = "rgba(0, 233, 255, 0.09)";
+const SIDEBAR_CYAN_DROP_BG = "rgba(0, 233, 255, 0.12)";
+const SIDEBAR_CYAN_ACTIVE_BORDER = "rgba(0, 233, 255, 0.68)";
+const SIDEBAR_CYAN_OPEN_BORDER = "rgba(0, 233, 255, 0.52)";
+const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
 
@@ -1035,7 +1042,7 @@ export function AppSidebar({
       <section style={appSidebarExplorerSectionStyle} aria-label="Explorer tree">
         <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
           <SidebarCompanyExplorerContent
-            accent={COLORWAYS.light.accent}
+            accent={SIDEBAR_ACTIVE_TEXT}
             widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
             theme="light"
             useParentScroll
@@ -1305,7 +1312,7 @@ function AppSidebarScopedExplorerSection({
         <div style={appSidebarMiniExplorerFrameStyle}>
           <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
             <SidebarCompanyExplorerContent
-              accent={COLORWAYS.light.accent}
+              accent={SIDEBAR_ACTIVE_TEXT}
               widgetId={widgetId}
               theme="light"
               hideTopControls
@@ -1554,8 +1561,9 @@ const appSidebarStyle: React.CSSProperties = {
   overflowY: "auto",
   overflowX: "hidden",
   scrollbarGutter: "stable",
-  ["--company-explorer-scroll-accent" as string]: "rgb(255, 136, 32)",
-  ["--company-explorer-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
+  ["--company-explorer-scroll-accent" as string]: SIDEBAR_CYAN_ACCENT,
+  ["--company-explorer-scroll-track" as string]: "rgba(0, 233, 255, 0.08)",
+  ["--company-explorer-hover-bg" as string]: "rgba(0, 233, 255, 0.10)",
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
@@ -1592,7 +1600,7 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
     minWidth: 0,
     padding: "0 0 10px",
     borderBottom: "1px solid rgba(17, 17, 17, 0.28)",
-    outline: active ? "2px solid rgba(255, 136, 32, 0.32)" : "2px solid transparent",
+    outline: active ? "2px solid rgba(0, 233, 255, 0.32)" : "2px solid transparent",
     outlineOffset: 2,
     borderRadius: 6,
   };
@@ -1615,10 +1623,10 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
     alignItems: "center",
     gap: 7,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.68)" : "transparent"}`,
+    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? "rgba(255, 136, 32, 0.13)" : "transparent",
-    color: active ? "#ff8820" : "#3f332b",
+    background: active ? SIDEBAR_CYAN_ACTIVE_BG : "transparent",
+    color: active ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
@@ -1729,10 +1737,10 @@ function appSidebarMiniExplorerRowStyle(open: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 22px",
     alignItems: "center",
-    border: `1px solid ${open ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    border: `1px solid ${open ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: open ? "rgba(255, 136, 32, 0.09)" : "transparent",
-    color: open ? "#ff8820" : "#3f332b",
+    background: open ? SIDEBAR_CYAN_OPEN_BG : "transparent",
+    color: open ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
     minWidth: 0,
   };
 }
@@ -1761,7 +1769,7 @@ const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
   height: 18,
   display: "grid",
   placeItems: "center",
-  color: "#ff8820",
+  color: SIDEBAR_CYAN_ACCENT,
 };
 
 const appSidebarMiniExplorerFrameStyle: React.CSSProperties = {
@@ -1780,10 +1788,10 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): R
     gridTemplateColumns: "minmax(0, 1fr) 22px",
     alignItems: "center",
     gap: 0,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.68)" : dropActive ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : dropActive ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? "rgba(255, 136, 32, 0.13)" : dropActive ? "#fff7eb" : "transparent",
-    color: active ? "#ff8820" : "#3f332b",
+    background: active ? SIDEBAR_CYAN_ACTIVE_BG : dropActive ? SIDEBAR_CYAN_DROP_BG : "transparent",
+    color: active ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
     minWidth: 0,
   };
 }
@@ -1855,9 +1863,9 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.64)" : dropPlacement === "inside" ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    border: `1px solid ${active ? "rgba(0, 233, 255, 0.64)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 5,
-    background: active ? "#fff2e0" : dropPlacement === "inside" ? "#fff7eb" : "transparent",
+    background: active ? "rgba(0, 233, 255, 0.16)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : "transparent",
     color: "#3f332b",
     cursor: "grab",
     font: "inherit",
@@ -1867,9 +1875,9 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     textAlign: "left",
     minWidth: 0,
     boxShadow: dropPlacement === "before"
-      ? "inset 0 2px 0 #ff8820"
+      ? `inset 0 2px 0 ${SIDEBAR_CYAN_ACCENT}`
       : dropPlacement === "after"
-        ? "inset 0 -2px 0 #ff8820"
+        ? `inset 0 -2px 0 ${SIDEBAR_CYAN_ACCENT}`
         : undefined,
   };
 }

@@ -5,8 +5,8 @@ import { EXPLORER_SYSTEM_FOLDER_COLOR } from "./treePresentation";
 
 export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind, systemKey }) => {
   if (kind === "folder") {
-    const fill = systemKey ? "rgba(255, 136, 32, 0.18)" : "#f6c944";
-    const tabFill = systemKey ? "rgba(255, 136, 32, 0.34)" : "#ffd85a";
+    const fill = systemKey ? "rgba(0, 233, 255, 0.14)" : "#f6c944";
+    const tabFill = systemKey ? "rgba(0, 233, 255, 0.28)" : "#ffd85a";
     const stroke = systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#9d7412";
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
