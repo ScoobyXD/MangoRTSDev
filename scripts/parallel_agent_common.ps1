@@ -144,6 +144,33 @@ function Get-AgentSiblingPath {
   return (Join-Path $parent $LeafName)
 }
 
+function Get-AgentDefaultWorkerParent {
+  return (Join-Path "C:\tmp" "MangoRTSDev-workers")
+}
+
+function Initialize-AgentWorkerParent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    throw "WorkerParent must not be empty."
+  }
+
+  $expanded = $Path.Trim()
+  if ($expanded -eq "~") {
+    $expanded = $HOME
+  } elseif ($expanded.StartsWith("~\") -or $expanded.StartsWith("~/")) {
+    $expanded = Join-Path $HOME $expanded.Substring(2)
+  } elseif (-not [System.IO.Path]::IsPathRooted($expanded)) {
+    $expanded = Join-Path (Get-Location) $expanded
+  }
+
+  New-Item -ItemType Directory -Force -Path $expanded | Out-Null
+  return (Resolve-AgentPath -Path $expanded)
+}
+
 function Get-AgentWorktreePathForBranch {
   param(
     [Parameter(Mandatory = $true)]
@@ -169,6 +196,105 @@ function Get-AgentWorktreePathForBranch {
   return $null
 }
 
+function Get-AgentCandidateWorkerPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$MainPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$WorkerInput
+  )
+
+  $mainRoot = Resolve-AgentPath -Path $MainPath
+  $value = $WorkerInput.Trim()
+
+  if ($value.Length -ge 2) {
+    $first = $value.Substring(0, 1)
+    $last = $value.Substring($value.Length - 1, 1)
+    if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+  }
+
+  $candidates = New-Object "System.Collections.Generic.List[string]"
+  if (-not [string]::IsNullOrWhiteSpace($value)) {
+    $candidates.Add($value)
+  }
+
+  if ($value -eq "~") {
+    $candidates.Add($HOME)
+  } elseif ($value.StartsWith("~\") -or $value.StartsWith("~/")) {
+    $candidates.Add((Join-Path $HOME $value.Substring(2)))
+  }
+
+  $looksLikePath = (
+    $value -match "^[a-zA-Z]:[\\/]" -or
+    $value.StartsWith("\") -or
+    $value.StartsWith("/") -or
+    $value.StartsWith("~") -or
+    $value.StartsWith(".") -or
+    $value.StartsWith("MangoRTSDev-")
+  )
+
+  if ($looksLikePath) {
+    $leaf = Split-Path -Leaf $value
+    if (-not [string]::IsNullOrWhiteSpace($leaf)) {
+      $candidates.Add((Get-AgentSiblingPath -MainPath $mainRoot -LeafName $leaf))
+      $candidates.Add((Join-Path (Get-AgentDefaultWorkerParent) $leaf))
+    }
+  }
+
+  $seen = @{}
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate) -or $seen.ContainsKey($candidate)) {
+      continue
+    }
+
+    $seen[$candidate] = $true
+    if (Test-Path -LiteralPath $candidate -PathType Container) {
+      return (Resolve-AgentPath -Path $candidate)
+    }
+  }
+
+  return $null
+}
+
+function Resolve-AgentWorkerReference {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$MainPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$WorkerInput
+  )
+
+  $mainRoot = Resolve-AgentPath -Path $MainPath
+  $workerPath = Get-AgentCandidateWorkerPath -MainPath $mainRoot -WorkerInput $WorkerInput
+
+  if ($workerPath) {
+    $branch = Get-AgentBranch -RepoPath $workerPath
+    if ([string]::IsNullOrWhiteSpace($branch)) {
+      throw "Worker path '$workerPath' is not on a named branch."
+    }
+
+    return [pscustomobject]@{
+      Branch = $branch
+      Path = $workerPath
+      Source = "path"
+    }
+  }
+
+  $workerPath = Get-AgentWorktreePathForBranch -MainPath $mainRoot -BranchName $WorkerInput
+  if ($workerPath) {
+    return [pscustomobject]@{
+      Branch = $WorkerInput
+      Path = $workerPath
+      Source = "branch"
+    }
+  }
+
+  throw "Could not resolve worker input '$WorkerInput' as an existing worktree path or registered worker branch."
+}
 function Invoke-AgentConflictScan {
   param(
     [Parameter(Mandatory = $true)]

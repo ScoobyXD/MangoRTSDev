@@ -1,5 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
+  [Alias("WorkerRef", "WorkerPath")]
   [string]$WorkerBranch,
 
   [string]$MainPath = ".",
@@ -80,16 +81,28 @@ Write-Host "Main worktree status before merge:"
 $initialMainDirty = @(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("status", "--porcelain"))
 
 Write-Host ""
-Write-Host "Worktrees:"
-@(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("worktree", "list")) | ForEach-Object { Write-Host $_ }
+$workerInput = $WorkerBranch
+try {
+  $workerReference = Resolve-AgentWorkerReference -MainPath $mainRoot -WorkerInput $workerInput
+} catch {
+  Write-Host "Worker resolution failed: $($_.Exception.Message)"
+  Write-Host ""
+  Write-Host "Registered worktrees:"
+  @(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("worktree", "list")) | ForEach-Object { Write-Host $_ }
+  Write-Host ""
+  Write-Host "Remotes:"
+  @(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("remote", "-v")) | ForEach-Object { Write-Host $_ }
+  throw
+}
 
-Write-Host ""
-Write-Host "Remotes:"
-@(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("remote", "-v")) | ForEach-Object { Write-Host $_ }
+$WorkerBranch = [string]$workerReference.Branch
+$workerPath = [string]$workerReference.Path
 
-$workerPath = Get-AgentWorktreePathForBranch -MainPath $mainRoot -BranchName $WorkerBranch
-if (-not $workerPath) {
-  throw "Could not find a worktree for worker branch '$WorkerBranch'."
+Write-Host "Worker input: $workerInput"
+if ($workerReference.Source -eq "path") {
+  Write-Host "Resolved worker branch from path: $WorkerBranch"
+} else {
+  Write-Host "Resolved worker branch from branch input: $WorkerBranch"
 }
 
 Write-Host ""
@@ -218,6 +231,7 @@ $finalStatus = @(Invoke-AgentGit -RepoPath $mainRoot -Arguments @("status", "--s
 
 Write-Host ""
 Write-Host "MERGE WORKER BRANCH RESULT"
+Write-Host "Worker input: $workerInput"
 Write-Host "Worker branch: $WorkerBranch"
 Write-Host "Worker worktree: $workerPath"
 Write-Host "Worker commit SHA: $workerSha"
