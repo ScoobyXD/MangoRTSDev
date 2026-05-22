@@ -975,15 +975,19 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setActiveDockTabID(tab.id);
   }, [closeMenus, selectPrimaryPage]);
 
-  const reorderDockTab = useCallback((movingTabID: string, targetTabID: string) => {
+  const reorderDockTab = useCallback((movingTabID: string, targetTabID: string, placement: "before" | "after") => {
     setDockTabs((previous) => {
       const from = previous.findIndex((tab) => tab.id === movingTabID);
       const to = previous.findIndex((tab) => tab.id === targetTabID);
       if (from < 0 || to < 0 || from === to) return previous;
-      const next = [...previous];
-      const [moving] = next.splice(from, 1);
-      next.splice(to, 0, moving);
-      return next;
+      const moving = previous[from];
+      const withoutMoving = previous.filter((tab) => tab.id !== movingTabID);
+      const targetIndex = withoutMoving.findIndex((tab) => tab.id === targetTabID);
+      if (targetIndex < 0) return previous;
+      const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+      const next = [...withoutMoving];
+      next.splice(insertIndex, 0, moving);
+      return next.every((tab, index) => tab.id === previous[index]?.id) ? previous : next;
     });
   }, []);
 

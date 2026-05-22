@@ -351,7 +351,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
               setContextMenu(null);
             }}
           >
-            Delete timeline item
+            Remove from Timeline
           </button>
         </FrameRightClickMenu>
       )}
