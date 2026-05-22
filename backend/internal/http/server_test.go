@@ -1054,7 +1054,7 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	companyID := "11111111-1111-4111-8111-333333333333"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
@@ -2846,7 +2846,7 @@ func TestNodesConditionalGetSkipsListWhenWorkspaceTokenMatches(t *testing.T) {
 
 func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "company-scoped-etag-unrelated-test"
 
@@ -2896,7 +2896,7 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 
 func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "company-scoped-etag-relevant-test"
 

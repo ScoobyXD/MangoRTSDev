@@ -445,6 +445,27 @@ func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCard
 	return items, nil
 }
 
+func (r *MemoryRepo) GetKanbanCard(companyID, boardID, cardID string) (domain.KanbanCard, error) {
+	companyID = strings.TrimSpace(companyID)
+	boardID = strings.TrimSpace(boardID)
+	cardID = strings.TrimSpace(cardID)
+	if companyID == "" || boardID == "" || cardID == "" {
+		return domain.KanbanCard{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, card := range r.kanbanCards[boardKey(companyID, boardID)] {
+		if card.CardID != cardID {
+			continue
+		}
+		if node, ok := r.nodes[key(companyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
+			card.NodeTitle = node.Title
+		}
+		return card, nil
+	}
+	return domain.KanbanCard{}, ErrNotFound
+}
+
 func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

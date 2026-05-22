@@ -191,14 +191,12 @@ export async function assignNodeToLogicGateStatus(args: {
   position?: number;
   isIssue?: boolean;
 }): Promise<LogicGateAssignmentCommandResult> {
-  const payload = await requestJSON<{ card: KanbanCard; node: NodeRecord }>(args.apiBase, "/v1/work-items/logic-gate-assignments", {
+  const payload = await requestJSON<{ card: KanbanCard; node: NodeRecord }>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes`, {
     method: "POST",
     json: {
       company_id: args.companyID,
-      logic_gate_id: args.logicGateID,
       node_id: args.nodeID,
-      status: args.status,
-      column_id: args.columnID,
+      status: args.status ?? args.columnID,
       priority: args.priority,
       node_title: args.nodeTitle,
       position: args.position,
@@ -226,6 +224,24 @@ export async function moveLogicGateAssignment(args: {
   priority?: number | null;
   assigneePolicy?: string;
 }): Promise<LogicGateAssignmentCommandResult> {
+  if (!args.fromLogicGateID || args.fromLogicGateID === args.logicGateID) {
+    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
+      method: "PUT",
+      json: {
+        company_id: args.companyID,
+        status: args.status ?? args.columnID,
+        position: args.position,
+        priority: args.priority,
+        assignee_policy: args.assigneePolicy,
+      },
+    });
+    invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
+    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
+    return {
+      card: { ...payload.card },
+      node: { ...payload.node },
+    };
+  }
   const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/move", {
     method: "POST",
     json: {
@@ -256,6 +272,23 @@ export async function removeLogicGateAssignment(args: {
   fallbackStatus?: string | null;
   fallbackStatusColor?: string | null;
 }): Promise<LogicGateAssignmentCommandResult> {
+  const logicGateID = args.logicGateID?.trim() ?? "";
+  if (logicGateID) {
+    const params = query({
+      company_id: args.companyID,
+      fallback_status: args.fallbackStatus ?? undefined,
+      fallback_status_color: args.fallbackStatusColor ?? undefined,
+    });
+    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}?${params}`, {
+      method: "DELETE",
+    });
+    invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
+    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
+    return {
+      card: { ...payload.card },
+      node: { ...payload.node },
+    };
+  }
   const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
     method: "POST",
     json: {
@@ -281,6 +314,22 @@ export async function setLogicGateAssignmentIssue(args: {
   nodeID: string;
   isIssue: boolean;
 }): Promise<LogicGateAssignmentCommandResult> {
+  const logicGateID = args.logicGateID?.trim() ?? "";
+  if (logicGateID) {
+    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
+      method: "PUT",
+      json: {
+        company_id: args.companyID,
+        is_issue: args.isIssue,
+      },
+    });
+    invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
+    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
+    return {
+      card: { ...payload.card },
+      node: { ...payload.node },
+    };
+  }
   const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/issue", {
     method: "POST",
     json: {

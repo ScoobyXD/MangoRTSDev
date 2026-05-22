@@ -135,7 +135,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		}
 		payload["logic_gate_map_positions"] = filterLogicGateMapPositionsByVisibleGates(logicGateMapPositions, logicGateIDs)
 	}
-	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
+	if s.legacyKanbanRoutesEnabled && isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
 		kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
@@ -795,6 +795,31 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 	boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 	if boardID == "" {
 		writeError(w, http.StatusBadRequest, "board_id_required")
+		return
+	}
+	if !s.legacyKanbanRoutesEnabled {
+		logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+		if logicGateID == "" {
+			writeLegacyKanbanDisabled(w)
+			return
+		}
+		work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, logicGateID, store.EntityPermissionView)
+		if !ok {
+			return
+		}
+		cardQuery, ok, errCode := parseKanbanCardQueryParams(r)
+		if !ok {
+			writeError(w, http.StatusBadRequest, errCode)
+			return
+		}
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
+			"scope":       "kanban",
+			"company_id":  companyID,
+			"board_id":    boardID,
+			"columns":     work.Columns,
+			"cards":       filterKanbanCompatibilityCards(work.Cards, cardQuery),
+			"cards_limit": cardQuery.Limit,
+		}, etag)
 		return
 	}
 	if store.IsLogicGateKanbanBoardID(boardID) {

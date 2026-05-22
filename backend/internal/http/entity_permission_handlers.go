@@ -375,14 +375,103 @@ func logicGateIDFromKanbanBoardID(boardID string) string {
 	return strings.TrimSpace(strings.TrimPrefix(boardID, "logic-gate:"))
 }
 
-func (s *Server) requireKanbanBoardView(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID string) bool {
+func kanbanBoardLogicGateID(boardID, logicGateID string) string {
 	if strings.TrimSpace(logicGateID) == "" {
 		logicGateID = logicGateIDFromKanbanBoardID(boardID)
 	}
+	return strings.TrimSpace(logicGateID)
+}
+
+func (s *Server) requireKanbanBoardAccess(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID, accessLevel string) bool {
+	logicGateID = kanbanBoardLogicGateID(boardID, logicGateID)
+	userID := s.entityPermissionActorUserID(r, companyID)
 	if strings.TrimSpace(logicGateID) == "" {
+		if userID != "" {
+			writeLegacyKanbanDisabled(w)
+			return false
+		}
 		return true
 	}
-	return s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found")
+	return s.requireKanbanLogicGateEffectiveAccess(w, companyID, userID, logicGateID, accessLevel)
+}
+
+func (s *Server) requireKanbanLogicGateEffectiveAccess(w http.ResponseWriter, companyID, userID, logicGateID, accessLevel string) bool {
+	if userID == "" {
+		return true
+	}
+	accessLevel, ok := store.NormalizeEntityPermission(accessLevel)
+	if !ok || store.EntityPermissionRank(accessLevel) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+		return false
+	}
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, accessLevel)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+		return false
+	}
+	if allowed {
+		return true
+	}
+	if accessLevel != store.EntityPermissionView {
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+			return false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+			return false
+		}
+		if canView {
+			writeAccessActionDenied(w)
+			return false
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
+}
+
+func (s *Server) requireKanbanBoardView(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID string) bool {
+	return s.requireKanbanBoardAccess(w, r, companyID, boardID, logicGateID, store.EntityPermissionView)
+}
+
+func (s *Server) requireKanbanBoardEdit(w http.ResponseWriter, r *http.Request, companyID, boardID, logicGateID string) bool {
+	return s.requireKanbanBoardAccess(w, r, companyID, boardID, logicGateID, store.EntityPermissionEdit)
+}
+
+func (s *Server) requireKanbanCardAccess(w http.ResponseWriter, r *http.Request, companyID, boardID, cardID, accessLevel string) (domain.KanbanCard, bool) {
+	card, err := s.repo.GetKanbanCard(companyID, boardID, cardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_kanban_card")
+		return domain.KanbanCard{}, false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kanban_card_not_found")
+		return domain.KanbanCard{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_kanban_card")
+		return domain.KanbanCard{}, false
+	}
+	logicGateID := logicGateIDFromKanbanBoardID(boardID)
+	if card.LogicGateID != nil && strings.TrimSpace(*card.LogicGateID) != "" {
+		logicGateID = strings.TrimSpace(*card.LogicGateID)
+	}
+	if logicGateID == "" {
+		if s.entityPermissionActorUserID(r, companyID) != "" {
+			writeLegacyKanbanDisabled(w)
+			return domain.KanbanCard{}, false
+		}
+		return card, true
+	}
+	if !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, accessLevel) {
+		return domain.KanbanCard{}, false
+	}
+	return card, true
 }
 
 func (s *Server) filterVisibleKanbanBoards(r *http.Request, companyID string, items []domain.KanbanBoard) ([]domain.KanbanBoard, error) {
@@ -447,38 +536,6 @@ func (s *Server) filterVisibleKanbanCards(r *http.Request, companyID string, ite
 		out = append(out, item)
 	}
 	return out, nil
-}
-
-func (s *Server) requireKanbanCardView(w http.ResponseWriter, r *http.Request, companyID, boardID, cardID string) bool {
-	userID := s.entityPermissionActorUserID(r, companyID)
-	if userID == "" {
-		return true
-	}
-	cards, err := s.repo.ListKanbanCards(companyID, boardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
-		return false
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_kanban_card")
-		return false
-	}
-	for _, card := range cards {
-		if card.CardID != cardID {
-			continue
-		}
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, card.NodeID, "kanban_card_not_found") {
-			return false
-		}
-		if card.LogicGateID != nil && strings.TrimSpace(*card.LogicGateID) != "" {
-			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, *card.LogicGateID, "kanban_card_not_found") {
-				return false
-			}
-		}
-		return true
-	}
-	writeError(w, http.StatusNotFound, "kanban_card_not_found")
-	return false
 }
 
 func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request, entityType, entityID, notFoundCode, eventType string) {

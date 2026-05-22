@@ -239,6 +239,7 @@ type KanbanRepository interface {
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
 	DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID string) (KanbanWorkspaceEventResult, error)
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
+	GetKanbanCard(companyID, boardID, cardID string) (domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	UpsertKanbanCardWithWorkspaceEvent(input KanbanCardMutationInput) (KanbanCardWorkspaceEventResult, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)

@@ -59,7 +59,7 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-111111111111"
 
