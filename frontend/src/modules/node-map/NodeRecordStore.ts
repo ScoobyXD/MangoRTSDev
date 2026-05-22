@@ -44,6 +44,8 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
       node: entry.node,
       information: [],
       relationships: entry.relationships ?? [],
+      information_count: 0,
+      relationships_count: entry.relationships?.length ?? 0,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
   }
@@ -55,7 +57,7 @@ export async function getNodeRecordSingleFlight(apiBase: string, companyID: stri
   if (cached) return cached;
   const inflight = detailsInflight.get(cacheKey);
   if (inflight) return inflight;
-  const promise = requestJSON<NodeDetails>(apiBase, `/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`)
+  const promise = requestJSON<NodeDetails>(apiBase, `/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}&include_information=0`)
     .then((payload) => {
       detailsCache.set(cacheKey, payload);
       detailsInflight.delete(cacheKey);

@@ -884,6 +884,14 @@ func (r *MemoryRepo) deleteNodeRelationshipLocked(companyID, relationshipID stri
 }
 
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
+	return r.getNodeDetails(companyID, nodeID, true)
+}
+
+func (r *MemoryRepo) GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error) {
+	return r.getNodeDetails(companyID, nodeID, false)
+}
+
+func (r *MemoryRepo) getNodeDetails(companyID, nodeID string, includeInformation bool) (domain.NodeDetails, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -892,10 +900,14 @@ func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetail
 		return domain.NodeDetails{}, ErrNotFound
 	}
 
-	info := append([]domain.NodeInformation{}, r.nodeInfo[key(companyID, nodeID)]...)
-	sort.Slice(info, func(i, j int) bool {
-		return info[i].CreatedTimestamp.Before(info[j].CreatedTimestamp)
-	})
+	allInfo := r.nodeInfo[key(companyID, nodeID)]
+	info := []domain.NodeInformation{}
+	if includeInformation {
+		info = append([]domain.NodeInformation{}, allInfo...)
+		sort.Slice(info, func(i, j int) bool {
+			return info[i].CreatedTimestamp.Before(info[j].CreatedTimestamp)
+		})
+	}
 
 	relationships := make([]domain.NodeRelationship, 0)
 	for _, rel := range r.nodeRels[companyID] {
@@ -908,8 +920,10 @@ func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetail
 	})
 
 	return domain.NodeDetails{
-		Node:          r.withNodeReadModelLocked(node),
-		Information:   info,
-		Relationships: relationships,
+		Node:               r.withNodeReadModelLocked(node),
+		Information:        info,
+		Relationships:      relationships,
+		InformationCount:   len(allInfo),
+		RelationshipsCount: len(relationships),
 	}, nil
 }

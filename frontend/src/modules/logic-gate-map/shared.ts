@@ -136,12 +136,16 @@ export type NodeDetails = {
   node: NodeRecord;
   information: NodeInformation[];
   relationships: NodeRelationship[];
+  information_count?: number;
+  relationships_count?: number;
 };
 
 export type LogicGateDetails = {
   logic_gate: LogicGateRecord;
   information: LogicGateInformation[];
   relationships: LogicGateRelationship[];
+  information_count?: number;
+  relationships_count?: number;
 };
 
 export type NodeMapState = {
@@ -188,6 +192,8 @@ export function toLogicGateDetails(details: LogicGateDetails): NodeDetails {
     node: toLogicGateCanvasRecord(details.logic_gate),
     information: (details.information ?? []).map(toLogicGateCanvasInformation),
     relationships: (details.relationships ?? []).map(toLogicGateCanvasRelationship),
+    information_count: details.information_count ?? details.information?.length ?? 0,
+    relationships_count: details.relationships_count ?? details.relationships?.length ?? 0,
   };
 }
 

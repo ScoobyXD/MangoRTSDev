@@ -243,9 +243,11 @@ type NodeContentChange struct {
 }
 
 type NodeDetails struct {
-	Node          Node               `json:"node"`
-	Information   []NodeInformation  `json:"information"`
-	Relationships []NodeRelationship `json:"relationships"`
+	Node               Node               `json:"node"`
+	Information        []NodeInformation  `json:"information"`
+	Relationships      []NodeRelationship `json:"relationships"`
+	InformationCount   int                `json:"information_count"`
+	RelationshipsCount int                `json:"relationships_count"`
 }
 
 type LogicGate struct {
