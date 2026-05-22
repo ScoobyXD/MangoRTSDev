@@ -1530,7 +1530,7 @@ left join node_content_change_seen seen
 where change.company_id=$1::uuid
   and change.node_id=$2::uuid
   and seen.change_id is null
-  and coalesce(change.actor_user_id::text, '') <> $3
+  and change.actor_user_id is distinct from $3::uuid
 order by change.created_timestamp asc, change.change_id asc`, companyID, nodeID, userID)
 	if err != nil {
 		return nil, err
