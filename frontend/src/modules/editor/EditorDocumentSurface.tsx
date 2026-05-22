@@ -1,6 +1,6 @@
 import type React from "react";
 import type { EditorDocumentIsolationState } from "./editorTabs";
-import type { EditorIndentGuideSegment } from "./editorIndentGuides";
+import { editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { EDITOR_DOCUMENT_LINE_HEIGHT } from "./useEditorPreferences";
 
@@ -96,7 +96,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
               style={{
                 position: "absolute",
                 top: segment.lineStart * documentLineHeightPx,
-                left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                left: editorIndentGuideLeftForDepth(segment.depth, EDITOR_TAB_TEXT.length),
                 height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
                 borderLeft: `1px solid ${indentGuideColor}`,
                 opacity: 0.9,
