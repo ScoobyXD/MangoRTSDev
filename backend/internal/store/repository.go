@@ -31,6 +31,7 @@ type Repository interface {
 	LogicGateRepository
 	EntityPermissionRepository
 	EffectiveAccessRepository
+	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
 	MapLayoutRepository
@@ -150,6 +151,10 @@ type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
+}
+
+type LogicGateWorkRepository interface {
+	GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error)
 }
 
 type WorkItemReadRepository interface {
