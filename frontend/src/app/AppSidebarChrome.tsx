@@ -900,7 +900,7 @@ export function AppSidebar({
             </button>
           </div>
           {sharedTriageOpen && (
-            <div style={appSidebarSharedRowsStyle}>
+            <div className="app-sidebar-elevated-dropdown" style={appSidebarSharedRowsStyle}>
               {sharedRows.map(renderSharedFolderRow)}
             </div>
           )}
@@ -1365,7 +1365,7 @@ function AppSidebarScopedExplorerSection({
         </button>
       </div>
       {open && (
-        <div style={appSidebarMiniExplorerFrameStyle(floating)}>
+        <div className={floating ? "app-sidebar-elevated-dropdown" : undefined} style={appSidebarMiniExplorerFrameStyle(floating)}>
           <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
             <SidebarCompanyExplorerContent
               accent={SIDEBAR_ACTIVE_TEXT}
@@ -1642,7 +1642,7 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
 
 const appSidebarSectionStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
+  gap: 2,
   minWidth: 0,
   paddingBottom: 10,
   borderBottom: "1px solid rgba(17, 17, 17, 0.28)",
@@ -1675,12 +1675,12 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
   if (elevated) {
     return {
       width: "auto",
-      minHeight: 36,
+      minHeight: 31,
       display: "grid",
       gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
       alignItems: "center",
       gap: 7,
-      margin: "2px 2px 2px",
+      margin: "0 2px",
       border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
       background: active
@@ -1698,7 +1698,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       cursor: "pointer",
       font: "inherit",
       fontSize: 12,
-      fontWeight: 700,
+      fontWeight: 500,
       letterSpacing: 0,
       padding: hasIcon ? "0 10px" : "0 10px 0 12px",
       textAlign: "left",
@@ -1720,7 +1720,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
-    fontWeight: active ? 700 : 600,
+    fontWeight: active ? 600 : 500,
     letterSpacing: 0,
     padding: "0 8px",
     textAlign: "left",
@@ -1813,7 +1813,7 @@ function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React
     display: "grid",
     gap: 0,
     minWidth: 0,
-    margin: "2px 2px 2px",
+    margin: "0 2px",
     border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}`,
     borderRadius: SIDEBAR_ELEVATED_RADIUS,
     background: raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
@@ -1835,7 +1835,7 @@ function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): Re
     display: "grid",
     gap: floating ? 0 : 3,
     minWidth: 0,
-    margin: floating ? "2px 2px 1px" : 0,
+    margin: floating ? "0 2px" : 0,
     border: floating ? `1px solid ${raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}` : undefined,
     borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
     background: floating && raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
@@ -1852,7 +1852,7 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised
   if (floating) {
     return {
       width: "100%",
-      minHeight: 36,
+      minHeight: 31,
       display: "grid",
       gridTemplateColumns: "minmax(0, 1fr) 28px",
       alignItems: "center",
@@ -1881,7 +1881,7 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised
 function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSProperties {
   return {
     minWidth: 0,
-    minHeight: floating ? 34 : 29,
+    minHeight: floating ? 29 : 29,
     display: "grid",
     gridTemplateColumns: "18px minmax(0, 1fr)",
     alignItems: "center",
@@ -1892,7 +1892,7 @@ function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSPro
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 500,
     letterSpacing: 0,
     padding: floating ? "0 0 0 10px" : "0 0 0 8px",
     textAlign: "left",
@@ -1922,7 +1922,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
   if (elevated) {
     return {
       width: "100%",
-      minHeight: 36,
+      minHeight: 31,
       display: "grid",
       gridTemplateColumns: "minmax(0, 1fr) 28px",
       alignItems: "center",
@@ -1954,7 +1954,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
 
 const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 34,
+  minHeight: 29,
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
@@ -1965,7 +1965,7 @@ const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 700,
+  fontWeight: 500,
   letterSpacing: 0,
   padding: "0 0 0 12px",
   textAlign: "left",
