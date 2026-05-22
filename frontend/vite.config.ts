@@ -12,6 +12,12 @@ export default defineConfig({
         timeout: 0,
         proxyTimeout: 0,
       },
+      "/v2": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
       "/healthz": {
         target: "http://localhost:8080",
         changeOrigin: true,
