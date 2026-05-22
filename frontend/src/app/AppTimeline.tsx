@@ -66,6 +66,9 @@ const EXPANDED_TRACK_HEIGHT = 108;
 const EXPANDED_LANE_TOP = 37;
 const TIMELINE_NODE_ACCENT = "rgb(0, 233, 255)";
 const TIMELINE_LOGIC_GATE_ACCENT = "rgb(0, 255, 132)";
+const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
+const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
+const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -723,7 +726,7 @@ function timelineItemStyle(
     height: compact ? "100%" : 46,
     minWidth: compact ? 0 : 88,
     display: "grid",
-    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "minmax(0, 1fr) 31px",
+    gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
     border: `1px solid ${accent}`,
     borderRadius: compact ? 0 : 7,
     background: nodeBackground,
@@ -745,7 +748,7 @@ function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntity
     bottom: 0,
     [side]: 0,
     zIndex: 2,
-    width: 7,
+    width: TIMELINE_ITEM_EDGE_WIDTH,
     cursor: "ew-resize",
     background: accent,
   };
@@ -757,7 +760,9 @@ function timelineItemMainStyle(compact: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateRows: compact ? "minmax(0, 1fr) 10px" : "minmax(0, 1fr) 14px",
     gap: 1,
-    padding: compact ? "4px 4px 3px 10px" : "5px 4px 3px 10px",
+    padding: compact
+      ? `4px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 3}px`
+      : `5px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 3}px`,
     boxSizing: "border-box",
   };
 }
@@ -811,8 +816,8 @@ function timelineCheckboxWrapStyle(compact: boolean, width: number): React.CSSPr
     display: visible ? "grid" : "none",
     placeItems: "center",
     minWidth: 0,
-    width: 31,
-    paddingRight: 7,
+    width: TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH,
+    paddingRight: TIMELINE_ITEM_EDGE_WIDTH,
     boxSizing: "border-box",
     cursor: "pointer",
   };
