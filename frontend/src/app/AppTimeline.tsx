@@ -62,8 +62,8 @@ type TimelineTick = {
 const PIXELS_PER_QUARTER_HOUR = 31;
 const TIMELINE_VISUAL_STEP_MINUTES = 15;
 const COMPACT_HEADER_HEIGHT = 22;
-const EXPANDED_TRACK_HEIGHT = 108;
-const EXPANDED_LANE_TOP = 37;
+const EXPANDED_TRACK_HEIGHT = 88;
+const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
 const TIMELINE_NODE_ACCENT = "rgb(0, 233, 255)";
 const TIMELINE_LOGIC_GATE_ACCENT = "rgb(0, 255, 132)";
 const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
@@ -248,7 +248,6 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
           )}
           <div
             ref={scrollerRef}
-            className={compact ? undefined : "mango-home-scroll"}
             style={timelineScrollerStyle(dropActive, compact)}
             onDragOver={(event) => {
               if (!hasExplorerTimelineDrag(event.dataTransfer)) return;
@@ -274,7 +273,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                 {state.items.map((item) => {
                   const selected = selectedItemID === item.id;
                   const left = (item.startMinute - state.startMinute) * metrics.pxPerMinute;
-                  const width = Math.max(compact ? APP_TIMELINE_STEP_MINUTES * metrics.pxPerMinute : 88, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
+                  const width = Math.max(APP_TIMELINE_STEP_MINUTES * metrics.pxPerMinute, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
                   return (
                     <div
                       key={item.id}
@@ -337,7 +336,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
         </div>
 
         {expanded && visibleHistory.map((day) => (
-          <TimelineHistoryDay key={day.date} day={day} onOpenEntity={onOpenEntity} />
+          <TimelineHistoryDay key={day.date} day={day} availableWidth={scrollerWidth} onOpenEntity={onOpenEntity} />
         ))}
       </div>
 
@@ -362,25 +361,27 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
 
 function TimelineHistoryDay({
   day,
+  availableWidth,
   onOpenEntity,
 }: {
   day: AppTimelineDay;
+  availableWidth: number;
   onOpenEntity: (target: { kind: AppTimelineEntityKind; id: string; label: string }) => void;
 }) {
-  const metrics = useTimelineMetrics(day, false);
+  const metrics = useTimelineMetrics(day, false, availableWidth);
   return (
     <div style={timelineDayPanelStyle(true)}>
       <div style={timelineDayTitleStyle}>
         <span>{formatTimelineDate(day.date)}</span>
         <span>{day.items.length} item{day.items.length === 1 ? "" : "s"}</span>
       </div>
-      <div className="mango-home-scroll" style={timelineScrollerStyle(false, false)}>
+      <div style={timelineScrollerStyle(false, false)}>
         <div style={timelineContentStyle(metrics.contentWidth, false)}>
           <TimelineTicks ticks={metrics.ticks} compact={false} />
           <div style={timelineLaneStyle(false)}>
             {day.items.map((item) => {
               const left = (item.startMinute - day.startMinute) * metrics.pxPerMinute;
-              const width = Math.max(88, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
+              const width = Math.max(APP_TIMELINE_STEP_MINUTES * metrics.pxPerMinute, (item.endMinute - item.startMinute) * metrics.pxPerMinute);
               return (
                 <div
                   key={item.id}
@@ -446,13 +447,11 @@ function HistoryCompletedIcon({ completed }: { completed: boolean }) {
   );
 }
 
-function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, compact: boolean, availableWidth = 0): TimelineMetrics {
+function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinute">, _compact: boolean, availableWidth = 0): TimelineMetrics {
   const rangeMinutes = Math.max(APP_TIMELINE_STEP_MINUTES, range.endMinute - range.startMinute);
   const intervalCount = Math.max(1, rangeMinutes / TIMELINE_VISUAL_STEP_MINUTES);
   const expandedContentWidth = Math.max(680, intervalCount * PIXELS_PER_QUARTER_HOUR);
-  const contentWidth = compact
-    ? Math.max(1, availableWidth || expandedContentWidth)
-    : Math.max(expandedContentWidth, availableWidth || 0);
+  const contentWidth = Math.max(1, availableWidth || expandedContentWidth);
   const pxPerMinute = contentWidth / rangeMinutes;
   const ticks = useMemo(() => buildTimelineTicks(range.startMinute, range.endMinute, contentWidth), [contentWidth, range.endMinute, range.startMinute]);
   return { rangeMinutes, contentWidth, pxPerMinute, ticks };
@@ -629,13 +628,13 @@ function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProp
     minWidth: 0,
     minHeight: 0,
     height: compact ? "100%" : EXPANDED_TRACK_HEIGHT,
-    overflowX: compact ? "hidden" : "auto",
+    overflowX: "hidden",
     overflowY: "hidden",
     border: compact ? 0 : `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
     borderRadius: compact ? "0 15px 15px 0" : 8,
     background: "#ffffff",
     boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
-    scrollbarWidth: compact ? "none" : "thin",
+    scrollbarWidth: "none",
   };
 }
 
@@ -650,7 +649,7 @@ function timelineContentStyle(width: number, compact: boolean): React.CSSPropert
 
 function timelineTickStyle(left: number, major: boolean, compact: boolean): React.CSSProperties {
   const laneTop = compact ? COMPACT_HEADER_HEIGHT : EXPANDED_LANE_TOP;
-  const majorHeaderRise = compact ? COMPACT_HEADER_HEIGHT / 2 : 12;
+  const majorHeaderRise = COMPACT_HEADER_HEIGHT / 2;
   return {
     position: "absolute",
     left,
@@ -683,8 +682,8 @@ function timelineLaneStyle(compact: boolean): React.CSSProperties {
     left: 0,
     right: 0,
     top: compact ? COMPACT_HEADER_HEIGHT : EXPANDED_LANE_TOP,
-    bottom: compact ? 0 : undefined,
-    height: compact ? undefined : 56,
+    bottom: 0,
+    height: undefined,
     borderTop: "1px solid rgba(100, 116, 139, 0.18)",
     borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
     background: "#ffffff",
@@ -697,7 +696,7 @@ function timelineItemStyle(
   completed: boolean,
   left: number,
   width: number,
-  compact: boolean,
+  _compact: boolean,
   readOnly: boolean,
 ): React.CSSProperties {
   const accent = completed ? "#16a34a" : timelineKindAccent(kind);
@@ -707,28 +706,22 @@ function timelineItemStyle(
       ? "rgba(0, 255, 132, 0.18)"
       : "rgba(0, 233, 255, 0.18)";
   const selectionShadow = kind === "logic_gate" ? "rgba(0, 255, 132, 0.32)" : "rgba(0, 233, 255, 0.32)";
-  const itemShadow = compact
-    ? completed
-      ? "inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
-      : selected
-        ? `inset 0 0 0 2px ${selectionShadow}`
-        : "inset 0 1px 0 rgba(255, 255, 255, 0.62)"
-    : completed
-      ? "0 6px 14px rgba(22, 163, 74, 0.22), inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
-      : selected
-        ? `0 0 0 2px ${selectionShadow}`
-        : "0 4px 10px rgba(15, 23, 42, 0.10)";
+  const itemShadow = completed
+    ? "inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
+    : selected
+      ? `inset 0 0 0 2px ${selectionShadow}`
+      : "inset 0 1px 0 rgba(255, 255, 255, 0.62)";
   return {
     position: "absolute",
     left,
-    top: compact ? 0 : 5,
+    top: 0,
     width,
-    height: compact ? "100%" : 46,
-    minWidth: compact ? 0 : 88,
+    height: "100%",
+    minWidth: 0,
     display: "grid",
     gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
     border: `1px solid ${accent}`,
-    borderRadius: compact ? 0 : 7,
+    borderRadius: 0,
     background: nodeBackground,
     color: "#0f172a",
     boxShadow: itemShadow,
