@@ -16,12 +16,9 @@ export const EDITOR_DOCUMENT_MAX_FONT_SIZE_PX = 28;
 export const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
 export const EDITOR_DOCUMENT_TOP_PX = 86;
 export const EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY = "var(--mango-font-family)";
-export const EDITOR_DOCUMENT_MONOSPACE_FONT_FAMILY = 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace';
 
-export function getEditorDocumentFontFamily(outlineStyle: EditorOutlineStyleID): string {
-  return outlineStyle === "indent-guides"
-    ? EDITOR_DOCUMENT_MONOSPACE_FONT_FAMILY
-    : EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY;
+export function getEditorDocumentFontFamily(_outlineStyle: EditorOutlineStyleID): string {
+  return EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY;
 }
 
 function readStoredOutlineStyle(storageKey: string): EditorOutlineStyleID {
