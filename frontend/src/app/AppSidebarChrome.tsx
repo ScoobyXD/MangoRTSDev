@@ -63,6 +63,7 @@ const SIDEBAR_CYAN_ACCENT = "rgb(0, 233, 255)";
 const SIDEBAR_CYAN_ACTIVE_BG = "rgba(0, 233, 255, 0.13)";
 const SIDEBAR_CYAN_OPEN_BG = "rgba(0, 233, 255, 0.09)";
 const SIDEBAR_CYAN_DROP_BG = "rgba(0, 233, 255, 0.12)";
+const SIDEBAR_CYAN_HOVER_BG = "rgba(0, 233, 255, 0.20)";
 const SIDEBAR_CYAN_ACTIVE_BORDER = "rgba(0, 233, 255, 0.68)";
 const SIDEBAR_CYAN_OPEN_BORDER = "rgba(0, 233, 255, 0.52)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
@@ -262,6 +263,7 @@ export function AppSidebar({
   );
   const [sharedTriageHovered, setSharedTriageHovered] = useState(false);
   const [sharedTriageFocused, setSharedTriageFocused] = useState(false);
+  const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
   const sharedTriageRaised = sharedTriageOpen || sharedTriageHovered || sharedTriageFocused;
   useEffect(() => {
     const onHomeUnreadCountsUpdated = (event: Event) => {
@@ -720,13 +722,17 @@ export function AppSidebar({
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
     const treeID = row.treeID as HomeSidebarView;
+    const active = homeActive && (activeHomeView === treeID || selectedSharedTreeIDs.has(row.treeID));
+    const hovered = hoveredSharedFolderID === folder.folder_id;
     return (
       <div
         key={folder.folder_id}
         role="button"
         tabIndex={0}
         draggable={!isRenaming && !sharedBusy}
-        style={appSidebarSharedFolderRowStyle(row.depth, homeActive && (activeHomeView === treeID || selectedSharedTreeIDs.has(row.treeID)), rowDropPlacement)}
+        style={appSidebarSharedFolderRowStyle(row.depth, active, rowDropPlacement, hovered)}
+        onPointerEnter={() => setHoveredSharedFolderID(folder.folder_id)}
+        onPointerLeave={() => setHoveredSharedFolderID((current) => current === folder.folder_id ? "" : current)}
         onClick={(event) => selectSharedFolderRow(row, event)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
@@ -2011,7 +2017,7 @@ const appSidebarSharedErrorStyle: React.CSSProperties = {
   lineHeight: 1.25,
 };
 
-function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null): React.CSSProperties {
+function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null, hovered = false): React.CSSProperties {
   return {
     width: "100%",
     minHeight: 28,
@@ -2019,17 +2025,18 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? "rgba(0, 233, 255, 0.64)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
+    border: `1px solid ${active ? "rgba(0, 233, 255, 0.64)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : hovered ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 5,
-    background: active ? "rgba(0, 233, 255, 0.16)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : "transparent",
+    background: active ? "rgba(0, 233, 255, 0.16)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : hovered ? SIDEBAR_CYAN_HOVER_BG : "transparent",
     color: "#3f332b",
-    cursor: "grab",
+    cursor: "pointer",
     font: "inherit",
     fontSize: 11,
     fontWeight: active ? 700 : 600,
     padding: `2px 6px 2px ${6 + depth * 14}px`,
     textAlign: "left",
     minWidth: 0,
+    transition: "background 120ms ease, border-color 120ms ease",
     boxShadow: dropPlacement === "before"
       ? `inset 0 2px 0 ${SIDEBAR_CYAN_ACCENT}`
       : dropPlacement === "after"
