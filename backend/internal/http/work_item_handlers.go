@@ -215,6 +215,7 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "failed_to_assign_logic_gate_node")
 		return
 	}
+	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_saved")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -321,6 +322,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "failed_to_move_logic_gate_assignment")
 		return
 	}
+	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_moved")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	if hadBeforeCard {
 		s.recordKanbanStateNotification(r, beforeCard, result.Card, columnTitles)
@@ -397,6 +399,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 		writeError(w, http.StatusInternalServerError, "failed_to_remove_logic_gate_assignment")
 		return
 	}
+	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_removed")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -467,6 +470,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_assignment_issue")
 		return
 	}
+	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_issue_toggled")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

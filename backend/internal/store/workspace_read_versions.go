@@ -85,18 +85,29 @@ var (
 
 type WorkspaceReadVersionQuery struct {
 	CompanyID   string
+	UserID      string
 	Scope       string
 	ResourceKey string
 }
 
 func NormalizeWorkspaceReadVersionQuery(query WorkspaceReadVersionQuery) (WorkspaceReadVersionQuery, error) {
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.UserID = strings.TrimSpace(query.UserID)
 	query.Scope = strings.TrimSpace(query.Scope)
 	query.ResourceKey = strings.TrimSpace(query.ResourceKey)
 	if query.CompanyID == "" || query.Scope == "" {
 		return WorkspaceReadVersionQuery{}, ErrInvalid
 	}
 	return query, nil
+}
+
+func WorkspaceReadVersionUserResourceKey(userID, resourceKey string) string {
+	userID = strings.TrimSpace(userID)
+	resourceKey = strings.TrimSpace(resourceKey)
+	if userID == "" {
+		return resourceKey
+	}
+	return "user:" + userID + "|" + resourceKey
 }
 
 func WorkspaceReadVersionResourceKey(key, value string) string {

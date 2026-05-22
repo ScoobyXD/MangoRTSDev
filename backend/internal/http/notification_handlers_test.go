@@ -50,6 +50,9 @@ func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, company
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions %s %s: %v", entityType, entityID, err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
 }
 
 func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
@@ -94,6 +97,13 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership("consulted-no-access-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	blockedNoAccess, err := repo.UpsertAuthUser("blocked-no-access-subject", "blocked-no-access@example.com", "Blocked No Access")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("blocked-no-access-subject", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	assignments, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
@@ -191,7 +201,7 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	}
 
 	blockedReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
-	blockedReq = requestWithActorForNotifications(blockedReq, consultedNoAccess, companyID)
+	blockedReq = requestWithActorForNotifications(blockedReq, blockedNoAccess, companyID)
 	blockedRec := httptest.NewRecorder()
 	handler.ServeHTTP(blockedRec, blockedReq)
 	if blockedRec.Code != http.StatusOK {

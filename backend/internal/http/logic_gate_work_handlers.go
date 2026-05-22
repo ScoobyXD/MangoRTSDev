@@ -105,6 +105,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
+	s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_assigned")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
@@ -161,6 +162,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
+		s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_moved")
 		s.publishCommittedWorkspaceEvents(result.Events)
 	}
 	if issueSet {
@@ -175,6 +177,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_issue_state") {
 			return
 		}
+		s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_issue_toggled")
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
 		result = issueResult
 	}
@@ -213,6 +216,7 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 	if !writeLogicGateWorkRemoveError(w, err) {
 		return
 	}
+	s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_removed")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	payload := logicGateWorkAssignmentRemoveResultPayload(result)
 	writeJSON(w, http.StatusOK, payload)

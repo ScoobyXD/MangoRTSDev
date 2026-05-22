@@ -835,6 +835,14 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
+	streamUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		if actorRoleForCompany(actor, companyID) == "" {
+			writeError(w, http.StatusForbidden, "company_access_denied")
+			return
+		}
+		streamUserID = strings.TrimSpace(actor.User.UserID)
+	}
 	afterSequence, explicitCursor, ok := workspaceReplayAfterSequence(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_after_sequence")
@@ -857,17 +865,17 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 
 	prepareSSEHeaders(w)
 
-	ch := s.hub.subscribe(companyID)
-	defer s.hub.unsubscribe(companyID, ch)
-	externalCh := s.workspaceWakeHub.subscribe(companyID)
-	defer s.workspaceWakeHub.unsubscribe(companyID, externalCh)
+	ch := s.hub.subscribeUser(companyID, streamUserID)
+	defer s.hub.unsubscribeUser(companyID, streamUserID, ch)
+	externalCh := s.workspaceWakeHub.subscribeUser(companyID, streamUserID)
+	defer s.workspaceWakeHub.unsubscribeUser(companyID, streamUserID, externalCh)
 
-	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q,\"after_sequence\":%d}\n\n", companyID, afterSequence)
+	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q,\"user_id\":%q,\"after_sequence\":%d}\n\n", companyID, streamUserID, afterSequence)
 	flusher.Flush()
 
 	lastSentSequence := afterSequence
 	if explicitCursor {
-		if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceInitial, w, flusher, companyID, &lastSentSequence); err != nil {
+		if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceInitial, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
 			log.Printf("workspace stream replay failed company_id=%s after_sequence=%d: %v", companyID, afterSequence, err)
 		}
 	}
@@ -885,7 +893,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 			flusher.Flush()
 		case <-catchup.C:
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourcePoll, w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourcePoll, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream catch-up failed company_id=%s after_sequence=%d: %v", companyID, lastSentSequence, err)
 			}
 		case payload := <-ch:
@@ -893,14 +901,14 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			if sequence > 0 && sequence <= lastSentSequence {
 				continue
 			}
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceHub, w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceHub, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream hub catch-up failed company_id=%s after_sequence=%d payload_sequence=%d: %v", companyID, lastSentSequence, sequence, err)
 			}
 		case notification := <-externalCh:
 			if notification.Sequence > 0 && notification.Sequence <= lastSentSequence {
 				continue
 			}
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceExternalFanout, w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceExternalFanout, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream external fanout catch-up failed company_id=%s after_sequence=%d notification_sequence=%d: %v", companyID, lastSentSequence, notification.Sequence, err)
 			}
 		}
@@ -939,9 +947,9 @@ type workspaceDurableCatchupResult struct {
 	LastSequence       int64
 }
 
-func (s *Server) writeAndRecordWorkspaceDurableCatchup(source string, w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) error {
+func (s *Server) writeAndRecordWorkspaceDurableCatchup(source string, w http.ResponseWriter, flusher http.Flusher, companyID, userID string, lastSentSequence *int64) error {
 	start := time.Now()
-	result, err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, lastSentSequence)
+	result, err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, userID, lastSentSequence)
 	s.recordWorkspaceReplayMetric(source, result, time.Since(start), err)
 	return err
 }
@@ -965,7 +973,7 @@ func (s *Server) recordWorkspaceReplayMetric(source string, result workspaceDura
 	})
 }
 
-func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) (workspaceDurableCatchupResult, error) {
+func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID, userID string, lastSentSequence *int64) (workspaceDurableCatchupResult, error) {
 	result := workspaceDurableCatchupResult{StartAfterSequence: *lastSentSequence, LastSequence: *lastSentSequence}
 	for {
 		result.Batches++
@@ -980,6 +988,10 @@ func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher htt
 		}
 		for _, event := range replay {
 			if event.Sequence <= *lastSentSequence {
+				continue
+			}
+			if strings.TrimSpace(userID) != "" && !s.workspaceEventVisibleToUser(event, userID) {
+				*lastSentSequence = event.Sequence
 				continue
 			}
 			if writeWorkspaceSSE(w, event) {
@@ -1019,17 +1031,31 @@ type workspaceEventHub struct {
 	subscribers map[string]map[chan []byte]struct{}
 }
 
+func workspaceSubscriptionKey(companyID, userID string) string {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return companyID
+	}
+	return companyID + ":" + userID
+}
+
 func newWorkspaceEventHub() *workspaceEventHub {
 	return &workspaceEventHub{subscribers: map[string]map[chan []byte]struct{}{}}
 }
 
 func (h *workspaceEventHub) subscribe(companyID string) chan []byte {
+	return h.subscribeUser(companyID, "")
+}
+
+func (h *workspaceEventHub) subscribeUser(companyID, userID string) chan []byte {
 	ch := make(chan []byte, 24)
+	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
-	bucket := h.subscribers[companyID]
+	bucket := h.subscribers[key]
 	if bucket == nil {
 		bucket = map[chan []byte]struct{}{}
-		h.subscribers[companyID] = bucket
+		h.subscribers[key] = bucket
 	}
 	bucket[ch] = struct{}{}
 	h.mu.Unlock()
@@ -1037,11 +1063,16 @@ func (h *workspaceEventHub) subscribe(companyID string) chan []byte {
 }
 
 func (h *workspaceEventHub) unsubscribe(companyID string, ch chan []byte) {
+	h.unsubscribeUser(companyID, "", ch)
+}
+
+func (h *workspaceEventHub) unsubscribeUser(companyID, userID string, ch chan []byte) {
+	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
-	if bucket := h.subscribers[companyID]; bucket != nil {
+	if bucket := h.subscribers[key]; bucket != nil {
 		delete(bucket, ch)
 		if len(bucket) == 0 {
-			delete(h.subscribers, companyID)
+			delete(h.subscribers, key)
 		}
 	}
 	h.mu.Unlock()
@@ -1055,9 +1086,13 @@ func (h *workspaceEventHub) hasSubscribers(companyID string) bool {
 }
 
 func (h *workspaceEventHub) publish(companyID string, payload []byte) {
+	h.publishUser(companyID, "", payload)
+}
+
+func (h *workspaceEventHub) publishUser(companyID, userID string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch := range h.subscribers[companyID] {
+	for ch := range h.subscribers[workspaceSubscriptionKey(companyID, userID)] {
 		select {
 		case ch <- payload:
 		default:
@@ -1092,7 +1127,33 @@ func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
 		return
 	}
 	s.hub.publish(event.CompanyID, payload)
+	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
+	if err != nil {
+		log.Printf("failed to resolve workspace event recipients company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
+	} else {
+		for _, userID := range userIDs {
+			s.hub.publishUser(event.CompanyID, userID, payload)
+		}
+	}
 	s.notifyWorkspaceEventFanout(event)
+}
+
+func (s *Server) workspaceEventVisibleToUser(event domain.DomainEvent, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return true
+	}
+	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
+	if err != nil {
+		log.Printf("failed to resolve workspace event visibility company_id=%s sequence=%d event_id=%s user_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, userID, err)
+		return false
+	}
+	for _, allowedUserID := range userIDs {
+		if strings.TrimSpace(allowedUserID) == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEventEnvelope {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -157,6 +158,77 @@ func TestWorkspaceFanoutDuplicateAndStaleNotificationsDoNotDuplicateSSE(t *testi
 	fanout.emit(notification)
 	fanout.emit(store.WorkspaceEventNotification{CompanyID: companyID, Sequence: event.Sequence})
 	assertNoWorkspaceSSEForTest(t, reader, cancel, 150*time.Millisecond)
+}
+
+func TestWorkspaceStreamUserScopedFanoutUsesEffectiveAccess(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{WorkspaceCatchupInterval: time.Hour})
+	defer server.Close()
+	companyID := "88888888-8888-4888-8888-888888888801"
+	repo.EnsureCompany(companyID, "Phase 6 Workspace HTTP Co")
+
+	viewer, err := repo.UpsertAuthUser("phase6-stream-viewer", "phase6-stream-viewer@example.com", "Viewer")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser viewer: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("phase6-stream-viewer", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership viewer: %v", err)
+	}
+	blocked, err := repo.UpsertAuthUser("phase6-stream-blocked", "phase6-stream-blocked@example.com", "Blocked")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser blocked: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("phase6-stream-blocked", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership blocked: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Stream Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Stream Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	viewerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.Routes().ServeHTTP(w, requestWithActorForTest(r, viewer, companyID))
+	})
+	viewerReader, viewerCancel := openWorkspaceStreamForTest(t, viewerHandler, "/v1/workspace/stream?company_id="+companyID+"&after_sequence=0", nil)
+	defer viewerCancel()
+	readWorkspaceReadyForTest(t, viewerReader)
+
+	blockedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.Routes().ServeHTTP(w, requestWithActorForTest(r, blocked, companyID))
+	})
+	blockedReader, blockedCancel := openWorkspaceStreamForTest(t, blockedHandler, "/v1/workspace/stream?company_id="+companyID+"&after_sequence=0", nil)
+	readWorkspaceReadyForTest(t, blockedReader)
+
+	server.publishWorkspaceEvent(companyID, store.WorkItemLogicGateAssignmentMovedEventType, map[string]any{
+		"logic_gate_id": logicGate.LogicGateID,
+		"node_id":       node.NodeID,
+	})
+
+	got := readWorkspaceSSEForTest(t, viewerReader)
+	if got.Type != store.WorkItemLogicGateAssignmentMovedEventType || got.Data["logic_gate_id"] != logicGate.LogicGateID {
+		t.Fatalf("viewer workspace event = %+v, want logic gate assignment update", got)
+	}
+	assertNoWorkspaceSSEForTest(t, blockedReader, blockedCancel, 150*time.Millisecond)
 }
 
 func TestWorkspaceStreamPollingCatchesUpWhenFanoutNotifyFails(t *testing.T) {

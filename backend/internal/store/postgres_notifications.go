@@ -179,16 +179,54 @@ surface, role, logic_gate_id, node_id, read_timestamp, created_timestamp`
 const notificationRecipientVisibilityWhereSQL = `
   and (
     company_id is null
-    or (
-      (btrim(logic_gate_id) = '' or mangorts_user_can_access_resource(company_id, 'logic_gate', logic_gate_id::uuid, recipient_user_id, 'view'))
-      and (btrim(node_id) = '' or mangorts_user_can_access_resource(company_id, 'node', node_id::uuid, recipient_user_id, 'view'))
-      and case
-        when entity_type = 'logic_gate' then mangorts_user_can_access_resource(company_id, 'logic_gate', entity_id::uuid, recipient_user_id, 'view')
-        when entity_type = 'node' then mangorts_user_can_access_resource(company_id, 'node', entity_id::uuid, recipient_user_id, 'view')
-        when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder') then mangorts_user_can_access_resource(company_id, 'shared_triage_folder', entity_id::uuid, recipient_user_id, 'view')
+    or case
+        when btrim(logic_gate_id) <> '' then exists (
+          select 1
+          from effective_resource_access access
+          where access.company_id=notifications.company_id
+            and access.user_id=notifications.recipient_user_id
+            and access.resource_type='logic_gate'
+            and access.resource_id=notifications.logic_gate_id::uuid
+            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+        )
+        when btrim(node_id) <> '' then exists (
+          select 1
+          from effective_resource_access access
+          where access.company_id=notifications.company_id
+            and access.user_id=notifications.recipient_user_id
+            and access.resource_type='node'
+            and access.resource_id=notifications.node_id::uuid
+            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+        )
+        when entity_type = 'logic_gate' then exists (
+          select 1
+          from effective_resource_access access
+          where access.company_id=notifications.company_id
+            and access.user_id=notifications.recipient_user_id
+            and access.resource_type='logic_gate'
+            and access.resource_id=notifications.entity_id::uuid
+            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+        )
+        when entity_type = 'node' then exists (
+          select 1
+          from effective_resource_access access
+          where access.company_id=notifications.company_id
+            and access.user_id=notifications.recipient_user_id
+            and access.resource_type='node'
+            and access.resource_id=notifications.entity_id::uuid
+            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+        )
+        when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder') then exists (
+          select 1
+          from effective_resource_access access
+          where access.company_id=notifications.company_id
+            and access.user_id=notifications.recipient_user_id
+            and access.resource_type='shared_triage_folder'
+            and access.resource_id=notifications.entity_id::uuid
+            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+        )
         else true
       end
-    )
   )`
 
 const notificationRoleSummaryTargetSQL = `

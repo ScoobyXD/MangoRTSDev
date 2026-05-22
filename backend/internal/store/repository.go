@@ -152,6 +152,7 @@ type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
+	ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error)
 }
 
 type ConsolidatedViewRepository interface {
@@ -1008,6 +1009,14 @@ func LogicGateKanbanBoardID(logicGateID string) string {
 
 func IsLogicGateKanbanBoardID(boardID string) bool {
 	return strings.HasPrefix(strings.TrimSpace(boardID), "logic-gate:")
+}
+
+func LogicGateIDFromKanbanBoardID(boardID string) string {
+	boardID = strings.TrimSpace(boardID)
+	if !IsLogicGateKanbanBoardID(boardID) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(boardID, "logic-gate:"))
 }
 
 func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {
