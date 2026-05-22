@@ -25,6 +25,20 @@ Teal remains a selectable legacy colorway, but it is not the default.
 - Text/icons/borders that are normally dark in `light` mode must switch to light values in `dark` mode.
 - Keep accent colors (`accent`) for highlights/branding, but do not use them as a replacement for surface/text inversion.
 
+## Elevated surface UI
+
+The official frontend term for the floating raised panel/card treatment is **elevated surface**.
+
+Use **elevated surface** for UI objects that should visually float above their surrounding area while still behaving as normal layout content when needed. Examples include the bottom taskbar surface and key views column sections such as expanded Logic Gate explorer groups.
+
+Required visual semantics:
+
+- The surface reads as one cohesive object, with the header and expanded body connected when open.
+- Use a rounded outer container, a subtle border, layered drop shadow, a light surface gradient, and a small inset highlight.
+- Optional backdrop blur is allowed when it supports the floating illusion without making text harder to read.
+- If the elevated surface expands inline, it must still occupy layout space and push following UI down. Do not use absolute overlay behavior unless the component is intentionally a popover.
+- Selection and hover states inside elevated surfaces should use the shared cyan/light-blue interaction treatment unless the component has a specific brand exception.
+
 ## Implementation expectation
 
 - Every module render signature should accept:

@@ -838,6 +838,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
+          elevated
           trailing={<SidebarNotificationBadges badges={[{
             key: "my-triage",
             count: myTriageNotificationCount,
@@ -847,9 +848,9 @@ export function AppSidebar({
           }]} />}
           onClick={() => onHomeViewSelect("my-triage")}
         />
-        <div style={appSidebarSharedRootBlockStyle}>
+        <div style={appSidebarSharedRootBlockStyle(sharedTriageActive || dropTarget?.folderID === "")}>
           <div
-            style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "")}
+            style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "", true, sharedTriageOpen)}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
             onDragOver={handleSharedRootDragOver}
             onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
@@ -895,6 +896,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="ACIO Nodes"
           active={homeActive && activeHomeView === "aci-inbox"}
+          elevated
           trailing={<SidebarNotificationBadges badges={[{
             key: "aci",
             count: aciNotificationCount,
@@ -907,6 +909,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="R Nodes"
           active={homeActive && activeHomeView === "r-inbox"}
+          elevated
           trailing={<SidebarNotificationBadges badges={[{
             key: "responsible",
             count: responsibleNotificationCount,
@@ -1037,6 +1040,7 @@ export function AppSidebar({
           label="Map"
           active={activePage === "map"}
           icon={<HeaderMapIcon />}
+          elevated
           onPointerEnter={preloadDefaultDashboardModules}
           onFocus={preloadDefaultDashboardModules}
           onPointerDown={preloadDefaultDashboardModules}
@@ -1245,6 +1249,7 @@ function AppSidebarButton({
   active,
   icon,
   trailing,
+  elevated = false,
   onClick,
   onPointerEnter,
   onFocus,
@@ -1254,6 +1259,7 @@ function AppSidebarButton({
   active: boolean;
   icon?: React.ReactNode;
   trailing?: React.ReactNode;
+  elevated?: boolean;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onPointerEnter?: () => void;
   onFocus?: () => void;
@@ -1262,7 +1268,7 @@ function AppSidebarButton({
   return (
     <button
       type="button"
-      style={appSidebarButtonStyle(active, !!icon, !!trailing)}
+      style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated)}
       onPointerEnter={onPointerEnter}
       onFocus={onFocus}
       onPointerDown={onPointerDown}
@@ -1277,9 +1283,9 @@ function AppSidebarButton({
 
 const SharedInboxAssignedEmailIcon: React.FC = () => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-    <path d="M2.2 5.8h11.6l-.95 6.25a1.25 1.25 0 0 1-1.24 1.05H4.39a1.25 1.25 0 0 1-1.24-1.05z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
-    <path d="M3.45 7.25 7.2 9.8c.48.33 1.12.33 1.6 0l3.75-2.55" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M4.25 3h7.5c.69 0 1.25.56 1.25 1.25V5.8H3V4.25C3 3.56 3.56 3 4.25 3Z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+    <rect x="2.35" y="3.15" width="11.3" height="9.7" rx="1.9" fill="none" stroke="currentColor" strokeWidth="1.25" />
+    <path d="m3.35 5.25 3.78 3.02c.51.41 1.23.41 1.74 0l3.78-3.02" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M4.45 10.55h7.1" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
   </svg>
 );
 
@@ -1624,14 +1630,44 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
 
 const appSidebarSectionTitleStyle: React.CSSProperties = {
   padding: "0 6px",
-  color: "rgba(36, 18, 10, 0.62)",
-  fontSize: 10,
-  fontWeight: 700,
+  color: "#111111",
+  fontSize: 12,
+  fontWeight: 800,
   textTransform: "uppercase",
   letterSpacing: 0,
 };
 
-function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean): React.CSSProperties {
+function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean): React.CSSProperties {
+  if (elevated) {
+    return {
+      width: "auto",
+      minHeight: 36,
+      display: "grid",
+      gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
+      alignItems: "center",
+      gap: 7,
+      margin: "2px -6px 2px",
+      border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
+      borderRadius: 14,
+      background: active
+        ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+      color: SIDEBAR_ACTIVE_TEXT,
+      boxShadow: active
+        ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+        : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
+      backdropFilter: "blur(18px)",
+      WebkitBackdropFilter: "blur(18px)",
+      cursor: "pointer",
+      font: "inherit",
+      fontSize: 12,
+      fontWeight: 700,
+      letterSpacing: 0,
+      padding: hasIcon ? "0 10px" : "0 10px 0 12px",
+      textAlign: "left",
+      minWidth: 0,
+    };
+  }
   return {
     width: "100%",
     minHeight: 31,
@@ -1734,18 +1770,30 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
   }
 }
-const appSidebarSharedRootBlockStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 3,
-  minWidth: 0,
-};
+function appSidebarSharedRootBlockStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gap: 0,
+    minWidth: 0,
+    margin: "2px -6px 2px",
+    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
+    borderRadius: 14,
+    background: "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)",
+    boxShadow: active
+      ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+      : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    overflow: "hidden",
+  };
+}
 
 function appSidebarMiniExplorerBlockStyle(floating: boolean): React.CSSProperties {
   return {
     display: "grid",
     gap: floating ? 0 : 3,
     minWidth: 0,
-    margin: floating ? "2px -6px 8px" : 0,
+    margin: floating ? "2px -6px 1px" : 0,
     border: floating ? "1px solid rgba(148, 163, 184, 0.38)" : undefined,
     borderRadius: floating ? 14 : undefined,
     background: floating ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
@@ -1825,7 +1873,24 @@ function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSPropertie
   };
 }
 
-function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): React.CSSProperties {
+function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, elevated = false, open = false): React.CSSProperties {
+  if (elevated) {
+    return {
+      width: "100%",
+      minHeight: 36,
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 1fr) 28px",
+      alignItems: "center",
+      gap: 0,
+      border: "none",
+      borderRadius: open ? "13px 13px 0 0" : 13,
+      background: active || dropActive
+        ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+      color: SIDEBAR_ACTIVE_TEXT,
+      minWidth: 0,
+    };
+  }
   return {
     width: "100%",
     minHeight: 31,
@@ -1843,7 +1908,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): R
 
 const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 29,
+  minHeight: 34,
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
@@ -1856,7 +1921,7 @@ const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
   letterSpacing: 0,
-  padding: "0 0 0 8px",
+  padding: "0 0 0 12px",
   textAlign: "left",
 };
 
@@ -1888,8 +1953,9 @@ const appSidebarSharedRowsStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignContent: "start",
-  gap: 2,
-  padding: "0 0 0 2px",
+  gap: 1,
+  padding: "2px 0 7px",
+  borderTop: "1px solid rgba(100, 116, 139, 0.22)",
 };
 
 const appSidebarSharedErrorStyle: React.CSSProperties = {
@@ -2059,9 +2125,9 @@ function appSidebarPinRowStyle(dropPlacement: "before" | "after" | null): React.
     gap: 4,
     cursor: "grab",
     boxShadow: dropPlacement === "before"
-      ? "inset 0 2px 0 #ff8820"
+      ? "inset 0 2px 0 rgba(100, 116, 139, 0.58)"
       : dropPlacement === "after"
-        ? "inset 0 -2px 0 #ff8820"
+        ? "inset 0 -2px 0 rgba(100, 116, 139, 0.58)"
         : undefined,
   };
 }
@@ -2073,7 +2139,7 @@ const appSidebarPinButtonStyle: React.CSSProperties = {
   gridTemplateColumns: "18px minmax(0, 1fr)",
   alignItems: "center",
   gap: 6,
-  border: "1px solid rgba(255, 136, 32, 0.15)",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#3f332b",
@@ -2089,7 +2155,7 @@ const appSidebarPinIconStyle: React.CSSProperties = {
   width: 18,
   display: "grid",
   placeItems: "center",
-  color: "#ff8820",
+  color: "#334155",
 };
 
 const appSidebarPinRemoveStyle: React.CSSProperties = {
@@ -2097,7 +2163,7 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.18)",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 5,
   background: "#ffffff",
   color: "rgba(36, 18, 10, 0.58)",
