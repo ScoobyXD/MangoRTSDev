@@ -107,7 +107,7 @@ Tasks:
 - [x] Decide for each old route: keep as effective-access compatibility, wrap over V2/consolidated behavior, or disable.
 - [x] Prefer `/v2/nodes/{id}/view` for node read workflows.
 - [x] Prefer `/v2/logic-gates/{id}/view` for Logic Gate read workflows.
-- [ ] Prefer `/v2/logic-gates/{id}/work` for Logic Gate work/Kanban workflows.
+- [x] Prefer `/v2/logic-gates/{id}/work` for Logic Gate work/Kanban workflows.
 - [x] Disable map routes by default.
 - [x] Remove map payloads from normal workspace snapshots by default.
 - [x] Remove Kanban legacy payloads from normal workspace snapshots by default.
@@ -128,17 +128,17 @@ Legacy Kanban routes still exist, including the old card authorization pattern t
 
 Tasks:
 
-- [ ] Audit all `/v1/kanban/*` route registrations.
-- [ ] Audit all callers of `requireKanbanCardView`.
-- [ ] Decide whether `/v1/kanban/*` returns disabled responses or compatibility responses.
-- [ ] If disabled, return a clear disabled/retired response for old Kanban routes.
-- [ ] If compatibility-wrapped, map reads and mutations to Logic Gate work.
-- [ ] Ensure Kanban-like reads require Logic Gate view access.
-- [ ] Ensure Kanban-like mutations require Logic Gate edit access.
-- [ ] Remove `requireKanbanCardView` from active request paths.
-- [ ] Stop loading full board card lists to authorize one card.
-- [ ] Add tests proving old Kanban card authorization does not execute.
-- [ ] Update the project journal with the final Kanban policy.
+- [x] Audit all `/v1/kanban/*` route registrations.
+- [x] Audit all callers of `requireKanbanCardView`.
+- [x] Decide whether `/v1/kanban/*` returns disabled responses or compatibility responses.
+- [x] If disabled, return a clear disabled/retired response for old Kanban routes.
+- [x] If compatibility-wrapped, map reads and mutations to Logic Gate work.
+- [x] Ensure Kanban-like reads require Logic Gate view access.
+- [x] Ensure Kanban-like mutations require Logic Gate edit access.
+- [x] Remove `requireKanbanCardView` from active request paths.
+- [x] Stop loading full board card lists to authorize one card.
+- [x] Add tests proving old Kanban card authorization does not execute.
+- [x] Update the project journal with the final Kanban policy.
 
 Success criteria:
 
@@ -222,6 +222,80 @@ Tests added or updated:
   - full snapshot map payload checks now opt in with `include_legacy_map=1`.
 - `backend/internal/http/communications_handlers_test.go`
   - shared inbox fixture rebuilds effective access before asserting view access.
+
+### Entry 3 - Phase 3 Neutralized Legacy Kanban Authorization
+
+Audit:
+
+- `/v1/kanban/*` registrations remain in `backend/internal/http/server.go` but are now intentional.
+- The registered routes are `/v1/kanban/boards`, `/v1/kanban/boards/`, `/v1/kanban/columns`, `/v1/kanban/columns/`, `/v1/kanban/cards`, and `/v1/kanban/cards/`.
+- The only active `requireKanbanCardView` callers were `PUT /v1/kanban/cards/{id}` and `DELETE /v1/kanban/cards/{id}`. The helper has been removed.
+
+Default route policy:
+
+- `/v1/kanban/boards`
+  - `GET` is compatibility-wrapped only when `logic_gate_id` is supplied.
+  - It reads the synthesized board from Logic Gate work and requires Logic Gate view effective access.
+  - Generic board list and `POST` are disabled with `legacy_kanban_routes_disabled`.
+- `/v1/kanban/boards/{id}`
+  - Disabled by default with `legacy_kanban_routes_disabled`.
+- `/v1/kanban/columns`
+  - `GET` is compatibility-wrapped only for `board_id=logic-gate:{id}`.
+  - It returns Logic Gate work status columns and requires Logic Gate view effective access.
+  - Generic column reads and `POST` are disabled by default.
+- `/v1/kanban/columns/{id}`
+  - Disabled by default with `legacy_kanban_routes_disabled`.
+- `/v1/kanban/cards`
+  - `GET` is compatibility-wrapped only for `board_id=logic-gate:{id}` and reads cards from Logic Gate work with Logic Gate view effective access.
+  - `POST` is compatibility-wrapped only for `board_id=logic-gate:{id}` and writes through `AssignNodeToLogicGateStatus` with Logic Gate edit effective access.
+  - Generic card reads and writes are disabled by default.
+- `/v1/kanban/cards/{id}`
+  - `PUT` and `DELETE` are compatibility-wrapped only for `board_id=logic-gate:{id}`.
+  - `PUT` maps to Logic Gate work move/issue mutations and requires Logic Gate edit effective access.
+  - `DELETE` maps to Logic Gate work assignment removal and requires Logic Gate edit effective access.
+  - Unsupported methods and non-Logic Gate boards are disabled by default.
+- `/v1/workspace/snapshot?scope=kanban`
+  - Default scoped Kanban snapshots are compatibility-wrapped only for `board_id=logic-gate:{id}` and require Logic Gate view effective access.
+  - Standalone legacy board snapshots are disabled by default.
+- `/v1/workspace/snapshot?scope=full`
+  - Legacy Kanban board payloads remain omitted by default.
+  - `include_legacy_kanban=1` only works when legacy Kanban routes are explicitly enabled.
+
+Temporary legacy compatibility:
+
+- Legacy standalone Kanban storage routes can be enabled with `ServerOptions.LegacyKanbanRoutesEnabled` or `MANGORTS_ENABLE_LEGACY_KANBAN_ROUTES=1`.
+- This exists for old tests and rollback compatibility only.
+- Even in the legacy path, Logic Gate board/card mutations now require Logic Gate edit effective access, and card authorization uses `GetKanbanCard` instead of loading a whole board through `ListKanbanCards`.
+
+Files changed:
+
+- `backend/internal/http/server.go`
+  - Added the legacy Kanban route gate option and environment variable.
+- `backend/internal/http/kanban_handlers.go`
+  - Added default Logic Gate work compatibility wrappers for old Kanban reads and card mutations.
+  - Disabled standalone old Kanban route behavior by default.
+- `backend/internal/http/entity_permission_handlers.go`
+  - Removed `requireKanbanCardView`.
+  - Added Logic Gate effective-access helpers for Kanban board/card paths.
+- `backend/internal/http/work_item_handlers.go`
+  - Old `/v1/work-items/logic-gate-assignments*` mutations now require Logic Gate edit effective access.
+- `backend/internal/http/workspace_handlers.go`
+  - Scoped Kanban snapshots now use Logic Gate work by default and standalone Kanban snapshots are disabled by default.
+  - Full snapshots only include legacy Kanban payloads when the legacy Kanban flag is enabled.
+- `backend/internal/store/repository.go`, `backend/internal/store/memory_kanban.go`, and `backend/internal/store/postgres_kanban.go`
+  - Added `GetKanbanCard` for direct card lookup.
+- `frontend/src/modules/kanban/kanbanApi.ts`
+  - Logic Gate assignment create/move/remove/issue flows now prefer `/v2/logic-gates/{id}/work` subresources where possible.
+  - Cross-gate move and missing-Logic-Gate legacy fallbacks remain on old work-item endpoints for now.
+
+Tests added or updated:
+
+- `backend/internal/http/v4_mini_phase3_test.go`
+  - proves default old Kanban card mutation does not call legacy board card list authorization
+  - proves no-view Logic Gate work/Kanban resources return HTTP 404 with the generic resource-denied message
+  - proves visible-but-insufficient Kanban-like mutation access returns HTTP 403 with the generic action-denied message
+  - proves standalone old Kanban routes are intentionally disabled by default
+- Existing legacy Kanban tests now opt in with `ServerOptions.LegacyKanbanRoutesEnabled`.
 
 ## Files To Inspect First
 

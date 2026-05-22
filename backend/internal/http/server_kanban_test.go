@@ -17,7 +17,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	companyID := "11111111-1111-4111-8111-111111111111"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	boardID := "frame-kanban-api-test"
@@ -270,7 +270,7 @@ func TestKanbanBoardAPIFlow(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-333333333333"
 	boardID := "ops-kanban-board"
@@ -383,7 +383,7 @@ func TestKanbanCardAPIUsesNodeOnlyCardsAndRemovesQueryEndpoint(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-222222222222"
 	boardID := "frame-kanban-query-test"
@@ -526,7 +526,7 @@ func (r *failingKanbanCardWorkspaceEventRepo) UpsertKanbanCardWithWorkspaceEvent
 
 func TestKanbanHTTPPublishesCommittedWorkspaceEventsWithoutLegacyAppend(t *testing.T) {
 	repo := &appendForbiddenKanbanRepo{MemoryRepo: store.NewMemoryRepo()}
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	handler := server.Routes()
 	companyID := "14141414-1414-4141-8141-141414141414"
 	boardID := "http-committed-kanban-events"
@@ -594,7 +594,7 @@ func TestKanbanHTTPPublishesCommittedWorkspaceEventsWithoutLegacyAppend(t *testi
 func TestKanbanHTTPDoesNotPublishHubEventWhenAtomicMutationFails(t *testing.T) {
 	companyID := "15151515-1515-4151-8151-151515151515"
 	repo := &failingKanbanCardWorkspaceEventRepo{MemoryRepo: store.NewMemoryRepo(), err: errors.New("commit failed")}
-	server := NewServer(repo)
+	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
 	stream := server.hub.subscribe(companyID)
 	defer server.hub.unsubscribe(companyID, stream)
 

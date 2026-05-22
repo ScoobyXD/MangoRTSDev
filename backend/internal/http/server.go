@@ -25,28 +25,29 @@ type AuthEmailSender interface {
 }
 
 type Server struct {
-	repo                     store.Repository
-	hub                      *workspaceEventHub
-	emailHub                 *workspaceEventHub
-	notificationHub          *workspaceEventHub
-	notifications            *notifications.Service
-	kanban                   *kanban.Service
-	workspaceWakeHub         *workspaceEventNotificationHub
-	workspaceFanout          store.WorkspaceEventFanout
-	workspaceFanoutCancel    context.CancelFunc
-	workspaceCatchupInterval time.Duration
-	metrics                  MetricsRecorder
-	commCache                *communicationsCache
-	nylasGate                *nylasRequestGate
-	nylasWebhooks            *nylasWebhookReceiptCache
-	authValidator            AuthTokenValidator
-	authCache                *authMembershipCache
-	cognitoAdmin             CognitoAdminClient
-	emailSender              AuthEmailSender
-	nylasClient              NylasClient
-	nylasConfig              NylasConfig
-	maxBodyBytes             int64
-	legacyMapRoutesEnabled   bool
+	repo                      store.Repository
+	hub                       *workspaceEventHub
+	emailHub                  *workspaceEventHub
+	notificationHub           *workspaceEventHub
+	notifications             *notifications.Service
+	kanban                    *kanban.Service
+	workspaceWakeHub          *workspaceEventNotificationHub
+	workspaceFanout           store.WorkspaceEventFanout
+	workspaceFanoutCancel     context.CancelFunc
+	workspaceCatchupInterval  time.Duration
+	metrics                   MetricsRecorder
+	commCache                 *communicationsCache
+	nylasGate                 *nylasRequestGate
+	nylasWebhooks             *nylasWebhookReceiptCache
+	authValidator             AuthTokenValidator
+	authCache                 *authMembershipCache
+	cognitoAdmin              CognitoAdminClient
+	emailSender               AuthEmailSender
+	nylasClient               NylasClient
+	nylasConfig               NylasConfig
+	maxBodyBytes              int64
+	legacyMapRoutesEnabled    bool
+	legacyKanbanRoutesEnabled bool
 }
 
 type ServerOptions struct {
@@ -59,6 +60,7 @@ type ServerOptions struct {
 	NylasConfig                   NylasConfig
 	MaxRequestBodyBytes           int64
 	LegacyMapRoutesEnabled        bool
+	LegacyKanbanRoutesEnabled     bool
 	WorkspaceEventFanout          store.WorkspaceEventFanout
 	WorkspaceCatchupInterval      time.Duration
 	Metrics                       MetricsRecorder
@@ -78,27 +80,28 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		metrics = NewInMemoryMetricsRecorder()
 	}
 	server := &Server{
-		repo:                     repo,
-		hub:                      newWorkspaceEventHub(),
-		emailHub:                 newWorkspaceEventHub(),
-		notificationHub:          newWorkspaceEventHub(),
-		notifications:            notifications.NewService(repo),
-		kanban:                   kanban.NewService(repo),
-		workspaceWakeHub:         newWorkspaceEventNotificationHub(),
-		workspaceFanout:          options.WorkspaceEventFanout,
-		workspaceCatchupInterval: catchupInterval,
-		metrics:                  metrics,
-		commCache:                newCommunicationsCache(),
-		nylasGate:                newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks:            newNylasWebhookReceiptCache(),
-		authValidator:            options.AuthValidator,
-		authCache:                newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
-		cognitoAdmin:             options.CognitoAdmin,
-		emailSender:              options.EmailSender,
-		nylasClient:              options.NylasClient,
-		nylasConfig:              options.NylasConfig,
-		maxBodyBytes:             options.MaxRequestBodyBytes,
-		legacyMapRoutesEnabled:   options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
+		repo:                      repo,
+		hub:                       newWorkspaceEventHub(),
+		emailHub:                  newWorkspaceEventHub(),
+		notificationHub:           newWorkspaceEventHub(),
+		notifications:             notifications.NewService(repo),
+		kanban:                    kanban.NewService(repo),
+		workspaceWakeHub:          newWorkspaceEventNotificationHub(),
+		workspaceFanout:           options.WorkspaceEventFanout,
+		workspaceCatchupInterval:  catchupInterval,
+		metrics:                   metrics,
+		commCache:                 newCommunicationsCache(),
+		nylasGate:                 newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:             newNylasWebhookReceiptCache(),
+		authValidator:             options.AuthValidator,
+		authCache:                 newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		cognitoAdmin:              options.CognitoAdmin,
+		emailSender:               options.EmailSender,
+		nylasClient:               options.NylasClient,
+		nylasConfig:               options.NylasConfig,
+		maxBodyBytes:              options.MaxRequestBodyBytes,
+		legacyMapRoutesEnabled:    options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
+		legacyKanbanRoutesEnabled: options.LegacyKanbanRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_KANBAN_ROUTES")),
 	}
 	server.startWorkspaceEventFanout()
 	return server

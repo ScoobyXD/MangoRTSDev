@@ -587,6 +587,27 @@ limit %s`, kanbanCardSelectColumns, strings.Join(where, " and "), strings.Join(o
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) GetKanbanCard(companyID, boardID, cardID string) (domain.KanbanCard, error) {
+	companyID = strings.TrimSpace(companyID)
+	boardID = strings.TrimSpace(boardID)
+	cardID = strings.TrimSpace(cardID)
+	if companyID == "" || boardID == "" || cardID == "" {
+		return domain.KanbanCard{}, ErrInvalid
+	}
+	ctx := context.Background()
+	item, err := scanKanbanCard(r.db.QueryRowContext(ctx, `
+select `+kanbanCardSelectColumns+`
+from kanban_cards
+where company_id=$1 and board_id=$2 and card_id=$3`, companyID, boardID, cardID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.KanbanCard{}, err
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
