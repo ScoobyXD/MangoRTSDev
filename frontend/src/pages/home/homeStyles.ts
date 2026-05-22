@@ -9,6 +9,7 @@ const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
 const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
+const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
   const trimmed = color.trim();
@@ -403,7 +404,7 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     alignContent: "center",
     justifyItems: "center",
     gap: 7,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_CYAN_MEDIUM}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_TASKBAR_TILE_GRAY_BORDER}`,
     borderRadius: 7,
     background: "#ffffff",
     color: "#24120a",
