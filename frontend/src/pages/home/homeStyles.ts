@@ -5,6 +5,7 @@ import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeU
 export const HOME_CYAN = "rgb(0, 233, 255)";
 const HOME_CYAN_FAINT = "rgba(0, 233, 255, 0.10)";
 const HOME_CYAN_SOFT = "rgba(0, 233, 255, 0.16)";
+const HOME_CYAN_HOVER = "rgba(0, 233, 255, 0.24)";
 const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
 const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
 const HOME_BLACK = "#000000";
@@ -167,11 +168,11 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : "transparent"}`,
+    border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : hovered ? HOME_CYAN_MEDIUM : "transparent"}`,
     borderRadius: 6,
-    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" || hovered ? HOME_CYAN_FAINT : "#ffffff",
+    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" ? HOME_CYAN_FAINT : hovered ? HOME_CYAN_HOVER : "#ffffff",
     color: "#24120a",
-    cursor: "grab",
+    cursor: "pointer",
     font: "inherit",
     fontSize: 12,
     fontWeight: active ? 700 : 500,
