@@ -260,6 +260,9 @@ export function AppSidebar({
     () => mailUnreadCounts.sharedTriage,
     [mailUnreadCounts.sharedTriage],
   );
+  const [sharedTriageHovered, setSharedTriageHovered] = useState(false);
+  const [sharedTriageFocused, setSharedTriageFocused] = useState(false);
+  const sharedTriageRaised = sharedTriageOpen || sharedTriageHovered || sharedTriageFocused;
   useEffect(() => {
     const onHomeUnreadCountsUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string; viewID?: HomeSidebarView; unreadCount?: number }>).detail;
@@ -849,9 +852,18 @@ export function AppSidebar({
           }]} />}
           onClick={() => onHomeViewSelect("my-triage")}
         />
-        <div style={appSidebarSharedRootBlockStyle(sharedTriageActive || dropTarget?.folderID === "")}>
+        <div
+          style={appSidebarSharedRootBlockStyle(sharedTriageActive || dropTarget?.folderID === "", sharedTriageRaised)}
+          onPointerEnter={() => setSharedTriageHovered(true)}
+          onPointerLeave={() => setSharedTriageHovered(false)}
+          onFocus={() => setSharedTriageFocused(true)}
+          onBlur={(event) => {
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+            setSharedTriageFocused(false);
+          }}
+        >
           <div
-            style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "", true, sharedTriageOpen)}
+            style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "", true, sharedTriageOpen, sharedTriageRaised)}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
             onDragOver={handleSharedRootDragOver}
             onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
@@ -1266,12 +1278,21 @@ function AppSidebarButton({
   onFocus?: () => void;
   onPointerDown?: () => void;
 }): React.ReactElement {
+  const [raised, setRaised] = useState(false);
   return (
     <button
       type="button"
-      style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated)}
-      onPointerEnter={onPointerEnter}
-      onFocus={onFocus}
+      style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated, raised)}
+      onPointerEnter={() => {
+        setRaised(true);
+        onPointerEnter?.();
+      }}
+      onPointerLeave={() => setRaised(false)}
+      onFocus={() => {
+        setRaised(true);
+        onFocus?.();
+      }}
+      onBlur={() => setRaised(false)}
       onPointerDown={onPointerDown}
       onClick={onClick}
     >
@@ -1307,9 +1328,21 @@ function AppSidebarScopedExplorerSection({
   selectionTargetFrameIDs: string[];
   onToggle: () => void;
 }): React.ReactElement {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const raised = floating && (open || hovered || focused);
   return (
-    <div style={appSidebarMiniExplorerBlockStyle(floating)}>
-      <div style={appSidebarMiniExplorerRowStyle(open, floating)}>
+    <div
+      style={appSidebarMiniExplorerBlockStyle(floating, raised)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setFocused(false);
+      }}
+    >
+      <div style={appSidebarMiniExplorerRowStyle(open, floating, raised)}>
         <button
           type="button"
           style={appSidebarMiniExplorerLabelButtonStyle(floating)}
@@ -1638,7 +1671,7 @@ const appSidebarSectionTitleStyle: React.CSSProperties = {
   letterSpacing: 0,
 };
 
-function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean): React.CSSProperties {
+function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean, raised = false): React.CSSProperties {
   if (elevated) {
     return {
       width: "auto",
@@ -1648,17 +1681,20 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       alignItems: "center",
       gap: 7,
       margin: "2px 2px 2px",
-      border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
+      border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
       background: active
         ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
-        : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+        : raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
-      boxShadow: active
-        ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
-        : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
-      backdropFilter: "blur(18px)",
-      WebkitBackdropFilter: "blur(18px)",
+      boxShadow: raised
+        ? active
+          ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+          : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+        : "none",
+      transform: raised ? "translateY(-1px)" : "translateY(0)",
+      backdropFilter: raised ? "blur(18px)" : "none",
+      WebkitBackdropFilter: raised ? "blur(18px)" : "none",
       cursor: "pointer",
       font: "inherit",
       fontSize: 12,
@@ -1667,6 +1703,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       padding: hasIcon ? "0 10px" : "0 10px 0 12px",
       textAlign: "left",
       minWidth: 0,
+      transition: "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease, transform 140ms ease, backdrop-filter 140ms ease",
     };
   }
   return {
@@ -1771,41 +1808,47 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
   }
 }
-function appSidebarSharedRootBlockStyle(active: boolean): React.CSSProperties {
+function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React.CSSProperties {
   return {
     display: "grid",
     gap: 0,
     minWidth: 0,
     margin: "2px 2px 2px",
-    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "rgba(148, 163, 184, 0.38)"}`,
+    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}`,
     borderRadius: SIDEBAR_ELEVATED_RADIUS,
-    background: "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)",
-    boxShadow: active
-      ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
-      : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
-    backdropFilter: "blur(18px)",
-    WebkitBackdropFilter: "blur(18px)",
+    background: raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
+    boxShadow: raised
+      ? active
+        ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+        : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+      : "none",
+    transform: raised ? "translateY(-1px)" : "translateY(0)",
+    backdropFilter: raised ? "blur(18px)" : "none",
+    WebkitBackdropFilter: raised ? "blur(18px)" : "none",
     overflow: "hidden",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease, transform 140ms ease, backdrop-filter 140ms ease",
   };
 }
 
-function appSidebarMiniExplorerBlockStyle(floating: boolean): React.CSSProperties {
+function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): React.CSSProperties {
   return {
     display: "grid",
     gap: floating ? 0 : 3,
     minWidth: 0,
     margin: floating ? "2px 2px 1px" : 0,
-    border: floating ? "1px solid rgba(148, 163, 184, 0.38)" : undefined,
+    border: floating ? `1px solid ${raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}` : undefined,
     borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
-    background: floating ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
-    boxShadow: floating ? "0 18px 42px rgba(15, 23, 42, 0.18), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : undefined,
-    backdropFilter: floating ? "blur(18px)" : undefined,
-    WebkitBackdropFilter: floating ? "blur(18px)" : undefined,
+    background: floating && raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
+    boxShadow: floating && raised ? "0 18px 42px rgba(15, 23, 42, 0.18), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : undefined,
+    transform: floating && raised ? "translateY(-1px)" : "translateY(0)",
+    backdropFilter: floating && raised ? "blur(18px)" : undefined,
+    WebkitBackdropFilter: floating && raised ? "blur(18px)" : undefined,
     overflow: floating ? "hidden" : "visible",
+    transition: floating ? "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease, transform 140ms ease, backdrop-filter 140ms ease" : undefined,
   };
 }
 
-function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React.CSSProperties {
+function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised = false): React.CSSProperties {
   if (floating) {
     return {
       width: "100%",
@@ -1815,9 +1858,10 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React
       alignItems: "center",
       border: "none",
       borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
-      background: "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+      background: raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
+      transition: "background 120ms ease",
     };
   }
   return {
@@ -1874,7 +1918,7 @@ function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSPropertie
   };
 }
 
-function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, elevated = false, open = false): React.CSSProperties {
+function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, elevated = false, open = false, raised = false): React.CSSProperties {
   if (elevated) {
     return {
       width: "100%",
@@ -1887,9 +1931,10 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
       borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
       background: active || dropActive
         ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
-        : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)",
+        : raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
+      transition: "background 120ms ease",
     };
   }
   return {
