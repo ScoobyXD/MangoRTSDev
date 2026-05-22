@@ -44,6 +44,8 @@ export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: stri
       logic_gate: entry.logicGate,
       information: [],
       relationships: entry.relationships ?? [],
+      information_count: 0,
+      relationships_count: entry.relationships?.length ?? 0,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
   }

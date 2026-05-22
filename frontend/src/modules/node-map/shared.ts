@@ -51,6 +51,8 @@ export type NodeDetails = {
   node: NodeRecord;
   information: NodeInformation[];
   relationships: NodeRelationship[];
+  information_count?: number;
+  relationships_count?: number;
 };
 
 export type NodeDirection = "left" | "right" | "top" | "bottom";

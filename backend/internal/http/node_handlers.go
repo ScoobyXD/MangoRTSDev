@@ -280,7 +280,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
 		}
-		details, err := s.repo.GetNodeDetails(companyID, nodeID)
+		loadDetails := s.repo.GetNodeDetailsSummary
+		if nodeDetailsIncludeInformationHistory(r) {
+			loadDetails = s.repo.GetNodeDetails
+		}
+		details, err := loadDetails(companyID, nodeID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
@@ -299,6 +303,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		details.Relationships = filterNodeRelationshipsByVisibleNodes(details.Relationships, visibleRelationshipNodeIDs)
+		details.RelationshipsCount = len(details.Relationships)
+		if details.InformationCount == 0 && len(details.Information) > 0 {
+			details.InformationCount = len(details.Information)
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
 		return
 	}
@@ -435,6 +443,13 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func nodeDetailsIncludeInformationHistory(r *http.Request) bool {
+	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_information", "include_history")) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("history")), "full")
 }
 
 func nodeChangeActorPayload(r *http.Request) (string, string) {

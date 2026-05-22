@@ -965,41 +965,60 @@ order by input.ordinality`,
 }
 
 func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
+	return r.getNodeDetails(companyID, nodeID, true)
+}
+
+func (r *PostgresRepo) GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error) {
+	return r.getNodeDetails(companyID, nodeID, false)
+}
+
+func (r *PostgresRepo) getNodeDetails(companyID, nodeID string, includeInformation bool) (domain.NodeDetails, error) {
 	node, err := r.GetNode(companyID, nodeID)
 	if err != nil {
 		return domain.NodeDetails{}, err
 	}
 
 	ctx := context.Background()
-	infoRows, err := r.db.QueryContext(ctx,
-		`select company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp
-		 from node_information
-		 where company_id=$1 and node_id=$2
-		 order by created_timestamp asc`,
-		companyID, nodeID,
-	)
-	if err != nil {
-		return domain.NodeDetails{}, err
-	}
-	defer infoRows.Close()
-
 	information := make([]domain.NodeInformation, 0)
-	for infoRows.Next() {
-		var item domain.NodeInformation
-		if err := infoRows.Scan(
-			&item.CompanyID,
-			&item.InformationID,
-			&item.NodeID,
-			&item.Type,
-			&item.Information,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
+	informationCount := 0
+	if includeInformation {
+		infoRows, err := r.db.QueryContext(ctx,
+			`select company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp
+			 from node_information
+			 where company_id=$1 and node_id=$2
+			 order by created_timestamp asc`,
+			companyID, nodeID,
+		)
+		if err != nil {
 			return domain.NodeDetails{}, err
 		}
-		information = append(information, item)
-	}
-	if err := infoRows.Err(); err != nil {
+		defer infoRows.Close()
+
+		for infoRows.Next() {
+			var item domain.NodeInformation
+			if err := infoRows.Scan(
+				&item.CompanyID,
+				&item.InformationID,
+				&item.NodeID,
+				&item.Type,
+				&item.Information,
+				&item.CreatedTimestamp,
+				&item.UpdatedTimestamp,
+			); err != nil {
+				return domain.NodeDetails{}, err
+			}
+			information = append(information, item)
+		}
+		if err := infoRows.Err(); err != nil {
+			return domain.NodeDetails{}, err
+		}
+		informationCount = len(information)
+	} else if err := r.db.QueryRowContext(ctx,
+		`select count(*)
+		   from node_information
+		  where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	).Scan(&informationCount); err != nil {
 		return domain.NodeDetails{}, err
 	}
 
@@ -1036,9 +1055,11 @@ func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDeta
 	}
 
 	return domain.NodeDetails{
-		Node:          node,
-		Information:   information,
-		Relationships: relationships,
+		Node:               node,
+		Information:        information,
+		Relationships:      relationships,
+		InformationCount:   informationCount,
+		RelationshipsCount: len(relationships),
 	}, nil
 }
 
@@ -1352,7 +1373,7 @@ select change.company_id::text,
        change.start_offset,
        change.end_offset,
        coalesce(change.actor_user_id::text, ''),
-       change.actor_display_name,
+       coalesce(change.actor_display_name, ''),
        change.created_timestamp
 from node_content_changes change
 left join node_content_change_seen seen

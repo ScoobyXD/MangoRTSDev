@@ -699,6 +699,67 @@ func TestNodeInformationProjectionAPIKeepsEditorTextBoxesIndependent(t *testing.
 	}
 }
 
+func TestGetNodeDefaultsToLightweightDetails(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-node-lightweight-details-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+
+	node, err := repo.CreateNode(companyID, "node with large history")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	largeInformation := strings.Repeat("large-history-row", 512)
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", largeInformation, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); err != nil {
+		t.Fatalf("AddNodeInformation() error = %v", err)
+	}
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", "current text", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"); err != nil {
+		t.Fatalf("AddNodeInformation() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+node.NodeID+"?company_id="+companyID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lightweight node status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), largeInformation) {
+		t.Fatal("lightweight node details response included append-only information history")
+	}
+	var lightweightPayload struct {
+		Information      []domain.NodeInformation `json:"information"`
+		InformationCount int                      `json:"information_count"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&lightweightPayload); err != nil {
+		t.Fatalf("decode lightweight node details: %v", err)
+	}
+	if len(lightweightPayload.Information) != 0 {
+		t.Fatalf("lightweight information rows = %d, want 0", len(lightweightPayload.Information))
+	}
+	if lightweightPayload.InformationCount != 2 {
+		t.Fatalf("lightweight information_count = %d, want 2", lightweightPayload.InformationCount)
+	}
+
+	fullReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+node.NodeID+"?company_id="+companyID+"&include_information=1", nil)
+	fullRec := httptest.NewRecorder()
+	handler.ServeHTTP(fullRec, fullReq)
+	if fullRec.Code != http.StatusOK {
+		t.Fatalf("GET full node status = %d, want %d body=%s", fullRec.Code, http.StatusOK, fullRec.Body.String())
+	}
+	var fullPayload struct {
+		Information      []domain.NodeInformation `json:"information"`
+		InformationCount int                      `json:"information_count"`
+	}
+	if err := json.NewDecoder(fullRec.Body).Decode(&fullPayload); err != nil {
+		t.Fatalf("decode full node details: %v", err)
+	}
+	if len(fullPayload.Information) != 2 || fullPayload.InformationCount != 2 {
+		t.Fatalf("full information rows/count = %d/%d, want 2/2", len(fullPayload.Information), fullPayload.InformationCount)
+	}
+}
+
 func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T) {
 	t.Parallel()
 

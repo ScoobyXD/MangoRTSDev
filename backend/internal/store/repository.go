@@ -97,6 +97,7 @@ type WorkGraphRepository interface {
 	DeleteNode(companyID, nodeID string) error
 	DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error)
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
+	GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
 	AddNodeInformationWithActor(input NodeInformationInput) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
