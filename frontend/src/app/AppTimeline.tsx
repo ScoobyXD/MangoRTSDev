@@ -60,8 +60,9 @@ type TimelineTick = {
 };
 
 const PIXELS_PER_QUARTER_HOUR = 31;
-const COMPACT_TRACK_HEIGHT = 76;
+const COMPACT_HEADER_HEIGHT = 24;
 const EXPANDED_TRACK_HEIGHT = 108;
+const EXPANDED_LANE_TOP = 37;
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -572,7 +573,7 @@ function timelineDaysScrollerStyle(expanded: boolean): React.CSSProperties {
     minHeight: 0,
     height: "100%",
     display: "grid",
-    alignContent: "start",
+    alignContent: expanded ? "start" : "stretch",
     gap: expanded ? 10 : 0,
     overflowX: "hidden",
     overflowY: expanded ? "auto" : "hidden",
@@ -585,7 +586,10 @@ function timelineDaysScrollerStyle(expanded: boolean): React.CSSProperties {
 function timelineDayPanelStyle(expanded: boolean): React.CSSProperties {
   return {
     minWidth: 0,
+    minHeight: 0,
+    height: expanded ? undefined : "100%",
     display: "grid",
+    gridTemplateRows: expanded ? undefined : "minmax(0, 1fr)",
     gap: expanded ? 6 : 0,
   };
 }
@@ -604,11 +608,12 @@ const timelineDayTitleStyle: React.CSSProperties = {
 function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProperties {
   return {
     minWidth: 0,
-    height: compact ? COMPACT_TRACK_HEIGHT : EXPANDED_TRACK_HEIGHT,
+    minHeight: 0,
+    height: compact ? "100%" : EXPANDED_TRACK_HEIGHT,
     overflowX: compact ? "hidden" : "auto",
     overflowY: "hidden",
-    border: `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
-    borderRadius: 8,
+    border: compact ? 0 : `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
+    borderRadius: compact ? "0 15px 15px 0" : 8,
     background: active ? "linear-gradient(180deg, #ecfeff 0%, #ffffff 100%)" : "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
     boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
     scrollbarWidth: compact ? "none" : "thin",
@@ -620,16 +625,18 @@ function timelineContentStyle(width: number, compact: boolean): React.CSSPropert
     position: "relative",
     width,
     minWidth: width,
-    height: (compact ? COMPACT_TRACK_HEIGHT : EXPANDED_TRACK_HEIGHT) - 2,
+    height: compact ? "100%" : EXPANDED_TRACK_HEIGHT - 2,
   };
 }
 
 function timelineTickStyle(left: number, major: boolean, compact: boolean): React.CSSProperties {
+  const laneTop = compact ? COMPACT_HEADER_HEIGHT : EXPANDED_LANE_TOP;
+  const majorHeaderRise = compact ? COMPACT_HEADER_HEIGHT / 2 : 12;
   return {
     position: "absolute",
     left,
-    top: compact ? 23 : 37,
-    height: compact ? 46 : 56,
+    top: major ? Math.max(0, laneTop - majorHeaderRise) : laneTop,
+    bottom: 0,
     width: 1,
     background: major ? "rgba(15, 23, 42, 0.18)" : "rgba(15, 23, 42, 0.08)",
     transform: "translateX(-0.5px)",
@@ -655,8 +662,9 @@ function timelineLaneStyle(compact: boolean): React.CSSProperties {
     position: "absolute",
     left: 0,
     right: 0,
-    top: compact ? 23 : 37,
-    height: compact ? 46 : 56,
+    top: compact ? COMPACT_HEADER_HEIGHT : EXPANDED_LANE_TOP,
+    bottom: compact ? 0 : undefined,
+    height: compact ? undefined : 56,
     borderTop: "1px solid rgba(100, 116, 139, 0.18)",
     borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
     background: "rgba(226, 232, 240, 0.24)",
@@ -681,9 +689,9 @@ function timelineItemStyle(
   return {
     position: "absolute",
     left,
-    top: compact ? 4 : 5,
+    top: compact ? 8 : 5,
     width,
-    height: compact ? 38 : 46,
+    height: compact ? 48 : 46,
     minWidth: compact ? 112 : 88,
     display: "grid",
     gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "7px minmax(0, 1fr) 24px 7px",

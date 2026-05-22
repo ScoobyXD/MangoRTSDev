@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { EXPLORER_DRAG_MIME } from "../modules/company-explorer/companyExplorerDragDrop";
 import type { AppDockTab } from "./appDockTabs";
 import { AppTimeline } from "./AppTimeline";
 import type { AppTimelineState } from "./timelineState";
@@ -10,6 +11,7 @@ type AppTaskbarProps = {
   timelineState: AppTimelineState;
   expanded: boolean;
   leftInset: number;
+  timelineStartX: number;
   onExpandedChange: (expanded: boolean) => void;
   onOpenTab: (tab: AppDockTab) => void;
   onReorderTab: (movingTabID: string, targetTabID: string) => void;
@@ -28,6 +30,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   timelineState,
   expanded,
   leftInset,
+  timelineStartX,
   onExpandedChange,
   onOpenTab,
   onReorderTab,
@@ -72,8 +75,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   }, []);
 
   return (
-    <footer style={taskbarShellStyle(expanded, leftInset)} aria-label="Taskbar">
-      <div aria-hidden="true" style={taskbarCenterDividerStyle} />
+    <footer style={taskbarShellStyle(expanded, leftInset, timelineStartX)} aria-label="Taskbar">
+      <div aria-hidden="true" style={taskbarCenterDividerStyle(leftInset, timelineStartX)} />
       <section style={taskbarDockPaneStyle(expanded)} aria-label="Collapsed nodes and Logic Gates">
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
           <div style={dockRailStyle}>
@@ -87,6 +90,25 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   title={tab.label}
                   aria-label={tab.label}
                   aria-pressed={active}
+                  draggable={!!tab.entityID}
+                  onDragStart={(event) => {
+                    const payload = dockTabTimelineDragPayload(tab);
+                    if (!payload) {
+                      event.preventDefault();
+                      return;
+                    }
+                    suppressNextClickRef.current = true;
+                    setDragging(true);
+                    setMovingTabID(tab.id);
+                    event.dataTransfer.effectAllowed = "copy";
+                    event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+                    event.dataTransfer.setData("text/plain", tab.label);
+                  }}
+                  onDragEnd={() => {
+                    dragRef.current = null;
+                    setMovingTabID("");
+                    setDragging(false);
+                  }}
                   onPointerDown={(event) => {
                     if (event.button !== 0) return;
                     dragRef.current = { id: tab.id, startX: event.clientX, startY: event.clientY };
@@ -159,17 +181,37 @@ function shortTaskbarLabel(label: string): string {
   return fallback.length > 18 ? `${fallback.slice(0, 15)}...` : fallback;
 }
 
-function taskbarShellStyle(expanded: boolean, leftInset: number): React.CSSProperties {
+function dockTabTimelineDragPayload(tab: AppDockTab): { kind: "node" | "logic_gate"; itemID: string; itemType: "node" | "logic_gate"; sourceTreeID: string } | null {
+  const itemID = tab.entityID.trim();
+  if (!itemID) return null;
+  const kind = tab.kind === "node" ? "node" : "logic_gate";
+  return {
+    kind,
+    itemID,
+    itemType: kind,
+    sourceTreeID: tab.id,
+  };
+}
+
+function taskbarLeft(leftInset: number): number {
+  return Math.max(TASKBAR_FLOATING_GAP, leftInset + TASKBAR_FLOATING_GAP);
+}
+
+function taskbarTimelineColumnStart(leftInset: number, timelineStartX: number): number {
+  return Math.max(0, Math.round(timelineStartX - taskbarLeft(leftInset)));
+}
+
+function taskbarShellStyle(expanded: boolean, leftInset: number, timelineStartX: number): React.CSSProperties {
   return {
     position: "fixed",
-    left: Math.max(TASKBAR_FLOATING_GAP, leftInset + TASKBAR_FLOATING_GAP),
+    left: taskbarLeft(leftInset),
     right: TASKBAR_FLOATING_GAP,
     bottom: TASKBAR_FLOATING_GAP,
     height: expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gridTemplateColumns: `${taskbarTimelineColumnStart(leftInset, timelineStartX)}px minmax(0, 1fr)`,
     gap: 0,
-    padding: expanded ? "14px 16px 14px" : "10px 14px",
+    padding: 0,
     boxSizing: "border-box",
     border: "1px solid rgba(148, 163, 184, 0.38)",
     borderRadius: 16,
@@ -185,16 +227,18 @@ function taskbarShellStyle(expanded: boolean, leftInset: number): React.CSSPrope
   };
 }
 
-const taskbarCenterDividerStyle: React.CSSProperties = {
-  position: "absolute",
-  left: "50%",
-  top: 10,
-  bottom: 10,
-  width: 1,
-  background: "rgba(100, 116, 139, 0.25)",
-  transform: "translateX(-0.5px)",
-  pointerEvents: "none",
-};
+function taskbarCenterDividerStyle(leftInset: number, timelineStartX: number): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: taskbarTimelineColumnStart(leftInset, timelineStartX),
+    top: 0,
+    bottom: 0,
+    width: 1,
+    background: "rgba(100, 116, 139, 0.25)",
+    transform: "translateX(-0.5px)",
+    pointerEvents: "none",
+  };
+}
 
 function taskbarDockPaneStyle(expanded: boolean): React.CSSProperties {
   return {
@@ -203,7 +247,7 @@ function taskbarDockPaneStyle(expanded: boolean): React.CSSProperties {
     display: "flex",
     alignItems: expanded ? "end" : "center",
     justifyContent: "end",
-    paddingRight: 18,
+    padding: expanded ? "14px 18px 14px 16px" : "10px 18px 10px 14px",
     boxSizing: "border-box",
     overflow: "hidden",
   };
@@ -220,6 +264,7 @@ function taskbarTimelinePaneStyle(expanded: boolean): React.CSSProperties {
     alignItems: "stretch",
     overflow: "hidden",
     opacity: expanded ? 1 : 0.98,
+    borderRadius: "0 15px 15px 0",
   };
 }
 
