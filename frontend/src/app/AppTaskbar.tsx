@@ -11,7 +11,8 @@ type AppTaskbarProps = {
   timelineState: AppTimelineState;
   expanded: boolean;
   leftInset: number;
-  timelineStartX: number;
+  timelineCenterX: number;
+  viewportWidth: number;
   onExpandedChange: (expanded: boolean) => void;
   onOpenTab: (tab: AppDockTab) => void;
   onReorderTab: (movingTabID: string, targetTabID: string) => void;
@@ -22,7 +23,19 @@ type AppTaskbarProps = {
 
 const TASKBAR_COLLAPSED_HEIGHT = 96;
 const TASKBAR_EXPANDED_HEIGHT = 330;
+const TASKBAR_MINIMIZED_HEIGHT = 8;
+const TASKBAR_MINIMIZED_WIDTH = 300;
 const TASKBAR_FLOATING_GAP = 18;
+const TASKBAR_TIMELINE_MIN_WIDTH = 520;
+const TASKBAR_DOCK_BUTTON_WIDTH = 68;
+const TASKBAR_DOCK_BUTTON_GAP = 10;
+
+type TaskbarLayout = {
+  left: number;
+  width: number;
+  dockWidth: number;
+  timelineWidth: number;
+};
 
 export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   tabs,
@@ -30,7 +43,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   timelineState,
   expanded,
   leftInset,
-  timelineStartX,
+  timelineCenterX,
+  viewportWidth,
   onExpandedChange,
   onOpenTab,
   onReorderTab,
@@ -41,13 +55,25 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   const dragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
   const suppressNextClickRef = useRef(false);
+  const previousTabCountRef = useRef(tabs.length);
   const [movingTabID, setMovingTabID] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [timelineVisible, setTimelineVisible] = useState(true);
+  const [leftDockOpen, setLeftDockOpen] = useState(() => tabs.length > 0);
+  const hasDockTabs = tabs.length > 0;
+  const dockVisible = hasDockTabs && leftDockOpen;
+  const layout = taskbarLayout(expanded, dockVisible ? tabs.length : 0, leftInset, timelineCenterX, viewportWidth, timelineVisible);
 
   useEffect(() => {
     const rail = railRef.current;
     if (!rail) return;
     rail.scrollLeft = rail.scrollWidth;
+  }, [tabs.length]);
+
+  useEffect(() => {
+    if (tabs.length > previousTabCountRef.current) setLeftDockOpen(true);
+    if (tabs.length === 0) setLeftDockOpen(false);
+    previousTabCountRef.current = tabs.length;
   }, [tabs.length]);
 
   useEffect(() => {
@@ -74,10 +100,24 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
     };
   }, []);
 
+  const toggleExpanded = () => {
+    if (!timelineVisible) {
+      setTimelineVisible(true);
+      onExpandedChange(false);
+      return;
+    }
+    onExpandedChange(!expanded);
+  };
+
+  const hideTimeline = () => {
+    setTimelineVisible(false);
+    onExpandedChange(false);
+  };
+
   return (
-    <footer style={taskbarShellStyle(expanded, leftInset, timelineStartX)} aria-label="Taskbar">
-      <div aria-hidden="true" style={taskbarCenterDividerStyle(leftInset, timelineStartX)} />
-      <section style={taskbarDockPaneStyle(expanded)} aria-label="Collapsed nodes and Logic Gates">
+    <footer style={taskbarShellStyle(expanded, layout, timelineVisible, dockVisible)} aria-label="Taskbar">
+      <div aria-hidden="true" style={taskbarCenterDividerStyle(layout.dockWidth, dockVisible, timelineVisible)} />
+      <section style={taskbarDockPaneStyle(expanded, dockVisible, !timelineVisible)} aria-label="Collapsed nodes and Logic Gates">
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
           <div style={dockRailStyle}>
             {tabs.map((tab) => {
@@ -139,24 +179,74 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
           </div>
         </div>
       </section>
-      <section style={taskbarTimelinePaneStyle(expanded)} aria-label="Timeline">
-        <AppTimeline
-          state={timelineState}
-          expanded={expanded}
-          onChange={onTimelineChange}
-          onOpenEntity={onOpenTimelineEntity}
-        />
+      <section style={taskbarTimelinePaneStyle(expanded, timelineVisible, dockVisible)} aria-label="Timeline">
+        {timelineVisible && (
+          <AppTimeline
+            state={timelineState}
+            expanded={expanded}
+            onChange={onTimelineChange}
+            onOpenEntity={onOpenTimelineEntity}
+          />
+        )}
       </section>
       <button
         type="button"
-        title={expanded ? "Minimize taskbar" : "Expand taskbar"}
-        aria-label={expanded ? "Minimize taskbar" : "Expand taskbar"}
-        aria-pressed={expanded}
-        onClick={() => onExpandedChange(!expanded)}
-        style={taskbarToggleStyle}
+        title={dockVisible ? "Hide collapsed nodes and Logic Gates" : "Show collapsed nodes and Logic Gates"}
+        aria-label={dockVisible ? "Hide collapsed nodes and Logic Gates" : "Show collapsed nodes and Logic Gates"}
+        aria-pressed={dockVisible}
+        onClick={() => setLeftDockOpen((current) => !current)}
+        style={taskbarSideToggleStyle(layout, "left", timelineVisible, dockVisible)}
       >
-        <ChevronIcon open={expanded} />
+        <ArrowIcon direction={dockVisible ? "right" : "left"} />
       </button>
+      <button
+        type="button"
+        title="Right taskbar section"
+        aria-label="Right taskbar section"
+        aria-disabled="true"
+        onClick={(event) => event.preventDefault()}
+        style={taskbarSideToggleStyle(layout, "right", timelineVisible, false)}
+      >
+        <ArrowIcon direction="right" />
+      </button>
+      <div style={taskbarCenterToggleStyle(layout, timelineVisible, timelineVisible && !expanded)} aria-label="Taskbar timeline controls">
+        {timelineVisible && expanded ? (
+          <button
+            type="button"
+            title="Collapse expanded taskbar"
+            aria-label="Collapse expanded taskbar"
+            aria-pressed={expanded}
+            onClick={toggleExpanded}
+            style={taskbarCenterSingleButtonStyle}
+          >
+            <ArrowIcon direction="down" />
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              title={!timelineVisible ? "Show taskbar" : "Expand taskbar"}
+              aria-label={!timelineVisible ? "Show taskbar" : "Expand taskbar"}
+              aria-pressed={expanded}
+              onClick={toggleExpanded}
+              style={timelineVisible ? taskbarCenterHalfButtonStyle("top") : taskbarCenterSingleButtonStyle}
+            >
+              <ChevronIcon open={false} />
+            </button>
+            {timelineVisible && (
+              <button
+                type="button"
+                title="Hide taskbar"
+                aria-label="Hide taskbar"
+                onClick={hideTimeline}
+                style={taskbarCenterHalfButtonStyle("bottom")}
+              >
+                <ArrowIcon direction="down" />
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </footer>
   );
 };
@@ -170,6 +260,19 @@ const PinIndicator: React.FC = () => (
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style={{ display: "block", transform: open ? "rotate(180deg)" : "none", transition: "transform 140ms ease" }}>
+      <path d="M4 10 8 6l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ArrowIcon({ direction }: { direction: "left" | "right" | "down" }) {
+  const transform = direction === "right"
+    ? "rotate(90deg)"
+    : direction === "left"
+      ? "rotate(-90deg)"
+      : "rotate(180deg)";
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", transform }}>
       <path d="M4 10 8 6l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -197,28 +300,64 @@ function taskbarLeft(leftInset: number): number {
   return Math.max(TASKBAR_FLOATING_GAP, leftInset + TASKBAR_FLOATING_GAP);
 }
 
-function taskbarTimelineColumnStart(leftInset: number, timelineStartX: number): number {
-  return Math.max(0, Math.round(timelineStartX - taskbarLeft(leftInset)));
+function taskbarDockHorizontalPadding(expanded: boolean): number {
+  return expanded ? 34 : 32;
 }
 
-function taskbarShellStyle(expanded: boolean, leftInset: number, timelineStartX: number): React.CSSProperties {
+function taskbarPreferredDockWidth(expanded: boolean, tabCount: number): number {
+  if (tabCount <= 0) return 0;
+  return (
+    taskbarDockHorizontalPadding(expanded)
+    + tabCount * TASKBAR_DOCK_BUTTON_WIDTH
+    + Math.max(0, tabCount - 1) * TASKBAR_DOCK_BUTTON_GAP
+  );
+}
+
+function taskbarLayout(expanded: boolean, tabCount: number, leftInset: number, timelineCenterX: number, viewportWidth: number, timelineVisible: boolean): TaskbarLayout {
+  const minLeft = taskbarLeft(leftInset);
+  const maxRight = Math.max(TASKBAR_FLOATING_GAP, viewportWidth - TASKBAR_FLOATING_GAP);
+  const centeredMaxWidth = Math.max(
+    1,
+    Math.min(timelineCenterX - minLeft, maxRight - timelineCenterX) * 2,
+  );
+  const preferredTimelineWidth = timelineVisible
+    ? Math.max(TASKBAR_TIMELINE_MIN_WIDTH, timelineCenterX - TASKBAR_FLOATING_GAP)
+    : TASKBAR_MINIMIZED_WIDTH;
+  const timelineWidth = Math.max(1, Math.min(preferredTimelineWidth, centeredMaxWidth));
+  const timelineLeft = Math.round(timelineCenterX - timelineWidth / 2);
+  const maxDockWidth = Math.max(0, timelineLeft - minLeft);
+  const dockWidth = Math.round(Math.min(taskbarPreferredDockWidth(expanded, tabCount), maxDockWidth));
+  const left = timelineLeft - dockWidth;
+
+  return {
+    left,
+    width: dockWidth + timelineWidth,
+    dockWidth,
+    timelineWidth,
+  };
+}
+
+function taskbarShellStyle(expanded: boolean, layout: TaskbarLayout, timelineVisible: boolean, dockVisible: boolean): React.CSSProperties {
+  const surfaceVisible = timelineVisible;
   return {
     position: "fixed",
-    left: taskbarLeft(leftInset),
-    right: TASKBAR_FLOATING_GAP,
+    left: layout.left,
+    width: layout.width,
     bottom: TASKBAR_FLOATING_GAP,
-    height: expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT,
+    height: timelineVisible
+      ? expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT
+      : dockVisible ? TASKBAR_COLLAPSED_HEIGHT : TASKBAR_MINIMIZED_HEIGHT,
     display: "grid",
-    gridTemplateColumns: `${taskbarTimelineColumnStart(leftInset, timelineStartX)}px minmax(0, 1fr)`,
+    gridTemplateColumns: `${layout.dockWidth}px ${layout.timelineWidth}px`,
     gap: 0,
     padding: 0,
     boxSizing: "border-box",
-    border: "1px solid rgba(148, 163, 184, 0.38)",
-    borderRadius: 16,
-    background: "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%)",
-    boxShadow: "0 28px 64px rgba(15, 23, 42, 0.26), 0 10px 22px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92)",
-    backdropFilter: "blur(18px)",
-    WebkitBackdropFilter: "blur(18px)",
+    border: surfaceVisible ? "1px solid rgba(148, 163, 184, 0.38)" : "none",
+    borderRadius: surfaceVisible ? 16 : 0,
+    background: surfaceVisible ? "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.94) 100%)" : "transparent",
+    boxShadow: surfaceVisible ? "0 28px 64px rgba(15, 23, 42, 0.26), 0 10px 22px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : "none",
+    backdropFilter: surfaceVisible ? "blur(18px)" : "none",
+    WebkitBackdropFilter: surfaceVisible ? "blur(18px)" : "none",
     zIndex: 116,
     pointerEvents: "auto",
     color: "#0f172a",
@@ -227,10 +366,11 @@ function taskbarShellStyle(expanded: boolean, leftInset: number, timelineStartX:
   };
 }
 
-function taskbarCenterDividerStyle(leftInset: number, timelineStartX: number): React.CSSProperties {
+function taskbarCenterDividerStyle(dockWidth: number, visible: boolean, timelineVisible: boolean): React.CSSProperties {
   return {
     position: "absolute",
-    left: taskbarTimelineColumnStart(leftInset, timelineStartX),
+    display: visible && timelineVisible ? "block" : "none",
+    left: dockWidth,
     top: 0,
     bottom: 0,
     width: 1,
@@ -240,21 +380,49 @@ function taskbarCenterDividerStyle(leftInset: number, timelineStartX: number): R
   };
 }
 
-function taskbarDockPaneStyle(expanded: boolean): React.CSSProperties {
+function taskbarDockPaneStyle(expanded: boolean, visible: boolean, detached: boolean): React.CSSProperties {
   return {
+    gridColumn: 1,
+    alignSelf: detached ? "end" : "stretch",
     minWidth: 0,
     minHeight: 0,
+    height: detached ? TASKBAR_COLLAPSED_HEIGHT : "auto",
     display: "flex",
     alignItems: expanded ? "end" : "center",
     justifyContent: "end",
     padding: expanded ? "14px 18px 14px 16px" : "10px 18px 10px 14px",
     boxSizing: "border-box",
     overflow: "hidden",
+    visibility: visible ? "visible" : "hidden",
+    pointerEvents: visible ? "auto" : "none",
+    border: detached ? "1px solid rgba(148, 163, 184, 0.38)" : "none",
+    borderRadius: detached ? 16 : 0,
+    background: detached ? "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.94) 100%)" : "transparent",
+    boxShadow: detached ? "0 18px 42px rgba(15, 23, 42, 0.20), 0 8px 18px rgba(15, 23, 42, 0.12)" : "none",
+    backdropFilter: detached ? "blur(18px)" : "none",
+    WebkitBackdropFilter: detached ? "blur(18px)" : "none",
   };
 }
 
-function taskbarTimelinePaneStyle(expanded: boolean): React.CSSProperties {
+function taskbarTimelinePaneStyle(expanded: boolean, timelineVisible: boolean, dockVisible: boolean): React.CSSProperties {
+  if (!timelineVisible) {
+    return {
+      gridColumn: 2,
+      alignSelf: "end",
+      minWidth: 0,
+      minHeight: 0,
+      height: TASKBAR_MINIMIZED_HEIGHT,
+      boxSizing: "border-box",
+      display: "block",
+      overflow: "visible",
+      border: "1px solid rgba(100, 116, 139, 0.34)",
+      borderRadius: 999,
+      background: "#ffffff",
+      boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+    };
+  }
   return {
+    gridColumn: 2,
     minWidth: 0,
     minHeight: 0,
     height: "100%",
@@ -264,7 +432,7 @@ function taskbarTimelinePaneStyle(expanded: boolean): React.CSSProperties {
     alignItems: "stretch",
     overflow: "hidden",
     opacity: expanded ? 1 : 0.98,
-    borderRadius: "0 15px 15px 0",
+    borderRadius: dockVisible ? "0 15px 15px 0" : 15,
   };
 }
 
@@ -286,7 +454,7 @@ const dockRailStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "end",
-  gap: 10,
+  gap: TASKBAR_DOCK_BUTTON_GAP,
   marginLeft: "auto",
 };
 
@@ -294,7 +462,7 @@ function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties 
   return {
     flex: "0 0 auto",
     position: "relative",
-    width: 68,
+    width: TASKBAR_DOCK_BUTTON_WIDTH,
     height: 64,
     display: "grid",
     gridTemplateRows: "36px 20px",
@@ -351,20 +519,74 @@ const dockPinnedStyle: React.CSSProperties = {
   color: "#2563eb",
 };
 
-const taskbarToggleStyle: React.CSSProperties = {
-  position: "absolute",
-  left: "50%",
-  top: -13,
-  width: 30,
-  height: 26,
+function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", timelineVisible: boolean, active: boolean): React.CSSProperties {
+  const timelineCenter = layout.dockWidth + layout.timelineWidth / 2;
+  return {
+    position: "absolute",
+    left: timelineVisible
+      ? side === "left" ? layout.dockWidth : layout.dockWidth + layout.timelineWidth
+      : timelineCenter + (side === "left" ? -48 : 48),
+    top: timelineVisible ? "50%" : undefined,
+    bottom: timelineVisible ? undefined : -8,
+    width: 28,
+    height: 28,
+    display: "grid",
+    placeItems: "center",
+    transform: timelineVisible ? "translate(-50%, -50%)" : "translateX(-50%)",
+    border: "1px solid rgba(100, 116, 139, 0.3)",
+    borderRadius: 999,
+    background: active ? "#f8fafc" : "#ffffff",
+    color: active ? "#0f172a" : "#334155",
+    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.13)",
+    cursor: "pointer",
+    padding: 0,
+    zIndex: 2,
+  };
+}
+
+function taskbarCenterToggleStyle(layout: TaskbarLayout, timelineVisible: boolean, split: boolean): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: layout.dockWidth + layout.timelineWidth / 2,
+    top: timelineVisible ? -16 : -24,
+    width: 32,
+    height: split ? 34 : 30,
+    display: "grid",
+    gridTemplateRows: split ? "1fr 1fr" : "1fr",
+    overflow: "hidden",
+    transform: "translateX(-50%)",
+    border: "1px solid rgba(100, 116, 139, 0.3)",
+    borderRadius: 999,
+    background: "#ffffff",
+    color: "#334155",
+    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+    zIndex: 3,
+  };
+}
+
+function taskbarCenterHalfButtonStyle(half: "top" | "bottom"): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 0,
+    display: "grid",
+    placeItems: "center",
+    border: "none",
+    borderBottom: half === "top" ? "1px solid rgba(100, 116, 139, 0.22)" : "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    padding: 0,
+  };
+}
+
+const taskbarCenterSingleButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
   display: "grid",
   placeItems: "center",
-  transform: "translateX(-50%)",
-  border: "1px solid rgba(100, 116, 139, 0.3)",
-  borderRadius: 999,
-  background: "#ffffff",
-  color: "#334155",
-  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+  border: "none",
+  background: "transparent",
+  color: "inherit",
   cursor: "pointer",
   padding: 0,
 };
