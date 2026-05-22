@@ -331,6 +331,32 @@ type LogicGateArenaView struct {
 	CardsLimit int            `json:"cards_limit"`
 }
 
+type LogicGateWorkView struct {
+	CompanyID   string                    `json:"company_id"`
+	LogicGateID string                    `json:"logic_gate_id"`
+	LogicGate   LogicGate                 `json:"logic_gate"`
+	Statuses    []LogicGateWorkStatus     `json:"statuses"`
+	Assignments []LogicGateWorkAssignment `json:"assignments"`
+	Nodes       []Node                    `json:"nodes"`
+	Board       KanbanBoard               `json:"board"`
+	Columns     []KanbanColumn            `json:"columns"`
+	Cards       []KanbanCard              `json:"cards"`
+	CardsLimit  int                       `json:"cards_limit"`
+}
+
+type LogicGateWorkStatus struct {
+	StatusKey   string                    `json:"status_key"`
+	Title       string                    `json:"title"`
+	Position    int                       `json:"position"`
+	Assignments []LogicGateWorkAssignment `json:"assignments"`
+}
+
+type LogicGateWorkAssignment struct {
+	Assignment NodeLogicGateAssignment `json:"assignment"`
+	Node       Node                    `json:"node"`
+	Card       KanbanCard              `json:"card"`
+}
+
 type CompanyExplorerFolder struct {
 	CompanyID        string                      `json:"company_id"`
 	FolderID         string                      `json:"folder_id"`
