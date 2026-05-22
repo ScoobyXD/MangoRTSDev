@@ -416,6 +416,16 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
 }
 
 export const myLogicGateTileIconStyle: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 6,
+  background: "#ffffff",
+  transform: "scale(1.5)",
+};
+
+export const myNodeTileIconStyle: React.CSSProperties = {
   width: 28,
   height: 28,
   display: "grid",
@@ -660,9 +670,9 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: str
     width: "100%",
     height: 30,
     display: "grid",
-    gridTemplateColumns: "18px minmax(0, 1fr) auto auto auto",
+    gridTemplateColumns: "22px minmax(0, 1fr) auto auto auto",
     alignItems: "center",
-    gap: 6,
+    gap: 7,
     border: "none",
     borderBottom: `1px solid ${HOME_BLACK}`,
     background: tint,
@@ -674,6 +684,14 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: str
     opacity: 1,
   };
 }
+
+export const logicGateInboxGroupIconStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  transform: "scale(1.24)",
+};
 
 export const logicGateInboxGroupTitleStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1269,13 +1287,13 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
 
 export function messagePlacementIconStyle(active: boolean): React.CSSProperties {
   return {
-    width: 18,
-    height: 18,
+    width: 22,
+    height: 22,
     marginTop: 0,
     display: "grid",
     placeItems: "center",
     color: active ? "#24120a" : HOME_CYAN,
-    transform: "scale(1.05)",
+    transform: "scale(1.25)",
   };
 }
 

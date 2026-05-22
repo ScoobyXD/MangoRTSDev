@@ -30,6 +30,9 @@ const TASKBAR_FLOATING_GAP = 18;
 const TASKBAR_TIMELINE_MIN_WIDTH = 520;
 const TASKBAR_DOCK_BUTTON_WIDTH = 68;
 const TASKBAR_DOCK_BUTTON_GAP = 10;
+const TASKBAR_CYAN_SOFT = "rgba(0, 233, 255, 0.16)";
+const TASKBAR_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
+const TASKBAR_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
 
 type TaskbarLayout = {
   left: number;
@@ -170,7 +173,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   onContextMenu={(event) => onTabContextMenu(event, tab)}
                   style={dockButtonStyle(active, movingTabID === tab.id)}
                 >
-                  <span style={dockIconStyle(active)}>
+                  <span style={dockIconStyle}>
                     <ExplorerRowIcon kind={tab.kind === "node" ? "node" : "logic_gate"} />
                   </span>
                   <span style={dockLabelStyle(active)}>{shortLabel}</span>
@@ -468,33 +471,31 @@ function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties 
     width: TASKBAR_DOCK_BUTTON_WIDTH,
     height: 64,
     display: "grid",
-    gridTemplateRows: "36px 20px",
+    gridTemplateRows: "34px 20px",
     placeItems: "center",
-    border: `1px solid ${active ? "rgba(37, 99, 235, 0.62)" : "rgba(100, 116, 139, 0.26)"}`,
-    borderRadius: 8,
-    background: active ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)" : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-    color: active ? "#1d4ed8" : "#334155",
+    border: `1px solid ${active ? TASKBAR_CYAN_BORDER : TASKBAR_CYAN_MEDIUM}`,
+    borderRadius: 7,
+    background: active ? TASKBAR_CYAN_SOFT : "#ffffff",
+    color: "#24120a",
     cursor: "pointer",
     font: "inherit",
     letterSpacing: 0,
-    padding: "5px 5px 4px",
+    padding: "6px 5px 4px",
     opacity: moving ? 0.78 : 1,
-    boxShadow: active ? "0 6px 14px rgba(37, 99, 235, 0.16)" : "0 4px 10px rgba(15, 23, 42, 0.08)",
+    boxShadow: active ? `0 0 0 2px ${TASKBAR_CYAN_SOFT}` : "none",
     transform: moving ? "translateY(-2px)" : "none",
     transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, opacity 120ms ease",
   };
 }
 
-function dockIconStyle(active: boolean): React.CSSProperties {
-  return {
-    width: 36,
-    height: 34,
-    display: "grid",
-    placeItems: "center",
-    color: active ? "#1d4ed8" : "#334155",
-    transform: "scale(1.45)",
-  };
-}
+const dockIconStyle: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  display: "grid",
+  placeItems: "center",
+  color: "#24120a",
+  transform: "scale(1.5)",
+};
 
 function dockLabelStyle(active: boolean): React.CSSProperties {
   return {
@@ -502,9 +503,9 @@ function dockLabelStyle(active: boolean): React.CSSProperties {
     minWidth: 0,
     height: 20,
     overflow: "hidden",
-    color: active ? "#1e3a8a" : "#475569",
-    fontSize: 9,
-    fontWeight: 800,
+    color: "#24120a",
+    fontSize: 10,
+    fontWeight: active ? 800 : 700,
     lineHeight: "10px",
     letterSpacing: 0,
     textAlign: "center",
@@ -519,7 +520,7 @@ const dockPinnedStyle: React.CSSProperties = {
   top: 4,
   display: "grid",
   placeItems: "center",
-  color: "#2563eb",
+  color: "#0891b2",
 };
 
 function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", timelineVisible: boolean, active: boolean): React.CSSProperties {
@@ -544,7 +545,7 @@ function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", t
     borderRadius: 999,
     background: active ? "#f8fafc" : "#ffffff",
     color: active ? "#0f172a" : "#334155",
-    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.13)",
+    boxShadow: "none",
     cursor: "pointer",
     padding: 0,
     zIndex: 2,
@@ -566,7 +567,7 @@ function taskbarCenterToggleStyle(layout: TaskbarLayout, timelineVisible: boolea
     borderRadius: 999,
     background: "#ffffff",
     color: "#334155",
-    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+    boxShadow: "none",
     zIndex: 3,
   };
 }
