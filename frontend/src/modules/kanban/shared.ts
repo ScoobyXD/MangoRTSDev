@@ -241,65 +241,58 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${red},${green},${blue},${alpha})`;
 }
 
-export function attachStackedDragPreview(dataTransfer: DataTransfer, items: KanbanDragPreviewItem[], accentColor: string, title: string): void {
+export function attachStackedDragPreview(dataTransfer: DataTransfer, items: KanbanDragPreviewItem[], _accentColor: string, title: string): void {
   if (typeof document === "undefined" || items.length === 0) return;
-  const visibleItems = items.slice(0, 12);
+  const iconKind = /logic gate/i.test(title) ? "logic_gate" : "node";
+  const layerCount = Math.min(3, items.length);
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "-1000px";
   container.style.left = "-1000px";
-  container.style.width = "230px";
-  container.style.padding = "8px";
-  container.style.border = `1px solid ${accentColor}`;
-  container.style.background = "rgba(36, 18, 10, 0.94)";
-  container.style.color = "#f6f8fb";
-  container.style.boxShadow = `0 10px 26px rgba(0,0,0,0.28), 0 0 18px ${hexToRgba(accentColor, 0.28)}`;
-  container.style.fontFamily = "var(--mango-font-family)";
+  container.style.width = "56px";
+  container.style.height = "56px";
+  container.style.opacity = "0.72";
+  container.style.filter = "grayscale(1) drop-shadow(0 12px 18px rgba(15, 23, 42, 0.26))";
   container.style.pointerEvents = "none";
   container.style.zIndex = "99999";
 
-  const header = document.createElement("div");
-  header.textContent = `${title} (${items.length})`;
-  header.style.fontSize = "10px";
-  header.style.fontWeight = "800";
-  header.style.letterSpacing = "0.06em";
-  header.style.textTransform = "uppercase";
-  header.style.marginBottom = "6px";
-  header.style.color = accentColor;
-  container.appendChild(header);
-
-  for (const item of visibleItems) {
-    const row = document.createElement("div");
-    row.textContent = item.label;
-    row.style.height = "22px";
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.marginTop = "3px";
-    row.style.padding = "0 7px";
-    row.style.border = "1px solid rgba(255,255,255,0.12)";
-    row.style.borderLeft = `4px solid ${item.color || accentColor}`;
-    row.style.background = "rgba(255,255,255,0.08)";
-    row.style.fontSize = "11px";
-    row.style.fontWeight = "700";
-    row.style.whiteSpace = "nowrap";
-    row.style.overflow = "hidden";
-    row.style.textOverflow = "ellipsis";
-    container.appendChild(row);
-  }
-
-  if (items.length > visibleItems.length) {
-    const more = document.createElement("div");
-    more.textContent = `+ ${items.length - visibleItems.length} more`;
-    more.style.marginTop = "5px";
-    more.style.fontSize = "10px";
-    more.style.fontWeight = "800";
-    more.style.color = "#fff2e0";
-    container.appendChild(more);
+  for (let index = layerCount - 1; index >= 0; index -= 1) {
+    const ghost = document.createElement("div");
+    ghost.style.position = "absolute";
+    ghost.style.left = `${index * 5}px`;
+    ghost.style.top = `${index * 4}px`;
+    ghost.style.width = "46px";
+    ghost.style.height = "46px";
+    ghost.style.display = "grid";
+    ghost.style.placeItems = "center";
+    ghost.style.border = "1px solid rgba(100, 116, 139, 0.32)";
+    ghost.style.borderRadius = "8px";
+    ghost.style.background = "rgba(248, 250, 252, 0.78)";
+    ghost.style.color = "rgba(51, 65, 85, 0.72)";
+    ghost.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.82), 0 6px 12px rgba(15, 23, 42, 0.12)";
+    ghost.innerHTML = iconKind === "logic_gate" ? logicGateDragPreviewIcon() : nodeDragPreviewIcon();
+    container.appendChild(ghost);
   }
 
   document.body.appendChild(container);
-  dataTransfer.setDragImage(container, 18, 18);
+  dataTransfer.setDragImage(container, 24, 24);
   window.setTimeout(() => container.remove(), 0);
+}
+
+function nodeDragPreviewIcon(): string {
+  return `<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <path d="M7 3.5h7.25L18 7.25V20.5H7z" fill="rgba(255,255,255,0.58)" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="M14.25 3.5v4h4" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="M9.7 12h5.2M9.7 15h5.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function logicGateDragPreviewIcon(): string {
+  return `<svg aria-hidden="true" width="26" height="24" viewBox="0 0 26 24" fill="none">
+    <path d="M2.5 12h4.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    <path d="M19.3 12h4.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    <path d="M7 6h6.1a6 6 0 0 1 0 12H7z" fill="rgba(255,255,255,0.58)" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+  </svg>`;
 }
 
 export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntityDragPayload | null {
