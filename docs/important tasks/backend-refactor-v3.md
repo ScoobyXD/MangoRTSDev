@@ -292,15 +292,15 @@ Files to inspect first:
 
 ### Phase 2: Effective Access Foundation
 
-- [ ] Add effective access schema/migration/read model.
-- [ ] Add projector/backfill logic from existing grants, groups, memberships, RACI, assignees, shared triage access, and Logic Gate assignments.
-- [ ] Add tests for direct grants.
-- [ ] Add tests for group grants.
-- [ ] Add tests for nested groups.
-- [ ] Add tests proving any RACI assignment grants edit access.
-- [ ] Add tests for Logic Gate inherited node visibility.
-- [ ] Add tests for shared triage folder/item inheritance.
-- [ ] Add tests for revoke/reprojection behavior.
+- [x] Add effective access schema/migration/read model.
+- [x] Add projector/backfill logic from existing grants, groups, memberships, RACI, assignees, shared triage access, and Logic Gate assignments.
+- [x] Add tests for direct grants.
+- [x] Add tests for group grants.
+- [x] Add tests for nested groups.
+- [x] Add tests proving any RACI assignment grants edit access.
+- [x] Add tests for Logic Gate inherited node visibility.
+- [x] Add tests for shared triage folder/item inheritance.
+- [x] Add tests for revoke/reprojection behavior.
 
 First concrete slice:
 
@@ -462,8 +462,18 @@ Use this section to record completed slices and important decisions.
 
 - 2026-05-22: Created V3 project document. Decisions captured: no positive access fact means no access; positive levels are view/edit/admin; RACI grants edit but is otherwise UI/notification routing; shared triage is a protected resource; shared triage items inherit folder access; Logic Gate access grants contextual assigned-node visibility; Kanban is a projection, not a backend domain.
 - 2026-05-22: Completed initial Phase 1 audit. Current backend uses `resource_access_grants` plus recursive `mangorts_user_can_access_resource`/`ListAccessibleEntityIDs` and Go-side list-then-filter helpers; exact legacy replacement paths, effective-access design notes, and the first implementation slice are now recorded above.
+- 2026-05-22: Completed the first Phase 2 implementation slice. Added `effective_resource_access` as a separate positive-access read model with forward, reverse, and source cleanup indexes. Added `EffectiveAccessRepository` methods for point checks, user-to-resource listing, resource-to-user listing, and deterministic full-company rebuilds. Implemented memory and Postgres rebuild projectors from legacy grants, group descendants, company/dev admins, node assignees, Logic Gate RACI, shared triage RACI including group assignments, shared-triage folder descendants, and Logic Gate assigned-node contextual visibility.
+- 2026-05-22: Phase 2 access projection decisions: `no_access` is consumed only as a legacy grant compatibility input and is never written to `effective_resource_access`; legacy grant projection applies the existing nearest-resource / direct-user-before-group precedence before emitting positive facts. Logic Gate assigned-node projection grants contextual `view` only. RACI still projects `edit` on the RACI resource and is not a permission tier.
+- 2026-05-22: Added focused store tests for direct user grants, direct group grants, nested group inheritance, RACI-to-edit, shared-triage folder inheritance, Logic Gate assigned-node contextual visibility, and source-specific revoke/reprojection. Verified with `go test ./internal/store` and full backend `go test ./...`.
 
 ## Open Questions
 
 - Should a Logic Gate editor be allowed to edit full node content for nodes assigned to the Logic Gate, or only assignment state/position?
 - Should legacy explicit `no_access` rows be migrated into absence of facts, or retained only as a compatibility deny source during the transition?
+- Legacy RACI mutation paths still write compatibility rows into `resource_access_grants` for old hot paths. During migration, these rows are treated as editable grant input because they have no provenance; future slices should decide when to stop creating those compatibility grants or add source metadata before relying on source-specific incremental cleanup.
+
+## Next Steps
+
+- Start Phase 3 by adding SQL visible-query methods that join `effective_resource_access` for nodes, Logic Gates, shared triage folders, company explorer reads, and work item reads.
+- Keep legacy handlers compatible while routing narrow internal reads through the new effective-access methods.
+- Avoid adding any new recursive permission checks; the recursive/group traversal belongs in the projector/backfill path only.

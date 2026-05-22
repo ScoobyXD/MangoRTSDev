@@ -30,6 +30,7 @@ type Repository interface {
 	WorkGraphRepository
 	LogicGateRepository
 	EntityPermissionRepository
+	EffectiveAccessRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
 	MapLayoutRepository
@@ -137,6 +138,13 @@ type EntityPermissionRepository interface {
 	ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error)
 	UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error)
 	UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error)
+}
+
+type EffectiveAccessRepository interface {
+	RebuildEffectiveResourceAccessForCompany(companyID string) error
+	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
+	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
+	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
 }
 
 type WorkItemReadRepository interface {

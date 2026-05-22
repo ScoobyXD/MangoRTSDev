@@ -104,6 +104,18 @@ type EntityPermission struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
+type EffectiveResourceAccess struct {
+	CompanyID        string    `json:"company_id"`
+	UserID           string    `json:"user_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	AccessLevel      string    `json:"access_level"`
+	SourceType       string    `json:"source_type"`
+	SourceID         string    `json:"source_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type Invitation struct {
 	InvitationID      string     `json:"invitation_id"`
 	CompanyID         string     `json:"company_id"`
