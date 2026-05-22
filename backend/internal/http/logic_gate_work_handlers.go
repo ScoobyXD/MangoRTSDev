@@ -347,11 +347,11 @@ func (s *Server) requireLogicGateWorkEffectiveAccess(w http.ResponseWriter, r *h
 			return false
 		}
 		if canView {
-			writeError(w, http.StatusForbidden, "logic_gate_access_denied")
+			writeAccessActionDenied(w)
 			return false
 		}
 	}
-	writeError(w, http.StatusNotFound, "logic_gate_not_found")
+	writeAccessResourceNotFound(w)
 	return false
 }
 

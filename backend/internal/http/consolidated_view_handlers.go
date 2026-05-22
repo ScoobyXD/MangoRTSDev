@@ -107,7 +107,7 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
 	if !canView {
-		writeError(w, http.StatusNotFound, notFoundCode)
+		writeAccessResourceNotFound(w)
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
 	canEdit, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)

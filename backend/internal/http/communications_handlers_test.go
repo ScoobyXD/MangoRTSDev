@@ -382,6 +382,9 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatal(err)
+	}
 	totalCount := 42
 	nylas := &fakeNylasClient{
 		folders: []NylasFolder{{ID: "archive", Name: "Archive", Attributes: []string{"\\Archive"}, TotalCount: &totalCount}},

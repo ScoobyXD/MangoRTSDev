@@ -180,6 +180,10 @@ func handlerWithCompanyAdminForTest(handler http.Handler, companyID string) http
 	})
 }
 
+func newServerWithLegacyMapRoutesForTest(repo store.Repository) *Server {
+	return NewServerWithOptions(repo, ServerOptions{LegacyMapRoutesEnabled: true})
+}
+
 func TestWorkspaceStreamReceivesDurableEventsFromOtherServer(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	serverA := NewServer(repo)
@@ -1440,7 +1444,7 @@ func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "company-map-layout-test"
 
@@ -1507,7 +1511,7 @@ func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 		t.Fatalf("node map positions = %+v, want saved node position", readPayload.Positions)
 	}
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full&include_legacy_map=1", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 	if snapshotRec.Code != http.StatusOK {
@@ -1670,7 +1674,7 @@ func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibili
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-555555555555"
 
@@ -1804,7 +1808,7 @@ func TestWorkspaceSnapshotNodeMapWindowRejectsInvalidInputsAndDoesNotRepairRows(
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-666666666666"
 	missingFolderID := "22222222-2222-4222-8222-222222222222"
@@ -1853,7 +1857,7 @@ func (r *countingNodeMapWindowRepo) ListNodeMapWindow(query store.NodeMapWindowQ
 func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &countingNodeMapWindowRepo{Repository: base}
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-777777777777"
 
@@ -2000,7 +2004,7 @@ func TestWorkspaceSnapshotLogicGateMapWindowBoundsPayloadAndPreservesBroadCompat
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-aaaaaaaaaaaa"
 
@@ -2144,7 +2148,7 @@ func TestWorkspaceSnapshotLogicGateMapWindowRejectsInvalidInputsAndDoesNotRepair
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-bbbbbbbbbbbb"
 	missingFolderID := "22222222-2222-4222-8222-222222222222"
@@ -2194,7 +2198,7 @@ func (r *countingLogicGateMapWindowRepo) ListLogicGateMapWindow(query store.Logi
 func TestWorkspaceSnapshotLogicGateMapWindowConditionalGetAndEventFilters(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &countingLogicGateMapWindowRepo{Repository: base}
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-cccccccccccc"
 
@@ -2522,7 +2526,7 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	companyID := "company-map-batch-node-test"
 
 	body := []byte(`{
@@ -2587,7 +2591,7 @@ func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	companyID := "company-map-batch-creator-test"
 	repo.EnsureCompany(companyID, "Map Batch Creator Company")
 	creator, err := repo.UpsertAuthUser("map-batch-creator-subject", "batch-creator@example.com", "Batch Creator")
@@ -2660,7 +2664,7 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	companyID := "company-map-batch-logic-test"
 	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic folder")
 	if err != nil {
@@ -3067,7 +3071,7 @@ func (r *countingMapLayoutWindowRepo) ListLogicGateMapPositionsWindow(query stor
 func TestMapLayoutWindowConditionalGetsUseReadVersionRows(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &countingMapLayoutWindowRepo{Repository: base}
-	server := NewServer(repo)
+	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-555555555555"
 
