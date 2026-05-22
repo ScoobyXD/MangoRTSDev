@@ -4,31 +4,6 @@ This is the project document for the deep MangoRTS backend refactor. Treat it as
 
 The goal is not to patch the current handlers. The goal is to rebuild the backend around graph-derived access, domain read models, Logic Gate node assignments as the work-board source of truth, materialized notification fanout, and user-scoped workspace delivery.
 
-## Starter Prompt
-
-Give this prompt to the next Codex instance:
-
-```text
-Read `docs/important tasks/backend-refactor-v3.md` first. Treat that file as the canonical project document and progress tracker for the MangoRTS backend V3 refactor.
-
-Do not start by making random code changes. First, audit the current backend against the V3 document, update the tracker in that document with what you learn, and propose the first concrete implementation slice.
-
-The V3 direction is:
-- permissions become graph-derived effective access, not repeated procedural checks;
-- no positive access fact means no access;
-- positive access levels are `view`, `edit`, and `admin`;
-- RACI is not a permission tier;
-- any RACI assignment grants edit access to its resource;
-- RACI role only controls UI bucket, notification routing, and prioritization;
-- shared triage is a first-class protected resource with view/edit/admin access;
-- shared triage emails/items inherit access from their shared triage folder;
-- Logic Gate access grants contextual visibility to all nodes assigned to that Logic Gate;
-- Kanban is not a backend domain and must become a projection of Logic Gate node assignments;
-- notification and workspace delivery should use reverse effective access/fanout instead of per-read recursive permission checks.
-
-Use `docs/important tasks/backend-refactor-v3.md` to keep track of decisions, phase status, work completed, open questions, and next steps. If you implement a slice, update the document in the same branch.
-```
-
 ## Core Decisions
 
 ### Access Model
