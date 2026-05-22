@@ -31,6 +31,7 @@ type Repository interface {
 	LogicGateRepository
 	EntityPermissionRepository
 	EffectiveAccessRepository
+	ConsolidatedViewRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
@@ -151,6 +152,11 @@ type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
+}
+
+type ConsolidatedViewRepository interface {
+	GetNodeView(input NodeViewInput) (domain.NodeView, error)
+	GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error)
 }
 
 type LogicGateWorkRepository interface {
@@ -832,6 +838,12 @@ type NodeContentChangeSeenInput struct {
 	CompanyID string
 	NodeID    string
 	ChangeID  string
+	UserID    string
+}
+
+type NodeViewInput struct {
+	CompanyID string
+	NodeID    string
 	UserID    string
 }
 

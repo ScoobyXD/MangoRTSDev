@@ -110,6 +110,7 @@ func (s *Server) Close() {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/v2/nodes/", s.handleNodeViewV2Subresource)
 	mux.HandleFunc("/v2/logic-gates/", s.handleLogicGateWorkV2Subresource)
 	mux.HandleFunc("/v1/me", s.handleMe)
 	mux.HandleFunc("/v1/companies", s.handleCompanies)

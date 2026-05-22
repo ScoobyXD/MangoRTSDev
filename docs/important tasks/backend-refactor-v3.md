@@ -332,10 +332,10 @@ This slice should not replace HTTP handlers yet except through a narrow compatib
 
 ### Phase 5: Consolidated Views
 
-- [ ] Add consolidated node view endpoint.
-- [ ] Add consolidated Logic Gate view endpoint.
-- [ ] Ensure frontend can open a node with one backend read.
-- [ ] Ensure frontend can open a Logic Gate with one backend read.
+- [x] Add consolidated node view endpoint.
+- [x] Add consolidated Logic Gate view endpoint.
+- [x] Ensure frontend can open a node with one backend read.
+- [x] Ensure frontend can open a Logic Gate with one backend read.
 
 ### Phase 6: Notifications And Workspace Fanout
 
@@ -476,6 +476,10 @@ Use this section to record completed slices and important decisions.
 - 2026-05-22: Phase 4 authorization decision: new v2 Logic Gate work handlers check `effective_resource_access` once against the Logic Gate (`view` for reads, `edit` for mutations). They do not require separate node visibility grants for assigned nodes and do not call legacy recursive access helpers or Kanban board/card access checks.
 - 2026-05-22: Phase 4 compatibility decision: v2 mutations preserve existing workspace event behavior and legacy clients by using the existing assignment command path, which writes the assignment row and maintains Kanban compatibility rows/events. The v2 read path canonicalizes status keys, treats Kanban rows as a projection only, and remains assignment-backed.
 - 2026-05-22: Added Phase 4 tests for v2 work read visibility, edit/admin satisfying view, no-access no-leak behavior, view-only mutation denial, edit add/move/issue/remove mutation behavior, contextual assigned-node visibility without direct node grants, no hidden node leakage, and source-shape guards preventing new v2 paths from using legacy recursive access APIs or Kanban tables as the work read source.
+- 2026-05-22: Completed Phase 5 consolidated v2 view endpoints: `GET /v2/nodes/{id}/view` and `GET /v2/logic-gates/{id}/view`. Both endpoints authenticate the actor, require company membership, check root-resource `effective_resource_access` for `view` at the top, and return root permission flags (`can_view`, `can_edit`, `can_admin`) where `edit` and `admin` satisfy `view`.
+- 2026-05-22: Phase 5 node view decision: the node view composes targeted detail, projection, assignment, and content-change read models. It returns node summary, information history, editor projections, relationships/counts, `logic_gate_node_assignments` metadata, unseen content changes for the actor, and root effective permission flags. It does not call `ListAccessibleEntityIDs`, `mangorts_user_can_access_resource`, or legacy entity permission checks.
+- 2026-05-22: Phase 5 Logic Gate view decision: the Logic Gate view composes targeted detail/projection/RACI reads with the Phase 4 assignment-backed `LogicGateWorkView`. Assigned nodes are returned through the Logic Gate context without separate node grants. The work payload keeps synthesized board/column/card compatibility fields for existing UI contracts, but they are derived from `logic_gate_node_assignments`; the v2 read path does not read Kanban boards, columns, or cards as truth.
+- 2026-05-22: Added Phase 5 tests for node and Logic Gate view access levels, no-access no-leak responses, contextual assigned-node visibility, inaccessible Logic Gate assigned-node no-leak behavior, source-shape guards against recursive legacy access paths, and guards against Kanban read methods on the new v2 paths.
 
 ## Open Questions
 
@@ -485,11 +489,13 @@ Use this section to record completed slices and important decisions.
 - Should global visible node lists expose existing assignment-derived node read-model fields (`status`, `status_color`, and `logic_gate_ids`) from all Logic Gate assignments, or only from Logic Gate contexts the actor can view? The first Phase 3 slice keeps the legacy node read model shape for compatibility and only scopes the returned node set.
 - Should effective-access maintenance become incremental on each grant/RACI/assignment/company-membership write before Phase 4, or remain a full-company rebuild job until the consolidated v2 views land?
 - When should the v2 Logic Gate work mutation path stop writing Kanban compatibility card/column payloads and switch workspace event consumers to assignment-native payloads?
+- Should consolidated node view assignment metadata include all Logic Gate assignment IDs for a visible node, or should a later actor-scoped variant include only Logic Gates the actor can open outside node context?
+- Should the consolidated view endpoints eventually become the only frontend open/read path, with v1 detail/projection endpoints kept strictly for compatibility clients?
 
 ## Next Steps
 
-- Begin Phase 5: add consolidated node and Logic Gate view endpoints.
+- Begin Phase 6: rebuild notification recipient materialization around reverse effective access and RACI routing.
+- Rebuild workspace event/snapshot delivery around user-scoped reverse access fanout.
 - Keep old Kanban routes and workspace/map-window compatibility paths as compatibility only; do not promote Kanban back into the V3 domain model or use it as a v2 work read source.
-- Decide whether visible node read models need actor-scoped assignment metadata before consolidated node and Logic Gate views.
 - Add incremental effective-access maintenance or an explicit projector job strategy for writes that change grants, RACI, group membership, node assignees, shared triage hierarchy, or Logic Gate assignments.
 - Continue avoiding new recursive permission checks; recursive/group traversal belongs in the projector/backfill path only.
