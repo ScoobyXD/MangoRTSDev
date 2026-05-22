@@ -229,6 +229,104 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	}
 }
 
+func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignments(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "77777777-7777-4777-8777-777777777770"
+
+	editor, err := repo.UpsertAuthUser("raci-editor-subject", "raci-editor@example.com", "RACI Editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-editor-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	accountable, err := repo.UpsertAuthUser("raci-accountable-subject", "raci-accountable@example.com", "RACI Accountable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-accountable-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	responsible, err := repo.UpsertAuthUser("raci-responsible-subject", "raci-responsible@example.com", "RACI Responsible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-responsible-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Assignment gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	putRaci := func(assignments []map[string]string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id":  companyID,
+			"assignments": assignments,
+		})
+		req := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(body))
+		req = requestWithActorForNotifications(req, editor, companyID)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT logic gate RACI status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	listNotifications := func(user domain.User) []domain.Notification {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+		req = requestWithActorForNotifications(req, user, companyID)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET notifications status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Notifications []domain.Notification `json:"notifications"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode notifications: %v", err)
+		}
+		return payload.Notifications
+	}
+
+	putRaci([]map[string]string{
+		{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
+		{"role": domain.LogicGateRaciRoleResponsible, "user_id": responsible.UserID},
+	})
+
+	accountableNotifications := listNotifications(accountable)
+	if len(accountableNotifications) != 1 {
+		t.Fatalf("accountable notification count = %d, want 1: %+v", len(accountableNotifications), accountableNotifications)
+	}
+	if accountableNotifications[0].Surface != domain.NotificationSurfaceACIInbox || accountableNotifications[0].Role != domain.LogicGateRaciRoleAccountable {
+		t.Fatalf("accountable notification metadata = %+v, want ACIO accountable", accountableNotifications[0])
+	}
+	responsibleNotifications := listNotifications(responsible)
+	if len(responsibleNotifications) != 1 {
+		t.Fatalf("responsible notification count = %d, want 1: %+v", len(responsibleNotifications), responsibleNotifications)
+	}
+	if responsibleNotifications[0].Surface != domain.NotificationSurfaceRInbox || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("responsible notification metadata = %+v, want responsible inbox", responsibleNotifications[0])
+	}
+
+	putRaci([]map[string]string{})
+	putRaci([]map[string]string{
+		{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
+	})
+
+	accountableNotifications = listNotifications(accountable)
+	if len(accountableNotifications) != 2 {
+		t.Fatalf("accountable notification count after reassignment = %d, want 2: %+v", len(accountableNotifications), accountableNotifications)
+	}
+}
+
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 	t.Parallel()
 
@@ -604,11 +702,26 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 	types := map[string]bool{}
 	for _, item := range payload.Notifications {
 		types[item.Type] = true
-		if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.LogicGateRaciRoleResponsible || item.NodeID != node.NodeID {
-			t.Fatalf("notification metadata = %+v, want responsible R inbox for node", item)
+		if item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.NotificationRoleOther || item.NodeID != node.NodeID {
+			t.Fatalf("notification metadata = %+v, want ACIO other for node", item)
 		}
 	}
 	if !types[domain.NotificationEventNodeAssigned] || !types[domain.NotificationEventNodeFieldsChanged] {
 		t.Fatalf("notification types = %+v, want node assigned and node fields changed", types)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
+	summaryReq = requestWithActorForNotifications(summaryReq, assignee, companyID)
+	summaryRec := httptest.NewRecorder()
+	handler.ServeHTTP(summaryRec, summaryReq)
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("GET notification summary status = %d body=%s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summary domain.NotificationSummary
+	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode notification summary: %v", err)
+	}
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("summary role counts = %+v, want one ACIO other node target", summary.RoleCounts)
 	}
 }

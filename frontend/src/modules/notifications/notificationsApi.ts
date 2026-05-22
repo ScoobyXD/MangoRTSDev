@@ -1,6 +1,6 @@
 import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
 
-export type NotificationRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+export type NotificationRaciRole = "responsible" | "accountable" | "consulted" | "informed" | "other";
 export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
 
 export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
@@ -154,6 +154,7 @@ export function normalizeRole(value: unknown): NotificationRaciRole | "" {
     case "accountable":
     case "consulted":
     case "informed":
+    case "other":
       return raw;
     default:
       return "";
