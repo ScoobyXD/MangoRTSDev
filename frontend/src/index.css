@@ -3,6 +3,14 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  font-family: var(--mango-font-family);
+  font-style: normal;
+}
+
+*::before,
+*::after {
+  font-family: var(--mango-font-family);
+  font-style: normal;
 }
 
 :root {
@@ -31,8 +39,9 @@ body {
   letter-spacing: 0;
 }
 
-button, input, textarea {
-  font-family: inherit;
+button, input, textarea, select {
+  font-family: var(--mango-font-family);
+  font-style: normal;
 }
 
 /* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */

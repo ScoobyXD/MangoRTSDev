@@ -1497,6 +1497,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         timelineState={timelineState}
         expanded={taskbarExpanded}
         leftInset={taskbarLeftInset}
+        timelineStartX={viewSize.w / 2}
         onExpandedChange={setTaskbarExpanded}
         onOpenTab={openDockTab}
         onReorderTab={reorderDockTab}
