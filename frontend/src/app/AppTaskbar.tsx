@@ -21,7 +21,8 @@ type AppTaskbarProps = {
   onOpenTimelineEntity: (target: { kind: "node" | "logic_gate"; id: string; label: string }) => void;
 };
 
-const TASKBAR_COLLAPSED_HEIGHT = 96;
+const TASKBAR_COLLAPSED_TOP_LOCK_HEIGHT = 96;
+const TASKBAR_COLLAPSED_HEIGHT = 88;
 const TASKBAR_EXPANDED_HEIGHT = 330;
 const TASKBAR_MINIMIZED_HEIGHT = 8;
 const TASKBAR_MINIMIZED_WIDTH = 300;
@@ -340,11 +341,12 @@ function taskbarLayout(expanded: boolean, tabCount: number, leftInset: number, t
 
 function taskbarShellStyle(expanded: boolean, layout: TaskbarLayout, timelineVisible: boolean, dockVisible: boolean): React.CSSProperties {
   const surfaceVisible = timelineVisible;
+  const collapsedBottomRise = TASKBAR_COLLAPSED_TOP_LOCK_HEIGHT - TASKBAR_COLLAPSED_HEIGHT;
   return {
     position: "fixed",
     left: layout.left,
     width: layout.width,
-    bottom: TASKBAR_FLOATING_GAP,
+    bottom: TASKBAR_FLOATING_GAP + (timelineVisible && !expanded ? collapsedBottomRise : 0),
     height: timelineVisible
       ? expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT
       : dockVisible ? TASKBAR_COLLAPSED_HEIGHT : TASKBAR_MINIMIZED_HEIGHT,

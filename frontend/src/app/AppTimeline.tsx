@@ -64,6 +64,8 @@ const TIMELINE_VISUAL_STEP_MINUTES = 15;
 const COMPACT_HEADER_HEIGHT = 22;
 const EXPANDED_TRACK_HEIGHT = 108;
 const EXPANDED_LANE_TOP = 37;
+const TIMELINE_NODE_ACCENT = "rgb(0, 233, 255)";
+const TIMELINE_LOGIC_GATE_ACCENT = "rgb(0, 255, 132)";
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -299,7 +301,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                       <span
                         title="Adjust start time"
                         aria-hidden="true"
-                        style={timelineItemHandleStyle("left")}
+                        style={timelineItemHandleStyle("left", item.kind, item.completed)}
                         onPointerDown={(event) => startInteraction(event, item, "start")}
                       />
                       <TimelineItemMain item={item} compact={compact} />
@@ -320,7 +322,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                       <span
                         title="Adjust end time"
                         aria-hidden="true"
-                        style={timelineItemHandleStyle("right")}
+                        style={timelineItemHandleStyle("right", item.kind, item.completed)}
                         onPointerDown={(event) => startInteraction(event, item, "end")}
                       />
                     </div>
@@ -507,6 +509,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
+function timelineKindAccent(kind: AppTimelineEntityKind): string {
+  return kind === "logic_gate" ? TIMELINE_LOGIC_GATE_ACCENT : TIMELINE_NODE_ACCENT;
+}
+
 function timelineShellStyle(expanded: boolean): React.CSSProperties {
   return {
     width: "100%",
@@ -691,13 +697,13 @@ function timelineItemStyle(
   compact: boolean,
   readOnly: boolean,
 ): React.CSSProperties {
-  const accent = completed ? "#16a34a" : kind === "logic_gate" ? "#0f9f68" : "#2563eb";
+  const accent = completed ? "#16a34a" : timelineKindAccent(kind);
   const nodeBackground = completed
-    ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
+    ? "#dcfce7"
     : kind === "logic_gate"
-      ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
-      : "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)";
-  const selectionShadow = kind === "logic_gate" ? "rgba(15, 159, 104, 0.16)" : "rgba(37, 99, 235, 0.16)";
+      ? "rgba(0, 255, 132, 0.18)"
+      : "rgba(0, 233, 255, 0.18)";
+  const selectionShadow = kind === "logic_gate" ? "rgba(0, 255, 132, 0.32)" : "rgba(0, 233, 255, 0.32)";
   const itemShadow = compact
     ? completed
       ? "inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
@@ -717,8 +723,8 @@ function timelineItemStyle(
     height: compact ? "100%" : 46,
     minWidth: compact ? 0 : 88,
     display: "grid",
-    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "minmax(0, 1fr) auto",
-    border: `1px solid ${selected || completed ? accent : "rgba(100, 116, 139, 0.28)"}`,
+    gridTemplateColumns: readOnly ? "minmax(0, 1fr) 24px" : "minmax(0, 1fr) 31px",
+    border: `1px solid ${accent}`,
     borderRadius: compact ? 0 : 7,
     background: nodeBackground,
     color: "#0f172a",
@@ -731,7 +737,8 @@ function timelineItemStyle(
   };
 }
 
-function timelineItemHandleStyle(side: "left" | "right"): React.CSSProperties {
+function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntityKind, completed: boolean): React.CSSProperties {
+  const accent = completed ? "#16a34a" : timelineKindAccent(kind);
   return {
     position: "absolute",
     top: 0,
@@ -740,9 +747,7 @@ function timelineItemHandleStyle(side: "left" | "right"): React.CSSProperties {
     zIndex: 2,
     width: 7,
     cursor: "ew-resize",
-    background: side === "left"
-      ? "linear-gradient(90deg, rgba(15, 23, 42, 0.15), transparent)"
-      : "linear-gradient(270deg, rgba(15, 23, 42, 0.15), transparent)",
+    background: accent,
   };
 }
 
@@ -752,7 +757,7 @@ function timelineItemMainStyle(compact: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateRows: compact ? "minmax(0, 1fr) 10px" : "minmax(0, 1fr) 14px",
     gap: 1,
-    padding: compact ? "4px 3px 3px" : "5px 4px 3px",
+    padding: compact ? "4px 4px 3px 10px" : "5px 4px 3px 10px",
     boxSizing: "border-box",
   };
 }
@@ -806,7 +811,9 @@ function timelineCheckboxWrapStyle(compact: boolean, width: number): React.CSSPr
     display: visible ? "grid" : "none",
     placeItems: "center",
     minWidth: 0,
-    width: 24,
+    width: 31,
+    paddingRight: 7,
+    boxSizing: "border-box",
     cursor: "pointer",
   };
 }
