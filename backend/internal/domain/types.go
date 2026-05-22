@@ -262,6 +262,29 @@ type NodeDetails struct {
 	RelationshipsCount int                `json:"relationships_count"`
 }
 
+type EffectiveAccessFlags struct {
+	CanView  bool `json:"can_view"`
+	CanEdit  bool `json:"can_edit"`
+	CanAdmin bool `json:"can_admin"`
+}
+
+type NodeView struct {
+	CompanyID            string                    `json:"company_id"`
+	NodeID               string                    `json:"node_id"`
+	Node                 Node                      `json:"node"`
+	Information          []NodeInformation         `json:"information"`
+	Projections          []NodeProjection          `json:"projections"`
+	Relationships        []NodeRelationship        `json:"relationships"`
+	LogicGateAssignments []NodeLogicGateAssignment `json:"logic_gate_assignments"`
+	ContentChanges       []NodeContentChange       `json:"content_changes"`
+	InformationCount     int                       `json:"information_count"`
+	ProjectionCount      int                       `json:"projection_count"`
+	RelationshipsCount   int                       `json:"relationships_count"`
+	AssignmentCount      int                       `json:"assignment_count"`
+	ContentChangeCount   int                       `json:"content_change_count"`
+	EffectiveAccessFlags
+}
+
 type LogicGate struct {
 	CompanyID        string                    `json:"company_id"`
 	LogicGateID      string                    `json:"logic_gate_id"`
@@ -321,6 +344,24 @@ type LogicGateDetails struct {
 	LogicGate     LogicGate               `json:"logic_gate"`
 	Information   []LogicGateInformation  `json:"information"`
 	Relationships []LogicGateRelationship `json:"relationships"`
+}
+
+type LogicGateView struct {
+	CompanyID           string                    `json:"company_id"`
+	LogicGateID         string                    `json:"logic_gate_id"`
+	LogicGate           LogicGate                 `json:"logic_gate"`
+	Information         []LogicGateInformation    `json:"information"`
+	Projections         []LogicGateProjection     `json:"projections"`
+	RaciAssignments     []LogicGateRaciAssignment `json:"raci_assignments"`
+	Relationships       []LogicGateRelationship   `json:"relationships"`
+	Work                LogicGateWorkView         `json:"work"`
+	InformationCount    int                       `json:"information_count"`
+	ProjectionCount     int                       `json:"projection_count"`
+	RaciAssignmentCount int                       `json:"raci_assignment_count"`
+	RelationshipsCount  int                       `json:"relationships_count"`
+	AssignmentCount     int                       `json:"assignment_count"`
+	NodeCount           int                       `json:"node_count"`
+	EffectiveAccessFlags
 }
 
 type LogicGateArenaView struct {

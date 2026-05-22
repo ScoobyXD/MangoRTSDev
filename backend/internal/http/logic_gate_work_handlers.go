@@ -19,6 +19,8 @@ func (s *Server) handleLogicGateWorkV2Subresource(w http.ResponseWriter, r *http
 	}
 	logicGateID := strings.TrimSpace(parts[0])
 	switch {
+	case len(parts) == 2 && parts[1] == "view":
+		s.handleLogicGateViewV2(w, r, logicGateID)
 	case len(parts) == 2 && parts[1] == "work":
 		s.handleLogicGateWorkV2(w, r, logicGateID)
 	case len(parts) == 2 && parts[1] == "nodes":

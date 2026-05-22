@@ -1,0 +1,191 @@
+package store
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"miraeopus/backend/internal/domain"
+)
+
+func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAssignmentsAndChanges(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555501"
+	repo.EnsureCompany(companyID, "Phase 5 Node View Store Co")
+
+	actor, err := repo.UpsertAuthUser("phase5-node-actor", "node-actor@example.com", "Node Actor")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser actor: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("phase5-node-actor", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership actor: %v", err)
+	}
+	viewer, err := repo.UpsertAuthUser("phase5-node-viewer", "node-viewer@example.com", "Node Viewer")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser viewer: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("phase5-node-viewer", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership viewer: %v", err)
+	}
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Node View Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Node View Item")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      "current node document",
+		InformationID:    "55555555-5555-4555-8555-555555555502",
+		ActorUserID:      actor.UserID,
+		ActorDisplayName: "Node Actor",
+	}); err != nil {
+		t.Fatalf("AddNodeInformationWithActor: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "in_progress",
+		Position:    20,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	view, err := repo.GetNodeView(NodeViewInput{CompanyID: companyID, NodeID: node.NodeID, UserID: viewer.UserID})
+	if err != nil {
+		t.Fatalf("GetNodeView: %v", err)
+	}
+	if view.Node.NodeID != node.NodeID || view.InformationCount != 1 || len(view.Information) != 1 {
+		t.Fatalf("node view details = %+v, want node with one history row", view)
+	}
+	if view.ProjectionCount != 1 || len(view.Projections) != 1 || view.Projections[0].Information != "current node document" {
+		t.Fatalf("node view projections = %+v, want current editor projection", view.Projections)
+	}
+	if view.AssignmentCount != 1 || len(view.LogicGateAssignments) != 1 || view.LogicGateAssignments[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("node view assignments = %+v, want logic gate assignment", view.LogicGateAssignments)
+	}
+	if view.ContentChangeCount == 0 || len(view.ContentChanges) == 0 {
+		t.Fatalf("node view content changes = %+v, want unseen actor change for viewer", view.ContentChanges)
+	}
+}
+
+func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignmentBackedWork(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555511"
+	repo.EnsureCompany(companyID, "Phase 5 Logic Gate View Store Co")
+
+	responsible, err := repo.UpsertAuthUser("phase5-gate-responsible", "gate-responsible@example.com", "Gate Responsible")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser responsible: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("phase5-gate-responsible", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership responsible: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Logic Gate View")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Assigned Logic Gate Work")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "current logic gate document", "55555555-5555-4555-8555-555555555512"); err != nil {
+		t.Fatalf("AddLogicGateInformation: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "done",
+		Position:    10,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	repo.mu.Lock()
+	delete(repo.kanbanCards, boardKey(companyID, LogicGateKanbanBoardID(logicGate.LogicGateID)))
+	repo.mu.Unlock()
+
+	view, err := repo.GetLogicGateView(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateView: %v", err)
+	}
+	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.InformationCount != 1 {
+		t.Fatalf("logic gate view details = %+v, want one history row", view)
+	}
+	if view.ProjectionCount != 1 || len(view.Projections) != 1 || view.Projections[0].Information != "current logic gate document" {
+		t.Fatalf("logic gate view projections = %+v, want current editor projection", view.Projections)
+	}
+	if view.RaciAssignmentCount != 1 || len(view.RaciAssignments) != 1 || view.RaciAssignments[0].UserID != responsible.UserID {
+		t.Fatalf("logic gate view RACI = %+v, want responsible assignment", view.RaciAssignments)
+	}
+	if view.AssignmentCount != 1 || len(view.Work.Assignments) != 1 || view.Work.Assignments[0].Assignment.NodeID != node.NodeID {
+		t.Fatalf("logic gate view work = %+v, want assignment-backed work node", view.Work.Assignments)
+	}
+	if len(view.Work.Cards) != 1 || view.Work.Cards[0].ColumnID != LogicGateWorkStatusDone {
+		t.Fatalf("logic gate synthesized cards = %+v, want done card from assignment", view.Work.Cards)
+	}
+}
+
+func TestPhase5ConsolidatedViewSourceShape(t *testing.T) {
+	storeSource := strings.ToLower(readPhase5SourceForTest(t, "consolidated_views.go"))
+	for _, required := range []string{"getlogicgatework", "listnodelogicgateassignments"} {
+		if !strings.Contains(storeSource, required) {
+			t.Fatalf("consolidated view store source missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"listaccessibleentityids",
+		"mangorts_user_can_access_resource",
+		"usercanaccessentity",
+		"listkanbanboards",
+		"listkanbancolumns",
+		"listkanbancards",
+	} {
+		if strings.Contains(storeSource, forbidden) {
+			t.Fatalf("consolidated view store source contains forbidden path %q", forbidden)
+		}
+	}
+
+	handlerSource := strings.ToLower(readPhase5SourceForTest(t, "../http/consolidated_view_handlers.go"))
+	for _, forbidden := range []string{
+		"listaccessibleentityids",
+		"mangorts_user_can_access_resource",
+		"usercanaccessentity",
+		"requireentityview",
+		"requireentityedit",
+		"requirekanbanboardview",
+		"requirekanbancardview",
+		"listkanbanboards",
+		"listkanbancolumns",
+		"listkanbancards",
+	} {
+		if strings.Contains(handlerSource, forbidden) {
+			t.Fatalf("consolidated view handler source contains forbidden path %q", forbidden)
+		}
+	}
+}
+
+func readPhase5SourceForTest(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", path, err)
+	}
+	return string(content)
+}
