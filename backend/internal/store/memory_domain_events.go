@@ -188,6 +188,21 @@ func (r *MemoryRepo) updateWorkspaceReadVersionsLocked(event domain.DomainEvent)
 			r.workspaceReadVersions[key] = event.Sequence
 		}
 	}
+	userIDs := r.effectiveUsersForWorkspaceEventLocked(event)
+	for _, userID := range userIDs {
+		for _, row := range WorkspaceReadVersionStaticRows(event.CompanyID) {
+			key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, WorkspaceReadVersionUserResourceKey(userID, row.ResourceKey))
+			if _, ok := r.workspaceReadVersions[key]; !ok {
+				r.workspaceReadVersions[key] = 0
+			}
+		}
+		for _, row := range workspaceReadVersionRowsForDomainEvent(event) {
+			key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, WorkspaceReadVersionUserResourceKey(userID, row.ResourceKey))
+			if event.Sequence > r.workspaceReadVersions[key] {
+				r.workspaceReadVersions[key] = event.Sequence
+			}
+		}
+	}
 }
 
 func (r *MemoryRepo) CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error) {
@@ -197,7 +212,7 @@ func (r *MemoryRepo) CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	version, ok := r.workspaceReadVersions[workspaceReadVersionMemoryKey(query.CompanyID, query.Scope, query.ResourceKey)]
+	version, ok := r.workspaceReadVersions[workspaceReadVersionMemoryKey(query.CompanyID, query.Scope, WorkspaceReadVersionUserResourceKey(query.UserID, query.ResourceKey))]
 	return version, ok, nil
 }
 

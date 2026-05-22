@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"miraeopus/backend/internal/domain"
 	"sort"
 )
 
@@ -450,4 +452,25 @@ order by access.user_id::text`, companyID, resourceType, resourceID, accessLevel
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (r *PostgresRepo) ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error) {
+	targets := WorkspaceEventAccessTargets(event)
+	if len(targets) == 0 {
+		return []string{}, nil
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		userIDs, err := r.ListEffectiveUsersForResource(event.CompanyID, target.ResourceType, target.ResourceID, EntityPermissionView)
+		if errors.Is(err, ErrInvalid) || errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, userID := range userIDs {
+			seen[userID] = true
+		}
+	}
+	return sortWorkspaceEventUserIDs(seen), nil
 }

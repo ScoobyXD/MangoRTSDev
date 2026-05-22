@@ -339,9 +339,9 @@ This slice should not replace HTTP handlers yet except through a narrow compatib
 
 ### Phase 6: Notifications And Workspace Fanout
 
-- [ ] Rebuild notification recipient materialization around reverse effective access and RACI routing.
-- [ ] Remove recursive permission calls from notification list/count/summary hot paths.
-- [ ] Rebuild workspace event/snapshot delivery around user-scoped reverse access fanout.
+- [x] Rebuild notification recipient materialization around reverse effective access and RACI routing.
+- [x] Remove recursive permission calls from notification list/count/summary hot paths.
+- [x] Rebuild workspace event/snapshot delivery around user-scoped reverse access fanout.
 
 ## Current Backend Audit
 
@@ -480,6 +480,12 @@ Use this section to record completed slices and important decisions.
 - 2026-05-22: Phase 5 node view decision: the node view composes targeted detail, projection, assignment, and content-change read models. It returns node summary, information history, editor projections, relationships/counts, `logic_gate_node_assignments` metadata, unseen content changes for the actor, and root effective permission flags. It does not call `ListAccessibleEntityIDs`, `mangorts_user_can_access_resource`, or legacy entity permission checks.
 - 2026-05-22: Phase 5 Logic Gate view decision: the Logic Gate view composes targeted detail/projection/RACI reads with the Phase 4 assignment-backed `LogicGateWorkView`. Assigned nodes are returned through the Logic Gate context without separate node grants. The work payload keeps synthesized board/column/card compatibility fields for existing UI contracts, but they are derived from `logic_gate_node_assignments`; the v2 read path does not read Kanban boards, columns, or cards as truth.
 - 2026-05-22: Added Phase 5 tests for node and Logic Gate view access levels, no-access no-leak responses, contextual assigned-node visibility, inaccessible Logic Gate assigned-node no-leak behavior, source-shape guards against recursive legacy access paths, and guards against Kanban read methods on the new v2 paths.
+- 2026-05-22: Completed Phase 6 notification fanout. Notification projection now uses reverse `effective_resource_access` (`ListEffectiveUsersForResource`) to materialize recipients, then applies RACI/assignment facts only for surface and role metadata. Logic Gate state notifications go to users with effective Logic Gate `view` or stronger; RACI users keep R/ACI routing labels, and non-RACI effective users route as ACI `other`. Explicit mention/assignment notification events are intersected with the reverse effective-access user set instead of checking each recipient with recursive permissions.
+- 2026-05-22: Phase 6 notification read decision: notification list, unread count, summary, mark-read, and mark-all-read remain recipient-scoped. The Postgres and memory stores no longer call `mangorts_user_can_access_resource` or `UserCanAccessEntity` on these hot paths. Existing notification rows are guarded by a cheap effective-access target check using the primary notification context (`logic_gate_id` first, then `node_id`, then entity target), so stale rows do not leak after access changes.
+- 2026-05-22: Completed Phase 6 workspace fanout slice. Workspace events now expose protected-resource targets, and the store resolves affected users from reverse effective access. Authenticated workspace streams subscribe to `company:user` buckets, local hub delivery publishes only to affected user buckets, and durable catch-up skips events that do not include the actor in the reverse effective-access set while advancing the cursor. Legacy company-scoped stream buckets are still published for compatibility clients/tests.
+- 2026-05-22: Phase 6 workspace read-version decision: memory read versions now maintain user-scoped keys for affected users using the same reverse effective-access event target model. Snapshot ETags pass the authenticated user into read-version lookup when present and fall back to company-scoped versions for legacy/no-row compatibility. Postgres keeps the existing `workspace_read_versions` table shape for now and encodes user-scoped keys in `resource_key` when a user-scoped row exists.
+- 2026-05-22: Phase 6 compatibility compromises: legacy company-wide workspace streams remain available when no actor context is present; compatibility Kanban card/column events are still emitted by existing assignment command paths, but V3 fanout targets Logic Gate assignment/work semantic events through `logic_gate_id` and does not use Kanban reads as Logic Gate work truth. Write handlers that change grants, RACI, or Logic Gate assignments refresh the full effective-access projection before emitting notifications/fanout until a later incremental projector replaces this compatibility rebuild.
+- 2026-05-22: Added Phase 6 tests for notification effective-access recipient materialization, RACI routing metadata, notification source-shape guards against recursive permissions, workspace affected-user fanout from Logic Gate access without direct node grants, user-scoped workspace read versions, authenticated user-scoped SSE delivery/no-leak behavior, and workspace source-shape guards.
 
 ## Open Questions
 
@@ -487,15 +493,16 @@ Use this section to record completed slices and important decisions.
 - Should legacy explicit `no_access` rows be migrated into absence of facts, or retained only as a compatibility deny source during the transition?
 - Legacy RACI mutation paths still write compatibility rows into `resource_access_grants` for old hot paths. During migration, these rows are treated as editable grant input because they have no provenance; future slices should decide when to stop creating those compatibility grants or add source metadata before relying on source-specific incremental cleanup.
 - Should global visible node lists expose existing assignment-derived node read-model fields (`status`, `status_color`, and `logic_gate_ids`) from all Logic Gate assignments, or only from Logic Gate contexts the actor can view? The first Phase 3 slice keeps the legacy node read model shape for compatibility and only scopes the returned node set.
-- Should effective-access maintenance become incremental on each grant/RACI/assignment/company-membership write before Phase 4, or remain a full-company rebuild job until the consolidated v2 views land?
+- Should effective-access maintenance become incremental on each grant/RACI/assignment/company-membership write, replacing the Phase 6 full-company refresh used by compatibility write handlers?
 - When should the v2 Logic Gate work mutation path stop writing Kanban compatibility card/column payloads and switch workspace event consumers to assignment-native payloads?
 - Should consolidated node view assignment metadata include all Logic Gate assignment IDs for a visible node, or should a later actor-scoped variant include only Logic Gates the actor can open outside node context?
 - Should the consolidated view endpoints eventually become the only frontend open/read path, with v1 detail/projection endpoints kept strictly for compatibility clients?
+- Should Postgres workspace read versions get a first-class `user_id` column, or is the current encoded user `resource_key` acceptable until the next schema slice?
+- Which legacy workspace events without a concrete protected-resource ID should be promoted to user-scoped V3 events, and which should remain company compatibility events only?
 
 ## Next Steps
 
-- Begin Phase 6: rebuild notification recipient materialization around reverse effective access and RACI routing.
-- Rebuild workspace event/snapshot delivery around user-scoped reverse access fanout.
+- Replace the Phase 6 full-company effective-access refresh calls with incremental projection on grant, RACI, membership, shared-triage, node-assignee, and Logic Gate assignment writes.
+- Add a Postgres migration/read model for first-class user-scoped workspace read versions if encoded `resource_key` rows are not sufficient operationally.
 - Keep old Kanban routes and workspace/map-window compatibility paths as compatibility only; do not promote Kanban back into the V3 domain model or use it as a v2 work read source.
-- Add incremental effective-access maintenance or an explicit projector job strategy for writes that change grants, RACI, group membership, node assignees, shared triage hierarchy, or Logic Gate assignments.
 - Continue avoiding new recursive permission checks; recursive/group traversal belongs in the projector/backfill path only.

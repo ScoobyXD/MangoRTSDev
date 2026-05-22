@@ -22,12 +22,17 @@ func newWorkspaceEventNotificationHub() *workspaceEventNotificationHub {
 }
 
 func (h *workspaceEventNotificationHub) subscribe(companyID string) chan store.WorkspaceEventNotification {
+	return h.subscribeUser(companyID, "")
+}
+
+func (h *workspaceEventNotificationHub) subscribeUser(companyID, userID string) chan store.WorkspaceEventNotification {
 	ch := make(chan store.WorkspaceEventNotification, 24)
+	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
-	bucket := h.subscribers[companyID]
+	bucket := h.subscribers[key]
 	if bucket == nil {
 		bucket = map[chan store.WorkspaceEventNotification]struct{}{}
-		h.subscribers[companyID] = bucket
+		h.subscribers[key] = bucket
 	}
 	bucket[ch] = struct{}{}
 	h.mu.Unlock()
@@ -35,11 +40,16 @@ func (h *workspaceEventNotificationHub) subscribe(companyID string) chan store.W
 }
 
 func (h *workspaceEventNotificationHub) unsubscribe(companyID string, ch chan store.WorkspaceEventNotification) {
+	h.unsubscribeUser(companyID, "", ch)
+}
+
+func (h *workspaceEventNotificationHub) unsubscribeUser(companyID, userID string, ch chan store.WorkspaceEventNotification) {
+	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
-	if bucket := h.subscribers[companyID]; bucket != nil {
+	if bucket := h.subscribers[key]; bucket != nil {
 		delete(bucket, ch)
 		if len(bucket) == 0 {
-			delete(h.subscribers, companyID)
+			delete(h.subscribers, key)
 		}
 	}
 	h.mu.Unlock()
@@ -49,7 +59,7 @@ func (h *workspaceEventNotificationHub) unsubscribe(companyID string, ch chan st
 func (h *workspaceEventNotificationHub) publish(notification store.WorkspaceEventNotification) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch := range h.subscribers[notification.CompanyID] {
+	for ch := range h.subscribers[workspaceSubscriptionKey(notification.CompanyID, notification.UserID)] {
 		select {
 		case ch <- notification:
 		default:

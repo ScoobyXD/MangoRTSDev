@@ -27,12 +27,23 @@ func (f *PostgresWorkspaceEventFanout) NotifyWorkspaceEvent(ctx context.Context,
 	if !ok {
 		return nil
 	}
-	payload, err := encodeWorkspaceEventNotification(notification)
+	notifications := []WorkspaceEventNotification{notification}
+	repo := &PostgresRepo{db: f.db}
+	userIDs, err := repo.ListEffectiveUsersForWorkspaceEvent(event)
 	if err != nil {
 		return err
 	}
-	_, err = f.db.ExecContext(ctx, `select pg_notify($1, $2)`, postgresWorkspaceEventFanoutChannel, payload)
-	return err
+	notifications = append(notifications, WorkspaceEventNotificationsForUsers(event, userIDs)...)
+	for _, item := range notifications {
+		payload, err := encodeWorkspaceEventNotification(item)
+		if err != nil {
+			return err
+		}
+		if _, err := f.db.ExecContext(ctx, `select pg_notify($1, $2)`, postgresWorkspaceEventFanoutChannel, payload); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *PostgresWorkspaceEventFanout) ListenWorkspaceEvents(ctx context.Context, notify func(WorkspaceEventNotification)) error {

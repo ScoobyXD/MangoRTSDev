@@ -58,6 +58,7 @@ func (s *Server) workspaceEventETag(r *http.Request, companyID, resource string,
 }
 
 func (s *Server) workspaceEventETagWithReadVersion(r *http.Request, companyID, resource string, queries []store.DomainEventStreamQuery, readVersion store.WorkspaceReadVersionQuery) (string, error) {
+	readVersion.UserID = workspaceReadVersionUserID(r, companyID)
 	version, err := s.workspaceEventVersionWithReadVersion(companyID, readVersion, queries)
 	if err != nil {
 		return "", err
@@ -73,6 +74,16 @@ func (s *Server) workspaceEventVersionWithReadVersion(companyID string, readVers
 		}
 		if found {
 			return version, nil
+		}
+		if strings.TrimSpace(readVersion.UserID) != "" {
+			readVersion.UserID = ""
+			version, found, err := s.repo.CurrentWorkspaceReadVersion(readVersion)
+			if err != nil {
+				return 0, err
+			}
+			if found {
+				return version, nil
+			}
 		}
 	}
 	return s.workspaceEventVersion(companyID, queries)
@@ -116,12 +127,13 @@ func workspaceEventQueryPayloadValue(queries []store.DomainEventStreamQuery, key
 }
 
 func workspaceSnapshotReadVersionQuery(r *http.Request, companyID, scope string) store.WorkspaceReadVersionQuery {
+	userID := workspaceReadVersionUserID(r, companyID)
 	switch scope {
 	case "full", "node_map", "node_map_window", "logic_gate_map", "logic_gate_map_window":
-		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:" + scope}
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, UserID: userID, Scope: "workspace-snapshot:" + scope}
 	case "company_explorer":
 		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
-		query := store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer"}
+		query := store.WorkspaceReadVersionQuery{CompanyID: companyID, UserID: userID, Scope: "workspace-snapshot:company_explorer"}
 		if folderKind == "node" || folderKind == "logic_gate" || folderKind == "communications" {
 			query.ResourceKey = store.WorkspaceReadVersionResourceKey("folder_kind", folderKind)
 		}
@@ -131,10 +143,18 @@ func workspaceSnapshotReadVersionQuery(r *http.Request, companyID, scope string)
 		if boardID == "" {
 			return store.WorkspaceReadVersionQuery{}
 		}
-		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:kanban", ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, UserID: userID, Scope: "workspace-snapshot:kanban", ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
 	default:
 		return store.WorkspaceReadVersionQuery{}
 	}
+}
+
+func workspaceReadVersionUserID(r *http.Request, companyID string) string {
+	actor, ok := authenticatedActor(r)
+	if !ok || actorRoleForCompany(actor, companyID) == "" {
+		return ""
+	}
+	return strings.TrimSpace(actor.User.UserID)
 }
 
 func (s *Server) writeWorkspaceEventNotModified(w http.ResponseWriter, r *http.Request, companyID, resource string, queries []store.DomainEventStreamQuery) (string, bool, error) {

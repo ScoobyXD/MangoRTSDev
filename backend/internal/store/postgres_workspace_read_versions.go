@@ -19,7 +19,7 @@ select version
 from workspace_read_versions
 where company_id=$1::uuid
   and scope=$2
-  and resource_key=$3`, query.CompanyID, query.Scope, query.ResourceKey).Scan(&version)
+  and resource_key=$3`, query.CompanyID, query.Scope, WorkspaceReadVersionUserResourceKey(query.UserID, query.ResourceKey)).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) || isPostgresUndefinedTableError(err) {
 		return 0, false, nil
 	}

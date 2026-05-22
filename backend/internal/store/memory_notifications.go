@@ -53,6 +53,13 @@ func NotificationAccessTargets(entityType, entityID, logicGateID, nodeID string)
 	return targets
 }
 
+func NotificationPrimaryAccessTarget(entityType, entityID, logicGateID, nodeID string) (NotificationAccessTarget, bool) {
+	for _, target := range NotificationAccessTargets(entityType, entityID, logicGateID, nodeID) {
+		return target, true
+	}
+	return NotificationAccessTarget{}, false
+}
+
 func cloneNotificationEvent(item domain.NotificationEvent) domain.NotificationEvent {
 	item.Payload = cloneNotificationPayload(item.Payload)
 	if item.ActorUserID != nil {
@@ -84,13 +91,15 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if companyID == "" || userID == "" {
 		return true
 	}
-	for _, target := range NotificationAccessTargets(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID) {
-		if !r.entityExistsLocked(companyID, target.EntityType, target.EntityID) {
-			return false
-		}
-		if !r.userCanAccessEntityLocked(companyID, target.EntityType, target.EntityID, userID, EntityPermissionView) {
-			return false
-		}
+	target, ok := NotificationPrimaryAccessTarget(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID)
+	if !ok {
+		return true
+	}
+	if !r.entityExistsLocked(companyID, target.EntityType, target.EntityID) {
+		return false
+	}
+	if !r.userHasEffectiveAccessLocked(companyID, userID, target.EntityType, target.EntityID, EntityPermissionView) {
+		return false
 	}
 	return true
 }

@@ -33,10 +33,6 @@ func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.companies[companyID]; !ok {
-		return ErrNotFound
-	}
-
 	now := time.Now().UTC()
 	next := make(map[string]domain.EffectiveResourceAccess)
 	r.projectLegacyGrantEffectiveAccessLocked(companyID, next, now)
@@ -145,6 +141,36 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (r *MemoryRepo) ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error) {
+	targets := WorkspaceEventAccessTargets(event)
+	if len(targets) == 0 {
+		return []string{}, nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.effectiveUsersForWorkspaceEventLocked(event), nil
+}
+
+func (r *MemoryRepo) effectiveUsersForWorkspaceEventLocked(event domain.DomainEvent) []string {
+	targets := WorkspaceEventAccessTargets(event)
+	if len(targets) == 0 {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		for _, access := range r.effectiveAccess {
+			if access.CompanyID == event.CompanyID &&
+				access.ResourceType == target.ResourceType &&
+				access.ResourceID == target.ResourceID &&
+				EntityPermissionSatisfies(access.AccessLevel, EntityPermissionView) {
+				seen[access.UserID] = true
+			}
+		}
+	}
+	return sortWorkspaceEventUserIDs(seen)
 }
 
 func (r *MemoryRepo) userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel string) bool {
