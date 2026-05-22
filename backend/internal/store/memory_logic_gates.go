@@ -135,6 +135,35 @@ func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error
 	return items, nil
 }
 
+func (r *MemoryRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.LogicGate, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
+			continue
+		}
+		items = append(items, r.withLogicGateRaciLocked(gate))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {

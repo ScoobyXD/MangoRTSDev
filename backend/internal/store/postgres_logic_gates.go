@@ -235,6 +235,48 @@ func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, err
 	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.LogicGate, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+		 from logic_gates gate
+		 join (
+		   select distinct access.resource_id
+		   from effective_resource_access access
+		   where access.company_id=$1::uuid
+		     and access.user_id=$2::uuid
+		     and access.resource_type='logic_gate'
+		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+		 ) visible on visible.resource_id=gate.logic_gate_id
+		 where gate.company_id=$1::uuid
+		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
+		companyID, userID, EntityPermissionView,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+}
+
 func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {
