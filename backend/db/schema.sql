@@ -2438,7 +2438,7 @@ create table if not exists notifications (
   constraint notifications_entity_id_nonblank_chk check (btrim(entity_id) <> ''),
   constraint notifications_title_nonblank_chk check (btrim(title) <> ''),
   constraint notifications_surface_chk check (surface = '' or surface in ('r_inbox', 'aci_inbox', 'my_triage', 'shared_triage')),
-  constraint notifications_role_chk check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed')),
+  constraint notifications_role_chk check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed', 'other')),
   primary key (notification_id),
   foreign key (recipient_user_id) references users (user_id) on delete cascade,
   foreign key (actor_user_id) references users (user_id) on delete set null,

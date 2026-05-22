@@ -713,6 +713,8 @@ function inboxNotificationRoleColors(role: string): { background: string; border
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    case "other":
+      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
     default:
       return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#042028" };
   }

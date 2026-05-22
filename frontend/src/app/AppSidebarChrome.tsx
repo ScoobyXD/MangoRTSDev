@@ -232,7 +232,8 @@ export function AppSidebar({
   const aciNotificationCount = useMemo(
     () => notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable")
       + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted")
-      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
+      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed")
+      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "other"),
     [notificationSummary],
   );
   const responsibleNotificationCount = useMemo(
@@ -1698,6 +1699,8 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    case "other":
+      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
     case "aci":
       return { background: "#eef2ff", border: "rgba(79, 70, 229, 0.30)", color: "#3730a3" };
     case "mention":

@@ -116,12 +116,11 @@ func (s *Server) recordLogicGateRaciCommandNotifications(r *http.Request, result
 		logicGateTitle = logicGate.Header
 	}
 	s.recordNotificationEvent(store.NotificationEventInput{
-		CompanyID:      result.CompanyID,
-		ActorUserID:    actorUserID,
-		Type:           domain.NotificationEventLogicGateRaciUpdated,
-		EntityType:     "logic_gate",
-		EntityID:       result.LogicGateID,
-		IdempotencyKey: "logic-gate-raci:" + result.CompanyID + ":" + result.LogicGateID + ":" + logicGateRaciFingerprint(result.RaciAssignments),
+		CompanyID:   result.CompanyID,
+		ActorUserID: actorUserID,
+		Type:        domain.NotificationEventLogicGateRaciUpdated,
+		EntityType:  "logic_gate",
+		EntityID:    result.LogicGateID,
 		Payload: map[string]any{
 			"assignment_user_ids": newlyAssignedUserIDs,
 			"actor_display_name":  actorLabel,

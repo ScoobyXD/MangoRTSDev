@@ -697,6 +697,10 @@ type RichTextMentionDraft = ActiveMentionDraft & {
   top: number;
 };
 
+const EDITOR_MENTION_MENU_WIDTH_PX = 320;
+const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = 242;
+const EDITOR_MENTION_MENU_MARGIN_PX = 8;
+
 function closestMentionElement(root: HTMLElement, node: Node | null): HTMLElement | null {
   if (!node) return null;
   const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
@@ -723,13 +727,21 @@ function readRichTextMentionDraft(root: HTMLElement): RichTextMentionDraft | nul
   if (!draft) return null;
 
   const rect = getCaretRect(root, range);
+  const rootRect = root.getBoundingClientRect();
   const view = root.ownerDocument.defaultView;
   const viewportWidth = view?.innerWidth ?? 1280;
   const viewportHeight = view?.innerHeight ?? 720;
+  const editorMinLeft = Number.isFinite(rootRect.left) ? rootRect.left + EDITOR_MENTION_MENU_MARGIN_PX : EDITOR_MENTION_MENU_MARGIN_PX;
+  const editorMaxLeft = Number.isFinite(rootRect.right)
+    ? rootRect.right - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX
+    : viewportWidth - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  const viewportMaxLeft = viewportWidth - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  const minLeft = Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(editorMinLeft, viewportMaxLeft));
+  const maxLeft = Math.max(minLeft, Math.min(editorMaxLeft, viewportMaxLeft));
   return {
     ...draft,
-    left: Math.max(8, Math.min(rect.left, viewportWidth - 348)),
-    top: Math.max(8, Math.min(rect.bottom + 6, viewportHeight - 258)),
+    left: Math.max(minLeft, Math.min(rect.left, maxLeft)),
+    top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(rect.bottom + 6, viewportHeight - EDITOR_MENTION_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX)),
   };
 }
 
@@ -1134,9 +1146,9 @@ export function useEditorDocumentSurfaceHandlers({
         left: activeMentionDraft.left,
         top: activeMentionDraft.top,
         zIndex: 2000,
-        width: 320,
+        width: EDITOR_MENTION_MENU_WIDTH_PX,
         maxWidth: "calc(100vw - 16px)",
-        maxHeight: 242,
+        maxHeight: EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
         overflowY: "auto",
         display: "grid",
         gap: 2,

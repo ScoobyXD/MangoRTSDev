@@ -457,6 +457,10 @@ const (
 	NotificationSurfaceSharedTriage = "shared_triage"
 )
 
+const (
+	NotificationRoleOther = "other"
+)
+
 type NotificationEvent struct {
 	EventID            string         `json:"event_id"`
 	CompanyID          string         `json:"company_id,omitempty"`

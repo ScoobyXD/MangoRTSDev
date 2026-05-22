@@ -23,6 +23,10 @@ File: `frontend/src/app/applayout.tsx`
 - `menus/ModulePickerMenu.tsx` — module-type chooser (including node submodule menu)
 - `frameLinking.ts` — pure helper layer for link/delink planning and context-menu label semantics
 
+## Key Views Column
+
+The left-hand most column in the authenticated app shell is the **key views column**. It owns the primary view shortcuts and notification entry points for high-use views such as ACIO Nodes, R Nodes, and @ Mentions. Future frontend docs and implementation notes should use **key views column** for this app-shell column, not a generic left sidebar label, when referring to these primary view tabs.
+
 ## Data model ownership
 
 - Frame model type: `FrameDataModel` (`frontend/src/types.ts`)

@@ -164,8 +164,8 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		if nodeTitle == "" {
 			nodeTitle = "a node"
 		}
-		title = "Node assigned to you"
-		body = nodeTitle + " was assigned to you."
+		title = "Node assigned to you in Others"
+		body = nodeTitle + " is now in your ACIO Others column."
 	case domain.NotificationEventNodeFieldsChanged:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
@@ -205,7 +205,7 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		}
 		firstLogicGateID := firstCleanString(node.LogicGateIDs)
 		if node.AssigneeUserID != nil {
-			addRecipient(*node.AssigneeUserID, notificationRecipientMeta{Surface: domain.NotificationSurfaceRInbox, Role: domain.LogicGateRaciRoleResponsible, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
+			addRecipient(*node.AssigneeUserID, notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
 		}
 		for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
 			if err := addLogicGateRecipients(logicGateID, node.NodeID); err != nil {
@@ -239,7 +239,7 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			firstLogicGateID := firstCleanString(node.LogicGateIDs)
 			if node.AssigneeUserID != nil {
 				userID := strings.TrimSpace(*node.AssigneeUserID)
-				metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationRecipientMeta{Surface: domain.NotificationSurfaceRInbox, Role: domain.LogicGateRaciRoleResponsible, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
+				metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
 			}
 			for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
 				roles, roleErr := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
@@ -467,7 +467,7 @@ func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map
 }
 
 func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notificationRecipientMeta {
-	role = normalizeRaciRole(role)
+	role = normalizeNotificationRole(role)
 	meta := notificationRecipientMeta{
 		Role:        role,
 		LogicGateID: strings.TrimSpace(logicGateID),
@@ -478,14 +478,16 @@ func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notifica
 		meta.Surface = domain.NotificationSurfaceRInbox
 	case domain.LogicGateRaciRoleAccountable, domain.LogicGateRaciRoleConsulted, domain.LogicGateRaciRoleInformed:
 		meta.Surface = domain.NotificationSurfaceACIInbox
+	case domain.NotificationRoleOther:
+		meta.Surface = domain.NotificationSurfaceACIInbox
 	}
 	return meta
 }
 
 func notificationMetaForNode(node domain.Node) notificationRecipientMeta {
 	return notificationRecipientMeta{
-		Surface:     domain.NotificationSurfaceRInbox,
-		Role:        domain.LogicGateRaciRoleResponsible,
+		Surface:     domain.NotificationSurfaceACIInbox,
+		Role:        domain.NotificationRoleOther,
 		LogicGateID: firstCleanString(node.LogicGateIDs),
 		NodeID:      node.NodeID,
 	}
@@ -493,11 +495,11 @@ func notificationMetaForNode(node domain.Node) notificationRecipientMeta {
 
 func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) notificationRecipientMeta {
 	current.Surface = strings.TrimSpace(current.Surface)
-	current.Role = normalizeRaciRole(current.Role)
+	current.Role = normalizeNotificationRole(current.Role)
 	current.LogicGateID = strings.TrimSpace(current.LogicGateID)
 	current.NodeID = strings.TrimSpace(current.NodeID)
 	next.Surface = strings.TrimSpace(next.Surface)
-	next.Role = normalizeRaciRole(next.Role)
+	next.Role = normalizeNotificationRole(next.Role)
 	next.LogicGateID = strings.TrimSpace(next.LogicGateID)
 	next.NodeID = strings.TrimSpace(next.NodeID)
 	if current.Surface == "" && current.Role == "" && current.LogicGateID == "" && current.NodeID == "" {
@@ -521,15 +523,15 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 }
 
 func mergeRaciRole(current, next string) string {
-	current = normalizeRaciRole(current)
-	next = normalizeRaciRole(next)
+	current = normalizeNotificationRole(current)
+	next = normalizeNotificationRole(next)
 	if raciRoleRank(next) > raciRoleRank(current) {
 		return next
 	}
 	return current
 }
 
-func normalizeRaciRole(role string) string {
+func normalizeNotificationRole(role string) string {
 	switch strings.TrimSpace(role) {
 	case domain.LogicGateRaciRoleResponsible:
 		return domain.LogicGateRaciRoleResponsible
@@ -539,20 +541,24 @@ func normalizeRaciRole(role string) string {
 		return domain.LogicGateRaciRoleConsulted
 	case domain.LogicGateRaciRoleInformed:
 		return domain.LogicGateRaciRoleInformed
+	case domain.NotificationRoleOther:
+		return domain.NotificationRoleOther
 	default:
 		return ""
 	}
 }
 
 func raciRoleRank(role string) int {
-	switch normalizeRaciRole(role) {
+	switch normalizeNotificationRole(role) {
 	case domain.LogicGateRaciRoleResponsible:
-		return 4
+		return 5
 	case domain.LogicGateRaciRoleAccountable:
-		return 3
+		return 4
 	case domain.LogicGateRaciRoleConsulted:
-		return 2
+		return 3
 	case domain.LogicGateRaciRoleInformed:
+		return 2
+	case domain.NotificationRoleOther:
 		return 1
 	default:
 		return 0

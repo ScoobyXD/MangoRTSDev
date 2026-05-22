@@ -318,12 +318,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if len(newlyAssignedUserIDs) > 0 {
 			s.recordNotificationEvent(store.NotificationEventInput{
-				CompanyID:      req.CompanyID,
-				ActorUserID:    actorUserID,
-				Type:           domain.NotificationEventLogicGateRaciUpdated,
-				EntityType:     "logic_gate",
-				EntityID:       logicGateID,
-				IdempotencyKey: "logic-gate-raci:" + req.CompanyID + ":" + logicGateID + ":" + logicGateRaciFingerprint(assignments),
+				CompanyID:   req.CompanyID,
+				ActorUserID: actorUserID,
+				Type:        domain.NotificationEventLogicGateRaciUpdated,
+				EntityType:  "logic_gate",
+				EntityID:    logicGateID,
 				Payload: map[string]any{
 					"assignment_user_ids": newlyAssignedUserIDs,
 					"actor_display_name":  actorLabel,
