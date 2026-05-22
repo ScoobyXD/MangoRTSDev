@@ -37,6 +37,7 @@ type MemoryRepo struct {
 	userGroups               map[string]domain.CompanyUserGroup
 	userGroupMembers         map[string]domain.CompanyUserGroupMember
 	entityPermissions        map[string]domain.EntityPermission
+	effectiveAccess          map[string]domain.EffectiveResourceAccess
 	invitations              map[string]domain.Invitation
 	emailConnections         map[string]domain.UserEmailConnection
 	triageItems              map[string]domain.CommunicationsTriageItem
@@ -80,6 +81,7 @@ func NewMemoryRepo() *MemoryRepo {
 		userGroups:               map[string]domain.CompanyUserGroup{},
 		userGroupMembers:         map[string]domain.CompanyUserGroupMember{},
 		entityPermissions:        map[string]domain.EntityPermission{},
+		effectiveAccess:          map[string]domain.EffectiveResourceAccess{},
 		invitations:              map[string]domain.Invitation{},
 		emailConnections:         map[string]domain.UserEmailConnection{},
 		triageItems:              map[string]domain.CommunicationsTriageItem{},
@@ -130,6 +132,10 @@ func userGroupMemberKey(companyID, groupID, userID string) string {
 
 func entityPermissionKey(companyID, entityType, entityID, subjectType, subjectID, permission string) string {
 	return companyID + ":" + entityType + ":" + entityID + ":" + subjectType + ":" + subjectID
+}
+
+func effectiveAccessKey(companyID, userID, resourceType, resourceID, sourceType, sourceID string) string {
+	return companyID + ":" + userID + ":" + resourceType + ":" + resourceID + ":" + sourceType + ":" + sourceID
 }
 
 func triageItemKey(userID, messageID string) string {
