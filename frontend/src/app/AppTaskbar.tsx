@@ -1,10 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
-import { EXPLORER_DRAG_MIME } from "../modules/company-explorer/companyExplorerDragDrop";
-import { attachStackedDragPreview } from "../modules/kanban/shared";
 import type { AppDockTab } from "./appDockTabs";
 import { AppTimeline } from "./AppTimeline";
-import type { AppTimelineState } from "./timelineState";
+import { clampTimelineStart, upsertTimelineDropsAt, type AppTimelineState } from "./timelineState";
 
 type AppTaskbarProps = {
   tabs: AppDockTab[];
@@ -31,13 +29,23 @@ const TASKBAR_FLOATING_GAP = 18;
 const TASKBAR_TIMELINE_MIN_WIDTH = 520;
 const TASKBAR_DOCK_BUTTON_WIDTH = 68;
 const TASKBAR_DOCK_BUTTON_GAP = 10;
-const APP_TASKBAR_DOCK_TAB_DRAG_MIME = "application/x-mangorts-app-taskbar-dock-tab";
+const TASKBAR_DOCK_DRAG_THRESHOLD_PX = 5;
 
 type TaskbarLayout = {
   left: number;
   width: number;
   dockWidth: number;
   timelineWidth: number;
+};
+
+type DockPointerDrag = {
+  tab: AppDockTab;
+  pointerID: number;
+  startX: number;
+  startY: number;
+  dragging: boolean;
+  previousCursor: string;
+  previousUserSelect: string;
 };
 
 export const AppTaskbar: React.FC<AppTaskbarProps> = ({
@@ -56,10 +64,12 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   onOpenTimelineEntity,
 }) => {
   const railRef = useRef<HTMLDivElement | null>(null);
+  const timelinePaneRef = useRef<HTMLElement | null>(null);
   const dockButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const previousDockRectsRef = useRef<Map<string, DOMRect>>(new Map());
   const suppressNextClickRef = useRef(false);
   const previousTabCountRef = useRef(tabs.length);
+  const dockPointerDragRef = useRef<DockPointerDrag | null>(null);
   const [movingTabID, setMovingTabID] = useState("");
   const [timelineVisible, setTimelineVisible] = useState(true);
   const [leftDockOpen, setLeftDockOpen] = useState(() => tabs.length > 0);
@@ -119,30 +129,89 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
     onExpandedChange(false);
   };
 
-  const reorderDockTabFromDrag = (event: React.DragEvent<HTMLElement>, targetTabID: string, placement: "before" | "after") => {
-    if (!movingTabID || movingTabID === targetTabID) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    onReorderTab(movingTabID, targetTabID, placement);
-  };
-
-  const reorderDockTabFromRailDrag = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!movingTabID) return;
+  const reorderDockTabAtClientX = (movingID: string, clientX: number) => {
     const elements = Array.from(railRef.current?.querySelectorAll<HTMLButtonElement>("[data-taskbar-tab-id]") ?? []);
     if (elements.length === 0) return;
     let target = elements[elements.length - 1];
     let placement: "before" | "after" = "after";
     for (const element of elements) {
       const rect = element.getBoundingClientRect();
-      if (event.clientX < rect.left + rect.width / 2) {
+      if (clientX < rect.left + rect.width / 2) {
         target = element;
         placement = "before";
         break;
       }
     }
     const targetID = target.dataset.taskbarTabId ?? "";
-    if (!targetID || targetID === movingTabID) return;
-    reorderDockTabFromDrag(event, targetID, placement);
+    if (!targetID || targetID === movingID) return;
+    onReorderTab(movingID, targetID, placement);
+  };
+
+  const timelineMinuteFromClientX = (clientX: number): number => {
+    const pane = timelinePaneRef.current;
+    if (!pane) return timelineState.startMinute;
+    const bounds = pane.getBoundingClientRect();
+    const x = Math.max(0, Math.min(bounds.width || 1, clientX - bounds.left));
+    const range = Math.max(1, timelineState.endMinute - timelineState.startMinute);
+    return clampTimelineStart(timelineState.startMinute + (x / Math.max(1, bounds.width)) * range, timelineState);
+  };
+
+  const beginDockPointerDrag = (event: React.PointerEvent<HTMLButtonElement>, tab: AppDockTab) => {
+    if (event.button !== 0 || !tab.entityID) return;
+    dockPointerDragRef.current = {
+      tab,
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      previousCursor: document.body.style.cursor,
+      previousUserSelect: document.body.style.userSelect,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const updateDockPointerDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dockPointerDragRef.current;
+    if (!drag || drag.pointerID !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.dragging && Math.hypot(deltaX, deltaY) < TASKBAR_DOCK_DRAG_THRESHOLD_PX) return;
+
+    event.preventDefault();
+    if (!drag.dragging) {
+      drag.dragging = true;
+      suppressNextClickRef.current = true;
+      setMovingTabID(drag.tab.id);
+      document.body.style.cursor = "grabbing";
+      document.body.style.userSelect = "none";
+    }
+    if (isPointInsideElement(railRef.current, event.clientX, event.clientY)) {
+      reorderDockTabAtClientX(drag.tab.id, event.clientX);
+    }
+  };
+
+  const finishDockPointerDrag = (event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const drag = dockPointerDragRef.current;
+    if (!drag || drag.pointerID !== event.pointerId) return;
+    dockPointerDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+
+    if (drag.dragging) {
+      event.preventDefault();
+      document.body.style.cursor = drag.previousCursor;
+      document.body.style.userSelect = drag.previousUserSelect;
+      setMovingTabID("");
+      if (!cancelled && isPointInsideElement(timelinePaneRef.current, event.clientX, event.clientY)) {
+        const payload = dockTabTimelineDragPayload(drag.tab);
+        if (payload) {
+          onTimelineChange(upsertTimelineDropsAt(
+            timelineState,
+            [{ kind: payload.kind, entityID: payload.itemID, label: drag.tab.label }],
+            timelineMinuteFromClientX(event.clientX),
+          ));
+        }
+      }
+    }
   };
 
   return (
@@ -150,7 +219,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
       <div aria-hidden="true" style={taskbarCenterDividerStyle(layout.dockWidth, dockVisible, timelineVisible)} />
       <section style={taskbarDockPaneStyle(expanded, dockVisible, !timelineVisible)} aria-label="Collapsed nodes and Logic Gates">
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
-          <div style={dockRailStyle} onDragOver={reorderDockTabFromRailDrag}>
+          <div style={dockRailStyle}>
             {tabs.map((tab) => {
               const active = activeTabID === tab.id;
               const shortLabel = shortTaskbarLabel(tab.label);
@@ -166,42 +235,11 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   title={tab.label}
                   aria-label={tab.label}
                   aria-pressed={active}
-                  draggable={!!tab.entityID}
-                  onDragStart={(event) => {
-                    const payload = dockTabTimelineDragPayload(tab);
-                    if (!payload) {
-                      event.preventDefault();
-                      return;
-                    }
-                    suppressNextClickRef.current = true;
-                    setMovingTabID(tab.id);
-                    event.dataTransfer.effectAllowed = "copyMove";
-                    event.dataTransfer.setData(APP_TASKBAR_DOCK_TAB_DRAG_MIME, tab.id);
-                    event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
-                    event.dataTransfer.setData("text/plain", tab.label);
-                    attachStackedDragPreview(
-                      event.dataTransfer,
-                      [{ label: tab.label, color: "#64748b" }],
-                      "#64748b",
-                      tab.kind === "logic_gate_arena" ? "Logic Gates" : "Nodes",
-                    );
-                  }}
-                  onDragEnd={() => {
-                    setMovingTabID("");
-                  }}
-                  onDragEnter={(event) => {
-                    const bounds = event.currentTarget.getBoundingClientRect();
-                    reorderDockTabFromDrag(event, tab.id, event.clientX > bounds.left + bounds.width / 2 ? "after" : "before");
-                  }}
-                  onDragOver={(event) => {
-                    const bounds = event.currentTarget.getBoundingClientRect();
-                    reorderDockTabFromDrag(event, tab.id, event.clientX > bounds.left + bounds.width / 2 ? "after" : "before");
-                  }}
-                  onDrop={(event) => {
-                    if (!movingTabID) return;
-                    event.preventDefault();
-                    setMovingTabID("");
-                  }}
+                  draggable={false}
+                  onPointerDown={(event) => beginDockPointerDrag(event, tab)}
+                  onPointerMove={updateDockPointerDrag}
+                  onPointerUp={(event) => finishDockPointerDrag(event)}
+                  onPointerCancel={(event) => finishDockPointerDrag(event, true)}
                   onClick={() => {
                     if (suppressNextClickRef.current) {
                       suppressNextClickRef.current = false;
@@ -223,7 +261,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
           </div>
         </div>
       </section>
-      <section style={taskbarTimelinePaneStyle(expanded, timelineVisible, dockVisible)} aria-label="Timeline">
+      <section ref={timelinePaneRef} style={taskbarTimelinePaneStyle(expanded, timelineVisible, dockVisible)} aria-label="Timeline">
         {timelineVisible && (
           <AppTimeline
             state={timelineState}
@@ -338,6 +376,12 @@ function dockTabTimelineDragPayload(tab: AppDockTab): { kind: "node" | "logic_ga
     itemType: kind,
     sourceTreeID: tab.id,
   };
+}
+
+function isPointInsideElement(element: HTMLElement | null, clientX: number, clientY: number): boolean {
+  if (!element) return false;
+  const bounds = element.getBoundingClientRect();
+  return clientX >= bounds.left && clientX <= bounds.right && clientY >= bounds.top && clientY <= bounds.bottom;
 }
 
 function taskbarLeft(leftInset: number): number {
@@ -516,7 +560,7 @@ function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties 
     borderRadius: 8,
     background: active ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)" : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
     color: active ? "#1d4ed8" : "#334155",
-    cursor: "pointer",
+    cursor: moving ? "grabbing" : "pointer",
     font: "inherit",
     letterSpacing: 0,
     padding: "5px 5px 4px",

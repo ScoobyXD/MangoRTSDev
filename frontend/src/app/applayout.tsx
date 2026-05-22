@@ -7,7 +7,8 @@ import FrameRightClickMenu from "./framerightclickmenu";
 import { MangoWordmark } from "./MangoLogo";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
-import { readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
+import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
+import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME } from "../modules/kanban/shared";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
@@ -204,6 +205,14 @@ function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
   }
 
   return [];
+}
+
+function hasMangoDragPayload(dataTransfer: DataTransfer): boolean {
+  const types = Array.from(dataTransfer.types);
+  return types.includes(EXPLORER_DRAG_MIME)
+    || types.includes(EXPLORER_ENTITY_DRAG_MIME)
+    || types.includes(KANBAN_CARD_DRAG_MIME)
+    || types.includes(KANBAN_COLUMN_DRAG_MIME);
 }
 
 function pageForTab(tab: ViewTab): PrimaryPage | null {
@@ -1341,6 +1350,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           setHeaderMenu(null);
           setFrameRightClickMenu(null);
           setModuleTypeMenu(null);
+        }}
+        onDragOver={(event) => {
+          if (event.defaultPrevented || !hasMangoDragPayload(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (event.defaultPrevented || !hasMangoDragPayload(event.dataTransfer)) return;
+          event.preventDefault();
         }}
       >
         {isLogicGateArenaView ? (
