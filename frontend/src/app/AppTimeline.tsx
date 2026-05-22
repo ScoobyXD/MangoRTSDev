@@ -751,11 +751,12 @@ function timelineItemMainStyle(compact: boolean): React.CSSProperties {
   return {
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: compact ? "minmax(0, 1fr) 10px" : "minmax(0, 1fr) 14px",
-    gap: 1,
+    gridTemplateRows: compact ? "28px 11px" : "30px 12px",
+    alignContent: "start",
+    gap: 0,
     padding: compact
-      ? `4px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 3}px`
-      : `5px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 3}px`,
+      ? `2px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 5}px`
+      : `2px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 5}px`,
     boxSizing: "border-box",
   };
 }
@@ -763,17 +764,18 @@ function timelineItemMainStyle(compact: boolean): React.CSSProperties {
 const timelineItemTopRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
-  alignItems: "center",
-  gap: 4,
+  alignItems: "start",
+  gap: 5,
 };
 
 function timelineItemIconStyle(compact: boolean): React.CSSProperties {
   return {
-    width: compact ? 15 : 17,
-    height: compact ? 15 : 17,
+    width: compact ? 19 : 20,
+    height: compact ? 19 : 20,
     display: "grid",
     placeItems: "center",
     flex: "0 0 auto",
+    marginTop: 1,
   };
 }
 
@@ -783,8 +785,9 @@ function timelineItemTextStyle(compact: boolean, completed: boolean): React.CSSP
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    fontSize: compact ? 9 : 11,
+    fontSize: compact ? 10.5 : 12,
     fontWeight: 900,
+    lineHeight: "18px",
     textDecoration: completed ? "line-through" : "none",
     color: completed ? "#166534" : "#0f172a",
   };
@@ -795,8 +798,9 @@ function timelineItemBottomRowStyle(compact: boolean, completed: boolean): React
     minWidth: 0,
     display: "block",
     color: completed ? "#166534" : "#475569",
-    fontSize: compact ? 8 : 9,
+    fontSize: compact ? 8.5 : 9.5,
     fontWeight: 900,
+    lineHeight: "11px",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
