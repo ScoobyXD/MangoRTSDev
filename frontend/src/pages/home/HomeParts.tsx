@@ -2149,7 +2149,7 @@ export function NodeInboxRail({
           {loading && <span style={mutedSmallStyle}>Loading</span>}
         </div>
         <input
-          style={{ ...inputStyle, border: "1px solid #111111" }}
+          style={inputStyle}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Search Nodes"

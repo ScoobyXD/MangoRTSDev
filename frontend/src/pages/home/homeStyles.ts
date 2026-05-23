@@ -106,7 +106,7 @@ export const columnResizeGripStyle: React.CSSProperties = {
   width: 2,
   minHeight: 0,
   borderRadius: 2,
-  background: HOME_BLACK,
+  background: "transparent",
 };
 
 export const railRowResizeHandleStyle: React.CSSProperties = {
@@ -127,7 +127,7 @@ export const railRowResizeGripStyle: React.CSSProperties = {
   width: "100%",
   height: 2,
   borderRadius: 2,
-  background: HOME_BLACK,
+  background: "transparent",
 };
 
 export const sidebarStyle: React.CSSProperties = {
@@ -137,9 +137,10 @@ export const sidebarStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 8,
   padding: 8,
-  border: `1px solid ${HOME_BLACK}`,
+  border: "none",
   background: "#ffffff",
   borderRadius: 8,
+  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10)",
   overflow: "hidden",
 };
 
@@ -344,8 +345,11 @@ export function logicGateRailStyle(topHeight: number): React.CSSProperties {
     display: "grid",
     gridTemplateRows: `${topHeight}px ${HOME_ROW_RESIZER_HEIGHT}px minmax(0, 1fr)`,
     gap: 0,
+    padding: 10,
     overflow: "hidden",
     background: "#ffffff",
+    borderRadius: 8,
+    boxShadow: "0 14px 34px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
   };
 }
 
@@ -354,10 +358,10 @@ export const logicGateRailSectionStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 8,
-  padding: 10,
-  border: `1px solid ${HOME_BLACK}`,
-  background: "#ffffff",
-  borderRadius: 8,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  borderRadius: 0,
   overflow: "hidden",
 };
 
@@ -519,11 +523,11 @@ export const logicGateTreeRowTextStyle: React.CSSProperties = {
 export const logicGateRaciPanelStyle: React.CSSProperties = {
   minHeight: 0,
   minWidth: 0,
-  padding: 10,
+  padding: 0,
   border: "none",
-  background: "#ffffff",
-  borderRadius: 8,
-  overflow: "hidden",
+  background: "transparent",
+  borderRadius: 0,
+  overflow: "visible",
 };
 
 export const logicGateRaciMatrixSurfaceStyle: React.CSSProperties = {
