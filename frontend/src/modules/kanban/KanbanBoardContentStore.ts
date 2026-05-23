@@ -8,6 +8,7 @@ export type KanbanBoardContents = {
 
 const contentCache = new Map<string, KanbanBoardContents>();
 const contentInflight = new Map<string, Promise<KanbanBoardContents>>();
+const contentVersions = new Map<string, number>();
 
 function key(apiBase: string, companyID: string, boardID: string): string {
   return `${apiBase}:${companyID}:${boardID}`;
@@ -20,16 +21,30 @@ function cloneContents(contents: KanbanBoardContents): KanbanBoardContents {
   };
 }
 
+function contentVersion(cacheKey: string): number {
+  return contentVersions.get(cacheKey) ?? 0;
+}
+
+function bumpContentVersion(cacheKey: string): number {
+  const next = contentVersion(cacheKey) + 1;
+  contentVersions.set(cacheKey, next);
+  return next;
+}
+
 export function hasKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): boolean {
   return contentCache.has(key(apiBase, companyID, boardID));
 }
 
 export function primeKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string, contents: KanbanBoardContents): void {
-  contentCache.set(key(apiBase, companyID, boardID), cloneContents(contents));
+  const cacheKey = key(apiBase, companyID, boardID);
+  bumpContentVersion(cacheKey);
+  contentInflight.delete(cacheKey);
+  contentCache.set(cacheKey, cloneContents(contents));
 }
 
 export function invalidateKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string): void {
   const cacheKey = key(apiBase, companyID, boardID);
+  bumpContentVersion(cacheKey);
   contentCache.delete(cacheKey);
   contentInflight.delete(cacheKey);
 }
@@ -41,17 +56,16 @@ export async function getKanbanBoardContentsSingleFlight(apiBase: string, compan
   const inflight = contentInflight.get(cacheKey);
   if (inflight) return inflight.then(cloneContents);
 
+  const version = contentVersion(cacheKey);
   const promise = Promise.all([
     listKanbanColumns(apiBase, companyID, boardID),
     listKanbanCards(apiBase, companyID, boardID, "", cardLimit),
   ]).then(([columns, cards]) => {
     const contents = { columns, cards };
-    contentCache.set(cacheKey, cloneContents(contents));
-    contentInflight.delete(cacheKey);
+    if (contentVersion(cacheKey) === version) contentCache.set(cacheKey, cloneContents(contents));
     return contents;
-  }).catch((error) => {
-    contentInflight.delete(cacheKey);
-    throw error;
+  }).finally(() => {
+    if (contentInflight.get(cacheKey) === promise) contentInflight.delete(cacheKey);
   });
 
   contentInflight.set(cacheKey, promise);

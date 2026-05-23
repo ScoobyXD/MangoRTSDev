@@ -596,10 +596,18 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
-		return LogicGateNodeAssignmentResult{}, ErrNotFound
-	}
 	nodeKey := key(input.CompanyID, input.NodeID)
+	var createdNode domain.Node
+	if _, ok := r.nodes[nodeKey]; !ok {
+		if input.CreateNodeTitle == "" {
+			return LogicGateNodeAssignmentResult{}, ErrNotFound
+		}
+		createdNode, err = r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+		if err != nil {
+			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
 	previousNode := r.nodes[nodeKey]
 	previousAssigneeUserID := nodeAssigneeUserID(previousNode)
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
@@ -616,6 +624,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		IsIssueSet:          input.IsIssueSet,
 	})
 	if err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
@@ -652,7 +661,12 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment: assignment,
 	}
-	events, err := r.appendDomainEventsLocked(logicGateAssignmentSavedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
+	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
+	if createdNode.CompanyID != "" {
+		eventInputs = append([]DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(createdNode, meta)}, eventInputs...)
+	}
+	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err

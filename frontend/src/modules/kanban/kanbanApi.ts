@@ -188,6 +188,7 @@ export async function assignNodeToLogicGateStatus(args: {
   columnID?: string;
   priority?: number | null;
   nodeTitle?: string;
+  createNodeTitle?: string;
   position?: number;
   isIssue?: boolean;
 }): Promise<LogicGateAssignmentCommandResult> {
@@ -199,6 +200,7 @@ export async function assignNodeToLogicGateStatus(args: {
       status: args.status ?? args.columnID,
       priority: args.priority,
       node_title: args.nodeTitle,
+      create_node_title: args.createNodeTitle,
       position: args.position,
       is_issue: args.isIssue,
       assignee_policy: "first_responsible",

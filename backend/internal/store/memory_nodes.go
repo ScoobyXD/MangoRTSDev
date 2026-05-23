@@ -41,15 +41,25 @@ func (r *MemoryRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, a
 }
 
 func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUserID string) (domain.Node, error) {
+	return r.createNodeWithAssigneeIDLocked(companyID, "", title, assigneeUserID)
+}
+
+func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+	nodeID = strings.TrimSpace(nodeID)
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	if assigneeUserID != "" {
 		if _, ok := r.memberships[membershipKey(companyID, assigneeUserID)]; !ok {
 			return domain.Node{}, ErrAssigneeNotInCompany
 		}
 	}
+	if nodeID == "" {
+		nodeID = newUUIDv7String()
+	} else if _, exists := r.nodes[key(companyID, nodeID)]; exists {
+		return domain.Node{}, ErrInvalid
+	}
 	n := domain.Node{
 		CompanyID:        companyID,
-		NodeID:           newUUIDv7String(),
+		NodeID:           nodeID,
 		Title:            title,
 		CreatedTimestamp: time.Now().UTC(),
 	}

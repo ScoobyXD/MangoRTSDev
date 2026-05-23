@@ -665,6 +665,7 @@ type LogicGateNodeAssignmentInput struct {
 	Status              string
 	ColumnID            string
 	NodeTitle           string
+	CreateNodeTitle     string
 	DescriptionSnapshot string
 	Position            int
 	Priority            *int

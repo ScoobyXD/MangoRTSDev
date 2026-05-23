@@ -227,6 +227,29 @@ export function logicGateIDFromKanbanBoardID(boardID: string): string {
   return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length).trim() : "";
 }
 
+export function createClientUUIDv7(now: () => number = () => Date.now(), randomValues?: (bytes: Uint8Array) => Uint8Array): string {
+  const bytes = new Uint8Array(16);
+  const fillRandom = randomValues ?? globalThis.crypto?.getRandomValues?.bind(globalThis.crypto);
+  if (fillRandom) {
+    fillRandom(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+
+  const timestamp = BigInt(Math.max(0, Math.floor(now()))) & 0xffffffffffffn;
+  bytes[0] = Number((timestamp >> 40n) & 0xffn);
+  bytes[1] = Number((timestamp >> 32n) & 0xffn);
+  bytes[2] = Number((timestamp >> 24n) & 0xffn);
+  bytes[3] = Number((timestamp >> 16n) & 0xffn);
+  bytes[4] = Number((timestamp >> 8n) & 0xffn);
+  bytes[5] = Number(timestamp & 0xffn);
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-${hex[4]}${hex[5]}-${hex[6]}${hex[7]}-${hex[8]}${hex[9]}-${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`;
+}
+
 export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
   return [...boards].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
 }

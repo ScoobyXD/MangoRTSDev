@@ -13,6 +13,7 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.NodeTitle = strings.TrimSpace(input.NodeTitle)
+	input.CreateNodeTitle = strings.TrimSpace(input.CreateNodeTitle)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)

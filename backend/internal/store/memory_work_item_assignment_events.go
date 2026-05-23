@@ -4,6 +4,7 @@ import "miraeopus/backend/internal/domain"
 
 type memoryWorkItemAssignmentEventSnapshot struct {
 	nodes                    map[string]domain.Node
+	folderItems              map[string]domain.CompanyExplorerFolderItem
 	kanbanCards              map[string][]domain.KanbanCard
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
 	entityPermissions        map[string]domain.EntityPermission
@@ -15,6 +16,7 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItemAssignmentEventSnapshot {
 	return memoryWorkItemAssignmentEventSnapshot{
 		nodes:                    cloneMemoryMap(r.nodes),
+		folderItems:              cloneMemoryMap(r.folderItems),
 		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
 		entityPermissions:        cloneMemoryMap(r.entityPermissions),
@@ -26,6 +28,7 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 
 func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWorkItemAssignmentEventSnapshot) {
 	r.nodes = snapshot.nodes
+	r.folderItems = snapshot.folderItems
 	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.entityPermissions = snapshot.entityPermissions
