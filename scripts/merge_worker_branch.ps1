@@ -45,7 +45,7 @@ function ConvertTo-BackendRelativePath {
   return ".\" + $GitPath.Substring("backend/".Length).Replace("/", "\")
 }
 
-function Write-PsqlScript {
+function Write-DbMigrationScript {
   param([string[]]$SqlPaths)
 
   $migrationNames = @(
@@ -54,22 +54,13 @@ function Write-PsqlScript {
       ForEach-Object { Split-Path -Leaf $_ } |
       Sort-Object
   )
-  $schemaChanged = @($SqlPaths | Where-Object { $_ -eq "backend/db/schema.sql" }).Count -gt 0
-
-  Write-Host '$ErrorActionPreference = "Stop"'
-  Write-Host '$awsProfile = if ($env:AWS_PROFILE) { $env:AWS_PROFILE } else { "mangorts-dev" }'
 
   if ($migrationNames.Count -gt 0) {
     $firstMigration = $migrationNames | Select-Object -First 1
-    Write-Host "..\scripts\apply_db_migrations.ps1 -AwsProfile `$awsProfile -StartAt `"$firstMigration`""
-    Write-Host 'if ($LASTEXITCODE -ne 0) { throw "apply_db_migrations.ps1 failed with exit code $LASTEXITCODE" }'
-    if ($schemaChanged) {
-      Write-Host '# backend/db/schema.sql changed as the canonical schema snapshot; the migration runner applies the executable migration file(s).'
-    }
+    Write-Host '$ErrorActionPreference = "Stop"'
+    Write-Host "..\scripts\apply_db_migrations.ps1 -StartAt `"$firstMigration`""
     return
   }
-
-  Write-Host '# No backend/db/migrations/*.sql file changed. Do not apply backend/db/schema.sql directly to an existing database unless you are rebuilding it intentionally.'
 }
 
 $mainRoot = Resolve-AgentPath -Path $MainPath
@@ -270,9 +261,13 @@ if ($dbSqlPaths.Count -gt 0) {
   Write-Host ""
   Write-Host "New DB migration/schema SQL changed by merge:"
   $dbSqlPaths | ForEach-Object { Write-Host " - $_" }
-  Write-Host ""
-  Write-Host "PowerShell psql script to run from backend:"
-  Write-PsqlScript -SqlPaths @($dbSqlPaths)
+
+  $dbMigrationPaths = @($dbSqlPaths | Where-Object { $_ -match "^backend/db/migrations/[^/]+\.sql$" })
+  if ($dbMigrationPaths.Count -gt 0) {
+    Write-Host ""
+    Write-Host "PowerShell migration script to run from backend:"
+    Write-DbMigrationScript -SqlPaths @($dbSqlPaths)
+  }
 }
 
 if ($verificationExitCode -ne 0) {
