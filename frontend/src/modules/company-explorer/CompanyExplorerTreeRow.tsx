@@ -127,6 +127,20 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
   const isDropTarget = dragOverTreeID === row.id;
+  const rowFrameGradient = "linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86))";
+  const selectedFrameSurface = isDarkTheme
+    ? "linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.78) 46%, rgba(58, 44, 92, 0.72))"
+    : "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.64) 46%, rgba(247, 240, 255, 0.72))";
+  const rowBackground = isDropTarget
+    ? dropRowBackground
+    : isSelected
+      ? `${selectedFrameSurface} padding-box, ${rowFrameGradient} border-box`
+      : undefined;
+  const rowBoxShadow = isDropTarget && dragOverPlacement
+    ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
+    : isSelected
+      ? "0 0 0 1px rgba(120, 224, 255, 0.16), 0 0 14px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.82)"
+      : `inset 0 -1px 0 ${rowRuleColor}`;
 
   return (
     <div
@@ -257,11 +271,12 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         cursor: "default",
         opacity: isDragging ? 0.55 : 1,
         ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(71, 85, 105, 0.12)",
-        background: isDropTarget ? dropRowBackground : (isSelected ? selectedRowBackground : undefined),
-        borderBottom: `1px solid ${rowRuleColor}`,
-        boxShadow: isDropTarget && dragOverPlacement
-          ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
-          : undefined,
+        ["--company-explorer-selected-bg" as string]: selectedRowBackground,
+        background: rowBackground,
+        border: "1px solid transparent",
+        borderRadius: 7,
+        boxShadow: rowBoxShadow,
+        transition: "background 120ms ease, box-shadow 140ms ease",
       }}
     >
       {isFolder && !isSearchActive ? (

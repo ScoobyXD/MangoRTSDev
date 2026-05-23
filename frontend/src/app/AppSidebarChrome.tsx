@@ -73,6 +73,8 @@ const SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #
 const SIDEBAR_NEUMORPHIC_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
 const SIDEBAR_NEUMORPHIC_RAISED_SHADOW = "10px 10px 22px rgba(174, 174, 192, 0.32), -8px -8px 18px rgba(255, 255, 255, 0.96), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7px 16px rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(148, 163, 184, 0.14)";
+const SIDEBAR_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const SIDEBAR_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
@@ -1617,9 +1619,9 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
 const appSidebarStyle: React.CSSProperties = {
   minHeight: 0,
   height: "100%",
-  display: "grid",
-  gridTemplateRows: "auto auto auto auto auto",
-  alignContent: "start",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "stretch",
   gap: 10,
   padding: 10,
   borderRadius: PAGE_SURFACE_RADIUS,
@@ -1628,6 +1630,7 @@ const appSidebarStyle: React.CSSProperties = {
   boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)",
   overflowY: "auto",
   overflowX: "hidden",
+  overscrollBehavior: "contain",
   scrollbarGutter: "stable",
   ["--company-explorer-scroll-accent" as string]: SIDEBAR_ORANGE_ACCENT,
   ["--company-explorer-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
@@ -1635,6 +1638,7 @@ const appSidebarStyle: React.CSSProperties = {
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
+  flex: "0 0 auto",
   minHeight: 42,
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -1653,6 +1657,7 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
 };
 
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
+  flex: "0 0 auto",
   display: "grid",
   gap: 8,
   minWidth: 0,
@@ -1661,6 +1666,7 @@ const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
 };
 
 const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
+  flex: "0 0 auto",
   display: "grid",
   gap: 8,
   minWidth: 0,
@@ -1670,6 +1676,7 @@ const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
 
 function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
   return {
+    flex: "0 0 auto",
     display: "grid",
     gridTemplateRows: "auto minmax(44px, auto)",
     gap: 5,
@@ -1693,6 +1700,8 @@ const appSidebarSectionTitleStyle: React.CSSProperties = {
 
 function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean, elevated: boolean, raised = false): React.CSSProperties {
   if (elevated) {
+    const framed = active || raised;
+    const surface = active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE;
     return {
       width: "100%",
       minHeight: 44,
@@ -1701,11 +1710,11 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       alignItems: "center",
       gap: 8,
       margin: 0,
-      border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
+      border: `1px solid ${framed ? "transparent" : SIDEBAR_SOFT_BORDER}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
-      background: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE,
+      background: framed ? `${surface} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : surface,
       color: SIDEBAR_ACTIVE_TEXT,
-      boxShadow: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW : raised ? SIDEBAR_NEUMORPHIC_RAISED_SHADOW : SIDEBAR_NEUMORPHIC_SHADOW,
+      boxShadow: framed ? `${active ? SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW : SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW,
       transform: raised ? "translateY(-2px)" : "translateY(0)",
       cursor: "pointer",
       font: "inherit",
@@ -1823,15 +1832,17 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
   }
 }
 function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React.CSSProperties {
+  const framed = active || raised;
+  const surface = active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE;
   return {
     display: "grid",
     gap: 0,
     minWidth: 0,
     margin: 0,
-    border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
+    border: `1px solid ${framed ? "transparent" : SIDEBAR_SOFT_BORDER}`,
     borderRadius: SIDEBAR_ELEVATED_RADIUS,
-    background: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE,
-    boxShadow: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW : raised ? SIDEBAR_NEUMORPHIC_RAISED_SHADOW : SIDEBAR_NEUMORPHIC_SHADOW,
+    background: framed ? `${surface} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : surface,
+    boxShadow: framed ? `${active ? SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW : SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW,
     transform: raised ? "translateY(-2px)" : "translateY(0)",
     overflow: "hidden",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
@@ -1844,10 +1855,10 @@ function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): Re
     gap: floating ? 0 : 3,
     minWidth: 0,
     margin: 0,
-    border: floating ? `1px solid ${SIDEBAR_SOFT_BORDER}` : undefined,
+    border: floating ? `1px solid ${raised ? "transparent" : SIDEBAR_SOFT_BORDER}` : undefined,
     borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
-    background: floating ? SIDEBAR_NEUMORPHIC_SURFACE : undefined,
-    boxShadow: floating ? (raised ? SIDEBAR_NEUMORPHIC_RAISED_SHADOW : SIDEBAR_NEUMORPHIC_SHADOW) : undefined,
+    background: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : SIDEBAR_NEUMORPHIC_SURFACE) : undefined,
+    boxShadow: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW) : undefined,
     transform: floating && raised ? "translateY(-2px)" : "translateY(0)",
     overflow: floating ? "hidden" : "visible",
     transition: floating ? "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease" : undefined,
@@ -2023,6 +2034,10 @@ const appSidebarSharedErrorStyle: React.CSSProperties = {
 };
 
 function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null, hovered = false): React.CSSProperties {
+  const framed = active || hovered || dropPlacement === "inside";
+  const frameBackground = active
+    ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 250, 255, 0.74) 44%, rgba(247, 241, 255, 0.76))"
+    : "linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(236, 251, 255, 0.58) 45%, rgba(247, 240, 255, 0.62))";
   return {
     width: "100%",
     minHeight: 28,
@@ -2030,9 +2045,9 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? SIDEBAR_STATE_ACTIVE_BORDER : dropPlacement === "inside" ? SIDEBAR_STATE_OPEN_BORDER : hovered ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
-    borderRadius: 5,
-    background: active ? SIDEBAR_STATE_ACTIVE_BG : dropPlacement === "inside" ? SIDEBAR_STATE_DROP_BG : hovered ? SIDEBAR_STATE_HOVER_BG : "transparent",
+    border: `1px solid ${framed ? "transparent" : "transparent"}`,
+    borderRadius: 7,
+    background: framed ? `${frameBackground} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : "transparent",
     color: "#334155",
     cursor: "pointer",
     font: "inherit",
@@ -2041,12 +2056,14 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     padding: `2px 6px 2px ${6 + depth * 14}px`,
     textAlign: "left",
     minWidth: 0,
-    transition: "background 120ms ease, border-color 120ms ease",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease",
     boxShadow: dropPlacement === "before"
       ? "inset 0 2px 0 rgba(100, 116, 139, 0.66)"
       : dropPlacement === "after"
         ? "inset 0 -2px 0 rgba(100, 116, 139, 0.66)"
-        : undefined,
+        : framed
+          ? "0 0 0 1px rgba(120, 224, 255, 0.12), 0 0 12px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.82)"
+          : undefined,
   };
 }
 
@@ -2232,10 +2249,11 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
 };
 
 const appSidebarExplorerSectionStyle: React.CSSProperties = {
+  flex: "0 0 auto",
   minWidth: 0,
   display: "grid",
   margin: "0 3px",
-  overflow: "hidden",
+  overflow: "visible",
   borderRadius: SIDEBAR_ELEVATED_RADIUS,
   border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
   background: SIDEBAR_NEUMORPHIC_SURFACE,

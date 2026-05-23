@@ -117,9 +117,9 @@ export const menuBtnBase: React.CSSProperties = {
 export const hoverHandlers = {
   onMouseEnter: (e: React.MouseEvent) => {
     const target = e.currentTarget as HTMLElement;
-    target.style.background = "radial-gradient(circle at 18% 18%, rgba(255,255,255,0.96), rgba(255,255,255,0.34) 38%, transparent 72%), linear-gradient(135deg, rgba(255,255,255,0.72), rgba(203, 245, 255, 0.34) 48%, rgba(224, 207, 255, 0.38))";
-    target.style.borderColor = "rgba(255, 255, 255, 0.72)";
-    target.style.boxShadow = "0 9px 24px rgba(15, 23, 42, 0.16), inset 1px 1px 0 rgba(255,255,255,0.86), inset -1px -1px 0 rgba(148,163,184,0.14)";
+    target.style.background = "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66)) padding-box, linear-gradient(135deg, rgba(92,238,255,0.92), rgba(128,216,255,0.82) 34%, rgba(183,124,255,0.88) 72%, rgba(255,255,255,0.86)) border-box";
+    target.style.borderColor = "transparent";
+    target.style.boxShadow = "0 9px 24px rgba(15, 23, 42, 0.14), 0 0 16px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255,255,255,0.86)";
     target.style.backdropFilter = "blur(14px) saturate(1.28)";
     target.style.transform = "translateY(-1px)";
   },

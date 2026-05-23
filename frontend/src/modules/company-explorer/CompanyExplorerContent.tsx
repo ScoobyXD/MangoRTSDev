@@ -405,6 +405,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [explorerSearchActive, hideTopControls, treeRows.length, useParentScroll]);
 
   useEffect(() => {
+    if (!useParentScroll || !treeViewportRef.current) return;
+    const viewport = treeViewportRef.current;
+    const scrollContainer = findParentScrollContainer(viewport);
+    const rowsTopOffset = getRowsTopOffsetInScrollContainer(viewport, scrollContainer);
+    const nextViewportHeight = Math.max(1, scrollContainer.clientHeight);
+    const nextScrollTop = Math.max(0, scrollContainer.scrollTop - rowsTopOffset);
+    setTreeViewportHeight((current) => (current === nextViewportHeight ? current : nextViewportHeight));
+    setTreeScrollTop((current) => (Math.abs(current - nextScrollTop) < 0.5 ? current : nextScrollTop));
+  });
+
+  useEffect(() => {
     if (defaultExpansionAppliedRef.current) return;
     try {
       if (localStorage.getItem(expandedStorageKey) != null) {
