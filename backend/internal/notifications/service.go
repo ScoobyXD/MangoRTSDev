@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
@@ -69,6 +70,43 @@ func (s *Service) ProcessEvent(event domain.NotificationEvent) ([]domain.Notific
 	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates})
 }
 
+func (s *Service) ProcessDomainEvents(ctx context.Context, events []domain.DomainEvent) ([]domain.Notification, error) {
+	all := make([]domain.Notification, 0)
+	for _, event := range events {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return all, err
+			}
+		}
+		items, err := s.ProcessDomainEvent(ctx, event)
+		if err != nil {
+			return all, err
+		}
+		all = append(all, items...)
+	}
+	return all, nil
+}
+
+func (s *Service) ProcessDomainEvent(ctx context.Context, event domain.DomainEvent) ([]domain.Notification, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	notificationEvent, ok := notificationEventFromDomainEvent(event)
+	if !ok {
+		return []domain.Notification{}, nil
+	}
+	candidates, err := s.notificationCandidates(notificationEvent)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return []domain.Notification{}, nil
+	}
+	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates})
+}
+
 func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]store.NotificationCreateInput, error) {
 	actorID := ""
 	if event.ActorUserID != nil {
@@ -123,6 +161,15 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			return notificationMetaForEffectiveLogicGateUser(roles[strings.TrimSpace(userID)], logicGateID, nodeID)
 		})
 	}
+	addLogicGateWorkRecipients := func(logicGateID, nodeID string) error {
+		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		if err != nil {
+			return err
+		}
+		return addEffectiveRecipients(store.EntityTypeLogicGate, logicGateID, func(userID string) notificationRecipientMeta {
+			return notificationMetaForEffectiveLogicGateUser(roles[strings.TrimSpace(userID)], logicGateID, nodeID)
+		})
+	}
 
 	title := "Mango notification"
 	body := payloadString(payload, "body_preview")
@@ -151,6 +198,61 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			body = fmt.Sprintf("%s changed %s to %s.", actorLabel, nodeTitle, toColumn)
 		} else {
 			body = fmt.Sprintf("%s changed this node to %s.", actorLabel, toColumn)
+		}
+	case store.WorkItemLogicGateAssignmentSavedEventType,
+		store.WorkItemLogicGateAssignmentMovedEventType,
+		store.WorkItemLogicGateAssignmentRemovedEventType,
+		store.WorkItemLogicGateIssueToggledEventType:
+		logicGateID := payloadString(payload, "logic_gate_id")
+		if logicGateID == "" {
+			logicGateID = event.EntityID
+		}
+		nodeID := payloadString(payload, "node_id")
+		if err := addLogicGateWorkRecipients(logicGateID, nodeID); err != nil {
+			return nil, err
+		}
+		nodeTitle := payloadString(payload, "node_title")
+		if nodeTitle == "" {
+			nodeTitle = s.notificationNodeTitle(event.CompanyID, nodeID)
+		}
+		if nodeTitle == "" {
+			nodeTitle = "This node"
+		}
+		status := payloadString(payload, "status")
+		if status == "" {
+			if statusKey := payloadString(payload, "status_key"); statusKey != "" {
+				status = store.LogicGateWorkStatusTitle(statusKey)
+			}
+		}
+		switch event.Type {
+		case store.WorkItemLogicGateAssignmentSavedEventType:
+			title = "Node added to Logic Gate work"
+			if status != "" {
+				body = fmt.Sprintf("%s was added in %s.", nodeTitle, status)
+			} else {
+				body = nodeTitle + " was added to Logic Gate work."
+			}
+		case store.WorkItemLogicGateAssignmentMovedEventType:
+			if status == "" {
+				status = "a new state"
+			}
+			title = "Node status changed to " + status
+			body = fmt.Sprintf("%s moved to %s.", nodeTitle, status)
+		case store.WorkItemLogicGateAssignmentRemovedEventType:
+			title = "Node removed from Logic Gate work"
+			body = nodeTitle + " was removed from Logic Gate work."
+		case store.WorkItemLogicGateIssueToggledEventType:
+			isIssue, ok := payloadBool(payload, "is_issue")
+			if ok && isIssue {
+				title = "Node marked as an issue"
+				body = nodeTitle + " was marked as an issue."
+			} else if ok {
+				title = "Node issue cleared"
+				body = nodeTitle + " is no longer marked as an issue."
+			} else {
+				title = "Node issue state changed"
+				body = nodeTitle + " issue state changed."
+			}
 		}
 	case domain.NotificationEventLogicGateRaciUpdated:
 		logicGateID := payloadString(payload, "logic_gate_id")
@@ -350,6 +452,77 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		})
 	}
 	return items, nil
+}
+
+func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.NotificationEvent, bool) {
+	switch event.Type {
+	case store.WorkItemLogicGateAssignmentSavedEventType,
+		store.WorkItemLogicGateAssignmentMovedEventType,
+		store.WorkItemLogicGateAssignmentRemovedEventType,
+		store.WorkItemLogicGateIssueToggledEventType:
+	default:
+		return domain.NotificationEvent{}, false
+	}
+	payload := event.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	logicGateID := payloadString(payload, "logic_gate_id")
+	actorUserID := ""
+	if event.ActorUserID != nil {
+		actorUserID = strings.TrimSpace(*event.ActorUserID)
+	}
+	if actorUserID == "" {
+		actorUserID = payloadString(payload, "actor_user_id")
+	}
+	out := domain.NotificationEvent{
+		EventID:          strings.TrimSpace(event.EventID),
+		CompanyID:        strings.TrimSpace(event.CompanyID),
+		Type:             strings.TrimSpace(event.Type),
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGateID,
+		IdempotencyKey:   event.IdempotencyKey,
+		Payload:          payload,
+		CreatedTimestamp: event.CreatedTimestamp,
+	}
+	if actorUserID != "" {
+		out.ActorUserID = &actorUserID
+	}
+	return out, true
+}
+
+func logicGateWorkNotificationTargets(logicGateID, nodeID string) []store.NotificationAccessTarget {
+	targets := make([]store.NotificationAccessTarget, 0, 2)
+	seen := map[string]bool{}
+	add := func(entityType, entityID string) {
+		entityType, ok := store.NormalizeEntityType(entityType)
+		entityID = strings.TrimSpace(entityID)
+		if !ok || entityID == "" {
+			return
+		}
+		key := entityType + "\x00" + entityID
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		targets = append(targets, store.NotificationAccessTarget{EntityType: entityType, EntityID: entityID})
+	}
+	add(store.EntityTypeLogicGate, logicGateID)
+	add(store.EntityTypeNode, nodeID)
+	return targets
+}
+
+func (s *Service) notificationNodeTitle(companyID, nodeID string) string {
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	if companyID == "" || nodeID == "" {
+		return ""
+	}
+	node, err := s.Repo.GetNode(companyID, nodeID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(node.Title)
 }
 
 func (s *Service) notificationEffectiveUsers(companyID, resourceType, resourceID string) ([]string, error) {
@@ -683,6 +856,28 @@ func payloadStringSlice(payload map[string]any, key string) []string {
 		return cleanStrings(strings.Split(typed, ","))
 	default:
 		return nil
+	}
+}
+
+func payloadBool(payload map[string]any, key string) (bool, bool) {
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return false, false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "y":
+			return true, true
+		case "false", "0", "no", "n":
+			return false, true
+		default:
+			return false, false
+		}
+	default:
+		return false, false
 	}
 }
 

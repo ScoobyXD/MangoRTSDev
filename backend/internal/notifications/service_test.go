@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -104,6 +105,176 @@ func TestPhase6NotificationRecipientsUseReverseEffectiveAccessAndRACIRouting(t *
 	}
 	if got := byUser[viewer.UserID]; got.Surface != domain.NotificationSurfaceACIInbox || got.Role != domain.NotificationRoleOther {
 		t.Fatalf("viewer metadata = %+v, want ACI other fallback", got)
+	}
+}
+
+func TestProcessDomainEventsLogicGateWorkUsesEffectiveAccessAndRACI(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666611"
+	repo.EnsureCompany(companyID, "Notification Projector Co")
+
+	viewer := mustNotificationUser(t, repo, companyID, "projector-viewer")
+	nodeOnlyViewer := mustNotificationUser(t, repo, companyID, "projector-node-viewer")
+	responsible := mustNotificationUser(t, repo, companyID, "projector-responsible")
+	actor := mustNotificationUser(t, repo, companyID, "projector-actor")
+	blocked := mustNotificationUser(t, repo, companyID, "projector-blocked")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Projector Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Projector Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions logic gate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: nodeOnlyViewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany setup: %v", err)
+	}
+
+	process := func(label, wantType, wantTitle string, events []domain.DomainEvent) []domain.Notification {
+		t.Helper()
+		if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+			t.Fatalf("%s RebuildEffectiveResourceAccessForCompany: %v", label, err)
+		}
+		items, err := service.ProcessDomainEvents(context.Background(), events)
+		if err != nil {
+			t.Fatalf("%s ProcessDomainEvents: %v", label, err)
+		}
+		byUser := map[string]domain.Notification{}
+		for _, item := range items {
+			if item.Type != wantType {
+				t.Fatalf("%s notification type = %q, want %q", label, item.Type, wantType)
+			}
+			if !strings.Contains(item.Title, wantTitle) {
+				t.Fatalf("%s notification title = %q, want it to contain %q", label, item.Title, wantTitle)
+			}
+			if item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID || item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
+				t.Fatalf("%s notification target = %+v, want logic gate/node target", label, item)
+			}
+			byUser[item.RecipientUserID] = item
+		}
+		for _, user := range []domain.User{viewer, responsible} {
+			if _, ok := byUser[user.UserID]; !ok {
+				t.Fatalf("%s missing notification for eligible user %s; got %+v", label, user.UserID, items)
+			}
+		}
+		for _, user := range []domain.User{actor, blocked, nodeOnlyViewer} {
+			if _, ok := byUser[user.UserID]; ok {
+				t.Fatalf("%s unexpected notification for user %s: %+v", label, user.UserID, byUser[user.UserID])
+			}
+		}
+		if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.LogicGateRaciRoleResponsible {
+			t.Fatalf("%s responsible metadata = %+v, want responsible R inbox", label, got)
+		}
+		return items
+	}
+
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	process("saved", store.WorkItemLogicGateAssignmentSavedEventType, "added", assigned.Events)
+
+	moved, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "done",
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+	}
+	process("moved", store.WorkItemLogicGateAssignmentMovedEventType, "Done", moved.Events)
+	if _, err := service.ProcessDomainEvent(context.Background(), moved.Events[0]); err != nil {
+		t.Fatalf("duplicate ProcessDomainEvent: %v", err)
+	}
+	responsibleNotifications, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications responsible: %v", err)
+	}
+	duplicateCount := 0
+	for _, item := range responsibleNotifications {
+		if item.SourceEventID == moved.Events[0].EventID {
+			duplicateCount++
+		}
+	}
+	if duplicateCount != 1 {
+		t.Fatalf("responsible duplicate moved notifications = %d, want 1: %+v", duplicateCount, responsibleNotifications)
+	}
+
+	issue, err := repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		IsIssue:     true,
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("SetLogicGateNodeAssignmentIssue: %v", err)
+	}
+	process("issue", store.WorkItemLogicGateIssueToggledEventType, "issue", issue.Events)
+
+	removed, err := repo.RemoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentRemoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("RemoveLogicGateNodeAssignment: %v", err)
+	}
+	process("removed", store.WorkItemLogicGateAssignmentRemovedEventType, "removed", removed.Events)
+}
+
+func TestLogicGateWorkNotificationTargetsIncludeGateAndNode(t *testing.T) {
+	targets := logicGateWorkNotificationTargets("gate-1", "node-1")
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v, want gate and node", targets)
+	}
+	if targets[0].EntityType != store.EntityTypeLogicGate || targets[0].EntityID != "gate-1" {
+		t.Fatalf("first target = %+v, want logic gate", targets[0])
+	}
+	if targets[1].EntityType != store.EntityTypeNode || targets[1].EntityID != "node-1" {
+		t.Fatalf("second target = %+v, want node", targets[1])
 	}
 }
 
