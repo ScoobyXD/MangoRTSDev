@@ -399,19 +399,21 @@ func writeLogicGateWorkRemoveError(w http.ResponseWriter, err error) bool {
 
 func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentResult) map[string]any {
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
+	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
 		"assignment": assignment,
 		"node":       result.Node,
-		"card":       result.Card,
+		"card":       card,
 	}
 }
 
 func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssignmentRemoveResult) map[string]any {
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
+	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
 		"assignment": assignment,
 		"node":       result.Node,
-		"card":       result.Card,
+		"card":       card,
 	}
 }
 

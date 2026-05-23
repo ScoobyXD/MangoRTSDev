@@ -80,6 +80,10 @@ func workItemAssignmentWorkspaceEventInput(eventType string, assignment domain.N
 	}
 }
 
+func logicGateAssignmentWorkspaceCard(result LogicGateNodeAssignmentResult) domain.KanbanCard {
+	return LogicGateWorkCompatibilityCard(result.Card.BoardID, result.Assignment, result.Node)
+}
+
 func kanbanCardWorkspaceEventInput(companyID, eventType string, card domain.KanbanCard, includeCard bool, meta workItemAssignmentEventMetadata) DomainEventInput {
 	payload := map[string]any{
 		"board_id": card.BoardID,
@@ -99,17 +103,19 @@ func kanbanCardWorkspaceEventInput(companyID, eventType string, card domain.Kanb
 }
 
 func logicGateAssignmentSavedWorkspaceEventInputs(result LogicGateNodeAssignmentResult, meta workItemAssignmentEventMetadata) []DomainEventInput {
+	card := logicGateAssignmentWorkspaceCard(result)
 	return []DomainEventInput{
 		workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentSavedEventType, result.Assignment, result.Node, meta),
-		kanbanCardWorkspaceEventInput(result.Card.CompanyID, "kanban_card_upserted", result.Card, true, meta),
+		kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_upserted", card, true, meta),
 		nodeUpdatedWorkspaceEventInputWithMetadata(result.Node, meta),
 	}
 }
 
 func logicGateAssignmentMovedWorkspaceEventInputs(result LogicGateNodeAssignmentResult, meta workItemAssignmentEventMetadata) []DomainEventInput {
+	card := logicGateAssignmentWorkspaceCard(result)
 	return []DomainEventInput{
 		workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentMovedEventType, result.Assignment, result.Node, meta),
-		kanbanCardWorkspaceEventInput(result.Card.CompanyID, "kanban_card_moved", result.Card, true, meta),
+		kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_moved", card, true, meta),
 		nodeUpdatedWorkspaceEventInputWithMetadata(result.Node, meta),
 	}
 }
@@ -123,9 +129,10 @@ func logicGateAssignmentRemovedWorkspaceEventInputs(result LogicGateNodeAssignme
 }
 
 func logicGateAssignmentIssueWorkspaceEventInputs(result LogicGateNodeAssignmentResult, meta workItemAssignmentEventMetadata) []DomainEventInput {
+	card := logicGateAssignmentWorkspaceCard(result)
 	return []DomainEventInput{
 		workItemAssignmentWorkspaceEventInput(WorkItemLogicGateIssueToggledEventType, result.Assignment, result.Node, meta),
-		kanbanCardWorkspaceEventInput(result.Card.CompanyID, "kanban_card_moved", result.Card, true, meta),
+		kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_moved", card, true, meta),
 		nodeUpdatedWorkspaceEventInputWithMetadata(result.Node, meta),
 	}
 }

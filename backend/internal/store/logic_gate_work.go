@@ -212,3 +212,13 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 		UpdatedTimestamp: assignment.UpdatedTimestamp,
 	}
 }
+
+// LogicGateWorkCompatibilityCard returns the same card shape used by Logic
+// Gate work read APIs, where column_id is a stable status key.
+func LogicGateWorkCompatibilityCard(boardID string, assignment domain.NodeLogicGateAssignment, node domain.Node) domain.KanbanCard {
+	boardID = strings.TrimSpace(boardID)
+	if boardID == "" {
+		boardID = strings.TrimSpace(assignment.CompatibilityBoardID)
+	}
+	return synthesizeLogicGateWorkCard(boardID, assignment, node)
+}

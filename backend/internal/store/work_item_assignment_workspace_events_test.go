@@ -27,6 +27,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, assigned.Events, WorkItemLogicGateAssignmentSavedEventType, companyID, logicGate.LogicGateID, node.NodeID, assigned.Assignment.AssignmentID)
+	assertKanbanEventCardColumn(t, assigned.Events[1], LogicGateWorkStatusInProgress)
 	payload := assigned.Events[0].Payload
 	if payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || payload["assignee_user_id"] != actorUserID {
 		t.Fatalf("saved payload = %+v, want status/priority/assignee from source state", payload)
@@ -41,6 +42,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, moved.Events, WorkItemLogicGateAssignmentMovedEventType, companyID, logicGate.LogicGateID, node.NodeID, moved.Assignment.AssignmentID)
+	assertKanbanEventCardColumn(t, moved.Events[1], LogicGateWorkStatusDone)
 	if moved.Events[0].Payload["status"] != "Done" || moved.Events[0].Payload["column_id"] != moved.Card.ColumnID {
 		t.Fatalf("moved payload = %+v, want done placement", moved.Events[0].Payload)
 	}
@@ -50,6 +52,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("SetLogicGateNodeAssignmentIssue: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, issue.Events, WorkItemLogicGateIssueToggledEventType, companyID, logicGate.LogicGateID, node.NodeID, issue.Assignment.AssignmentID)
+	assertKanbanEventCardColumn(t, issue.Events[1], LogicGateWorkStatusDone)
 	if issue.Events[0].Payload["is_issue"] != true || issue.Events[0].Payload["status"] != "Issue" {
 		t.Fatalf("issue payload = %+v, want issue state", issue.Events[0].Payload)
 	}
@@ -72,6 +75,17 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 	}
 	if gotTypes := domainEventTypes(replay); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	}
+}
+
+func assertKanbanEventCardColumn(t *testing.T, event domain.DomainEvent, wantColumnID string) {
+	t.Helper()
+	card, ok := event.Payload["card"].(domain.KanbanCard)
+	if !ok {
+		t.Fatalf("%s card payload = %T, want domain.KanbanCard", event.Type, event.Payload["card"])
+	}
+	if card.ColumnID != wantColumnID {
+		t.Fatalf("%s card column = %q, want %q: %+v", event.Type, card.ColumnID, wantColumnID, card)
 	}
 }
 
