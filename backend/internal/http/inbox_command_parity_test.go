@@ -69,7 +69,7 @@ func TestInboxPriorityMoveCommandKeepsSourceProjectionReadsAndEventsConsistent(t
 		t.Fatalf("compatibility cards after priority move = %+v, want moved command card", cards)
 	}
 
-	readRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?company_id="+companyID+"&user_id="+responsibleUserID)
+	readRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?company_id="+companyID, responsibleUserID, companyID, domain.RoleCompanyUser)
 	var readPayload struct {
 		Nodes []domain.Node `json:"nodes"`
 	}
