@@ -312,26 +312,22 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		s.refreshEffectiveAccessProjection(req.CompanyID, "logic_gate_raci_updated")
-		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_raci_updated", map[string]any{"logic_gate_id": logicGateID, "raci_assignments": assignments})
 		actorUserID, actorLabel := notificationActorPayload(r)
 		newlyAssignedUserIDs := newlyAssignedLogicGateRaciUserIDs(beforeAssignments, assignments)
 		logicGateTitle := ""
 		if logicGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
 			logicGateTitle = logicGate.Header
 		}
-		if len(newlyAssignedUserIDs) > 0 {
-			s.recordNotificationEvent(store.NotificationEventInput{
-				CompanyID:   req.CompanyID,
-				ActorUserID: actorUserID,
-				Type:        domain.NotificationEventLogicGateRaciUpdated,
-				EntityType:  "logic_gate",
-				EntityID:    logicGateID,
-				Payload: map[string]any{
-					"assignment_user_ids": newlyAssignedUserIDs,
-					"actor_display_name":  actorLabel,
-					"logic_gate_title":    logicGateTitle,
-				},
-			})
+		event, projected := s.publishWorkspaceEvent(req.CompanyID, store.LogicGateRaciUpdatedEventType, map[string]any{
+			"logic_gate_id":       logicGateID,
+			"raci_assignments":    assignments,
+			"assignment_user_ids": newlyAssignedUserIDs,
+			"actor_user_id":       actorUserID,
+			"actor_display_name":  actorLabel,
+			"logic_gate_title":    logicGateTitle,
+		})
+		if projected {
+			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"company_id":       req.CompanyID,

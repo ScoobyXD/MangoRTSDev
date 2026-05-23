@@ -5,3 +5,7 @@ create table if not exists notification_domain_event_projection_checkpoints (
   updated_timestamp timestamptz not null default now()
 );
 
+drop index if exists idx_notification_events_pending;
+
+alter table notification_events
+  drop column if exists processed_timestamp;

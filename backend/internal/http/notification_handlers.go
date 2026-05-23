@@ -226,15 +226,6 @@ func (s *Server) handleNotificationStream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *Server) recordNotificationEvent(input store.NotificationEventInput) {
-	items, err := s.notifications.RecordAndProcess(input)
-	if err != nil {
-		log.Printf("failed to process notification event type=%s company_id=%s entity_type=%s entity_id=%s: %v", input.Type, input.CompanyID, input.EntityType, input.EntityID, err)
-		return
-	}
-	s.publishNotifications(items)
-}
-
 func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent) {
 	items, err := s.notifications.ProcessDomainEvents(context.Background(), events)
 	if err != nil {
@@ -336,61 +327,55 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	}
 	actorUserID, actorLabel := notificationActorPayload(r)
 	comment := editorMentionCommentPreview(infoType, information)
-	if entityType == store.EntityTypeNode {
-		events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
-		for _, userID := range mentionedUserIDs {
-			userID = strings.TrimSpace(userID)
-			if userID == "" {
-				continue
-			}
-			event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
-				CompanyID:      companyID,
-				StreamType:     "notification",
-				StreamID:       "node:" + entityID,
-				Type:           store.NodeMentionCreatedEventType,
-				ActorUserID:    actorUserID,
-				IdempotencyKey: "mention:node:" + entityID + ":" + informationID + ":" + userID,
-				Payload: map[string]any{
-					"node_id":            entityID,
-					"entity_type":        store.EntityTypeNode,
-					"entity_id":          entityID,
-					"comment":            comment,
-					"information_id":     informationID,
-					"mentioned_user_ids": []string{userID},
-					"actor_display_name": actorLabel,
-				},
-			})
-			if err != nil {
-				log.Printf("failed to append node mention notification domain event company_id=%s node_id=%s information_id=%s user_id=%s: %v", companyID, entityID, informationID, userID, err)
-				return
-			}
-			events = append(events, event)
-		}
-		if len(events) > 0 {
-			s.projectCommittedNotificationEvents(events)
-		}
+	eventType := ""
+	streamID := ""
+	idempotencyEntityKey := ""
+	payloadResourceKey := ""
+	switch entityType {
+	case store.EntityTypeNode:
+		eventType = store.NodeMentionCreatedEventType
+		streamID = "node:" + entityID
+		idempotencyEntityKey = "node"
+		payloadResourceKey = "node_id"
+	case store.EntityTypeLogicGate:
+		eventType = store.LogicGateMentionCreatedEventType
+		streamID = "logic_gate:" + entityID
+		idempotencyEntityKey = "logic-gate"
+		payloadResourceKey = "logic_gate_id"
+	default:
 		return
 	}
-	entityKey := strings.ReplaceAll(entityType, "_", "-")
+	events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
 	for _, userID := range mentionedUserIDs {
 		userID = strings.TrimSpace(userID)
 		if userID == "" {
 			continue
 		}
-		s.recordNotificationEvent(store.NotificationEventInput{
+		event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 			CompanyID:      companyID,
+			StreamType:     "notification",
+			StreamID:       streamID,
+			Type:           eventType,
 			ActorUserID:    actorUserID,
-			Type:           domain.NotificationEventMentionCreated,
-			EntityType:     entityType,
-			EntityID:       entityID,
-			IdempotencyKey: "mention:" + entityKey + ":" + entityID + ":" + informationID + ":" + userID,
+			IdempotencyKey: "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID,
 			Payload: map[string]any{
+				payloadResourceKey:   entityID,
+				"entity_type":        entityType,
+				"entity_id":          entityID,
 				"comment":            comment,
 				"information_id":     informationID,
 				"mentioned_user_ids": []string{userID},
 				"actor_display_name": actorLabel,
 			},
 		})
+		if err != nil {
+			log.Printf("failed to append mention notification domain event company_id=%s entity_type=%s entity_id=%s information_id=%s user_id=%s: %v", companyID, entityType, entityID, informationID, userID, err)
+			return
+		}
+		events = append(events, event)
+	}
+	if len(events) > 0 {
+		s.projectCommittedNotificationEvents(events)
 	}
 }
 
@@ -507,51 +492,4 @@ func sharedInboxRaciFingerprint(assignments []domain.SharedInboxRaciAssignment) 
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
-}
-func (s *Server) kanbanCardNotificationSnapshot(companyID, boardID, cardID string) (domain.KanbanCard, map[string]string, bool) {
-	columnTitles := map[string]string{}
-	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
-	if err == nil {
-		for _, column := range columns {
-			columnTitles[column.ColumnID] = column.Title
-		}
-	}
-	cards, err := s.repo.ListKanbanCards(companyID, boardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
-	if err != nil {
-		return domain.KanbanCard{}, columnTitles, false
-	}
-	for _, card := range cards {
-		if card.CardID == cardID {
-			return card, columnTitles, true
-		}
-	}
-	return domain.KanbanCard{}, columnTitles, false
-}
-
-func (s *Server) recordKanbanStateNotification(r *http.Request, before domain.KanbanCard, after domain.KanbanCard, columnTitles map[string]string) {
-	if before.CardID == "" || after.LogicGateID == nil || before.ColumnID == after.ColumnID {
-		return
-	}
-	actorUserID, actorLabel := notificationActorPayload(r)
-	payload := map[string]any{
-		"actor_display_name":    actorLabel,
-		"logic_gate_id":         *after.LogicGateID,
-		"board_id":              after.BoardID,
-		"card_id":               after.CardID,
-		"node_id":               after.NodeID,
-		"node_title":            after.NodeTitle,
-		"previous_column_id":    before.ColumnID,
-		"previous_column_title": columnTitles[before.ColumnID],
-		"column_id":             after.ColumnID,
-		"column_title":          columnTitles[after.ColumnID],
-	}
-	s.recordNotificationEvent(store.NotificationEventInput{
-		CompanyID:      after.CompanyID,
-		ActorUserID:    actorUserID,
-		Type:           domain.NotificationEventLogicGateStateChanged,
-		EntityType:     "kanban_card",
-		EntityID:       after.CardID,
-		IdempotencyKey: "logic-gate-state:" + after.CompanyID + ":" + after.CardID + ":" + after.UpdatedTimestamp.Format(time.RFC3339Nano),
-		Payload:        payload,
-	})
 }

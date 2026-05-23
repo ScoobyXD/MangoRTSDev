@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -80,7 +79,7 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 
 	s.refreshEffectiveAccessProjection(companyID, "logic_gate_raci_command")
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.recordLogicGateRaciCommandNotifications(r, result)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -101,31 +100,4 @@ func parseLogicGateRaciCommandAssignments(fields map[string]json.RawMessage) ([]
 		return nil, false
 	}
 	return []store.LogicGateRaciAssignmentInput{{Role: role, UserID: userID}}, true
-}
-
-func (s *Server) recordLogicGateRaciCommandNotifications(r *http.Request, result store.LogicGateRaciAssignmentCommandResult) {
-	if !result.Changed {
-		return
-	}
-	newlyAssignedUserIDs := newlyAssignedLogicGateRaciUserIDs(result.BeforeAssignments, result.RaciAssignments)
-	if len(newlyAssignedUserIDs) == 0 {
-		return
-	}
-	actorUserID, actorLabel := notificationActorPayload(r)
-	logicGateTitle := ""
-	if logicGate, err := s.repo.GetLogicGate(result.CompanyID, result.LogicGateID); err == nil {
-		logicGateTitle = logicGate.Header
-	}
-	s.recordNotificationEvent(store.NotificationEventInput{
-		CompanyID:   result.CompanyID,
-		ActorUserID: actorUserID,
-		Type:        domain.NotificationEventLogicGateRaciUpdated,
-		EntityType:  "logic_gate",
-		EntityID:    result.LogicGateID,
-		Payload: map[string]any{
-			"assignment_user_ids": newlyAssignedUserIDs,
-			"actor_display_name":  actorLabel,
-			"logic_gate_title":    logicGateTitle,
-		},
-	})
 }
