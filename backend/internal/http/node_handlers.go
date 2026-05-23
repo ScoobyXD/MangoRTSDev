@@ -225,7 +225,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
-			beforeNode, beforeNodeErr := s.repo.GetNode(input.CompanyID, nodeID)
+			input.ActorUserID, input.ActorDisplayName = nodeChangeActorPayload(r)
 			item, event, err := s.repo.UpdateNodeAndWorkspaceEvent(input)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
@@ -247,9 +247,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				s.refreshEffectiveAccessProjection(input.CompanyID, "node_assignee_updated")
 			}
 			s.publishCommittedWorkspaceEvent(event)
-			if beforeNodeErr == nil {
-				s.recordNodeUpdateNotifications(r, input, beforeNode, item)
-			}
+			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 			writeJSON(w, http.StatusOK, item)
 			return
 		}

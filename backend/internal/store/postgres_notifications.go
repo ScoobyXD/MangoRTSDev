@@ -262,6 +262,9 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
+		if err := r.ensureNotificationSourceEventTx(ctx, tx, candidate); err != nil {
+			return nil, err
+		}
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
 insert into notifications (
   notification_id, company_id, recipient_user_id, actor_user_id, notification_type,
@@ -287,6 +290,23 @@ returning `+notificationSelectColumns,
 		return nil, err
 	}
 	return created, nil
+}
+
+func (r *PostgresRepo) ensureNotificationSourceEventTx(ctx context.Context, tx *sql.Tx, candidate NotificationCreateInput) error {
+	_, err := tx.ExecContext(ctx, `
+insert into notification_events (
+  event_id, company_id, actor_user_id, event_type, entity_type, entity_id,
+  idempotency_key, payload, processed_timestamp, created_timestamp
+) values ($1::uuid, nullif($2, '')::uuid, nullif($3, '')::uuid, $4, $5, $6, '', '{}'::jsonb, now(), now())
+on conflict (event_id) do nothing`,
+		candidate.SourceEventID,
+		candidate.CompanyID,
+		candidate.ActorUserID,
+		candidate.Type,
+		candidate.EntityType,
+		candidate.EntityID,
+	)
+	return err
 }
 
 func (r *PostgresRepo) ListNotifications(input NotificationListInput) ([]domain.Notification, error) {

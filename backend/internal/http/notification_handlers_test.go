@@ -712,8 +712,8 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 	types := map[string]bool{}
 	for _, item := range payload.Notifications {
 		types[item.Type] = true
-		if item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.NotificationRoleOther || item.NodeID != node.NodeID {
-			t.Fatalf("notification metadata = %+v, want ACIO other for node", item)
+		if item.Surface != domain.NotificationSurfaceMyTriage || item.Role != domain.NotificationRoleOther || item.NodeID != node.NodeID {
+			t.Fatalf("notification metadata = %+v, want my triage other for node", item)
 		}
 	}
 	if !types[domain.NotificationEventNodeAssigned] || !types[domain.NotificationEventNodeFieldsChanged] {
@@ -731,7 +731,7 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
 		t.Fatalf("decode notification summary: %v", err)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
-		t.Fatalf("summary role counts = %+v, want one ACIO other node target", summary.RoleCounts)
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceMyTriage || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("summary role counts = %+v, want one my triage other node target", summary.RoleCounts)
 	}
 }

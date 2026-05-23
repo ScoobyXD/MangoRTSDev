@@ -148,12 +148,17 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
+	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	event, err := r.appendDomainEventLocked(nodeUpdatedWorkspaceEventInput(item))
+	eventInput := nodeUpdatedWorkspaceEventInput(item)
+	if hasBefore {
+		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
+	}
+	event, err := r.appendDomainEventLocked(eventInput)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
