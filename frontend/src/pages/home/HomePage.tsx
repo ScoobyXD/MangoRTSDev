@@ -1994,6 +1994,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       : isInboxMatrixView
         ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
         : getHomeGridTemplateColumns(layoutColumnWidths);
+  const matrixWorkspaceActive = isInboxMatrixView && !isNarrow;
+  const workspaceLayoutStyle: React.CSSProperties = {
+    ...workspaceStyle,
+    gridTemplateColumns: workspaceGridTemplateColumns,
+    gap: matrixWorkspaceActive ? 0 : isNarrow ? 10 : 0,
+    padding: matrixWorkspaceActive ? 0 : workspaceStyle.padding,
+  };
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
       {!embedded && (
@@ -2040,7 +2047,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           </section>
         </main>
       ) : (
-        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || (isInboxMatrixView && !hideNavigation) ? 10 : 0 }}>
+        <main ref={workspaceRef} style={workspaceLayoutStyle}>
           {!hideNavigation && (
             <HomeSidebar
               activeViewID={activeViewID}

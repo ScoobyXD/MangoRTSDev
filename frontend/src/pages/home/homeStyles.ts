@@ -140,7 +140,6 @@ export const sidebarStyle: React.CSSProperties = {
   border: "none",
   background: "#ffffff",
   borderRadius: 8,
-  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10)",
   overflow: "hidden",
 };
 
