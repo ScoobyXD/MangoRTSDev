@@ -101,6 +101,17 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 			t.Fatalf("v2 logic gate work handler contains forbidden access path %q", forbidden)
 		}
 	}
+
+	workItemHandlerSource := strings.ToLower(readPhase4SourceForTest(t, "../http/work_item_handlers.go"))
+	for _, forbidden := range []string{
+		"recordkanbanstatenotification",
+		"logicgateassignmentnotificationsnapshot",
+		"kanbancardnotificationsnapshot",
+	} {
+		if strings.Contains(workItemHandlerSource, forbidden) {
+			t.Fatalf("work item assignment handler contains replaced notification helper %q", forbidden)
+		}
+	}
 }
 
 func readPhase4SourceForTest(t *testing.T, path string) string {

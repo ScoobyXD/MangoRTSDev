@@ -239,6 +239,7 @@ func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent)
 	items, err := s.notifications.ProcessDomainEvents(context.Background(), events)
 	if err != nil {
 		log.Printf("failed to project committed notification events: %v", err)
+		go s.runNotificationDomainEventCatchupOnce(context.Background())
 		return
 	}
 	s.publishNotifications(items)
@@ -482,87 +483,6 @@ func sharedInboxRaciAssignmentUserIDs(assignments []domain.SharedInboxRaciAssign
 		out = append(out, userID)
 	}
 	return out
-}
-
-func cleanNodeAssigneeUserID(node domain.Node) string {
-	if node.AssigneeUserID == nil {
-		return ""
-	}
-	return strings.TrimSpace(*node.AssigneeUserID)
-}
-
-func nodeUpdateChangedNotificationFields(input store.UpdateNodeInput, before, after domain.Node) []string {
-	fields := make([]string, 0, 3)
-	if input.StatusSet && optionalStringValue(before.Status) != optionalStringValue(after.Status) {
-		fields = append(fields, "status")
-	}
-	if input.DueDateSet && optionalStringValue(before.DueDate) != optionalStringValue(after.DueDate) {
-		fields = append(fields, "due date")
-	}
-	if input.PrioritySet && optionalIntValue(before.Priority) != optionalIntValue(after.Priority) {
-		fields = append(fields, "priority")
-	}
-	return fields
-}
-
-func optionalStringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
-}
-
-func optionalIntValue(value *int) int {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
-func (s *Server) recordNodeUpdateNotifications(r *http.Request, input store.UpdateNodeInput, before, after domain.Node) {
-	afterAssignee := cleanNodeAssigneeUserID(after)
-	if afterAssignee == "" {
-		return
-	}
-	beforeAssignee := cleanNodeAssigneeUserID(before)
-	actorUserID, actorLabel := notificationActorPayload(r)
-	assignedToNewUser := input.AssigneeUserIDSet && afterAssignee != beforeAssignee
-	if assignedToNewUser {
-		s.recordNotificationEvent(store.NotificationEventInput{
-			CompanyID:   input.CompanyID,
-			ActorUserID: actorUserID,
-			Type:        domain.NotificationEventNodeAssigned,
-			EntityType:  "node",
-			EntityID:    after.NodeID,
-			Payload: map[string]any{
-				"recipient_user_ids": []string{afterAssignee},
-				"actor_display_name": actorLabel,
-				"node_title":         after.Title,
-			},
-		})
-		return
-	}
-	changedFields := nodeUpdateChangedNotificationFields(input, before, after)
-	if len(changedFields) == 0 {
-		return
-	}
-	payload := map[string]any{
-		"recipient_user_ids": []string{afterAssignee},
-		"actor_display_name": actorLabel,
-		"node_title":         after.Title,
-		"changed_fields":     changedFields,
-	}
-	if input.StatusSet {
-		payload["status"] = optionalStringValue(after.Status)
-	}
-	s.recordNotificationEvent(store.NotificationEventInput{
-		CompanyID:   input.CompanyID,
-		ActorUserID: actorUserID,
-		Type:        domain.NotificationEventNodeFieldsChanged,
-		EntityType:  "node",
-		EntityID:    after.NodeID,
-		Payload:     payload,
-	})
 }
 
 func logicGateRaciFingerprint(assignments []domain.LogicGateRaciAssignment) string {

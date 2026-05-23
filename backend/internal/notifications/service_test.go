@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -555,6 +556,20 @@ func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T)
 	if got := byUser[viewer.UserID]; got.Role != domain.NotificationRoleOther {
 		t.Fatalf("viewer role = %+v, want other", got)
 	}
+	visible, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications responsible: %v", err)
+	}
+	if len(visible) != 1 || visible[0].Surface != domain.NotificationSurfaceSharedTriage || visible[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("responsible visible notifications = %+v, want shared triage responsible row", visible)
+	}
+	summary, err := repo.GetNotificationSummary(store.NotificationSummaryInput{UserID: responsible.UserID, CompanyID: companyID})
+	if err != nil {
+		t.Fatalf("GetNotificationSummary responsible: %v", err)
+	}
+	if summary.TotalUnread != 1 || len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceSharedTriage || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("responsible summary = %+v, want one shared triage responsible target", summary)
+	}
 }
 
 func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresses(t *testing.T) {
@@ -612,6 +627,234 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 	}
 }
 
+func TestProcessDomainEventDuplicateReturnsNoNewNotifications(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666671"
+	repo.EnsureCompany(companyID, "Duplicate Notification Co")
+
+	assignee := mustNotificationUser(t, repo, companyID, "duplicate-assignee")
+	actor := mustNotificationUser(t, repo, companyID, "duplicate-actor")
+	node, err := repo.CreateNode(companyID, "Duplicate Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	event := domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666672",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	}
+	items, err := service.ProcessDomainEvent(context.Background(), event)
+	if err != nil {
+		t.Fatalf("first ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("first ProcessDomainEvent created %d notifications, want 1: %+v", len(items), items)
+	}
+	again, err := service.ProcessDomainEvent(context.Background(), event)
+	if err != nil {
+		t.Fatalf("duplicate ProcessDomainEvent: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("duplicate ProcessDomainEvent returned %d notifications, want 0 newly-created rows: %+v", len(again), again)
+	}
+	visible, err := repo.ListNotifications(store.NotificationListInput{UserID: assignee.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(visible) != 1 {
+		t.Fatalf("visible notifications = %d, want 1: %+v", len(visible), visible)
+	}
+}
+
+func TestReplayDomainEventsRetriesFailedProjectionWithoutAdvancingCheckpoint(t *testing.T) {
+	base := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666681"
+	base.EnsureCompany(companyID, "Notification Replay Co")
+
+	assignee := mustNotificationUser(t, base, companyID, "replay-assignee")
+	actor := mustNotificationUser(t, base, companyID, "replay-actor")
+	node, err := base.CreateNode(companyID, "Replay Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	event, err := base.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent: %v", err)
+	}
+
+	createErr := errors.New("create notifications failed")
+	repo := &createNotificationsFailOnceRepo{Repository: base, err: createErr, remaining: 1}
+	service := NewService(repo)
+	result, items, err := service.ReplayDomainEvents(context.Background(), companyID, 10)
+	if !errors.Is(err, createErr) {
+		t.Fatalf("first ReplayDomainEvents err = %v, want %v", err, createErr)
+	}
+	if result.ProcessedEvents != 0 || len(items) != 0 {
+		t.Fatalf("failed replay result = %+v items=%+v, want no checkpoint advance or notifications", result, items)
+	}
+	if checkpoint, ok, err := base.GetNotificationDomainEventCheckpoint(companyID); err != nil || ok {
+		t.Fatalf("checkpoint after failed replay = %+v ok=%v err=%v, want absent", checkpoint, ok, err)
+	}
+
+	result, items, err = service.ReplayDomainEvents(context.Background(), companyID, 10)
+	if err != nil {
+		t.Fatalf("retry ReplayDomainEvents: %v", err)
+	}
+	if result.ProcessedEvents != 1 || result.CreatedNotifications != 1 || len(items) != 1 {
+		t.Fatalf("retry result = %+v items=%+v, want one processed notification", result, items)
+	}
+	if result.LastCheckpoint.EventID != event.EventID || !result.LastCheckpoint.CreatedTimestamp.Equal(event.CreatedTimestamp) {
+		t.Fatalf("checkpoint = %+v, want event %s at %s", result.LastCheckpoint, event.EventID, event.CreatedTimestamp)
+	}
+	again, err := service.ProcessDomainEvent(context.Background(), event)
+	if err != nil {
+		t.Fatalf("duplicate ProcessDomainEvent after replay: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("duplicate after replay returned %+v, want no newly-created rows", again)
+	}
+	visible, err := base.ListNotifications(store.NotificationListInput{UserID: assignee.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(visible) != 1 {
+		t.Fatalf("visible notifications = %d, want 1: %+v", len(visible), visible)
+	}
+}
+
+func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666691"
+	repo.EnsureCompany(companyID, "Notification Revocation Co")
+
+	assignee := mustNotificationUser(t, repo, companyID, "delivery-revoked")
+	actor := mustNotificationUser(t, repo, companyID, "delivery-actor")
+	node, err := repo.CreateNode(companyID, "Delivered Then Revoked")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666692",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("delivered notifications = %+v, want one", items)
+	}
+	before, err := repo.ListNotifications(store.NotificationListInput{UserID: assignee.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications before revoke: %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("visible before revoke = %+v, want one", before)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	after, err := repo.ListNotifications(store.NotificationListInput{UserID: assignee.UserID, CompanyID: companyID, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListNotifications after revoke: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("visible after revoke = %+v, want hidden by read-time access guard", after)
+	}
+	summary, err := repo.GetNotificationSummary(store.NotificationSummaryInput{UserID: assignee.UserID, CompanyID: companyID})
+	if err != nil {
+		t.Fatalf("GetNotificationSummary after revoke: %v", err)
+	}
+	if summary.TotalUnread != 0 {
+		t.Fatalf("summary after revoke = %+v, want no visible unread notifications", summary)
+	}
+	if _, err := repo.MarkNotificationRead(assignee.UserID, before[0].NotificationID, true); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("MarkNotificationRead after revoke err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestLogicGateWorkNotificationTargetsIncludeGateAndNode(t *testing.T) {
 	targets := logicGateWorkNotificationTargets("gate-1", "node-1")
 	if len(targets) != 2 {
@@ -640,6 +883,8 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 			"mangorts_user_can_access_resource",
 			"usercanaccessentity",
 			"usercanaccessentitylocked",
+			"recordkanbanstatenotification",
+			"kanbancardnotificationsnapshot",
 		} {
 			if strings.Contains(source, forbidden) {
 				t.Fatalf("%s contains forbidden notification hot path %q", path, forbidden)
@@ -667,4 +912,18 @@ func readNotificationSourceForTest(t *testing.T, path string) string {
 		t.Fatalf("ReadFile %s: %v", path, err)
 	}
 	return string(content)
+}
+
+type createNotificationsFailOnceRepo struct {
+	store.Repository
+	err       error
+	remaining int
+}
+
+func (r *createNotificationsFailOnceRepo) CreateNotifications(input store.CreateNotificationsInput) ([]domain.Notification, error) {
+	if r.remaining > 0 {
+		r.remaining--
+		return nil, r.err
+	}
+	return r.Repository.CreateNotifications(input)
 }

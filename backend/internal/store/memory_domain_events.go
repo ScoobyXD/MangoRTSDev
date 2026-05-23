@@ -153,6 +153,74 @@ func (r *MemoryRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]doma
 	}
 	return items, nil
 }
+
+func (r *MemoryRepo) ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.AfterEventID = strings.TrimSpace(query.AfterEventID)
+	query.Limit = NormalizeDomainEventListLimit(query.Limit)
+	if query.CompanyID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.DomainEvent, 0)
+	for _, item := range r.domainEvents {
+		if item.CompanyID != query.CompanyID {
+			continue
+		}
+		if !query.AfterCreatedTimestamp.IsZero() {
+			if item.CreatedTimestamp.Before(query.AfterCreatedTimestamp) {
+				continue
+			}
+			if item.CreatedTimestamp.Equal(query.AfterCreatedTimestamp) && strings.Compare(item.EventID, query.AfterEventID) <= 0 {
+				continue
+			}
+		}
+		items = append(items, cloneDomainEvent(item))
+	}
+	slices.SortFunc(items, func(a, b domain.DomainEvent) int {
+		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
+			return -1
+		}
+		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
+			return 1
+		}
+		return strings.Compare(a.EventID, b.EventID)
+	})
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return NotificationDomainEventCheckpoint{}, false, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var checkpoint NotificationDomainEventCheckpoint
+	found := false
+	for _, item := range r.domainEvents {
+		if item.CompanyID != companyID {
+			continue
+		}
+		if !found || item.CreatedTimestamp.After(checkpoint.CreatedTimestamp) || (item.CreatedTimestamp.Equal(checkpoint.CreatedTimestamp) && strings.Compare(item.EventID, checkpoint.EventID) > 0) {
+			checkpoint = NotificationDomainEventCheckpoint{
+				CompanyID:        item.CompanyID,
+				CreatedTimestamp: item.CreatedTimestamp,
+				EventID:          item.EventID,
+			}
+			found = true
+		}
+	}
+	return checkpoint, found, nil
+}
 func (r *MemoryRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error) {
 	query, err := normalizeDomainEventStreamQuery(query)
 	if err != nil {

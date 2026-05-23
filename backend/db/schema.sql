@@ -2444,6 +2444,13 @@ create index if not exists idx_notification_events_pending
 create index if not exists idx_notification_events_company_created
   on notification_events(company_id, created_timestamp desc, event_id desc);
 
+create table if not exists notification_domain_event_projection_checkpoints (
+  company_id uuid primary key,
+  checkpoint_timestamp timestamptz not null,
+  checkpoint_event_id uuid not null,
+  updated_timestamp timestamptz not null default now()
+);
+
 create table if not exists notifications (
   notification_id uuid not null,
   company_id uuid,

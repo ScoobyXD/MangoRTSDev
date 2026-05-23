@@ -47,6 +47,7 @@ type MemoryRepo struct {
 	workspaceReadVersions    map[string]int64
 	domainEventAppendErr     error
 	notificationEvents       map[string]domain.NotificationEvent
+	notificationCheckpoints  map[string]NotificationDomainEventCheckpoint
 	notifications            map[string]domain.Notification
 }
 
@@ -90,6 +91,7 @@ func NewMemoryRepo() *MemoryRepo {
 		domainEvents:             map[string]domain.DomainEvent{},
 		workspaceReadVersions:    map[string]int64{},
 		notificationEvents:       map[string]domain.NotificationEvent{},
+		notificationCheckpoints:  map[string]NotificationDomainEventCheckpoint{},
 		notifications:            map[string]domain.Notification{},
 	}
 }

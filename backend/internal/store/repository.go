@@ -257,6 +257,8 @@ type NotificationRepository interface {
 	CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error)
 	ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error)
 	MarkNotificationEventProcessed(eventID string) error
+	GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error)
+	SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error
 	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
 	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
 	GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error)
@@ -270,6 +272,8 @@ type DomainEventRepository interface {
 	AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error)
 	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
+	ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error)
+	LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
 	MarkDomainEventPublished(companyID, eventID string) error
@@ -786,6 +790,19 @@ type NotificationListInput struct {
 type NotificationSummaryInput struct {
 	UserID    string
 	CompanyID string
+}
+
+type NotificationDomainEventCheckpoint struct {
+	CompanyID        string
+	CreatedTimestamp time.Time
+	EventID          string
+}
+
+type DomainEventNotificationProjectionQuery struct {
+	CompanyID             string
+	AfterCreatedTimestamp time.Time
+	AfterEventID          string
+	Limit                 int
 }
 
 func NormalizeNotificationListLimit(limit int) int {
