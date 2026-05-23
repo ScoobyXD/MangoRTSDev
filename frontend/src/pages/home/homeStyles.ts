@@ -10,7 +10,6 @@ const HOME_CYAN_MEDIUM = "rgba(71, 85, 105, 0.28)";
 const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
-const HOME_MATRIX_LINE = "rgba(15, 23, 42, 0.22)";
 const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
 const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
@@ -578,15 +577,14 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
     gridTemplateColumns: `116px repeat(${columnCount}, minmax(210px, 1fr))`,
     gridTemplateRows: `54px repeat(${INBOX_PRIORITIES.length}, minmax(112px, auto))`,
     alignItems: "stretch",
-    background: "#ffffff",
+    background: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(232, 240, 255, 0.54) 48%, rgba(255, 255, 255, 0.96))",
+    filter: "drop-shadow(0 8px 18px rgba(96, 165, 250, 0.08))",
   };
 }
 
 export const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
-  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
-  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
   background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
 };
 
@@ -595,8 +593,6 @@ export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
-  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
   background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
   padding: "0 12px",
 };
@@ -628,8 +624,6 @@ export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignItems: "start",
-  borderRight: `2px solid ${HOME_MATRIX_LINE}`,
-  borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
   background: "#fbfdfe",
   color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
@@ -649,8 +643,6 @@ export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties
     alignItems: "start",
     justifyContent: "start",
     gap: 10,
-    borderRight: `2px solid ${HOME_MATRIX_LINE}`,
-    borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
     background: activeDrop ? HOME_CYAN_FAINT : "rgba(248, 250, 252, 0.42)",
     boxShadow: activeDrop ? `inset 0 0 0 2px ${HOME_CYAN_MEDIUM}` : "none",
     padding: 10,
