@@ -48,28 +48,28 @@ function ConvertTo-BackendRelativePath {
 function Write-PsqlScript {
   param([string[]]$SqlPaths)
 
+  $migrationNames = @(
+    $SqlPaths |
+      Where-Object { $_ -match "^backend/db/migrations/[^/]+\.sql$" } |
+      ForEach-Object { Split-Path -Leaf $_ } |
+      Sort-Object
+  )
+  $schemaChanged = @($SqlPaths | Where-Object { $_ -eq "backend/db/schema.sql" }).Count -gt 0
+
   Write-Host '$ErrorActionPreference = "Stop"'
-  Write-Host 'if (-not $env:DB_HOST) { throw "Set DB_HOST first" }'
-  Write-Host 'if (-not $env:DB_PORT) { $env:DB_PORT = "5432" }'
-  Write-Host 'if (-not $env:DB_NAME) { throw "Set DB_NAME first" }'
-  Write-Host 'if (-not $env:DB_USER) { throw "Set DB_USER first" }'
-  Write-Host 'if (-not $env:PGPASSWORD) { throw "Set PGPASSWORD first" }'
-  Write-Host 'if (-not $env:PGSSLMODE) { $env:PGSSLMODE = "require" }'
-  Write-Host '$dbHost = $env:DB_HOST.Trim()'
-  Write-Host 'if ($dbHost.StartsWith("host=")) {'
-  Write-Host '  $dbHost = $dbHost.Substring(5)'
-  Write-Host '}'
-  Write-Host '$files = @('
-  foreach ($path in $SqlPaths) {
-    $relativePath = ConvertTo-BackendRelativePath -GitPath $path
-    Write-Host "  `"$relativePath`""
+  Write-Host '$awsProfile = if ($env:AWS_PROFILE) { $env:AWS_PROFILE } else { "mangorts-dev" }'
+
+  if ($migrationNames.Count -gt 0) {
+    $firstMigration = $migrationNames | Select-Object -First 1
+    Write-Host "..\scripts\apply_db_migrations.ps1 -AwsProfile `$awsProfile -StartAt `"$firstMigration`""
+    Write-Host 'if ($LASTEXITCODE -ne 0) { throw "apply_db_migrations.ps1 failed with exit code $LASTEXITCODE" }'
+    if ($schemaChanged) {
+      Write-Host '# backend/db/schema.sql changed as the canonical schema snapshot; the migration runner applies the executable migration file(s).'
+    }
+    return
   }
-  Write-Host ')'
-  Write-Host 'foreach ($file in $files) {'
-  Write-Host '  $path = Join-Path (Get-Location) $file'
-  Write-Host '  psql -h $dbHost -p $env:DB_PORT -U $env:DB_USER -d $env:DB_NAME -v ON_ERROR_STOP=1 --single-transaction -f $path'
-  Write-Host '  if ($LASTEXITCODE -ne 0) { throw "psql failed with exit code $LASTEXITCODE for $file" }'
-  Write-Host '}'
+
+  Write-Host '# No backend/db/migrations/*.sql file changed. Do not apply backend/db/schema.sql directly to an existing database unless you are rebuilding it intentionally.'
 }
 
 $mainRoot = Resolve-AgentPath -Path $MainPath
