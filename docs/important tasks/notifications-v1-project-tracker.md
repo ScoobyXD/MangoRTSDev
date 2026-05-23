@@ -308,25 +308,43 @@ Phase 1 implementation update:
 
 This phase should be one Codex instance. It expands the projector to the other V1 resources after the Logic Gate projector path exists.
 
-- [ ] Route node mention events through the projector.
-- [ ] Validate mentioned users against effective node access.
-- [ ] Route node assignment changes through the projector.
-- [ ] Classify assignees separately from general node viewers.
-- [ ] Decide whether node field changes notify all viewers or only related users.
-- [ ] Confirm canonical resource type for shared inbox notification targets.
-- [ ] Confirm which shared inbox item events are in V1 scope.
-- [ ] Add shared inbox/shared triage event target extraction.
-- [ ] Use reverse effective access on shared triage folders.
-- [ ] Use shared inbox RACI assignment tables for role classification.
-- [ ] Make `shared_inbox.raci_changed` create meaningful notifications.
+- [x] Route node mention events through the projector.
+- [x] Validate mentioned users against effective node access.
+- [x] Route node assignment changes through the projector.
+- [x] Classify assignees separately from general node viewers.
+- [x] Decide whether node field changes notify all viewers or only related users.
+- [x] Confirm canonical resource type for shared inbox notification targets.
+- [x] Confirm which shared inbox item events are in V1 scope.
+- [x] Add shared inbox/shared triage event target extraction.
+- [x] Use reverse effective access on shared triage folders.
+- [x] Use shared inbox RACI assignment tables for role classification.
+- [x] Make `shared_inbox.raci_changed` create meaningful notifications.
 - [ ] Make supported item/status/assignment events create meaningful notifications.
-- [ ] Identify any shared inbox access/RACI mutation that still depends on a full-company effective-access rebuild.
-- [ ] Add tests for mention access filtering.
-- [ ] Add tests for node assignment notifications.
-- [ ] Add tests for actor self-notification behavior.
-- [ ] Add tests for shared inbox RACI routing.
-- [ ] Add tests for access revocation before event processing.
-- [ ] Update this tracker with exact files touched and any follow-up findings.
+- [x] Identify any shared inbox access/RACI mutation that still depends on a full-company effective-access rebuild.
+- [x] Add tests for mention access filtering.
+- [x] Add tests for node assignment notifications.
+- [x] Add tests for actor self-notification behavior.
+- [x] Add tests for shared inbox RACI routing.
+- [x] Add tests for access revocation before event processing.
+- [x] Update this tracker with exact files touched and any follow-up findings.
+
+Phase 2 implementation update:
+
+- Audited current producers for node mentions, node assignment/update notifications, shared inbox access, and shared inbox RACI. Node mention and node assignment notifications were still created through handler-side `RecordAndProcess`; shared inbox access/RACI events published workspace events but had placeholder notification behavior in the projector.
+- Node mentions now append committed `node.mention_created` domain events on a notification stream and invoke the projector. The event remains per mentioned user for idempotency across repeated edits to the same information ID, but recipient eligibility is enforced in `notifications.Service` through reverse effective node access before creating rows.
+- Node assignment and selected field-change notifications now come from committed `node_updated` domain events carrying an explicit `notification_event_type` payload marker. Generic `node_updated` events from other systems, including Logic Gate work compatibility events, do not become node notifications unless that marker is present.
+- V1 node field-change policy: only the current assignee is notified, only for status, due date, or priority changes, and only if the assignee still has effective node access. Broad node-viewer field-change fanout is intentionally deferred.
+- Node assignee notifications are classified separately from general node viewers with `surface=my_triage` and `role=other`. The current schema does not yet have an `assignee` notification role, so Phase 2 uses the existing `other` role and the distinct `my_triage` surface.
+- Canonical shared inbox/shared triage notification target is `shared_triage_folder:{folder_id}`. The first supported shared inbox event set is `communications_shared_inbox_raci_updated` and `shared_triage_access_updated`; item/status/assignment notification events remain deferred until their canonical item event payloads are defined.
+- Shared inbox/shared triage projector support now maps `communications_shared_inbox_raci_updated` to `aci_inbox.raci_updated` and `shared_triage_access_updated` to `aci_inbox.changed`. Recipients are expanded with reverse effective access on `shared_triage_folder`, then classified from shared inbox RACI assignment tables, including group assignments expanded through company user group membership.
+- Shared inbox access/RACI handlers now refresh the effective-access projection before immediate projection and then pass the committed workspace event into the notification projector. This keeps Phase 2 behavior correct, but the path still depends on a full-company effective-access rebuild rather than source-scoped transactional effective-access writers.
+- Added a small Postgres compatibility guard so domain-event-projected notifications can satisfy the existing `notifications.source_event_id -> notification_events.event_id` foreign key by inserting a processed anchor notification event when needed. This does not start or otherwise change pending queue processing semantics.
+- Added tests in `backend/internal/notifications/service_test.go` for node mention access filtering, node assignment fanout and actor self-suppression, assignment revocation before processing, shared inbox RACI routing and role classification, shared triage access revocation before processing, and broader notification source-shape guards.
+- Updated route-level expectations in `backend/internal/http/notification_handlers_test.go` for node assignment/field-change notifications to use the `my_triage` assignee classification.
+- Files touched: `backend/internal/notifications/service.go`, `backend/internal/notifications/service_test.go`, `backend/internal/http/notification_handlers.go`, `backend/internal/http/notification_handlers_test.go`, `backend/internal/http/node_handlers.go`, `backend/internal/http/workspace_handlers.go`, `backend/internal/http/communications_shared_inbox_handlers.go`, `backend/internal/http/company_explorer_handlers.go`, `backend/internal/store/repository.go`, `backend/internal/store/node_graph_workspace_events.go`, `backend/internal/store/memory_nodes.go`, `backend/internal/store/postgres_nodes.go`, `backend/internal/store/postgres_notifications.go`, and this tracker.
+- Validation run: `go test ./...` from `backend` on May 22, 2026.
+- Follow-up finding: `notification_events.ProcessPending` is still not started anywhere and remains Phase 3 reliability work.
+- Follow-up finding: shared inbox RACI/access correctness still relies on full-company effective-access rebuilds. `SetCommunicationsSharedInboxRaciAssignments` and shared triage `SetEntityPermissions` should eventually move to source-scoped effective-access writers aligned with Backend Refactor V4 before `resource_access_grants` can be considered for removal.
 
 ### Phase 3 - Reliability, Legacy Removal, And Final Validation
 

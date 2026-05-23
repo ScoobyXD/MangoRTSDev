@@ -345,7 +345,12 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_access")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "access_grants": grants, "permissions": grants})
+		s.refreshEffectiveAccessProjection(req.CompanyID, "shared_triage_access_updated")
+		actorUserID, actorLabel := notificationActorPayload(r)
+		event, projected := s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "access_grants": grants, "permissions": grants, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
+		if projected {
+			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"company_id":    req.CompanyID,
 			"folder_id":     folderID,

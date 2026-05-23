@@ -335,6 +335,41 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	}
 	actorUserID, actorLabel := notificationActorPayload(r)
 	comment := editorMentionCommentPreview(infoType, information)
+	if entityType == store.EntityTypeNode {
+		events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
+		for _, userID := range mentionedUserIDs {
+			userID = strings.TrimSpace(userID)
+			if userID == "" {
+				continue
+			}
+			event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
+				CompanyID:      companyID,
+				StreamType:     "notification",
+				StreamID:       "node:" + entityID,
+				Type:           store.NodeMentionCreatedEventType,
+				ActorUserID:    actorUserID,
+				IdempotencyKey: "mention:node:" + entityID + ":" + informationID + ":" + userID,
+				Payload: map[string]any{
+					"node_id":            entityID,
+					"entity_type":        store.EntityTypeNode,
+					"entity_id":          entityID,
+					"comment":            comment,
+					"information_id":     informationID,
+					"mentioned_user_ids": []string{userID},
+					"actor_display_name": actorLabel,
+				},
+			})
+			if err != nil {
+				log.Printf("failed to append node mention notification domain event company_id=%s node_id=%s information_id=%s user_id=%s: %v", companyID, entityID, informationID, userID, err)
+				return
+			}
+			events = append(events, event)
+		}
+		if len(events) > 0 {
+			s.projectCommittedNotificationEvents(events)
+		}
+		return
+	}
 	entityKey := strings.ReplaceAll(entityType, "_", "-")
 	for _, userID := range mentionedUserIDs {
 		userID = strings.TrimSpace(userID)

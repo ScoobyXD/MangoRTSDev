@@ -1128,7 +1128,7 @@ func (h *workspaceEventHub) publishUser(companyID, userID string, payload []byte
 	}
 }
 
-func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) {
+func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) (domain.DomainEvent, bool) {
 	event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:  companyID,
 		StreamType: workspaceDomainStreamType,
@@ -1138,9 +1138,10 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	})
 	if err != nil {
 		log.Printf("failed to append workspace domain event company_id=%s type=%s: %v", companyID, eventType, err)
-		return
+		return domain.DomainEvent{}, false
 	}
 	s.publishCommittedWorkspaceEvent(event)
+	return event, true
 }
 
 func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {

@@ -342,7 +342,20 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_raci")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "raci_assignments": assignments})
+	s.refreshEffectiveAccessProjection(req.CompanyID, "communications_shared_inbox_raci_updated")
+	actorUserID := ""
+	actorLabel := ""
+	if hasActor {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+		actorLabel = strings.TrimSpace(actor.User.DisplayName)
+		if actorLabel == "" {
+			actorLabel = strings.TrimSpace(actor.User.Email)
+		}
+	}
+	event, projected := s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "raci_assignments": assignments, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
+	if projected {
+		s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"company_id":       req.CompanyID,
 		"folder_id":        folderID,

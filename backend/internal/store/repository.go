@@ -810,6 +810,8 @@ type UpdateNodeInput struct {
 	PrioritySet       bool
 	AssigneeUserID    *string
 	AssigneeUserIDSet bool
+	ActorUserID       string
+	ActorDisplayName  string
 }
 
 type NodeInformationInput struct {

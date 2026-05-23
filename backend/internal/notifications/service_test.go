@@ -265,6 +265,353 @@ func TestProcessDomainEventsLogicGateWorkUsesEffectiveAccessAndRACI(t *testing.T
 	process("removed", store.WorkItemLogicGateAssignmentRemovedEventType, "removed", removed.Events)
 }
 
+func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666621"
+	repo.EnsureCompany(companyID, "Node Mention Projector Co")
+
+	allowed := mustNotificationUser(t, repo, companyID, "node-mention-allowed")
+	blocked := mustNotificationUser(t, repo, companyID, "node-mention-blocked")
+	actor := mustNotificationUser(t, repo, companyID, "node-mention-actor")
+	node, err := repo.CreateNode(companyID, "Mentioned Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: allowed.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666622",
+		CompanyID:   companyID,
+		StreamType:  "notification",
+		StreamID:    "node:" + node.NodeID,
+		Type:        store.NodeMentionCreatedEventType,
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":            node.NodeID,
+			"comment":            "@allowed @blocked @actor",
+			"mentioned_user_ids": []string{allowed.UserID, blocked.UserID, actor.UserID},
+			"actor_display_name": "Mention Actor",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 1 || items[0].RecipientUserID != allowed.UserID {
+		t.Fatalf("mention notifications = %+v, want allowed user only", items)
+	}
+	if items[0].Type != domain.NotificationEventMentionCreated || items[0].EntityType != store.EntityTypeNode || items[0].EntityID != node.NodeID {
+		t.Fatalf("mention notification target = %+v, want node mention", items[0])
+	}
+}
+
+func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActor(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666631"
+	repo.EnsureCompany(companyID, "Node Assignment Projector Co")
+
+	assignee := mustNotificationUser(t, repo, companyID, "node-assignment-assignee")
+	viewer := mustNotificationUser(t, repo, companyID, "node-assignment-viewer")
+	actor := mustNotificationUser(t, repo, companyID, "node-assignment-actor")
+	node, err := repo.CreateNode(companyID, "Assigned Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: assignee.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666632",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+			"node_title":              node.Title,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 1 || items[0].RecipientUserID != assignee.UserID {
+		t.Fatalf("assignment notifications = %+v, want assignee only", items)
+	}
+	if items[0].Surface != domain.NotificationSurfaceMyTriage || items[0].Role != domain.NotificationRoleOther {
+		t.Fatalf("assignment metadata = %+v, want my triage other", items[0])
+	}
+	if items[0].NodeID != node.NodeID || items[0].EntityType != store.EntityTypeNode || items[0].EntityID != node.NodeID {
+		t.Fatalf("assignment target = %+v, want node target", items[0])
+	}
+
+	selfItems, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666633",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: &assignee.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("self ProcessDomainEvent: %v", err)
+	}
+	if len(selfItems) != 0 {
+		t.Fatalf("self assignment notifications = %+v, want none", selfItems)
+	}
+}
+
+func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666641"
+	repo.EnsureCompany(companyID, "Node Assignment Revocation Co")
+
+	assignee := mustNotificationUser(t, repo, companyID, "node-assignment-revoked")
+	actor := mustNotificationUser(t, repo, companyID, "node-assignment-revoke-actor")
+	node, err := repo.CreateNode(companyID, "Revoked Assignment Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666642",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("revoked assignment notifications = %+v, want none", items)
+	}
+}
+
+func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666651"
+	repo.EnsureCompany(companyID, "Shared Inbox RACI Co")
+
+	responsible := mustNotificationUser(t, repo, companyID, "shared-raci-responsible")
+	accountable := mustNotificationUser(t, repo, companyID, "shared-raci-accountable")
+	groupMember := mustNotificationUser(t, repo, companyID, "shared-raci-group-member")
+	viewer := mustNotificationUser(t, repo, companyID, "shared-raci-viewer")
+	blocked := mustNotificationUser(t, repo, companyID, "shared-raci-blocked")
+	actor := mustNotificationUser(t, repo, companyID, "shared-raci-actor")
+	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Shared RACI parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup parent: %v", err)
+	}
+	childGroup, err := repo.CreateCompanyUserGroup(companyID, parentGroup.GroupID, "Shared RACI child")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup child: %v", err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{groupMember.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Shared RACI Inbox")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: accountable.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
+		CompanyID: companyID,
+		FolderID:  folder.FolderID,
+		Assignments: []store.SharedInboxRaciAssignmentInput{
+			{Role: domain.LogicGateRaciRoleResponsible, SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID},
+			{Role: domain.LogicGateRaciRoleAccountable, SubjectType: store.EntityPermissionSubjectUser, SubjectID: accountable.UserID},
+			{Role: domain.LogicGateRaciRoleConsulted, SubjectType: store.EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID},
+			{Role: domain.LogicGateRaciRoleInformed, SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID},
+		},
+	}); err != nil {
+		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments: %v", err)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666652",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "communications_shared_inbox_raci_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"folder_id":   folder.FolderID,
+			"folder_kind": "communications",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	byUser := map[string]domain.Notification{}
+	for _, item := range items {
+		if item.Surface != domain.NotificationSurfaceSharedTriage {
+			t.Fatalf("shared inbox surface = %+v, want shared triage", item)
+		}
+		if item.EntityType != store.EntityTypeSharedTriageFolder || item.EntityID != folder.FolderID {
+			t.Fatalf("shared inbox target = %+v, want shared triage folder", item)
+		}
+		byUser[item.RecipientUserID] = item
+	}
+	for _, user := range []domain.User{responsible, accountable, groupMember, viewer} {
+		if _, ok := byUser[user.UserID]; !ok {
+			t.Fatalf("missing shared inbox notification for %s; got %+v", user.UserID, items)
+		}
+	}
+	for _, user := range []domain.User{actor, blocked} {
+		if _, ok := byUser[user.UserID]; ok {
+			t.Fatalf("unexpected shared inbox notification for %s: %+v", user.UserID, byUser[user.UserID])
+		}
+	}
+	if got := byUser[responsible.UserID]; got.Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("responsible role = %+v, want responsible", got)
+	}
+	if got := byUser[accountable.UserID]; got.Role != domain.LogicGateRaciRoleAccountable {
+		t.Fatalf("accountable role = %+v, want accountable", got)
+	}
+	if got := byUser[groupMember.UserID]; got.Role != domain.LogicGateRaciRoleConsulted {
+		t.Fatalf("group member role = %+v, want consulted", got)
+	}
+	if got := byUser[viewer.UserID]; got.Role != domain.NotificationRoleOther {
+		t.Fatalf("viewer role = %+v, want other", got)
+	}
+}
+
+func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresses(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666661"
+	repo.EnsureCompany(companyID, "Shared Inbox Access Revocation Co")
+
+	user := mustNotificationUser(t, repo, companyID, "shared-access-revoked")
+	actor := mustNotificationUser(t, repo, companyID, "shared-access-actor")
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Revoked Shared Inbox")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeSharedTriageFolder, EntityID: folder.FolderID}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:     "66666666-6666-4666-8666-666666666662",
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "shared_triage_access_updated",
+		ActorUserID: &actor.UserID,
+		Payload: map[string]any{
+			"folder_id":   folder.FolderID,
+			"folder_kind": "communications",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("revoked shared access notifications = %+v, want none", items)
+	}
+}
+
 func TestLogicGateWorkNotificationTargetsIncludeGateAndNode(t *testing.T) {
 	targets := logicGateWorkNotificationTargets("gate-1", "node-1")
 	if len(targets) != 2 {
@@ -283,6 +630,9 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 		"service.go",
 		"../store/postgres_notifications.go",
 		"../store/memory_notifications.go",
+		"../store/node_graph_workspace_events.go",
+		"../store/workspace_effective_fanout.go",
+		"../store/workspace_event_fanout.go",
 	} {
 		source := strings.ToLower(readNotificationSourceForTest(t, path))
 		for _, forbidden := range []string{
