@@ -3,139 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
 )
-
-func scanNotificationEvent(row interface{ Scan(dest ...any) error }) (domain.NotificationEvent, error) {
-	var item domain.NotificationEvent
-	var companyID sql.NullString
-	var actorUserID sql.NullString
-	var payloadBytes []byte
-	err := row.Scan(
-		&item.EventID,
-		&companyID,
-		&actorUserID,
-		&item.Type,
-		&item.EntityType,
-		&item.EntityID,
-		&item.IdempotencyKey,
-		&payloadBytes,
-		&item.ProcessedTimestamp,
-		&item.CreatedTimestamp,
-	)
-	if err != nil {
-		return domain.NotificationEvent{}, err
-	}
-	if companyID.Valid {
-		item.CompanyID = companyID.String
-	}
-	if actorUserID.Valid {
-		item.ActorUserID = &actorUserID.String
-	}
-	if len(payloadBytes) > 0 {
-		if err := json.Unmarshal(payloadBytes, &item.Payload); err != nil {
-			return domain.NotificationEvent{}, err
-		}
-	}
-	if item.Payload == nil {
-		item.Payload = map[string]any{}
-	}
-	return item, nil
-}
-
-const notificationEventSelectColumns = `
-event_id::text, company_id::text, actor_user_id::text, event_type, entity_type, entity_id,
-idempotency_key, payload, processed_timestamp, created_timestamp`
-
-func (r *PostgresRepo) CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error) {
-	ctx := context.Background()
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
-	input.Type = strings.TrimSpace(input.Type)
-	input.EntityType = strings.TrimSpace(input.EntityType)
-	input.EntityID = strings.TrimSpace(input.EntityID)
-	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	if input.Type == "" || input.EntityType == "" || input.EntityID == "" {
-		return domain.NotificationEvent{}, ErrInvalid
-	}
-	payloadBytes, err := json.Marshal(cloneNotificationPayload(input.Payload))
-	if err != nil {
-		return domain.NotificationEvent{}, err
-	}
-	if input.IdempotencyKey != "" {
-		return scanNotificationEvent(r.db.QueryRowContext(ctx, `
-insert into notification_events (
-  event_id, company_id, actor_user_id, event_type, entity_type, entity_id,
-  idempotency_key, payload, created_timestamp
-) values ($1, nullif($2, '')::uuid, nullif($3, '')::uuid, $4, $5, $6, $7, $8::jsonb, now())
-on conflict (idempotency_key) where btrim(idempotency_key) <> ''
-do update set idempotency_key=excluded.idempotency_key
-returning `+notificationEventSelectColumns,
-			newUUIDv7String(), input.CompanyID, input.ActorUserID, input.Type, input.EntityType, input.EntityID, input.IdempotencyKey, string(payloadBytes),
-		))
-	}
-	return scanNotificationEvent(r.db.QueryRowContext(ctx, `
-insert into notification_events (
-  event_id, company_id, actor_user_id, event_type, entity_type, entity_id,
-  idempotency_key, payload, created_timestamp
-) values ($1, nullif($2, '')::uuid, nullif($3, '')::uuid, $4, $5, $6, '', $7::jsonb, now())
-returning `+notificationEventSelectColumns,
-		newUUIDv7String(), input.CompanyID, input.ActorUserID, input.Type, input.EntityType, input.EntityID, string(payloadBytes),
-	))
-}
-
-func (r *PostgresRepo) ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error) {
-	ctx := context.Background()
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	rows, err := r.db.QueryContext(ctx, `
-select `+notificationEventSelectColumns+`
-from notification_events
-where processed_timestamp is null
-order by created_timestamp asc, event_id asc
-limit $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.NotificationEvent, 0)
-	for rows.Next() {
-		item, err := scanNotificationEvent(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) MarkNotificationEventProcessed(eventID string) error {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return ErrInvalid
-	}
-	result, err := r.db.Exec(`
-update notification_events
-set processed_timestamp=coalesce(processed_timestamp, now())
-where event_id=$1::uuid`, eventID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
 
 func (r *PostgresRepo) GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
 	companyID = strings.TrimSpace(companyID)
@@ -307,7 +179,7 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
-		if err := r.ensureNotificationSourceEventTx(ctx, tx, candidate); err != nil {
+		if err := r.ensureNotificationSourceAnchorTx(ctx, tx, candidate); err != nil {
 			return nil, err
 		}
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
@@ -336,12 +208,12 @@ returning `+notificationSelectColumns,
 	return created, nil
 }
 
-func (r *PostgresRepo) ensureNotificationSourceEventTx(ctx context.Context, tx *sql.Tx, candidate NotificationCreateInput) error {
+func (r *PostgresRepo) ensureNotificationSourceAnchorTx(ctx context.Context, tx *sql.Tx, candidate NotificationCreateInput) error {
 	_, err := tx.ExecContext(ctx, `
 insert into notification_events (
   event_id, company_id, actor_user_id, event_type, entity_type, entity_id,
-  idempotency_key, payload, processed_timestamp, created_timestamp
-) values ($1::uuid, nullif($2, '')::uuid, nullif($3, '')::uuid, $4, $5, $6, '', '{}'::jsonb, now(), now())
+  idempotency_key, payload, created_timestamp
+) values ($1::uuid, nullif($2, '')::uuid, nullif($3, '')::uuid, $4, $5, $6, '', '{}'::jsonb, now())
 on conflict (event_id) do nothing`,
 		candidate.SourceEventID,
 		candidate.CompanyID,

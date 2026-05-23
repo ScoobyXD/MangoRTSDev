@@ -2423,7 +2423,6 @@ create table if not exists notification_events (
   entity_id text not null,
   idempotency_key text not null default '',
   payload jsonb not null default '{}'::jsonb,
-  processed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   constraint notification_events_type_nonblank_chk check (btrim(event_type) <> ''),
   constraint notification_events_entity_type_nonblank_chk check (btrim(entity_type) <> ''),
@@ -2436,10 +2435,6 @@ create table if not exists notification_events (
 create unique index if not exists idx_notification_events_idempotency_key
   on notification_events(idempotency_key)
   where btrim(idempotency_key) <> '';
-
-create index if not exists idx_notification_events_pending
-  on notification_events(created_timestamp asc, event_id asc)
-  where processed_timestamp is null;
 
 create index if not exists idx_notification_events_company_created
   on notification_events(company_id, created_timestamp desc, event_id desc);

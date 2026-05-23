@@ -254,9 +254,6 @@ type KanbanRepository interface {
 }
 
 type NotificationRepository interface {
-	CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error)
-	ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error)
-	MarkNotificationEventProcessed(eventID string) error
 	GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error)
 	SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error
 	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
@@ -748,16 +745,6 @@ type KanbanCardWorkspaceEventResult struct {
 }
 
 const NotificationListMaxLimit = 100
-
-type NotificationEventInput struct {
-	CompanyID      string
-	ActorUserID    string
-	Type           string
-	EntityType     string
-	EntityID       string
-	IdempotencyKey string
-	Payload        map[string]any
-}
 
 type NotificationCreateInput struct {
 	CompanyID       string

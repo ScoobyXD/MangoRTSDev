@@ -84,21 +84,19 @@ What exists:
 - It supports reverse lookups by `(company_id, resource_type, resource_id, user_id)`.
 - Notification storage tables exist.
 - Notification API endpoints and frontend summary/SSE consumers exist.
-- The notification service already has helper logic for reverse effective-access recipient expansion.
+- The notification service has centralized domain-event projector logic for reverse effective-access recipient expansion.
 - Workspace fanout already extracts access targets from domain events.
 - Logic Gate RACI assignments exist and are useful for recipient role classification.
+- Active notification row creation is driven by committed `domain_events`, including bounded checkpoint replay.
+- `notification_events` remains only as a minimal foreign-key anchor for `notifications.source_event_id`; it is no longer a queue or processing API.
 
 What is still broken or incomplete:
 
-- Active V2 Logic Gate work endpoints publish domain events but do not create notification rows.
-- The frontend uses the V2 Logic Gate work endpoints for normal assignment/state updates.
-- Old Kanban/work-item paths still contain notification side effects.
-- Notification creation is still mostly handler-driven through `RecordAndProcess`.
-- `notification_events` has pending-processing code, but there is no reliable always-on notification worker.
 - Shared inbox/shared triage notification cases are mostly placeholders.
 - Shared inbox RACI/access mutations are not consistently refreshing or transactionally updating effective access.
-- Some notification tests cover old paths, not the active V2 Logic Gate workflow.
 - Full-company effective-access rebuilds still appear in correctness paths.
+- Shared inbox item/status/assignment notifications remain deferred until canonical item event payloads are defined.
+- Legacy Kanban card moves intentionally do not create notifications because Kanban snapshots are not a notification source of truth.
 
 ## Architecture Rules
 
@@ -343,7 +341,7 @@ Phase 2 implementation update:
 - Updated route-level expectations in `backend/internal/http/notification_handlers_test.go` for node assignment/field-change notifications to use the `my_triage` assignee classification.
 - Files touched: `backend/internal/notifications/service.go`, `backend/internal/notifications/service_test.go`, `backend/internal/http/notification_handlers.go`, `backend/internal/http/notification_handlers_test.go`, `backend/internal/http/node_handlers.go`, `backend/internal/http/workspace_handlers.go`, `backend/internal/http/communications_shared_inbox_handlers.go`, `backend/internal/http/company_explorer_handlers.go`, `backend/internal/store/repository.go`, `backend/internal/store/node_graph_workspace_events.go`, `backend/internal/store/memory_nodes.go`, `backend/internal/store/postgres_nodes.go`, `backend/internal/store/postgres_notifications.go`, and this tracker.
 - Validation run: `go test ./...` from `backend` on May 22, 2026.
-- Follow-up finding: `notification_events.ProcessPending` is still not started anywhere and remains Phase 3 reliability work.
+- Follow-up finding, now resolved by Phase 3: `notification_events.ProcessPending` was not started anywhere, so the legacy queue API was removed instead of promoted into a worker.
 - Follow-up finding: shared inbox RACI/access correctness still relies on full-company effective-access rebuilds. `SetCommunicationsSharedInboxRaciAssignments` and shared triage `SetEntityPermissions` should eventually move to source-scoped effective-access writers aligned with Backend Refactor V4 before `resource_access_grants` can be considered for removal.
 
 ### Phase 3 - Reliability, Legacy Removal, And Final Validation
@@ -351,7 +349,7 @@ Phase 2 implementation update:
 This phase should be one Codex instance. It hardens the system after V1 event coverage exists.
 
 - [x] Decide whether `notification_events` remains as a queue or is replaced by domain-event projection.
-- [x] Do not start `notification_events` as the V1 queue; retain it only as a legacy compatibility/FK anchor.
+- [x] Do not start `notification_events` as the V1 queue; retain it only as an FK anchor.
 - [x] If domain events become the queue, add projector state/checkpointing or idempotent replay.
 - [x] Ensure notification row inserts are idempotent by source event and recipient.
 - [x] Ensure retries do not duplicate SSE publishes in a harmful way.
@@ -360,7 +358,7 @@ This phase should be one Codex instance. It hardens the system after V1 event co
 - [x] Remove or quarantine notification logic tied to old Kanban card snapshots once projector coverage exists.
 - [x] Remove handler-specific event construction that duplicates domain event payloads where directly replaced by projector tests.
 - [x] Remove notification fanout paths that depend on legacy permission helpers.
-- [~] Remove or quarantine unused notification event types.
+- [x] Remove or quarantine unused notification event types.
 - [x] Add source-shape tests that fail on `UserCanAccessEntity` inside notification fanout.
 - [x] Add source-shape tests that fail on old Kanban notification helpers from active V2 paths.
 - [x] Identify remaining notification correctness dependency on full-company effective-access rebuilds.
@@ -375,23 +373,30 @@ This phase should be one Codex instance. It hardens the system after V1 event co
 - [x] Confirm SSE publishes are limited to newly inserted notification rows after retry/replay.
 - [x] Confirm notification list/summary behavior backfills rows created by replay.
 - [x] Run backend tests.
-- [x] Add a final audit note to this document with any intentionally retained legacy code.
+- [x] Add a final audit note to this document with retained compatibility and removed legacy code.
 
 Phase 3 implementation update:
 
-- Decision: committed `domain_events` projection is the Notifications V1 source of truth. `notification_events` is not started as a queue. It remains for existing legacy `RecordAndProcess` producers and as the `notifications.source_event_id` foreign-key anchor used by projected domain-event notifications.
+- Decision: committed `domain_events` projection is the Notifications V1 source of truth. `notification_events` is no longer a queue, no server worker starts it, and no public repository or notification service API processes it.
 - Added a bounded domain-event notification replay path with persisted per-company checkpoints in `notification_domain_event_projection_checkpoints`. Server startup initializes checkpoints for existing companies to the latest already-durable event, then a background catch-up loop replays newer domain events. New companies without a checkpoint replay from their first event. Failed event processing stops before checkpoint advancement, so later catch-up retries the same event.
 - Notification inserts now return only newly inserted rows. Store idempotency remains keyed by `(recipient_user_id, source_event_id, notification_type, entity_type, entity_id)`, and duplicate processing does not return existing rows to `publishNotifications`, preventing retry/replay from creating duplicate SSE publishes.
 - Added tests for duplicate event processing, failed processing retry behavior, and revocation after delivery read-time filtering. Shared inbox RACI summary/list behavior is also asserted from stored notifications.
-- Replaced the Work Item Logic Gate assignment handler's old Kanban-card snapshot notification path with `projectCommittedNotificationEvents(result.Events)` for saved, moved, removed, and issue-toggled assignment events. The old Kanban card state helper is intentionally retained only for the legacy `/v1/kanban/cards/{id}` move path.
-- Removed the now-unused handler-side node update notification helper; node assignment and selected field-change notifications now come from the `node_updated` domain-event payload marker.
+- Removed legacy notification queue/service entry points: `RecordAndProcess`, `ProcessPending`, `ProcessEvent`, `CreateNotificationEvent`, `ListPendingNotificationEvents`, `MarkNotificationEventProcessed`, `NotificationEventInput`, and the legacy `domain.NotificationEvent` queue type.
+- Removed HTTP legacy notification producers: `recordNotificationEvent`, Logic Gate RACI compatibility producers, non-node mention fallback writes, legacy Kanban card move notification creation, `recordKanbanStateNotification`, and `kanbanCardNotificationSnapshot`.
+- Logic Gate RACI full PUT and command handlers now publish/project committed `logic_gate_raci_updated` domain events with affected assignment user IDs. The notification projector expands recipients from reverse effective Logic Gate access first, then uses RACI assignment tables only for notification role classification.
+- Node mentions still create notifications through committed `node.mention_created` domain events and projector access validation.
+- Logic Gate information mentions now create committed `logic_gate.mention_created` domain events and are projected as mention notifications after effective Logic Gate access validation. Unsupported non-node mention targets without a canonical resource/access target are explicitly dropped and tested.
+- Work Item Logic Gate assignment handlers project canonical committed work-item events for saved, moved, removed, and issue-toggled assignment events. Legacy enabled `/v1/kanban/cards/{id}` card moves intentionally create no notification because Kanban card snapshots are not a source of truth for Notifications V1.
+- Removed the now-unused handler-side node update notification helper; node assignment and selected field-change notifications come from the `node_updated` domain-event payload marker.
+- Kept only a narrowly named Postgres FK-anchor helper inside `CreateNotifications`: `ensureNotificationSourceAnchorTx` inserts minimal `notification_events` rows so existing `notifications.source_event_id -> notification_events.event_id` constraints remain valid. The queue column/index (`processed_timestamp`, `idx_notification_events_pending`) and all queue behavior were removed from schema/migrations and store code.
 - Added source-shape coverage so active notification fanout cannot call `UserCanAccessEntity`, `ListAccessibleEntityIDs`, the recursive DB permission function, or old Kanban notification helpers from the V2/work-item Logic Gate notification paths.
+- Added source-shape coverage rejecting the removed legacy notification path names from active notification/service/store/HTTP code.
 - Shared inbox RACI/access effective-access refresh remains a temporary full-company rebuild and is now explicitly marked with V4 TODOs. This stays aligned with Backend Refactor V4 rather than adding a new broad access writer in Notifications V1.
 - Remaining notification correctness dependencies on full-company effective-access rebuilds: shared triage direct access grants, shared inbox RACI user/group assignments, group membership/group hierarchy facts used by shared inbox RACI expansion, Logic Gate RACI edit-access grants, node assignee edit-access facts, and Logic Gate assignment contextual node-view facts still need source-scoped effective-access writers before normal correctness can stop relying on repair-style rebuilds.
 - `resource_access_grants` must not be deleted until V4 replaces all source facts still derived from direct user/group resource grants, RACI-derived grants, node assignee grants, Logic Gate assignment contextual grants, shared triage inherited grants, group membership expansion, and company admin/default access modeling with transactionally maintained effective-access facts and an explicit migration plan.
-- Files touched: `backend/internal/notifications/service.go`, `backend/internal/notifications/service_test.go`, `backend/internal/http/notification_projection.go`, `backend/internal/http/server.go`, `backend/internal/http/notification_handlers.go`, `backend/internal/http/work_item_handlers.go`, `backend/internal/http/communications_shared_inbox_handlers.go`, `backend/internal/http/company_explorer_handlers.go`, `backend/internal/store/repository.go`, `backend/internal/store/memory.go`, `backend/internal/store/memory_domain_events.go`, `backend/internal/store/memory_notifications.go`, `backend/internal/store/postgres_domain_events.go`, `backend/internal/store/postgres_notifications.go`, `backend/internal/store/logic_gate_work_test.go`, `backend/db/schema.sql`, `backend/db/migrations/20260523_notification_domain_event_projection_checkpoints.sql`, and this tracker.
-- Validation run: `go test ./...` from `backend` on May 23, 2026.
-- Intentionally retained legacy code: `notification_events.ProcessPending` and `RecordAndProcess` remain for old non-projector producers, but no server startup worker is started for that table. Logic Gate information mentions and full Logic Gate RACI PUT/command notification construction still use the legacy compatibility path until their canonical domain-event payloads are explicitly covered. Legacy Kanban card move notification code remains isolated to legacy Kanban routes.
+- Files touched: `backend/internal/notifications/service.go`, `backend/internal/notifications/service_test.go`, `backend/internal/http/kanban_handlers.go`, `backend/internal/http/logic_gate_handlers.go`, `backend/internal/http/logic_gate_raci_command_handlers.go`, `backend/internal/http/logic_gate_raci_command_handlers_test.go`, `backend/internal/http/notification_handlers.go`, `backend/internal/http/notification_handlers_test.go`, `backend/internal/store/logic_gate_raci_commands.go`, `backend/internal/store/repository.go`, `backend/internal/store/memory.go`, `backend/internal/store/memory_notifications.go`, `backend/internal/store/node_graph_workspace_events.go`, `backend/internal/store/postgres_notifications.go`, `backend/internal/domain/types.go`, `backend/db/schema.sql`, `backend/db/migrations/20260517_notifications.sql`, `backend/db/migrations/20260523_notification_domain_event_projection_checkpoints.sql`, and this tracker.
+- Validation run: `go test ./...` from `backend`.
+- Compatibility retained: the `notification_events` table remains only as the existing `notifications.source_event_id` FK target. No legacy queue behavior, pending processing API, HTTP producer, or Kanban snapshot notification producer remains. `resource_access_grants` is retained unchanged for the broader V4 access migration dependency.
 
 ## Files To Inspect First
 
@@ -423,8 +428,9 @@ Phase 3 implementation update:
 - `backend/internal/http/logic_gate_work_handlers.go` V2 work mutations now invoke committed domain-event notification projection.
 - `frontend/src/modules/kanban/kanbanApi.ts` still uses the V2 Logic Gate work endpoints for normal active work-board flows.
 - `backend/internal/notifications/service.go` now treats committed domain events as the V1 projector source and supports bounded checkpoint replay.
-- `backend/internal/http/notification_handlers.go` still contains legacy `RecordAndProcess` compatibility helpers for non-projector producers, but active node update, node mention, V2 Logic Gate work, Work Item Logic Gate work, and initial shared inbox/shared triage paths use domain-event projection.
+- `backend/internal/http/notification_handlers.go` no longer contains legacy `RecordAndProcess` compatibility helpers. Node mentions, Logic Gate mentions, node update notifications, V2 Logic Gate work, Work Item Logic Gate work, Logic Gate RACI changes, and initial shared inbox/shared triage paths use domain-event projection.
 - `backend/internal/store/workspace_effective_fanout.go` remains the workspace fanout target extractor; notification fanout separately uses reverse `effective_resource_access` lookups through `ListEffectiveUsersForResource`.
+- Legacy enabled Kanban card moves intentionally create no notifications. Compatibility routes that map to canonical Logic Gate work project the committed work-item domain events instead.
 - Shared inbox item/status/assignment notification events remain deferred until their canonical domain-event shape is defined and tested. Shared inbox RACI/access events are supported.
 
 ## Implementation Notes

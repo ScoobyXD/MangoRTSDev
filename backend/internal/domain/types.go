@@ -519,14 +519,13 @@ type NodeLogicGateAssignment struct {
 }
 
 const (
-	NotificationEventLogicGateStateChanged = "logic_gate.state_changed"
-	NotificationEventLogicGateRaciUpdated  = "logic_gate.raci_updated"
-	NotificationEventNodeAssigned          = "node.assigned"
-	NotificationEventNodeFieldsChanged     = "node.fields_changed"
-	NotificationEventNodeCommentCreated    = "node.comment_created"
-	NotificationEventMentionCreated        = "mention.created"
-	NotificationEventACIInboxChanged       = "aci_inbox.changed"
-	NotificationEventACIInboxRaciUpdated   = "aci_inbox.raci_updated"
+	NotificationEventLogicGateRaciUpdated = "logic_gate.raci_updated"
+	NotificationEventNodeAssigned         = "node.assigned"
+	NotificationEventNodeFieldsChanged    = "node.fields_changed"
+	NotificationEventNodeCommentCreated   = "node.comment_created"
+	NotificationEventMentionCreated       = "mention.created"
+	NotificationEventACIInboxChanged      = "aci_inbox.changed"
+	NotificationEventACIInboxRaciUpdated  = "aci_inbox.raci_updated"
 )
 
 const (
@@ -539,19 +538,6 @@ const (
 const (
 	NotificationRoleOther = "other"
 )
-
-type NotificationEvent struct {
-	EventID            string         `json:"event_id"`
-	CompanyID          string         `json:"company_id,omitempty"`
-	ActorUserID        *string        `json:"actor_user_id,omitempty"`
-	Type               string         `json:"type"`
-	EntityType         string         `json:"entity_type"`
-	EntityID           string         `json:"entity_id"`
-	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
-	Payload            map[string]any `json:"payload,omitempty"`
-	ProcessedTimestamp *time.Time     `json:"processed_timestamp,omitempty"`
-	CreatedTimestamp   time.Time      `json:"created_timestamp"`
-}
 
 type DomainEvent struct {
 	EventID            string         `json:"event_id"`

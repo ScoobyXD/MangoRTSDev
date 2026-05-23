@@ -7,6 +7,7 @@ import (
 
 const workspaceDomainStreamType = "workspace"
 const NodeMentionCreatedEventType = "node.mention_created"
+const LogicGateMentionCreatedEventType = "logic_gate.mention_created"
 
 func workspaceDomainEventInput(companyID, eventType string, payload map[string]any) DomainEventInput {
 	return DomainEventInput{

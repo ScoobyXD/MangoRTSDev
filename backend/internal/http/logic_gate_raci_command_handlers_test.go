@@ -65,6 +65,13 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 	}
 	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 1)
 	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 1)
+	responsibleNotifications, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListNotifications responsible: %v", err)
+	}
+	if len(responsibleNotifications) != 1 || responsibleNotifications[0].Type != domain.NotificationEventLogicGateRaciUpdated || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("responsible notifications after add = %+v, want one projected RACI notification", responsibleNotifications)
+	}
 
 	duplicateAdd := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandAdd, addBody)
 	if duplicateAdd.Code != http.StatusOK {
@@ -76,6 +83,13 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 	}
 	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 1)
 	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 1)
+	responsibleNotifications, err = repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListNotifications responsible after duplicate: %v", err)
+	}
+	if len(responsibleNotifications) != 1 {
+		t.Fatalf("responsible notifications after duplicate add = %+v, want no duplicate", responsibleNotifications)
+	}
 
 	removeBody := map[string]any{
 		"company_id": companyID,

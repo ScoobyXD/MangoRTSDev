@@ -67,23 +67,22 @@ func TestPhase6NotificationRecipientsUseReverseEffectiveAccessAndRACIRouting(t *
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
-	notifications, err := service.ProcessEvent(domain.NotificationEvent{
+	notifications, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666699",
 		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
 		ActorUserID: &actor.UserID,
-		Type:        domain.NotificationEventLogicGateStateChanged,
-		EntityType:  "kanban_card",
-		EntityID:    "card-phase6",
+		Type:        store.WorkItemLogicGateAssignmentMovedEventType,
 		Payload: map[string]any{
-			"logic_gate_id":      logicGate.LogicGateID,
-			"node_id":            node.NodeID,
-			"node_title":         node.Title,
-			"column_title":       "In Progress",
-			"actor_display_name": "Actor",
+			"logic_gate_id": logicGate.LogicGateID,
+			"node_id":       node.NodeID,
+			"node_title":    node.Title,
+			"status":        "In Progress",
 		},
 	})
 	if err != nil {
-		t.Fatalf("ProcessEvent: %v", err)
+		t.Fatalf("ProcessDomainEvent: %v", err)
 	}
 
 	byUser := map[string]domain.Notification{}
@@ -316,6 +315,34 @@ func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *t
 	}
 	if items[0].Type != domain.NotificationEventMentionCreated || items[0].EntityType != store.EntityTypeNode || items[0].EntityID != node.NodeID {
 		t.Fatalf("mention notification target = %+v, want node mention", items[0])
+	}
+}
+
+func TestProcessDomainEventUnsupportedMentionCreatesNoNotification(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666623"
+	repo.EnsureCompany(companyID, "Unsupported Mention Projector Co")
+
+	mentioned := mustNotificationUser(t, repo, companyID, "unsupported-mention-user")
+	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
+		EventID:    "66666666-6666-4666-8666-666666666624",
+		CompanyID:  companyID,
+		StreamType: "notification",
+		StreamID:   "document:unsupported",
+		Type:       "document.mention_created",
+		Payload: map[string]any{
+			"entity_type":        "document",
+			"entity_id":          "unsupported",
+			"mentioned_user_ids": []string{mentioned.UserID},
+			"comment":            "@Unsupported Mention User",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unsupported mention notifications = %+v, want none", items)
 	}
 }
 
@@ -871,6 +898,10 @@ func TestLogicGateWorkNotificationTargetsIncludeGateAndNode(t *testing.T) {
 func TestPhase6NotificationSourceShape(t *testing.T) {
 	for _, path := range []string{
 		"service.go",
+		"../http/notification_handlers.go",
+		"../http/logic_gate_handlers.go",
+		"../http/logic_gate_raci_command_handlers.go",
+		"../http/kanban_handlers.go",
 		"../store/postgres_notifications.go",
 		"../store/memory_notifications.go",
 		"../store/node_graph_workspace_events.go",
@@ -879,6 +910,12 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 	} {
 		source := strings.ToLower(readNotificationSourceForTest(t, path))
 		for _, forbidden := range []string{
+			"recordandprocess",
+			"processpending",
+			"recordnotificationevent",
+			"createnotificationevent",
+			"listpendingnotificationevents",
+			"marknotificationeventprocessed",
 			"listaccessibleentityids",
 			"mangorts_user_can_access_resource",
 			"usercanaccessentity",
@@ -888,6 +925,22 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 		} {
 			if strings.Contains(source, forbidden) {
 				t.Fatalf("%s contains forbidden notification hot path %q", path, forbidden)
+			}
+		}
+	}
+	for _, path := range []string{
+		"../store/repository.go",
+		"../store/postgres_notifications.go",
+		"../store/memory_notifications.go",
+	} {
+		source := strings.ToLower(readNotificationSourceForTest(t, path))
+		for _, forbidden := range []string{
+			"createnotificationevent",
+			"listpendingnotificationevents",
+			"marknotificationeventprocessed",
+		} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s contains removed notification queue API %q", path, forbidden)
 			}
 		}
 	}

@@ -55,7 +55,7 @@ func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, company
 	}
 }
 
-func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
+func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -184,20 +184,8 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode notifications: %v", err)
 	}
-	if len(payload.Notifications) != 1 {
-		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
-	}
-	if payload.Notifications[0].Type != domain.NotificationEventLogicGateStateChanged {
-		t.Fatalf("notification type = %q", payload.Notifications[0].Type)
-	}
-	if !strings.Contains(payload.Notifications[0].Title, "In Progress") {
-		t.Fatalf("notification title = %q, want In Progress", payload.Notifications[0].Title)
-	}
-	if payload.Notifications[0].Surface != domain.NotificationSurfaceRInbox || payload.Notifications[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("notification metadata = surface %q role %q, want responsible R inbox", payload.Notifications[0].Surface, payload.Notifications[0].Role)
-	}
-	if payload.Notifications[0].LogicGateID != logicGate.LogicGateID || payload.Notifications[0].NodeID != node.NodeID {
-		t.Fatalf("notification target = logic gate %q node %q, want %q %q", payload.Notifications[0].LogicGateID, payload.Notifications[0].NodeID, logicGate.LogicGateID, node.NodeID)
+	if len(payload.Notifications) != 0 {
+		t.Fatalf("legacy kanban move notification count = %d, want 0: %+v", len(payload.Notifications), payload.Notifications)
 	}
 
 	blockedReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
@@ -228,14 +216,8 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
 		t.Fatalf("decode notification summary: %v", err)
 	}
-	if summary.TotalUnread != 1 {
-		t.Fatalf("summary total unread = %d, want 1", summary.TotalUnread)
-	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
-		t.Fatalf("summary role counts = %+v, want one responsible R inbox count", summary.RoleCounts)
-	}
-	if len(summary.LogicGateCounts) != 1 || summary.LogicGateCounts[0].LogicGateID != logicGate.LogicGateID || summary.LogicGateCounts[0].NodeID != node.NodeID || summary.LogicGateCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.LogicGateCounts[0].Count != 1 {
-		t.Fatalf("summary logic gate counts = %+v, want one responsible logic gate/node count", summary.LogicGateCounts)
+	if summary.TotalUnread != 0 {
+		t.Fatalf("summary total unread = %d, want 0", summary.TotalUnread)
 	}
 }
 
@@ -374,10 +356,10 @@ func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 		candidates = append(candidates, store.NotificationCreateInput{
 			CompanyID:       companyID,
 			RecipientUserID: user.UserID,
-			Type:            domain.NotificationEventLogicGateStateChanged,
+			Type:            store.WorkItemLogicGateAssignmentMovedEventType,
 			SourceEventID:   "66666666-6666-4666-8666-00000000000" + string(rune('1'+index)),
-			EntityType:      "kanban_card",
-			EntityID:        "card-" + string(rune('1'+index)),
+			EntityType:      store.EntityTypeLogicGate,
+			EntityID:        logicGate.LogicGateID,
 			Title:           "Node status changed",
 			Surface:         domain.NotificationSurfaceACIInbox,
 			Role:            domain.LogicGateRaciRoleConsulted,
@@ -486,6 +468,69 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	}
 	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
 		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
+	}
+}
+
+func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "22222222-2222-4222-8222-222222222223"
+
+	author, err := repo.UpsertAuthUser("gate-author-subject", "gate-author@example.com", "Gate Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("gate-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	mentioned, err := repo.UpsertAuthUser("gate-mentioned-subject", "gate-mentioned@example.com", "Gate Mentioned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("gate-mentioned-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Mention gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, mentioned.UserID)
+
+	infoBody, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"type":        "Text box",
+		"information": "Please review this, @Gate Mentioned please.",
+	})
+	infoReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/information", bytes.NewReader(infoBody))
+	infoReq = requestWithActorForNotifications(infoReq, author, companyID)
+	infoReq.Header.Set("Content-Type", "application/json")
+	infoRec := httptest.NewRecorder()
+	handler.ServeHTTP(infoRec, infoReq)
+	if infoRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic gate information status = %d body=%s", infoRec.Code, infoRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 1 {
+		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
+	}
+	if item := payload.Notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
+		t.Fatalf("mention notification = %+v, want logic gate mention", item)
 	}
 }
 

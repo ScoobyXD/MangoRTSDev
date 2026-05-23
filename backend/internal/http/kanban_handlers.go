@@ -134,18 +134,6 @@ func (s *Server) logicGateWorkCompatibilityCardAfterMutation(companyID, logicGat
 	return fallback
 }
 
-func (s *Server) kanbanColumnTitles(companyID, boardID string) map[string]string {
-	columnTitles := map[string]string{}
-	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
-	if err != nil {
-		return columnTitles
-	}
-	for _, column := range columns {
-		columnTitles[column.ColumnID] = column.Title
-	}
-	return columnTitles
-}
-
 func (s *Server) handleKanbanBoardsCompatibility(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeLegacyKanbanDisabled(w)
@@ -281,6 +269,7 @@ func (s *Server) handleKanbanCardsCompatibility(w http.ResponseWriter, r *http.R
 	}
 	s.refreshEffectiveAccessProjection(req.CompanyID, "legacy_kanban_card_assigned_to_logic_gate_work")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusCreated, s.logicGateWorkCompatibilityCardAfterMutation(req.CompanyID, logicGateID, result.Card))
 }
 
@@ -370,6 +359,7 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		}
 		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_removed_from_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(result.Events)
+		s.projectCommittedNotificationEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -391,6 +381,7 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		}
 		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_moved_as_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(result.Events)
+		s.projectCommittedNotificationEvents(result.Events)
 		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, result.Card)
 	}
 	if isIssue != nil {
@@ -407,6 +398,7 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		}
 		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_issue_toggled_as_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
+		s.projectCommittedNotificationEvents(issueResult.Events)
 		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, issueResult.Card)
 		result = issueResult
 	}
@@ -849,15 +841,13 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		if !s.requireKanbanBoardEdit(w, r, req.CompanyID, req.BoardID, "") {
 			return
 		}
-		beforeCard, ok := s.requireKanbanCardAccess(w, r, req.CompanyID, req.BoardID, cardID, store.EntityPermissionEdit)
-		if !ok {
+		if _, ok := s.requireKanbanCardAccess(w, r, req.CompanyID, req.BoardID, cardID, store.EntityPermissionEdit); !ok {
 			return
 		}
 		if columnID == "" && req.IsIssue == nil {
 			writeError(w, http.StatusBadRequest, "kanban_card_update_required")
 			return
 		}
-		columnTitles, hadBeforeCard := s.kanbanColumnTitles(req.CompanyID, req.BoardID), true
 		result, err := s.kanban.MoveCard(store.KanbanCardMoveInput{
 			CompanyID: req.CompanyID,
 			BoardID:   req.BoardID,
@@ -876,9 +866,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		if item.LogicGateID != nil && hadBeforeCard {
-			s.recordKanbanStateNotification(r, beforeCard, item, columnTitles)
-		}
 		writeJSON(w, http.StatusOK, item)
 		return
 	}

@@ -29,53 +29,18 @@ type notificationRecipientMeta struct {
 	NodeID      string
 }
 
+type notificationProjectionEvent struct {
+	EventID     string
+	CompanyID   string
+	ActorUserID *string
+	Type        string
+	EntityType  string
+	EntityID    string
+	Payload     map[string]any
+}
+
 func NewService(repo store.Repository) *Service {
 	return &Service{Repo: repo}
-}
-
-func (s *Service) RecordAndProcess(input store.NotificationEventInput) ([]domain.Notification, error) {
-	event, err := s.Repo.CreateNotificationEvent(input)
-	if err != nil {
-		return nil, err
-	}
-	notifications, err := s.ProcessEvent(event)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Repo.MarkNotificationEventProcessed(event.EventID); err != nil {
-		return notifications, err
-	}
-	return notifications, nil
-}
-
-func (s *Service) ProcessPending(limit int) ([]domain.Notification, error) {
-	events, err := s.Repo.ListPendingNotificationEvents(limit)
-	if err != nil {
-		return nil, err
-	}
-	all := make([]domain.Notification, 0)
-	for _, event := range events {
-		notifications, err := s.ProcessEvent(event)
-		if err != nil {
-			return all, err
-		}
-		if err := s.Repo.MarkNotificationEventProcessed(event.EventID); err != nil {
-			return all, err
-		}
-		all = append(all, notifications...)
-	}
-	return all, nil
-}
-
-func (s *Service) ProcessEvent(event domain.NotificationEvent) ([]domain.Notification, error) {
-	candidates, err := s.notificationCandidates(event)
-	if err != nil {
-		return nil, err
-	}
-	if len(candidates) == 0 {
-		return []domain.Notification{}, nil
-	}
-	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates})
 }
 
 func (s *Service) ProcessDomainEvents(ctx context.Context, events []domain.DomainEvent) ([]domain.Notification, error) {
@@ -191,7 +156,7 @@ func (s *Service) ReplayDomainEvents(ctx context.Context, companyID string, limi
 	return result, all, nil
 }
 
-func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]store.NotificationCreateInput, error) {
+func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]store.NotificationCreateInput, error) {
 	actorID := ""
 	if event.ActorUserID != nil {
 		actorID = strings.TrimSpace(*event.ActorUserID)
@@ -208,11 +173,6 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			return
 		}
 		recipients[userID] = mergeNotificationRecipientMeta(recipients[userID], meta)
-	}
-	addRecipients := func(userIDs []string, meta notificationRecipientMeta) {
-		for _, userID := range userIDs {
-			addRecipient(userID, meta)
-		}
 	}
 	addEffectiveRecipients := func(resourceType, resourceID string, metaForUser func(string) notificationRecipientMeta) error {
 		userIDs, err := s.notificationEffectiveUsers(event.CompanyID, resourceType, resourceID)
@@ -269,29 +229,6 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 	notificationType := event.Type
 
 	switch event.Type {
-	case domain.NotificationEventLogicGateStateChanged:
-		logicGateID := payloadString(payload, "logic_gate_id")
-		if logicGateID == "" {
-			logicGateID = event.EntityID
-		}
-		if err := addLogicGateRecipients(logicGateID, payloadString(payload, "node_id")); err != nil {
-			return nil, err
-		}
-		toColumn := payloadString(payload, "column_title")
-		nodeTitle := payloadString(payload, "node_title")
-		if toColumn == "" {
-			toColumn = "a new state"
-		}
-		actorLabel := payloadString(payload, "actor_display_name")
-		if actorLabel == "" {
-			actorLabel = "Someone"
-		}
-		title = "Node status changed to " + toColumn
-		if nodeTitle != "" {
-			body = fmt.Sprintf("%s changed %s to %s.", actorLabel, nodeTitle, toColumn)
-		} else {
-			body = fmt.Sprintf("%s changed this node to %s.", actorLabel, toColumn)
-		}
 	case store.WorkItemLogicGateAssignmentSavedEventType,
 		store.WorkItemLogicGateAssignmentMovedEventType,
 		store.WorkItemLogicGateAssignmentRemovedEventType,
@@ -501,16 +438,7 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 				return nil, err
 			}
 		default:
-			target, ok := store.NotificationPrimaryAccessTarget(event.EntityType, event.EntityID, "", "")
-			if ok {
-				if err := addEffectiveRecipientSubset(target.EntityType, target.EntityID, mentionedUserIDs, func(string) notificationRecipientMeta {
-					return notificationRecipientMeta{}
-				}); err != nil {
-					return nil, err
-				}
-			} else {
-				addRecipients(mentionedUserIDs, notificationRecipientMeta{})
-			}
+			return []store.NotificationCreateInput{}, nil
 		}
 		actorLabel := payloadString(payload, "actor_display_name")
 		if actorLabel == "" {
@@ -563,7 +491,7 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 	return items, nil
 }
 
-func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.NotificationEvent, bool) {
+func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationProjectionEvent, bool) {
 	payload := event.Payload
 	if payload == nil {
 		payload = map[string]any{}
@@ -586,6 +514,17 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.Notifica
 		if entityID == "" {
 			entityID = payloadString(payload, "entity_id")
 		}
+	case store.LogicGateMentionCreatedEventType:
+		notificationType = domain.NotificationEventMentionCreated
+		entityType = store.EntityTypeLogicGate
+		entityID = payloadString(payload, "logic_gate_id")
+		if entityID == "" {
+			entityID = payloadString(payload, "entity_id")
+		}
+	case store.LogicGateRaciUpdatedEventType:
+		notificationType = domain.NotificationEventLogicGateRaciUpdated
+		entityType = store.EntityTypeLogicGate
+		entityID = payloadString(payload, "logic_gate_id")
 	case "node_updated":
 		switch mapped := payloadString(payload, "notification_event_type"); mapped {
 		case domain.NotificationEventNodeAssigned, domain.NotificationEventNodeFieldsChanged:
@@ -593,7 +532,7 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.Notifica
 			entityType = store.EntityTypeNode
 			entityID = payloadString(payload, "node_id")
 		default:
-			return domain.NotificationEvent{}, false
+			return notificationProjectionEvent{}, false
 		}
 	case "communications_shared_inbox_raci_updated":
 		notificationType = domain.NotificationEventACIInboxRaciUpdated
@@ -604,10 +543,10 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.Notifica
 		entityType = store.EntityTypeSharedTriageFolder
 		entityID = payloadString(payload, "folder_id")
 	default:
-		return domain.NotificationEvent{}, false
+		return notificationProjectionEvent{}, false
 	}
 	if strings.TrimSpace(notificationType) == "" || strings.TrimSpace(entityType) == "" || strings.TrimSpace(entityID) == "" {
-		return domain.NotificationEvent{}, false
+		return notificationProjectionEvent{}, false
 	}
 	actorUserID := ""
 	if event.ActorUserID != nil {
@@ -616,15 +555,13 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (domain.Notifica
 	if actorUserID == "" {
 		actorUserID = payloadString(payload, "actor_user_id")
 	}
-	out := domain.NotificationEvent{
-		EventID:          strings.TrimSpace(event.EventID),
-		CompanyID:        strings.TrimSpace(event.CompanyID),
-		Type:             notificationType,
-		EntityType:       entityType,
-		EntityID:         entityID,
-		IdempotencyKey:   event.IdempotencyKey,
-		Payload:          payload,
-		CreatedTimestamp: event.CreatedTimestamp,
+	out := notificationProjectionEvent{
+		EventID:    strings.TrimSpace(event.EventID),
+		CompanyID:  strings.TrimSpace(event.CompanyID),
+		Type:       notificationType,
+		EntityType: entityType,
+		EntityID:   entityID,
+		Payload:    payload,
 	}
 	if actorUserID != "" {
 		out.ActorUserID = &actorUserID

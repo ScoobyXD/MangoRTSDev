@@ -46,7 +46,6 @@ type MemoryRepo struct {
 	domainEvents             map[string]domain.DomainEvent
 	workspaceReadVersions    map[string]int64
 	domainEventAppendErr     error
-	notificationEvents       map[string]domain.NotificationEvent
 	notificationCheckpoints  map[string]NotificationDomainEventCheckpoint
 	notifications            map[string]domain.Notification
 }
@@ -90,7 +89,6 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateShortcuts:       map[string]domain.UserLogicGateShortcut{},
 		domainEvents:             map[string]domain.DomainEvent{},
 		workspaceReadVersions:    map[string]int64{},
-		notificationEvents:       map[string]domain.NotificationEvent{},
 		notificationCheckpoints:  map[string]NotificationDomainEventCheckpoint{},
 		notifications:            map[string]domain.Notification{},
 	}

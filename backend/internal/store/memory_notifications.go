@@ -7,17 +7,6 @@ import (
 	"time"
 )
 
-func cloneNotificationPayload(payload map[string]any) map[string]any {
-	if len(payload) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(payload))
-	for key, value := range payload {
-		out[key] = value
-	}
-	return out
-}
-
 func notificationStringPtr(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -58,19 +47,6 @@ func NotificationPrimaryAccessTarget(entityType, entityID, logicGateID, nodeID s
 		return target, true
 	}
 	return NotificationAccessTarget{}, false
-}
-
-func cloneNotificationEvent(item domain.NotificationEvent) domain.NotificationEvent {
-	item.Payload = cloneNotificationPayload(item.Payload)
-	if item.ActorUserID != nil {
-		actor := *item.ActorUserID
-		item.ActorUserID = &actor
-	}
-	if item.ProcessedTimestamp != nil {
-		processed := *item.ProcessedTimestamp
-		item.ProcessedTimestamp = &processed
-	}
-	return item
 }
 
 func cloneNotification(item domain.Notification) domain.Notification {
@@ -115,93 +91,6 @@ func notificationRoleSummaryTargetKey(item domain.Notification) string {
 		return strings.TrimSpace(item.EntityType) + "\x00" + strings.TrimSpace(item.EntityID)
 	}
 	return strings.TrimSpace(item.NotificationID)
-}
-
-func (r *MemoryRepo) CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error) {
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
-	input.Type = strings.TrimSpace(input.Type)
-	input.EntityType = strings.TrimSpace(input.EntityType)
-	input.EntityID = strings.TrimSpace(input.EntityID)
-	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	if input.Type == "" || input.EntityType == "" || input.EntityID == "" {
-		return domain.NotificationEvent{}, ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if input.IdempotencyKey != "" {
-		for _, existing := range r.notificationEvents {
-			if existing.IdempotencyKey == input.IdempotencyKey {
-				return cloneNotificationEvent(existing), nil
-			}
-		}
-	}
-
-	now := time.Now().UTC()
-	item := domain.NotificationEvent{
-		EventID:          newUUIDv7String(),
-		CompanyID:        input.CompanyID,
-		ActorUserID:      notificationStringPtr(input.ActorUserID),
-		Type:             input.Type,
-		EntityType:       input.EntityType,
-		EntityID:         input.EntityID,
-		IdempotencyKey:   input.IdempotencyKey,
-		Payload:          cloneNotificationPayload(input.Payload),
-		CreatedTimestamp: now,
-	}
-	r.notificationEvents[item.EventID] = item
-	return cloneNotificationEvent(item), nil
-}
-
-func (r *MemoryRepo) ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items := make([]domain.NotificationEvent, 0)
-	for _, item := range r.notificationEvents {
-		if item.ProcessedTimestamp != nil {
-			continue
-		}
-		items = append(items, cloneNotificationEvent(item))
-	}
-	slices.SortFunc(items, func(a, b domain.NotificationEvent) int {
-		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
-			return -1
-		}
-		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
-			return 1
-		}
-		return strings.Compare(a.EventID, b.EventID)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, nil
-}
-
-func (r *MemoryRepo) MarkNotificationEventProcessed(eventID string) error {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	item, ok := r.notificationEvents[eventID]
-	if !ok {
-		return ErrNotFound
-	}
-	now := time.Now().UTC()
-	item.ProcessedTimestamp = &now
-	r.notificationEvents[eventID] = item
-	return nil
 }
 
 func (r *MemoryRepo) GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
