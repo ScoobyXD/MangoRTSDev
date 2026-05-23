@@ -218,6 +218,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     : activeSharedInboxFolderID
       ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
       : true;
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timerID = window.setTimeout(() => {
+      setNotice((current) => current === notice ? "" : current);
+    }, 3_000);
+    return () => window.clearTimeout(timerID);
+  }, [notice]);
   const addPendingAutoArchiveMessages = useCallback((messageIDs: string[]) => {
     const pending = pendingAutoArchiveMessageIDsRef.current;
     let changed = false;

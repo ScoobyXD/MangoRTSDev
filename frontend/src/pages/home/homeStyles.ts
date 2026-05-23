@@ -1505,15 +1505,15 @@ export const loadingMoreStyle: React.CSSProperties = {
   fontSize: 11,
 };
 
-export function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
-  const framed = active;
+export function messageRowStyle(active: boolean, unread: boolean, hovered = false): React.CSSProperties {
+  const framed = active || hovered;
   return {
     display: "grid",
     gap: 4,
     minHeight: 78,
     border: `1px solid ${framed ? "transparent" : HOME_KEY_SOFT_BORDER}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
-    background: framed ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
+    background: framed ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
     cursor: "pointer",
     color: "#111827",
     font: "inherit",
@@ -1522,14 +1522,15 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
     padding: 9,
     textAlign: "left",
     minWidth: 0,
-    boxShadow: framed ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
+    boxShadow: framed ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
     letterSpacing: 0,
-    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
+    transform: hovered ? "translateY(-2px)" : "translateY(0)",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease",
   };
 }
 
-export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false): React.CSSProperties {
-  const framed = active;
+export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false): React.CSSProperties {
+  const framed = active || hovered;
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 98px",
@@ -1541,7 +1542,7 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     background: pendingAutoArchive
       ? "linear-gradient(145deg, #f2f3f6 0%, #e7e9ee 100%)"
       : framed
-        ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
+        ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
         : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
     color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
@@ -1551,12 +1552,13 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     textAlign: "left",
     minWidth: 0,
     boxShadow: framed
-      ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
+      ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
       : pendingAutoArchive
         ? "inset 0 0 0 1px rgba(148, 163, 184, 0.16)"
         : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
     letterSpacing: 0,
-    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
+    transform: hovered ? "translateY(-2px)" : "translateY(0)",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease",
   };
 }
 
@@ -1566,10 +1568,12 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_CYAN : unread ? "#64748b" : "rgba(100, 116, 139, 0.28)",
+    background: active ? HOME_CYAN : unread ? "#38bdf8" : "rgba(100, 116, 139, 0.22)",
     boxShadow: active
       ? "0 0 0 4px rgba(71, 85, 105, 0.12), 2px 2px 5px rgba(157, 171, 191, 0.5)"
-      : "inset 1px 1px 2px rgba(15, 23, 42, 0.12), inset -1px -1px 2px rgba(255, 255, 255, 0.75)",
+      : unread
+        ? "0 0 0 4px rgba(56, 189, 248, 0.16), 0 0 12px rgba(56, 189, 248, 0.34)"
+        : "inset 1px 1px 2px rgba(15, 23, 42, 0.12), inset -1px -1px 2px rgba(255, 255, 255, 0.75)",
   };
 }
 
@@ -1622,7 +1626,7 @@ export const triageMessageMetaStyle: React.CSSProperties = {
   minWidth: 94,
 };
 
-export function messageStarButtonStyle(active: boolean): React.CSSProperties {
+export function messageStarButtonStyle(highlighted: boolean, hovered = false): React.CSSProperties {
   return {
     ...mailPanelSmallButtonStyle,
     width: 28,
@@ -1631,10 +1635,13 @@ export function messageStarButtonStyle(active: boolean): React.CSSProperties {
     padding: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#111111" : "rgba(15, 23, 42, 0.45)",
-    border: `1px solid ${active ? "transparent" : HOME_KEY_SOFT_BORDER}`,
-    background: active ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
-    boxShadow: active ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : "4px 4px 9px rgba(174, 174, 192, 0.24), -4px -4px 9px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
+    color: highlighted ? "#facc15" : "rgba(15, 23, 42, 0.45)",
+    border: `1px solid ${highlighted ? "rgba(250, 204, 21, 0.45)" : HOME_KEY_SOFT_BORDER}`,
+    background: HOME_KEY_SURFACE,
+    boxShadow: hovered
+      ? "5px 5px 12px rgba(174, 174, 192, 0.3), -5px -5px 12px rgba(255, 255, 255, 0.94), 0 0 0 3px rgba(250, 204, 21, 0.14), inset 1px 1px 0 rgba(255, 255, 255, 0.9)"
+      : "4px 4px 9px rgba(174, 174, 192, 0.24), -4px -4px 9px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
+    transform: hovered ? "translateY(-1px)" : "translateY(0)",
   };
 }
 

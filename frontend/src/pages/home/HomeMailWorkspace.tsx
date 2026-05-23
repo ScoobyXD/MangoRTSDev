@@ -198,6 +198,9 @@ export function HomeMailWorkspace({
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
 }) {
+  const [hoveredMessageID, setHoveredMessageID] = React.useState("");
+  const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
+
   if (unassignedSharedInbox) {
     return (
       <>
@@ -350,8 +353,11 @@ export function HomeMailWorkspace({
             <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
+            const hovered = hoveredMessageID === message.id;
             const draggable = activeViewID === "my-triage" && mailbox === "primary";
             const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
+            const starHovered = hoveredStarMessageID === message.id;
+            const starHighlighted = message.starred || mailbox === "starred" || starHovered;
             return (
               <div
                 key={message.id}
@@ -359,9 +365,11 @@ export function HomeMailWorkspace({
                 role="button"
                 tabIndex={0}
                 style={isArchivableListView
-                  ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive)
-                  : messageRowStyle(active, message.unread)}
+                  ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered)
+                  : messageRowStyle(active, message.unread, hovered)}
                 draggable={draggable}
+                onPointerEnter={() => setHoveredMessageID(message.id)}
+                onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
                 onClick={(event) => onSelectMessage(message, event)}
                 onKeyDown={(event) => {
                   if (event.target !== event.currentTarget) return;
@@ -387,14 +395,16 @@ export function HomeMailWorkspace({
                         aria-label={message.starred ? "Remove star" : "Star message"}
                         title={message.starred ? "Remove star" : "Star message"}
                         draggable={false}
-                        style={messageStarButtonStyle(message.starred)}
+                        style={messageStarButtonStyle(starHighlighted, starHovered)}
                         disabled={busy === "message"}
+                        onPointerEnter={() => setHoveredStarMessageID(message.id)}
+                        onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
                         onClick={(event) => {
                           event.stopPropagation();
                           onToggleMessageStar(message);
                         }}
                       >
-                        <StarIcon filled={message.starred} />
+                        <StarIcon filled={starHighlighted} />
                       </button>
                     </span>
                   </>
