@@ -147,8 +147,8 @@ export const PlacementSplash: React.FC<{
               top: cell.y * stepY + 1.5,
               width: Math.max(2, stepX - 3),
               height: Math.max(2, stepY - 3),
-              border: "1px solid rgba(255, 136, 32, 0.72)",
-              background: `rgba(255, 136, 32, ${opacity})`,
+              border: "1px solid rgba(0, 188, 212, 0.72)",
+              background: `rgba(0, 188, 212, ${opacity})`,
               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
             }}
           />

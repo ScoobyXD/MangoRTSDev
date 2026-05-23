@@ -32,7 +32,7 @@ export function CompanyExplorerFolderShareDialogView({
   const actionDisabled = dialog.busy || !dialog.email.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center", padding: 12 }}>
-      <div style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
+      <div style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(0,188,212,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
         <div style={{ display: "grid", gap: 4 }}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Share folder</div>
           <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#333333", overflowWrap: "anywhere" }}>{dialog.label}</div>
@@ -55,7 +55,7 @@ export function CompanyExplorerFolderShareDialogView({
           <button
             type="submit"
             disabled={actionDisabled}
-            style={{ minHeight: 32, border: "1px solid rgba(255,136,32,0.55)", background: "#ff8820", color: "#111111", cursor: actionDisabled ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, padding: "0 12px", opacity: actionDisabled ? 0.6 : 1 }}
+            style={{ minHeight: 32, border: "1px solid rgba(0,188,212,0.55)", background: "#00e9ff", color: "#111111", cursor: actionDisabled ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, padding: "0 12px", opacity: actionDisabled ? 0.6 : 1 }}
           >
             {dialog.busy ? "Sharing" : "Invite"}
           </button>
@@ -78,7 +78,7 @@ export function CompanyExplorerFolderShareDialogView({
               {dialog.shares.map((share) => (
                 <div key={share.email} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", minHeight: 34, padding: "6px 8px", borderTop: `1px solid ${rowRuleColor}` }}>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{share.email}</span>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: share.status === "active" ? (isDarkTheme ? "#9be7c1" : "#0b6b43") : (isDarkTheme ? "#ffd8a6" : "#8a3b10") }}>{share.status}</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: share.status === "active" ? (isDarkTheme ? "#9be7c1" : "#0b6b43") : (isDarkTheme ? "#cbd5e1" : "#475569") }}>{share.status}</span>
                   <button
                     type="button"
                     onClick={() => onRemoveShare(share)}
@@ -96,7 +96,7 @@ export function CompanyExplorerFolderShareDialogView({
           <button
             type="button"
             onClick={onClose}
-            style={{ minHeight: 30, border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
+            style={{ minHeight: 30, border: "1px solid rgba(0,188,212,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
           >
             Done
           </button>
@@ -123,13 +123,13 @@ type CompanyExplorerDeleteBlockedDialogProps = {
 export function CompanyExplorerDeleteBlockedDialog({ message, isDarkTheme, onClose }: CompanyExplorerDeleteBlockedDialogProps): React.ReactElement {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,188,212,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
         <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>{message}</div>
         <button
           type="button"
           onClick={onClose}
-          style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
+          style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
         >
           OK
         </button>
@@ -160,7 +160,7 @@ export function CompanyExplorerDeleteConfirmationDialog({
   const confirmationDisabled = summary.requiresFolderAcknowledgement && !acknowledged;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,188,212,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 700 }}>
           {summary.title}
         </div>
@@ -186,7 +186,7 @@ export function CompanyExplorerDeleteConfirmationDialog({
             type="button"
             onClick={() => onConfirm(targets)}
             disabled={confirmationDisabled}
-            style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: confirmationDisabled ? "not-allowed" : "pointer", fontWeight: 700, opacity: confirmationDisabled ? 0.55 : 1 }}
+            style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#fff", color: "#111111", cursor: confirmationDisabled ? "not-allowed" : "pointer", fontWeight: 700, opacity: confirmationDisabled ? 0.55 : 1 }}
           >
             Yes
           </button>

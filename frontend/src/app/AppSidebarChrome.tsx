@@ -788,7 +788,7 @@ export function AppSidebar({
               toggleSharedFolder(folder.folder_id);
             }}
           >
-            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(36, 18, 10, 0.62)" />
+            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(15, 23, 42, 0.62)" />
           </button>
         ) : (
           <span style={{ width: 18, height: 20 }} />
@@ -901,7 +901,7 @@ export function AppSidebar({
                 setSharedTriageOpen((open) => !open);
               }}
             >
-              <ExplorerDisclosureIcon open={sharedTriageOpen} color="rgba(36, 18, 10, 0.68)" />
+              <ExplorerDisclosureIcon open={sharedTriageOpen} color="rgba(15, 23, 42, 0.68)" />
             </button>
           </div>
           {sharedTriageOpen && (
@@ -1366,7 +1366,7 @@ function AppSidebarScopedExplorerSection({
             onToggle();
           }}
         >
-          <ExplorerDisclosureIcon open={open} color="rgba(36, 18, 10, 0.68)" />
+          <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.68)" />
         </button>
       </div>
       {open && (
@@ -1594,7 +1594,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
         </button>
         <React.Suspense fallback={fullPageFallback}>
           <AppNodeEditorContent
-            accent="#ff8820"
+            accent="#006f85"
             widgetId={`app-explorer-node-editor-popup:${nodeID}`}
             theme="mango"
             forcedEntityKind="node"
@@ -1634,7 +1634,7 @@ const appSidebarBrandStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   padding: "2px 6px 4px",
-  color: "#24120a",
+  color: "#111827",
   minWidth: 0,
 };
 
@@ -1797,20 +1797,20 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
     case "responsible":
       return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
     case "accountable":
-      return { background: "#fef3c7", border: "rgba(217, 119, 6, 0.38)", color: "#b45309" };
+      return { background: "#ede9fe", border: "rgba(124, 58, 237, 0.38)", color: "#6d28d9" };
     case "consulted":
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
     case "other":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
     case "aci":
       return { background: "#eef2ff", border: "rgba(79, 70, 229, 0.30)", color: "#3730a3" };
     case "mention":
       return { background: "#f5f3ff", border: "rgba(124, 58, 237, 0.32)", color: "#6d28d9" };
     case "mail":
     default:
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
   }
 }
 function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React.CSSProperties {
@@ -1983,13 +1983,13 @@ const appSidebarSharedDisclosureStyle: React.CSSProperties = {
   placeItems: "center",
   border: "none",
   background: "transparent",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
 };
 
 const appSidebarSharedMetaStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.52)",
+  color: "rgba(15, 23, 42, 0.52)",
   fontSize: 10,
   fontWeight: 700,
 };
@@ -2056,10 +2056,10 @@ const appSidebarSharedRenameInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 22,
-  border: "1px solid #ff8820",
+  border: "1px solid #006f85",
   borderRadius: 4,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   font: "inherit",
   fontSize: 11,
   fontWeight: 700,
@@ -2072,7 +2072,7 @@ const appSidebarContextMenuButtonStyle: React.CSSProperties = {
   minHeight: 31,
   border: "none",
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
@@ -2092,7 +2092,7 @@ const appSidebarNotificationMenuStyle: React.CSSProperties = {
 
 const appSidebarNotificationMenuHeaderStyle: React.CSSProperties = {
   padding: "5px 12px 8px",
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   fontWeight: 800,
   textTransform: "uppercase",
@@ -2105,7 +2105,7 @@ const appSidebarNotificationMenuItemStyle: React.CSSProperties = {
   gap: 3,
   border: "none",
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   textAlign: "left",
@@ -2126,20 +2126,20 @@ const appSidebarNotificationMenuBodyStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   fontWeight: 500,
 };
 
 const appSidebarNotificationMenuMetaStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.45)",
+  color: "rgba(15, 23, 42, 0.45)",
   fontSize: 10,
   fontWeight: 700,
 };
 
 const appSidebarNotificationMenuEmptyStyle: React.CSSProperties = {
   padding: "10px 12px",
-  color: "rgba(36, 18, 10, 0.55)",
+  color: "rgba(15, 23, 42, 0.55)",
   fontSize: 12,
   fontWeight: 600,
 };
@@ -2162,7 +2162,7 @@ const appSidebarEmptyStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   padding: "0 6px",
-  color: "rgba(36, 18, 10, 0.48)",
+  color: "rgba(15, 23, 42, 0.48)",
   fontSize: 11,
   fontWeight: 600,
 };
@@ -2217,7 +2217,7 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 5,
   background: "#ffffff",
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "rgba(15, 23, 42, 0.58)",
   cursor: "pointer",
   font: "inherit",
   fontSize: 10,
@@ -2254,10 +2254,10 @@ const sharedInboxEmailModalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   display: "grid",
   gap: 10,
-  border: "1px solid rgba(255,136,32,0.45)",
+  border: "1px solid rgba(0,188,212,0.45)",
   borderRadius: 10,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   padding: 12,
   boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
 };
@@ -2268,7 +2268,7 @@ const sharedInboxEmailModalTitleStyle: React.CSSProperties = {
 };
 
 const sharedInboxEmailModalDetailStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   lineHeight: 1.35,
 };
@@ -2285,7 +2285,7 @@ const sharedInboxEmailModalInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 34,
-  border: "1px solid rgba(255, 136, 32, 0.28)",
+  border: "1px solid rgba(0, 188, 212, 0.28)",
   borderRadius: 6,
   padding: "0 9px",
   font: "inherit",
@@ -2318,8 +2318,8 @@ const sharedInboxEmailModalSecondaryButtonStyle: React.CSSProperties = {
 
 const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
   ...sharedInboxEmailModalSecondaryButtonStyle,
-  border: "1px solid rgba(255,136,32,0.74)",
-  background: "#ff8a00",
+  border: "1px solid rgba(0,188,212,0.74)",
+  background: "#00bcd4",
   color: "#111111",
 };
 
@@ -2329,7 +2329,7 @@ const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   zIndex: 130,
   display: "grid",
   placeItems: "center",
-  background: "rgba(36, 18, 10, 0.18)",
+  background: "rgba(15, 23, 42, 0.18)",
   padding: 22,
 };
 
@@ -2342,10 +2342,10 @@ const nodeEditorPopupStyle: React.CSSProperties = {
   maxWidth: "calc(100vw - 44px)",
   maxHeight: "calc(100vh - 64px)",
   boxSizing: "border-box",
-  border: "1px solid rgba(255, 136, 32, 0.54)",
+  border: "1px solid rgba(0, 188, 212, 0.54)",
   borderRadius: 16,
   background: "#ffffff",
-  boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
   overflow: "hidden",
   cursor: "default",
 };
@@ -2376,10 +2376,10 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.56)",
+  border: "1px solid rgba(0, 188, 212, 0.56)",
   borderRadius: 4,
   background: "#ffffff",
-  color: "#ff8820",
+  color: "#006f85",
   padding: 0,
   cursor: "pointer",
 };

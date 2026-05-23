@@ -49,7 +49,7 @@ export const MangoWordmark: React.FC<MangoWordmarkProps> = ({ size = 22, weight 
         lineHeight: `${size}px`,
         letterSpacing: 0,
         textTransform: "none",
-        background: "var(--mango-gradient)",
+        background: "var(--mango-brand-gradient)",
         WebkitBackgroundClip: "text",
         backgroundClip: "text",
         color: "transparent",

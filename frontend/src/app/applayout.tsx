@@ -282,7 +282,7 @@ const appResizeGripStyle: React.CSSProperties = {
   width: 2,
   minHeight: 0,
   borderRadius: 2,
-  background: "rgba(255, 136, 32, 0.24)",
+  background: "rgba(0, 188, 212, 0.24)",
 };
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
@@ -1173,7 +1173,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   });
 
   return (
-    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
+    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "#f1f5f9" }}>
       <AppLiveFreshnessBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
@@ -1240,7 +1240,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
                       onNavigate(routeForPage(nextPage));
                     }
                   }}
-                  style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(255, 136, 32, 0.22)" : "1px solid transparent", background: selected ? "rgba(255, 136, 32, 0.13)" : "transparent", color: selected ? "#ff8820" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+                  style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(0, 188, 212, 0.22)" : "1px solid transparent", background: selected ? "rgba(0, 188, 212, 0.13)" : "transparent", color: selected ? "#006f85" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
                 >
                   {renamingTabId === tab.id ? (
                     <input
@@ -1253,7 +1253,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
                         if (e.key === "Escape") cancelRenameTab();
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      style={{ width: 92, border: "1px solid rgba(255, 136, 32, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
+                      style={{ width: 92, border: "1px solid rgba(0, 188, 212, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
                     />
                   ) : (
                     <>
@@ -1632,7 +1632,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       {frameDeleteConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,188,212,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>
               Are you sure you want to delete {frameDeleteConfirmation.frameIDs.length} frame{frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?
             </div>
@@ -1640,7 +1640,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
               This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
               <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
             </div>
           </div>

@@ -153,10 +153,10 @@ export function KanbanNodeEditorOverlay({
         transform: "translateX(-50%)",
         minWidth: "min(420px, calc(100% - 44px))",
         minHeight: "min(320px, calc(100% - 64px))",
-        border: "1px solid rgba(255, 136, 32, 0.54)",
+        border: "1px solid rgba(0, 188, 212, 0.54)",
         borderRadius: 16,
         background: "#ffffff",
-        boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+        boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
         overflow: "hidden",
         cursor: "default",
       }}
@@ -175,10 +175,10 @@ export function KanbanNodeEditorOverlay({
           height: 24,
           display: "grid",
           placeItems: "center",
-          border: "1px solid rgba(255, 136, 32, 0.56)",
+          border: "1px solid rgba(0, 188, 212, 0.56)",
           borderRadius: 4,
           background: "#ffffff",
-          color: "#ff8820",
+          color: "#006f85",
           padding: 0,
           cursor: "pointer",
         }}
@@ -262,7 +262,7 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalPanelStyle: React.CSSProperties = {
   width: "min(420px, 90%)",
   borderRadius: 10,
-  border: "1px solid rgba(255,136,32,0.45)",
+  border: "1px solid rgba(0,188,212,0.45)",
   background: "rgba(255,255,255,0.95)",
   padding: 12,
   display: "grid",
@@ -270,7 +270,7 @@ const modalPanelStyle: React.CSSProperties = {
 };
 
 const yesButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(255,136,32,0.45)",
+  border: "1px solid rgba(0,188,212,0.45)",
   background: "#fff",
   cursor: "pointer",
   fontWeight: 700,

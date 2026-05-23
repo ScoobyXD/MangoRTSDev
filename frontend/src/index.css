@@ -17,13 +17,14 @@
 
 :root {
   --mango-font-family: "Inter", "Inter var", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mango-orange-1: rgba(251, 177, 82, 1);
-  --mango-orange-2: rgba(254, 169, 78, 1);
-  --mango-orange-3: rgba(254, 155, 70, 1);
-  --mango-orange-4: rgba(255, 136, 32, 1);
-  --mango-accent-rgb: 255, 136, 32;
-  --mango-gradient: linear-gradient(90deg, var(--mango-orange-1), var(--mango-orange-2), var(--mango-orange-3), var(--mango-orange-4));
-  --mango-text: #24120a;
+  --mango-brand-orange-1: rgba(251, 177, 82, 1);
+  --mango-brand-orange-2: rgba(254, 169, 78, 1);
+  --mango-brand-orange-3: rgba(254, 155, 70, 1);
+  --mango-brand-orange-4: rgba(255, 136, 32, 1);
+  --mango-brand-gradient: linear-gradient(90deg, var(--mango-brand-orange-1), var(--mango-brand-orange-2), var(--mango-brand-orange-3), var(--mango-brand-orange-4));
+  --mango-accent-rgb: 0, 188, 212;
+  --mango-gradient: linear-gradient(90deg, rgba(0, 233, 255, 1), rgba(56, 189, 248, 1), rgba(14, 165, 233, 1), rgba(0, 188, 212, 1));
+  --mango-text: #111827;
 }
 
 /* Lock app viewport to full-screen and prevent browser scrollbars. */
@@ -48,7 +49,7 @@ button, input, textarea, select {
 
 /* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */
 .company-explorer-scroll {
-  --company-explorer-scroll-accent: rgb(255, 136, 32);
+  --company-explorer-scroll-accent: rgb(0, 233, 255);
   --company-explorer-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--company-explorer-scroll-accent) transparent;
@@ -82,7 +83,7 @@ button, input, textarea, select {
 
 /* Kanban board uses the same thin scrollbars as Editor and Company Explorer, including horizontal overflow. */
 .kanban-board-scroll {
-  --kanban-board-scroll-accent: rgb(255, 136, 32);
+  --kanban-board-scroll-accent: rgb(0, 233, 255);
   --kanban-board-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--kanban-board-scroll-accent) transparent;
@@ -149,7 +150,7 @@ button, input, textarea, select {
 
 /* Individual Kanban columns use slimmer color-matched scrollbars for card lanes. */
 .kanban-column-scroll {
-  --kanban-column-scroll-accent: #fbb152;
+  --kanban-column-scroll-accent: #00e9ff;
   --kanban-column-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--kanban-column-scroll-accent) transparent;
@@ -179,7 +180,7 @@ button, input, textarea, select {
 
 /* Hover is visual-only; real selection stays click/key/API driven. */
 .company-explorer-row:hover {
-  background: var(--company-explorer-hover-bg, rgba(255, 136, 32, 0.13));
+  background: var(--company-explorer-hover-bg, rgba(0, 233, 255, 0.13));
 }
 
 @keyframes app-sidebar-dropdown-in {
@@ -201,7 +202,7 @@ button, input, textarea, select {
 
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
 .editor-document-scroll {
-  --editor-document-scroll-accent: rgb(255, 136, 32);
+  --editor-document-scroll-accent: rgb(0, 233, 255);
   --editor-document-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--editor-document-scroll-accent) transparent;

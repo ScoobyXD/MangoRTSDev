@@ -211,7 +211,7 @@ export function HomeMailWorkspace({
             </div>
           </div>
           <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
-            <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#24120a", textAlign: "center" }}>
+            <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#111827", textAlign: "center" }}>
               <strong style={{ fontSize: 20, lineHeight: 1.2 }}>{unassignedSharedInbox.folderName}</strong>
               <span>{unassignedSharedInbox.message ?? "This folder has not been assigned an email"}</span>
               {unassignedSharedInbox.onAssignEmail && <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>}
