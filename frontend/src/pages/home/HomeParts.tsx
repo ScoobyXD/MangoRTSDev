@@ -2060,6 +2060,7 @@ export function NodeInboxRail({
   loading,
   nodeByID,
   myNodeGroups,
+  otherNodes,
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
@@ -2071,6 +2072,7 @@ export function NodeInboxRail({
   nodeByID: Map<string, NodeRecord>;
   allRows: ExplorerTreeNode[];
   myNodeGroups: MyNodeGroup[];
+  otherNodes: NodeRecord[];
   selectedRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
   search: string;
@@ -2084,15 +2086,6 @@ export function NodeInboxRail({
   onCreateNode: () => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
-  const myNodeIDs = useMemo(() => new Set(myNodeGroups.flatMap((group) => group.nodes.map((node) => node.node_id))), [myNodeGroups]);
-  const otherNodes = useMemo(() => (
-    Array.from(nodeByID.values())
-      .filter((node) => !myNodeIDs.has(node.node_id))
-      .sort((a, b) => (
-        nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
-        || a.node_id.localeCompare(b.node_id)
-      ))
-  ), [myNodeIDs, nodeByID]);
   const otherNodeOrderedRowIDs = useMemo(() => otherNodes.map((node) => nodeTreeID(node.node_id)), [otherNodes]);
   const railSplit = useRailTopResize(HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
