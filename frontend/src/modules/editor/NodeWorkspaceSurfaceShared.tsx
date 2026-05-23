@@ -10,6 +10,7 @@ export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
 export type NodeWorkspaceSurfaceProps = {
+  apiBase: string;
   companyID: string;
   nodeID: string;
   nodePriorityDraft: string;

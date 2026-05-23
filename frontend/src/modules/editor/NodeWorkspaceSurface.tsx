@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { humanLabelOrFallback } from "../entityLabels.js";
+import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
@@ -168,6 +169,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   nodeID,
   nodePriorityDraft,
   assignedLogicGateIDs,
+  apiBase,
   projections,
   unseenChanges,
   companyUsers,
@@ -391,8 +393,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     let cancelled = false;
     void Promise.all(ids.map(async (logicGateID) => {
       try {
-        const payload = await requestJSON<{ logic_gate?: LogicGateRecord }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}?company_id=${encodeURIComponent(companyID)}`);
-        return payload.logic_gate ?? null;
+        const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
+        return details.logic_gate;
       } catch {
         return null;
       }
@@ -400,7 +402,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (!cancelled) setAssignedLogicGateRecords(records.filter((record): record is LogicGateRecord => Boolean(record)));
     });
     return () => { cancelled = true; };
-  }, [assignedLogicGateIDs, companyID, requestJSON]);
+  }, [apiBase, assignedLogicGateIDs, companyID]);
   useEffect(() => {
     if (!logicGateAssignerOpen || !companyID) return;
     let cancelled = false;

@@ -17,17 +17,19 @@ type LogicGateViewResponse = LogicGateDetails & {
   projections?: LogicGateProjectionItem[];
 };
 
+const viewCache = new Map<string, LogicGateViewResponse>();
+const viewInflight = new Map<string, Promise<LogicGateViewResponse>>();
+
 const detailsCache = new Map<string, LogicGateDetails>();
-const detailsInflight = new Map<string, Promise<LogicGateDetails>>();
 
 const projectionCache = new Map<string, LogicGateProjectionItem[]>();
-const projectionInflight = new Map<string, Promise<LogicGateProjectionItem[]>>();
 
 function key(apiBase: string, companyID: string, logicGateID: string): string {
   return `${apiBase}:${companyID}:${logicGateID}`;
 }
 
 function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewResponse): LogicGateDetails {
+  viewCache.set(cacheKey, payload);
   const details: LogicGateDetails = {
     logic_gate: payload.logic_gate,
     information: payload.information ?? [],
@@ -40,8 +42,29 @@ function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewRespo
   return details;
 }
 
+async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateViewResponse> {
+  const cacheKey = key(apiBase, companyID, logicGateID);
+  const cached = viewCache.get(cacheKey);
+  if (cached) return cached;
+  const inflight = viewInflight.get(cacheKey);
+  if (inflight) return inflight;
+  const promise = requestJSON<LogicGateViewResponse>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/view?company_id=${encodeURIComponent(companyID)}`)
+    .then((payload) => {
+      cacheLogicGateViewPayload(cacheKey, payload);
+      viewInflight.delete(cacheKey);
+      return payload;
+    })
+    .catch((error) => {
+      viewInflight.delete(cacheKey);
+      throw error;
+    });
+  viewInflight.set(cacheKey, promise);
+  return promise;
+}
+
 export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID: string, logicGateID: string): void {
   const cacheKey = key(apiBase, companyID, logicGateID);
+  viewCache.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
 }
@@ -68,40 +91,15 @@ export async function getLogicGateRecordSingleFlight(apiBase: string, companyID:
   const cacheKey = key(apiBase, companyID, logicGateID);
   const cached = detailsCache.get(cacheKey);
   if (cached) return cached;
-  const inflight = detailsInflight.get(cacheKey);
-  if (inflight) return inflight;
-  const promise = requestJSON<LogicGateViewResponse>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/view?company_id=${encodeURIComponent(companyID)}`)
-    .then((payload) => {
-      const details = cacheLogicGateViewPayload(cacheKey, payload);
-      detailsInflight.delete(cacheKey);
-      return details;
-    })
-    .catch((error) => {
-      detailsInflight.delete(cacheKey);
-      throw error;
-    });
-  detailsInflight.set(cacheKey, promise);
-  return promise;
+  const payload = await getLogicGateViewPayloadSingleFlight(apiBase, companyID, logicGateID);
+  return cacheLogicGateViewPayload(cacheKey, payload);
 }
 
 export async function getLogicGateInformationProjectionSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateProjectionItem[]> {
   const cacheKey = key(apiBase, companyID, logicGateID);
   const cached = projectionCache.get(cacheKey);
   if (cached) return cached;
-  const inflight = projectionInflight.get(cacheKey);
-  if (inflight) return inflight;
-  const promise = requestJSON<LogicGateViewResponse>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/view?company_id=${encodeURIComponent(companyID)}`)
-    .then((payload) => {
-      cacheLogicGateViewPayload(cacheKey, payload);
-      const items = payload.projections ?? [];
-      projectionInflight.delete(cacheKey);
-      return items;
-    })
-    .catch((error) => {
-      projectionInflight.delete(cacheKey);
-      throw error;
-    });
-  projectionInflight.set(cacheKey, promise);
-  return promise;
+  const payload = await getLogicGateViewPayloadSingleFlight(apiBase, companyID, logicGateID);
+  return payload.projections ?? [];
 }
 
