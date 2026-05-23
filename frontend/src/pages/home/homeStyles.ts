@@ -10,7 +10,6 @@ const HOME_CYAN_MEDIUM = "rgba(71, 85, 105, 0.28)";
 const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
-const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
 const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
 
@@ -519,6 +518,7 @@ export const logicGateTreeRowTextStyle: React.CSSProperties = {
 };
 
 export const logicGateRaciPanelStyle: React.CSSProperties = {
+  height: "100%",
   minHeight: 0,
   minWidth: 0,
   padding: 0,
@@ -530,17 +530,20 @@ export const logicGateRaciPanelStyle: React.CSSProperties = {
 
 export const logicGateRaciMatrixSurfaceStyle: React.CSSProperties = {
   width: "100%",
+  height: "100%",
+  minHeight: 0,
   maxWidth: "100%",
   display: "grid",
-  gridTemplateRows: "auto minmax(0, auto)",
+  gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 10,
-  alignSelf: "start",
   padding: "14px 14px 16px",
-  border: `1px solid ${HOME_SURFACE_BORDER}`,
+  border: "1px solid rgba(255, 255, 255, 0.62)",
   borderRadius: 8,
-  background: "linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%)",
-  boxShadow: "0 14px 34px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
+  background:
+    "radial-gradient(circle at 10% 8%, rgba(255, 196, 218, 0.72) 0%, rgba(255, 196, 218, 0) 26%), radial-gradient(circle at 92% 0%, rgba(178, 166, 255, 0.72) 0%, rgba(178, 166, 255, 0) 32%), radial-gradient(circle at 88% 92%, rgba(88, 238, 226, 0.56) 0%, rgba(88, 238, 226, 0) 32%), linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(237, 243, 255, 0.84) 42%, rgba(244, 232, 255, 0.70) 68%, rgba(224, 255, 250, 0.76) 100%)",
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.13), 0 20px 56px rgba(125, 151, 255, 0.18), 0 1px 0 rgba(255, 255, 255, 0.94) inset",
   boxSizing: "border-box",
+  overflow: "hidden",
 };
 
 export const logicGateRaciHeaderStyle: React.CSSProperties = {
@@ -563,7 +566,7 @@ export const logicGateRaciMetaStyle: React.CSSProperties = {
 
 export const logicGateRaciScrollStyle: React.CSSProperties = {
   minHeight: 0,
-  maxHeight: "min(760px, calc(100vh - 240px))",
+  height: "100%",
   overflow: "auto",
   padding: "2px 4px 8px 0",
   ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
@@ -577,7 +580,7 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
     gridTemplateColumns: `116px repeat(${columnCount}, minmax(210px, 1fr))`,
     gridTemplateRows: `54px repeat(${INBOX_PRIORITIES.length}, minmax(112px, auto))`,
     alignItems: "stretch",
-    background: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(232, 240, 255, 0.54) 48%, rgba(255, 255, 255, 0.96))",
+    background: "rgba(255, 255, 255, 0.16)",
     filter: "drop-shadow(0 8px 18px rgba(96, 165, 250, 0.08))",
   };
 }
@@ -585,7 +588,7 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
 export const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
-  background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  background: "rgba(255, 255, 255, 0.34)",
 };
 
 export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
@@ -593,7 +596,7 @@ export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  background: "rgba(255, 255, 255, 0.38)",
   padding: "0 12px",
 };
 
@@ -624,7 +627,7 @@ export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignItems: "start",
-  background: "#fbfdfe",
+  background: "rgba(255, 255, 255, 0.34)",
   color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   fontWeight: 700,
@@ -643,7 +646,7 @@ export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties
     alignItems: "start",
     justifyContent: "start",
     gap: 10,
-    background: activeDrop ? HOME_CYAN_FAINT : "rgba(248, 250, 252, 0.42)",
+    background: activeDrop ? HOME_CYAN_FAINT : "rgba(255, 255, 255, 0.20)",
     boxShadow: activeDrop ? `inset 0 0 0 2px ${HOME_CYAN_MEDIUM}` : "none",
     padding: 10,
     transition: "background 120ms ease, box-shadow 120ms ease",
