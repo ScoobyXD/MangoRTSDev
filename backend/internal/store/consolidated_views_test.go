@@ -61,8 +61,8 @@ func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAssignmentsAndChange
 	if err != nil {
 		t.Fatalf("GetNodeView: %v", err)
 	}
-	if view.Node.NodeID != node.NodeID || view.InformationCount != 1 || len(view.Information) != 1 {
-		t.Fatalf("node view details = %+v, want node with one history row", view)
+	if view.Node.NodeID != node.NodeID || view.InformationCount != 1 || len(view.Information) != 0 {
+		t.Fatalf("node view details = %+v, want node summary without append-only history rows", view)
 	}
 	if view.ProjectionCount != 1 || len(view.Projections) != 1 || view.Projections[0].Information != "current node document" {
 		t.Fatalf("node view projections = %+v, want current editor projection", view.Projections)
@@ -144,12 +144,13 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignme
 
 func TestPhase5ConsolidatedViewSourceShape(t *testing.T) {
 	storeSource := strings.ToLower(readPhase5SourceForTest(t, "consolidated_views.go"))
-	for _, required := range []string{"getlogicgatework", "listnodelogicgateassignments"} {
+	for _, required := range []string{"getlogicgatework", "listnodelogicgateassignments", "getnodedetailssummary"} {
 		if !strings.Contains(storeSource, required) {
 			t.Fatalf("consolidated view store source missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{
+		"getnodedetails(companyid, nodeid)",
 		"listaccessibleentityids",
 		"mangorts_user_can_access_resource",
 		"usercanaccessentity",

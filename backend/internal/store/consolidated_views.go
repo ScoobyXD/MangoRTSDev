@@ -6,7 +6,7 @@ import (
 )
 
 type nodeViewLoader interface {
-	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
+	GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
@@ -33,7 +33,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		return domain.NodeView{}, ErrInvalid
 	}
 
-	details, err := loader.GetNodeDetails(companyID, nodeID)
+	details, err := loader.GetNodeDetailsSummary(companyID, nodeID)
 	if err != nil {
 		return domain.NodeView{}, err
 	}

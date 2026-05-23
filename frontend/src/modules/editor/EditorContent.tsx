@@ -14,7 +14,7 @@ import {
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRaciAssignment, type LogicGateRaciRole, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
@@ -34,7 +34,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import type { NodeContentChange, NodeContentChangeResponse } from "./nodeContentChanges";
+import type { NodeContentChange } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
@@ -1467,9 +1467,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
           return;
         }
-        const [details, projections] = await Promise.all([
+        const [details, projections, contentChanges] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
@@ -1482,7 +1483,20 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
-        const visibleNodeInformation = details.information.filter((item) => !isNodeWorkspaceHeaderInformationType(item.type));
+        setNodeContentChanges(contentChanges);
+        setNodeContentChangesLoadedNodeID(linkedNodeID);
+        const currentInformation = details.information.length > 0
+          ? details.information
+          : projections.map((item) => ({
+            company_id: item.company_id,
+            information_id: item.information_id,
+            node_id: item.node_id,
+            type: item.type,
+            information: item.information,
+            created_timestamp: item.created_timestamp,
+            updated_timestamp: item.updated_timestamp,
+          }));
+        const visibleNodeInformation = currentInformation.filter((item) => !isNodeWorkspaceHeaderInformationType(item.type));
         const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
         setLinkedNodeInfoPreview(visibleNodeInformation.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
         setLinkedNodeMetadataRows([
@@ -1503,25 +1517,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     })();
     return () => { cancelled = true; };
   }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!companyID || linkedEntityKind !== "node" || !linkedNodeID || nodeWorkspaceLoadedNodeID !== linkedNodeID) {
-      setNodeContentChanges([]);
-      setNodeContentChangesLoadedNodeID("");
-      return;
-    }
-    void requestJSON<NodeContentChangeResponse>(`/v1/nodes/${linkedNodeID}/changes?company_id=${encodeURIComponent(companyID)}`)
-      .then((payload) => {
-        if (cancelled) return;
-        setNodeContentChanges(payload.changes ?? []);
-        setNodeContentChangesLoadedNodeID(linkedNodeID);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_node_changes");
-      });
-    return () => { cancelled = true; };
-  }, [companyID, linkedEntityKind, linkedNodeID, nodeWorkspaceLoadedNodeID, requestJSON]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -1571,6 +1566,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
     const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);
     setNodeContentChanges((current) => current.filter((change) => change.change_id !== changeID));
+    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/${changeID}/seen`, {
       method: "POST",
       body: JSON.stringify({ company_id: companyID }),
@@ -1583,11 +1579,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
       setError(cause instanceof Error ? cause.message : "failed_to_mark_node_change_seen");
     });
-  }, [companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
   const markAllNodeContentChangesSeen = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID || nodeContentChanges.length === 0) return;
     const removedChanges = nodeContentChanges;
     setNodeContentChanges([]);
+    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/seen-all`, {
       method: "POST",
       body: JSON.stringify({ company_id: companyID }),
@@ -1600,7 +1597,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       });
       setError(cause instanceof Error ? cause.message : "failed_to_mark_node_changes_seen");
     });
-  }, [companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
   const visibleCollaborators = useMemo(() => {
     const now = Date.now();
     return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
@@ -1735,6 +1732,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         )}
         {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (
           <NodeWorkspaceSurface
+            apiBase={apiBase}
             companyID={companyID}
             nodeID={linkedNodeID}
             nodePriorityDraft={nodePriorityDraft}
