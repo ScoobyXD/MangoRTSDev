@@ -56,9 +56,10 @@ function Write-DbMigrationScript {
   )
 
   if ($migrationNames.Count -gt 0) {
-    $firstMigration = $migrationNames | Select-Object -First 1
     Write-Host '$ErrorActionPreference = "Stop"'
-    Write-Host "..\scripts\apply_db_migrations.ps1 -StartAt `"$firstMigration`""
+    foreach ($migrationName in $migrationNames) {
+      Write-Host "psql -h `$env:DB_HOST -p `$env:DB_PORT -U `$env:DB_USER -d `$env:DB_NAME -v ON_ERROR_STOP=1 -f `".\db\migrations\$migrationName`""
+    }
     return
   }
 }
