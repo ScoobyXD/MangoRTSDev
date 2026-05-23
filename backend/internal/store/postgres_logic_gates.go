@@ -158,6 +158,9 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, item.LogicGateID, item.Header); err != nil {
 		return domain.LogicGate{}, err
 	}
+	if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
+		return domain.LogicGate{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -695,6 +698,9 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	defer tx.Rollback()
 
+	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_relationships
 		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,

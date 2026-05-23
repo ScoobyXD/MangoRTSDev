@@ -293,6 +293,8 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	foldersSnapshot := cloneMemoryMap(r.folders)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	var parent *string
 	if parentFolderID != "" {
 		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
@@ -315,6 +317,13 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		UpdatedTimestamp: now,
 	}
 	r.folders[key(companyID, item.FolderID)] = item
+	if item.FolderKind == "communications" {
+		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
+			r.folders = foldersSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
 	return r.withSharedInboxRaciLocked(item), nil
 }
 
@@ -769,6 +778,13 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("kanban", kanbanBoardIDs)
 
+	for folderID := range folderIDs {
+		if folderKinds[folderID] == "communications" {
+			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+		}
+	}
 	for logicGateID := range logicGateIDs {
 		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
 			return CompanyExplorerDeleteResult{}, err

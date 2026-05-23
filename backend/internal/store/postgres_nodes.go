@@ -304,6 +304,9 @@ func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx,
 	if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, companyID, item.NodeID); err != nil {
 		return domain.Node{}, err
 	}
+	if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeNode, item.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}
 	return item, nil

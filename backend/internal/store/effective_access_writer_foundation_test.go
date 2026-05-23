@@ -192,6 +192,18 @@ func TestPostgresEffectiveAccessWriterDeleteHelpersAreScoped(t *testing.T) {
 	if strings.Contains(resourceSQL, " and source_id=") {
 		t.Fatalf("resource/source-family delete SQL = %q, should not constrain one source id", resourceSQL)
 	}
+
+	deletedResourceExecer := &fakeEffectiveAccessExecer{}
+	if err := deleteEffectiveFactsForResourceTx(context.Background(), deletedResourceExecer, companyID, EntityTypeNode, nodeID); err != nil {
+		t.Fatalf("deleteEffectiveFactsForResourceTx: %v", err)
+	}
+	deletedResourceSQL := normalizeEffectiveAccessSQLForTest(deletedResourceExecer.calls[0].query)
+	if !strings.Contains(deletedResourceSQL, "where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid") {
+		t.Fatalf("deleted-resource SQL = %q, want resource-scoped delete", deletedResourceSQL)
+	}
+	if strings.Contains(deletedResourceSQL, " source_type") || strings.Contains(deletedResourceSQL, " source_id") {
+		t.Fatalf("deleted-resource SQL = %q, should remove every source for the deleted resource", deletedResourceSQL)
+	}
 }
 
 func TestPostgresEffectiveAccessWriterInvalidFactsFailBeforeMutation(t *testing.T) {

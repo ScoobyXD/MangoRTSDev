@@ -64,6 +64,9 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 	if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, n.NodeID); err != nil {
 		return domain.Node{}, err
 	}
+	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	return r.withNodeReadModelLocked(n), nil
 }
 
@@ -417,6 +420,9 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	k := key(companyID, nodeID)
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
+	}
+	if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeNode, nodeID); err != nil {
+		return err
 	}
 
 	delete(r.nodes, k)

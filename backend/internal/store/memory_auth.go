@@ -227,6 +227,9 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 	if !ok {
 		return domain.CompanyMembership{}, ErrNotFound
 	}
+	membershipKeyValue := membershipKey(companyID, user.UserID)
+	existingMembership, hadExistingMembership := r.memberships[membershipKeyValue]
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	now := time.Now().UTC()
 	membership := domain.CompanyMembership{
 		CompanyID:        companyID,
@@ -235,7 +238,19 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.memberships[membershipKey(companyID, user.UserID)] = membership
+	if hadExistingMembership {
+		membership.CreatedTimestamp = existingMembership.CreatedTimestamp
+	}
+	r.memberships[membershipKeyValue] = membership
+	if err := r.recomputeCompanyAdminEffectiveAccessForUserLocked(user.UserID); err != nil {
+		if hadExistingMembership {
+			r.memberships[membershipKeyValue] = existingMembership
+		} else {
+			delete(r.memberships, membershipKeyValue)
+		}
+		r.effectiveAccess = effectiveAccessSnapshot
+		return domain.CompanyMembership{}, err
+	}
 	return membership, nil
 }
 
@@ -339,6 +354,28 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 	if user.UserID == "" {
 		return DeleteCompanyUserResult{}, ErrNotFound
 	}
+	membershipsSnapshot := cloneMemoryMap(r.memberships)
+	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
+	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
+	nodesSnapshot := cloneMemoryMap(r.nodes)
+	logicGateRaciSnapshot := cloneMemorySliceMap(r.logicGateRaci)
+	usersSnapshot := cloneMemoryMap(r.users)
+	invitationsSnapshot := cloneMemoryMap(r.invitations)
+	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
+	emailConnectionsSnapshot := cloneMemoryMap(r.emailConnections)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
+	restore := func() {
+		r.memberships = membershipsSnapshot
+		r.userGroupMembers = userGroupMembersSnapshot
+		r.entityPermissions = entityPermissionsSnapshot
+		r.nodes = nodesSnapshot
+		r.logicGateRaci = logicGateRaciSnapshot
+		r.users = usersSnapshot
+		r.invitations = invitationsSnapshot
+		r.folderShares = folderSharesSnapshot
+		r.emailConnections = emailConnectionsSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+	}
 	deleted := domain.CompanyUser{
 		CompanyID:        membership.CompanyID,
 		UserID:           user.UserID,
@@ -350,6 +387,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		UpdatedTimestamp: membership.UpdatedTimestamp,
 	}
 
+	changedNodeIDs := map[string]bool{}
 	delete(r.memberships, membershipKey(companyID, userID))
 	for memberKey, member := range r.userGroupMembers {
 		if member.CompanyID == companyID && member.UserID == userID {
@@ -365,6 +403,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		if node.CompanyID == companyID && node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
 			node.AssigneeUserID = nil
 			r.nodes[key] = node
+			changedNodeIDs[node.NodeID] = true
 		}
 	}
 	for gateKey, assignments := range r.logicGateRaci {
@@ -379,6 +418,25 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			delete(r.logicGateRaci, gateKey)
 		} else {
 			r.logicGateRaci[gateKey] = filtered
+		}
+	}
+	if err := r.recomputeCompanyAdminEffectiveAccessForUserLocked(userID); err != nil {
+		restore()
+		return DeleteCompanyUserResult{}, err
+	}
+	for nodeID := range changedNodeIDs {
+		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, nodeID); err != nil {
+			restore()
+			return DeleteCompanyUserResult{}, err
+		}
+	}
+	if r.effectiveAccessErr != nil {
+		restore()
+		return DeleteCompanyUserResult{}, r.effectiveAccessErr
+	}
+	for accessKey, access := range r.effectiveAccess {
+		if access.CompanyID == companyID && access.UserID == userID && access.SourceType == effectiveAccessSourceDirectUserGrant {
+			delete(r.effectiveAccess, accessKey)
 		}
 	}
 
@@ -433,6 +491,15 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			delete(r.logicGateRaci, gateKey)
 		} else {
 			r.logicGateRaci[gateKey] = filtered
+		}
+	}
+	if r.effectiveAccessErr != nil {
+		restore()
+		return DeleteCompanyUserResult{}, r.effectiveAccessErr
+	}
+	for accessKey, access := range r.effectiveAccess {
+		if access.UserID == userID {
+			delete(r.effectiveAccess, accessKey)
 		}
 	}
 	delete(r.users, user.CognitoSubject)
