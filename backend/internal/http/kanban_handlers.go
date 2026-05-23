@@ -134,6 +134,39 @@ func (s *Server) logicGateWorkCompatibilityCardAfterMutation(companyID, logicGat
 	return fallback
 }
 
+func logicGateProjectionBoards(gates []domain.LogicGate, query store.KanbanBoardQuery) []domain.KanbanBoard {
+	query = store.NormalizeKanbanBoardQuery(query)
+	boards := make([]domain.KanbanBoard, 0, min(query.Limit, len(gates)))
+	for index, gate := range gates {
+		position := (index + 1) * 1000
+		if query.AfterPosition > 0 && position <= query.AfterPosition {
+			continue
+		}
+		logicGateID := strings.TrimSpace(gate.LogicGateID)
+		if logicGateID == "" {
+			continue
+		}
+		boardID := store.LogicGateKanbanBoardID(logicGateID)
+		title := strings.TrimSpace(gate.Header)
+		if title == "" {
+			title = boardID
+		}
+		boards = append(boards, domain.KanbanBoard{
+			CompanyID:        gate.CompanyID,
+			BoardID:          boardID,
+			LogicGateID:      &logicGateID,
+			Title:            title,
+			Position:         position,
+			CreatedTimestamp: gate.CreatedTimestamp,
+			UpdatedTimestamp: gate.CreatedTimestamp,
+		})
+		if len(boards) >= query.Limit {
+			break
+		}
+	}
+	return boards
+}
+
 func (s *Server) handleKanbanBoardsCompatibility(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeLegacyKanbanDisabled(w)
@@ -150,7 +183,27 @@ func (s *Server) handleKanbanBoardsCompatibility(w http.ResponseWriter, r *http.
 		return
 	}
 	if query.LogicGateID == "" {
-		writeLegacyKanbanDisabled(w)
+		actor, hasActor := authenticatedActor(r)
+		if hasActor && actorRoleForCompany(actor, companyID) == "" {
+			writeError(w, http.StatusForbidden, "company_access_denied")
+			return
+		}
+		var gates []domain.LogicGate
+		var err error
+		if hasActor && !actorCanManageCompany(actor, companyID) {
+			gates, err = s.repo.ListVisibleLogicGates(companyID, actor.User.UserID)
+		} else {
+			gates, err = s.repo.ListLogicGates(companyID)
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_kanban_board_query")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"boards": logicGateProjectionBoards(gates, query)})
 		return
 	}
 	work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, query.LogicGateID, store.EntityPermissionView)
