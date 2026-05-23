@@ -1384,11 +1384,27 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!currentUserID) return [];
     return nodes.filter((node) => node.assignee_user_id?.trim() === currentUserID);
   }, [currentUserID, nodes]);
+  const assignedMyLogicGates = useMemo(() => {
+    if (!currentUserID) return [];
+    return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, currentUserID));
+  }, [currentUserID, logicGates]);
+  const assignedMyLogicGateIDs = useMemo(() => new Set(assignedMyLogicGates.map((logicGate) => logicGate.logic_gate_id)), [assignedMyLogicGates]);
+  const myLogicGateNodes = useMemo(() => (
+    myNodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => assignedMyLogicGateIDs.has(logicGateID)))
+  ), [assignedMyLogicGateIDs, myNodes]);
+  const otherAssignedNodes = useMemo(() => (
+    myNodes
+      .filter((node) => !cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => assignedMyLogicGateIDs.has(logicGateID)))
+      .sort((a, b) => (
+        nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
+        || a.node_id.localeCompare(b.node_id)
+      ))
+  ), [assignedMyLogicGateIDs, myNodes]);
   const myNodeGroups = useMemo(() => buildMyNodeGroups({
-    nodes: myNodes,
+    nodes: myLogicGateNodes,
     logicGateFolders,
     logicGateFolderItems,
-  }), [logicGateFolderItems, logicGateFolders, myNodes]);
+  }), [logicGateFolderItems, logicGateFolders, myLogicGateNodes]);
   const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
     ...logicGate,
     node_id: logicGate.logic_gate_id,
@@ -1404,10 +1420,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     rootRowOrder: {},
   }).filter((row) => row.kind === "folder" || row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs, logicGateFolderItems, logicGateFolders]);
   const visibleLogicGateRows = useMemo(() => filterExplorerRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
-  const assignedMyLogicGates = useMemo(() => {
-    if (!currentUserID) return [];
-    return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, currentUserID));
-  }, [currentUserID, logicGates]);
   const shortcutLogicGateIDs = useMemo(() => new Set(myLogicGateShortcuts.map((shortcut) => shortcut.logic_gate_id)), [myLogicGateShortcuts]);
   const myLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
     shortcuts: myLogicGateShortcuts,
@@ -2125,6 +2137,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                 nodeByID={nodeByID}
                 allRows={visibleNodeRows}
                 myNodeGroups={myNodeGroups}
+                otherNodes={otherAssignedNodes}
                 selectedRowIDs={selectedNodeRowIDs}
                 expandedRowIDs={nodeExpandedIDs}
                 search={nodeSearch}
