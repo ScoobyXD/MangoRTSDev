@@ -407,6 +407,12 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	if _, ok := r.logicGates[k]; !ok {
 		return ErrNotFound
 	}
+	affectedNodeIDs := []string{}
+	for _, assignment := range r.nodeLogicGateAssignments {
+		if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {
+			affectedNodeIDs = append(affectedNodeIDs, assignment.NodeID)
+		}
+	}
 	if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
@@ -420,6 +426,9 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 		}
 	}
 	r.deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID)
+	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, nil, affectedNodeIDs); err != nil {
+		return err
+	}
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
 	for boardKeyValue, board := range r.kanbanBoards {

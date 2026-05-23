@@ -359,6 +359,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	logicGateRaciSnapshot := cloneMemorySliceMap(r.logicGateRaci)
+	sharedInboxRaciSnapshot := cloneMemorySliceMap(r.sharedInboxRaci)
 	usersSnapshot := cloneMemoryMap(r.users)
 	invitationsSnapshot := cloneMemoryMap(r.invitations)
 	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
@@ -370,6 +371,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		r.entityPermissions = entityPermissionsSnapshot
 		r.nodes = nodesSnapshot
 		r.logicGateRaci = logicGateRaciSnapshot
+		r.sharedInboxRaci = sharedInboxRaciSnapshot
 		r.users = usersSnapshot
 		r.invitations = invitationsSnapshot
 		r.folderShares = folderSharesSnapshot
@@ -420,6 +422,26 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			r.logicGateRaci[gateKey] = filtered
 		}
 	}
+	for raciKey, assignments := range r.sharedInboxRaci {
+		filtered := assignments[:0]
+		for _, assignment := range assignments {
+			subjectType := strings.TrimSpace(assignment.SubjectType)
+			subjectID := strings.TrimSpace(assignment.SubjectID)
+			if subjectType == "" {
+				subjectType = EntityPermissionSubjectUser
+				subjectID = strings.TrimSpace(assignment.UserID)
+			}
+			if assignment.CompanyID == companyID && subjectType == EntityPermissionSubjectUser && subjectID == userID {
+				continue
+			}
+			filtered = append(filtered, assignment)
+		}
+		if len(filtered) == 0 {
+			delete(r.sharedInboxRaci, raciKey)
+		} else {
+			r.sharedInboxRaci[raciKey] = filtered
+		}
+	}
 	if err := r.recomputeCompanyAdminEffectiveAccessForUserLocked(userID); err != nil {
 		restore()
 		return DeleteCompanyUserResult{}, err
@@ -434,10 +456,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		restore()
 		return DeleteCompanyUserResult{}, r.effectiveAccessErr
 	}
-	for accessKey, access := range r.effectiveAccess {
-		if access.CompanyID == companyID && access.UserID == userID && access.SourceType == effectiveAccessSourceDirectUserGrant {
-			delete(r.effectiveAccess, accessKey)
-		}
+	if err := r.deleteEffectiveFactsForCompanyUserLocked(companyID, userID); err != nil {
+		restore()
+		return DeleteCompanyUserResult{}, err
 	}
 
 	hasRemainingMembership := false
@@ -491,6 +512,26 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			delete(r.logicGateRaci, gateKey)
 		} else {
 			r.logicGateRaci[gateKey] = filtered
+		}
+	}
+	for raciKey, assignments := range r.sharedInboxRaci {
+		filtered := assignments[:0]
+		for _, assignment := range assignments {
+			subjectType := strings.TrimSpace(assignment.SubjectType)
+			subjectID := strings.TrimSpace(assignment.SubjectID)
+			if subjectType == "" {
+				subjectType = EntityPermissionSubjectUser
+				subjectID = strings.TrimSpace(assignment.UserID)
+			}
+			if subjectType == EntityPermissionSubjectUser && subjectID == userID {
+				continue
+			}
+			filtered = append(filtered, assignment)
+		}
+		if len(filtered) == 0 {
+			delete(r.sharedInboxRaci, raciKey)
+		} else {
+			r.sharedInboxRaci[raciKey] = filtered
 		}
 	}
 	if r.effectiveAccessErr != nil {

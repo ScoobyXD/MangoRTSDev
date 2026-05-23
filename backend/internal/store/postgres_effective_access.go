@@ -99,6 +99,19 @@ where company_id=$1::uuid
 	return err
 }
 
+func deleteEffectiveFactsForCompanyUserTx(ctx context.Context, tx effectiveAccessExecer, companyID, userID string) error {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" || ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from effective_resource_access
+where company_id=$1::uuid
+  and user_id=$2::uuid`, companyID, userID)
+	return err
+}
+
 func insertEffectiveFactsTx(ctx context.Context, tx effectiveAccessExecer, facts []domain.EffectiveResourceAccess) error {
 	if ctx == nil || tx == nil {
 		return ErrInvalid
@@ -719,6 +732,46 @@ func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Conte
 		}
 	}
 	return nil
+}
+
+func deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" || ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select distinct node_id::text
+from node_logic_gate_assignments
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid
+order by node_id::text`, companyID, logicGateID)
+	if err != nil {
+		return err
+	}
+	affectedNodeIDs := []string{}
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			rows.Close()
+			return err
+		}
+		affectedNodeIDs = append(affectedNodeIDs, nodeID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
+		return err
+	}
+	return recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, nil, affectedNodeIDs)
 }
 
 func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs, nodeIDs []string) error {

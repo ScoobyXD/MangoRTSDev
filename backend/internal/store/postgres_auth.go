@@ -328,11 +328,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 			return DeleteCompanyUserResult{}, err
 		}
 	}
-	if _, err = tx.Exec(`
-delete from effective_resource_access
-where company_id=$1::uuid
-  and user_id=$2::uuid
-  and source_type=$3`, companyID, userID, effectiveAccessSourceDirectUserGrant); err != nil {
+	if err = deleteEffectiveFactsForCompanyUserTx(context.Background(), tx, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 
