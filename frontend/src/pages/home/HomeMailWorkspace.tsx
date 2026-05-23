@@ -11,7 +11,6 @@ import {
   emptyStateStyle,
   inlineErrorStyle,
   inlineNoticeStyle,
-  inputStyle,
   listHeaderStyle,
   loadingMoreStyle,
   mailArchiveActionButtonStyle,
@@ -21,21 +20,22 @@ import {
   mailFiltersRowStyle,
   mailListTitleStackStyle,
   mailListToolbarStyle,
+  mailPanelInputStyle,
+  mailPanelPrimaryButtonStyle,
+  mailPanelSearchButtonStyle,
+  mailPanelSmallButtonStyle,
   mailPanelControlsStyle,
   mailPanelStyle,
+  mailViewerPanelStyle,
   messageContextMenuStyle,
   messageListStyle,
   messageRowStyle,
   messageRowTopStyle,
   messageStarButtonStyle,
   mutedSmallStyle,
-  panelStyle,
   panelTitleStyle,
-  primaryButtonStyle,
-  searchButtonStyle,
   searchRowStyle,
   selectedCountStyle,
-  smallButtonStyle,
   snippetStyle,
   triageDateStyle,
   triageMailListHeaderStyle,
@@ -201,27 +201,27 @@ export function HomeMailWorkspace({
   if (unassignedSharedInbox) {
     return (
       <>
-        <section style={mailPanelStyle}>
+        <section style={mailPanelStyle(showDetailResizeHandle)}>
           <div style={mailPanelControlsStyle}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
               <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {unassignedSharedInbox.folderName}
               </h2>
-              {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
+              {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
             </div>
           </div>
           <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
             <div style={{ ...emptyStateStyle, minHeight: 220, gap: 12, color: "#111827", textAlign: "center" }}>
               <strong style={{ fontSize: 20, lineHeight: 1.2 }}>{unassignedSharedInbox.folderName}</strong>
               <span>{unassignedSharedInbox.message ?? "This folder has not been assigned an email"}</span>
-              {unassignedSharedInbox.onAssignEmail && <button type="button" style={primaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>}
+              {unassignedSharedInbox.onAssignEmail && <button type="button" style={mailPanelPrimaryButtonStyle} onClick={unassignedSharedInbox.onAssignEmail}>Assign email to inbox</button>}
             </div>
           </div>
         </section>
 
         {showDetailResizeHandle && <HomeColumnResizeHandle dividerIndex={1} onPointerDown={onColumnResizeStart} />}
 
-        <section style={panelStyle}>
+        <section style={mailViewerPanelStyle(showDetailResizeHandle)}>
           <div style={emptyStateStyle}>Select a message or compose a new one</div>
         </section>
       </>
@@ -230,20 +230,20 @@ export function HomeMailWorkspace({
 
   return (
     <>
-      <section style={mailPanelStyle}>
+      <section style={mailPanelStyle(showDetailResizeHandle)}>
         <div style={mailPanelControlsStyle}>
           {isArchivableListView ? (
             <div style={triageMailListHeaderStyle}>
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
+                  {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
                 </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>
               <div style={accountRowStyle}>
                 <span style={accountEmailStyle}>{accountEmail}</span>
-                <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+                <button style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
               </div>
             </div>
           ) : (
@@ -251,7 +251,7 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <h2 style={panelTitleStyle}>{listViewLabel}</h2>
               </div>
-              <button style={primaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
+              <button style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
             </div>
           )}
           {error && <div style={inlineErrorStyle}>{error}</div>}
@@ -299,21 +299,21 @@ export function HomeMailWorkspace({
               </button>
             </div>
           )}
-          {isArchivableListView && <button style={primaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>}
+          {isArchivableListView && <button style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>}
           {!isArchivableListView && (
             <div style={accountRowStyle}>
               <span style={accountEmailStyle}>{accountEmail}</span>
-              <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+              <button style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
             </div>
           )}
           <form style={searchRowStyle} onSubmit={onSubmitSearch}>
             <input
-              style={inputStyle}
+              style={mailPanelInputStyle}
               value={searchDraft}
               onChange={(event) => onSearchDraftChange(event.target.value)}
               placeholder="Search mail"
             />
-            <button type="submit" style={searchButtonStyle}>Search</button>
+            <button type="submit" style={mailPanelSearchButtonStyle}>Search</button>
           </form>
           <div style={mailFiltersRowStyle}>
             <label style={checkboxStyle}>
@@ -417,7 +417,7 @@ export function HomeMailWorkspace({
 
       {showDetailResizeHandle && <HomeColumnResizeHandle dividerIndex={1} onPointerDown={onColumnResizeStart} />}
 
-      <section style={panelStyle}>
+      <section style={mailViewerPanelStyle(showDetailResizeHandle)}>
         {compose.open ? (
           <ComposePanel
             compose={compose}

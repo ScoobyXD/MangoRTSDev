@@ -1,5 +1,5 @@
 import React from "react";
-import { HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
+import { HOME_COLUMN_RESIZER_WIDTH, HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
 import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeUtils";
 
 export const HOME_CYAN = "rgb(71, 85, 105)";
@@ -33,7 +33,7 @@ export const pageStyle: React.CSSProperties = {
   overflow: "hidden",
   display: "flex",
   flexDirection: "column",
-  background: "#ffffff",
+  background: "#edf2f7",
   color: "#111827",
   fontFamily: "var(--mango-font-family)",
 };
@@ -82,6 +82,8 @@ export const workspaceStyle: React.CSSProperties = {
   gap: 10,
   padding: 10,
   overflow: "auto",
+  background:
+    "radial-gradient(circle at 38% 18%, rgba(125, 211, 252, 0.22), transparent 30%), radial-gradient(circle at 70% 82%, rgba(167, 139, 250, 0.18), transparent 34%), linear-gradient(135deg, #f5f8fc 0%, #edf2f7 46%, #e8f5f7 100%)",
 };
 
 export const columnResizeHandleStyle: React.CSSProperties = {
@@ -311,21 +313,47 @@ export const sharedInboxCreateButtonStyle: React.CSSProperties = {
 };
 
 export const panelStyle: React.CSSProperties = {
+  position: "relative",
+  isolation: "isolate",
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "auto",
   gap: 10,
-  padding: 10,
-  border: `1px solid ${HOME_BLACK}`,
-  background: "#ffffff",
-  borderRadius: 8,
+  padding: 14,
+  border: "1px solid rgba(255, 255, 255, 0.52)",
+  background:
+    "radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.88), transparent 28%), radial-gradient(circle at 92% 86%, rgba(45, 212, 191, 0.34), transparent 32%), radial-gradient(circle at 68% 100%, rgba(129, 140, 248, 0.25), transparent 34%), linear-gradient(135deg, rgba(255, 255, 255, 0.64), rgba(226, 244, 248, 0.36) 46%, rgba(240, 236, 255, 0.34))",
+  backdropFilter: "blur(24px) saturate(1.55)",
+  WebkitBackdropFilter: "blur(24px) saturate(1.55)",
+  borderRadius: 18,
+  boxShadow:
+    "inset 1px 1px 0 rgba(255, 255, 255, 0.76), inset -18px -22px 42px rgba(148, 163, 184, 0.12), 0 22px 54px rgba(15, 23, 42, 0.14)",
   overflow: "hidden",
 };
 
-export const mailPanelStyle: React.CSSProperties = {
-  ...panelStyle,
-  gridTemplateRows: "auto minmax(0, 1fr)",
-};
+export function mailViewerPanelStyle(attached: boolean): React.CSSProperties {
+  return {
+    ...panelStyle,
+    marginLeft: attached ? -HOME_COLUMN_RESIZER_WIDTH : 0,
+    borderRadius: attached ? "0 18px 18px 0" : 18,
+  };
+}
+
+export function mailPanelStyle(attached: boolean): React.CSSProperties {
+  return {
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: "auto minmax(0, 1fr)",
+    gap: 12,
+    padding: 12,
+    border: "none",
+    background: "#edf2f7",
+    borderRadius: attached ? "18px 0 0 18px" : 18,
+    boxShadow:
+      "10px 10px 22px rgba(166, 180, 200, 0.42), -10px -10px 22px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.62)",
+    overflow: "hidden",
+  };
+}
 
 export const mailPanelControlsStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1095,6 +1123,30 @@ export const primaryButtonStyle: React.CSSProperties = {
   padding: "0 10px",
 };
 
+export const mailPanelSmallButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  border: "none",
+  borderRadius: 10,
+  background: "#edf2f7",
+  color: "#1f2937",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 650,
+  padding: "0 10px",
+  boxShadow:
+    "5px 5px 11px rgba(166, 180, 200, 0.5), -5px -5px 11px rgba(255, 255, 255, 0.92)",
+};
+
+export const mailPanelPrimaryButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  minHeight: 34,
+  color: "#172033",
+  background: "linear-gradient(145deg, #f5f9fd, #dfe7f1)",
+  boxShadow:
+    "7px 7px 15px rgba(157, 171, 191, 0.52), -7px -7px 15px rgba(255, 255, 255, 0.94), inset 1px 1px 0 rgba(255, 255, 255, 0.8)",
+};
+
 export const dangerButtonStyle: React.CSSProperties = {
   borderColor: "#64748b",
   color: "#334155",
@@ -1109,6 +1161,16 @@ export const inputStyle: React.CSSProperties = {
   padding: "0 9px",
   font: "inherit",
   fontSize: 12,
+};
+
+export const mailPanelInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  border: "none",
+  borderRadius: 12,
+  background: "#edf2f7",
+  color: "#111827",
+  boxShadow:
+    "inset 5px 5px 10px rgba(166, 180, 200, 0.45), inset -5px -5px 10px rgba(255, 255, 255, 0.88)",
 };
 
 export const textareaStyle: React.CSSProperties = {
@@ -1172,6 +1234,13 @@ export const searchButtonStyle: React.CSSProperties = {
   alignSelf: "center",
 };
 
+export const mailPanelSearchButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  width: "100%",
+  height: 34,
+  alignSelf: "center",
+};
+
 export const mailArchiveActionsStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -1181,7 +1250,7 @@ export const mailArchiveActionsStyle: React.CSSProperties = {
 
 export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperties {
   return {
-    ...smallButtonStyle,
+    ...mailPanelSmallButtonStyle,
     width: "100%",
     minWidth: 0,
     display: "flex",
@@ -1191,9 +1260,11 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     overflow: "hidden",
     whiteSpace: "nowrap",
     fontWeight: 700,
-    borderColor: active ? HOME_CYAN : smallButtonStyle.borderColor,
-    background: active ? HOME_CYAN_SOFT : smallButtonStyle.background,
-    color: active ? "#334155" : smallButtonStyle.color,
+    background: active ? "#e4ebf4" : mailPanelSmallButtonStyle.background,
+    color: active ? "#263449" : mailPanelSmallButtonStyle.color,
+    boxShadow: active
+      ? "inset 5px 5px 10px rgba(157, 171, 191, 0.5), inset -5px -5px 10px rgba(255, 255, 255, 0.86)"
+      : mailPanelSmallButtonStyle.boxShadow,
   };
 }
 
@@ -1212,11 +1283,13 @@ export const mailArchiveActionCountStyle: React.CSSProperties = {
   placeItems: "center",
   borderRadius: 9,
   padding: "0 5px",
-  background: "rgba(100, 116, 139, 0.14)",
+  background: "#dfe7f1",
   color: "#475569",
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
+  boxShadow:
+    "inset 2px 2px 4px rgba(157, 171, 191, 0.42), inset -2px -2px 4px rgba(255, 255, 255, 0.72)",
 };
 
 export const mailFiltersRowStyle: React.CSSProperties = {
@@ -1254,7 +1327,8 @@ export const messageListStyle: React.CSSProperties = {
   overflowY: "auto",
   display: "grid",
   alignContent: "start",
-  gap: 6,
+  gap: 10,
+  padding: "2px 4px 4px",
 };
 
 export const loadingMoreStyle: React.CSSProperties = {
@@ -1270,9 +1344,9 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
     display: "grid",
     gap: 4,
     minHeight: 78,
-    border: `1px solid ${active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
-    borderRadius: 7,
-    background: active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
+    border: "none",
+    borderRadius: 13,
+    background: active ? "#e1e8f2" : unread ? "linear-gradient(145deg, #f5f9fd, #e3ebf5)" : "#edf2f7",
     cursor: "pointer",
     color: "#111827",
     font: "inherit",
@@ -1281,6 +1355,9 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
     padding: 9,
     textAlign: "left",
     minWidth: 0,
+    boxShadow: active
+      ? "inset 5px 5px 11px rgba(157, 171, 191, 0.48), inset -5px -5px 11px rgba(255, 255, 255, 0.84)"
+      : "6px 6px 14px rgba(166, 180, 200, 0.42), -6px -6px 14px rgba(255, 255, 255, 0.88)",
   };
 }
 
@@ -1291,9 +1368,9 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${pendingAutoArchive ? "rgba(15, 23, 42, 0.26)" : active ? HOME_CYAN : unread ? HOME_CYAN_MEDIUM : HOME_BLACK_SOFT}`,
-    borderRadius: 7,
-    background: pendingAutoArchive ? "#e7e7e7" : active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
+    border: "none",
+    borderRadius: 14,
+    background: pendingAutoArchive ? "#e1e6ee" : active ? "#e1e8f2" : unread ? "linear-gradient(145deg, #f7fbff, #e2eaf4)" : "#edf2f7",
     cursor: draggable ? "grab" : "pointer",
     color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
     font: "inherit",
@@ -1301,7 +1378,12 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     padding: "10px 10px 9px",
     textAlign: "left",
     minWidth: 0,
-    transition: "background 140ms ease, border-color 140ms ease, color 140ms ease",
+    boxShadow: active
+      ? "inset 6px 6px 12px rgba(157, 171, 191, 0.5), inset -6px -6px 12px rgba(255, 255, 255, 0.84)"
+      : pendingAutoArchive
+        ? "inset 4px 4px 9px rgba(157, 171, 191, 0.42), inset -4px -4px 9px rgba(255, 255, 255, 0.7)"
+        : "7px 7px 15px rgba(166, 180, 200, 0.42), -7px -7px 15px rgba(255, 255, 255, 0.88)",
+    transition: "background 140ms ease, box-shadow 140ms ease, color 140ms ease",
   };
 }
 
@@ -1311,8 +1393,10 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : "rgba(15, 23, 42, 0.16)",
-    boxShadow: active ? `0 0 0 3px ${HOME_CYAN_SOFT}` : undefined,
+    background: active ? HOME_CYAN : unread ? "#64748b" : "rgba(100, 116, 139, 0.28)",
+    boxShadow: active
+      ? "0 0 0 4px rgba(71, 85, 105, 0.12), 2px 2px 5px rgba(157, 171, 191, 0.5)"
+      : "inset 1px 1px 2px rgba(15, 23, 42, 0.12), inset -1px -1px 2px rgba(255, 255, 255, 0.75)",
   };
 }
 
@@ -1367,7 +1451,7 @@ export const triageMessageMetaStyle: React.CSSProperties = {
 
 export function messageStarButtonStyle(active: boolean): React.CSSProperties {
   return {
-    ...smallButtonStyle,
+    ...mailPanelSmallButtonStyle,
     width: 28,
     height: 28,
     minHeight: 28,
@@ -1375,8 +1459,10 @@ export function messageStarButtonStyle(active: boolean): React.CSSProperties {
     display: "grid",
     placeItems: "center",
     color: active ? "#334155" : "rgba(15, 23, 42, 0.45)",
-    background: active ? "#f8fafc" : "#ffffff",
-    borderColor: active ? "rgba(100, 116, 139, 0.62)" : "rgba(15, 23, 42, 0.16)",
+    background: active ? "#e4ebf4" : "#edf2f7",
+    boxShadow: active
+      ? "inset 3px 3px 6px rgba(157, 171, 191, 0.46), inset -3px -3px 6px rgba(255, 255, 255, 0.78)"
+      : "4px 4px 9px rgba(166, 180, 200, 0.44), -4px -4px 9px rgba(255, 255, 255, 0.88)",
   };
 }
 
@@ -1431,9 +1517,11 @@ export const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
   height: "100%",
-  border: "1px solid rgba(100, 116, 139, 0.16)",
-  borderRadius: 6,
-  background: "#fff",
+  border: "1px solid rgba(255, 255, 255, 0.56)",
+  borderRadius: 14,
+  background: "rgba(255, 255, 255, 0.72)",
+  boxShadow:
+    "inset 1px 1px 0 rgba(255, 255, 255, 0.72), 0 14px 34px rgba(15, 23, 42, 0.10)",
 };
 
 export const composeStyle: React.CSSProperties = {
