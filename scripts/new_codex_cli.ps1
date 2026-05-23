@@ -129,7 +129,7 @@ if (-not $NoStart) {
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
-    "& '$escapedCodexExe'"
+    "`$env:TERM = 'xterm-256color'; `$env:COLORTERM = 'truecolor'; & '$escapedCodexExe'"
   ) -PassThru
   $pidValue = $process.Id
 }
