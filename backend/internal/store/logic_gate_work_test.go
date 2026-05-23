@@ -89,10 +89,13 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	for _, forbidden := range []string{
 		"listaccessibleentityids",
 		"mangorts_user_can_access_resource",
+		"usercanaccessentity",
 		"requireentityview",
 		"requireentityedit",
 		"requirekanbanboardview",
 		"requirekanbancardview",
+		"recordkanbanstatenotification",
+		"kanbancardnotificationsnapshot",
 	} {
 		if strings.Contains(handlerSource, forbidden) {
 			t.Fatalf("v2 logic gate work handler contains forbidden access path %q", forbidden)

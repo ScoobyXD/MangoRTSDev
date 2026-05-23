@@ -269,27 +269,40 @@ Status values:
 
 This phase should be one Codex instance. It includes the minimal audit needed to avoid wiring the wrong path.
 
-- [ ] List active Logic Gate work routes that publish domain events but do not create notifications.
-- [ ] Confirm current notification producers and whether `ProcessPending` is started anywhere.
-- [ ] Add a notification projector API that accepts committed domain events.
-- [ ] Keep HTTP handlers out of event-specific notification business logic.
-- [ ] Add event target extraction helpers for Logic Gate work notification fanout.
-- [ ] Reuse or align with workspace event target extraction.
-- [ ] Define actor self-notification defaults for Logic Gate work events.
-- [ ] Map `work_item.logic_gate_assignment_saved` to notification behavior.
-- [ ] Map `work_item.logic_gate_assignment_moved` to notification behavior.
-- [ ] Map `work_item.logic_gate_assignment_removed` to notification behavior.
-- [ ] Map `work_item.logic_gate_assignment_issue_toggled` to notification behavior.
-- [ ] Wire V2 Logic Gate work handlers to invoke the projector after domain events commit.
-- [ ] Avoid resurrecting old Kanban snapshot notification logic.
-- [ ] Use `effective_resource_access` to expand Logic Gate recipients.
-- [ ] Use `logic_gate_raci_assignments` to classify R/A/C/I notification roles.
-- [ ] Ensure notification row inserts are idempotent for retried Logic Gate events.
-- [ ] Add unit tests for Logic Gate target extraction and RACI recipient classification.
-- [ ] Add tests proving V2 Logic Gate work state changes create notifications.
-- [ ] Add tests proving users without effective Logic Gate access do not receive notifications.
-- [ ] Add or update a source-shape test so the V2 Logic Gate notification path cannot call `UserCanAccessEntity` or old recursive permission fanout.
-- [ ] Update this tracker with exact files touched and any follow-up findings.
+- [x] List active Logic Gate work routes that publish domain events but do not create notifications.
+- [x] Confirm current notification producers and whether `ProcessPending` is started anywhere.
+- [x] Add a notification projector API that accepts committed domain events.
+- [x] Keep HTTP handlers out of event-specific notification business logic.
+- [x] Add event target extraction helpers for Logic Gate work notification fanout.
+- [x] Reuse or align with workspace event target extraction.
+- [x] Define actor self-notification defaults for Logic Gate work events.
+- [x] Map `work_item.logic_gate_assignment_saved` to notification behavior.
+- [x] Map `work_item.logic_gate_assignment_moved` to notification behavior.
+- [x] Map `work_item.logic_gate_assignment_removed` to notification behavior.
+- [x] Map `work_item.logic_gate_assignment_issue_toggled` to notification behavior.
+- [x] Wire V2 Logic Gate work handlers to invoke the projector after domain events commit.
+- [x] Avoid resurrecting old Kanban snapshot notification logic.
+- [x] Use `effective_resource_access` to expand Logic Gate recipients.
+- [x] Use `logic_gate_raci_assignments` to classify R/A/C/I notification roles.
+- [x] Ensure notification row inserts are idempotent for retried Logic Gate events.
+- [x] Add unit tests for Logic Gate target extraction and RACI recipient classification.
+- [x] Add tests proving V2 Logic Gate work state changes create notifications.
+- [x] Add tests proving users without effective Logic Gate access do not receive notifications.
+- [x] Add or update a source-shape test so the V2 Logic Gate notification path cannot call `UserCanAccessEntity` or old recursive permission fanout.
+- [x] Update this tracker with exact files touched and any follow-up findings.
+
+Phase 1 implementation update:
+
+- Active V2 Logic Gate work mutation routes audited: `POST /v2/logic-gates/{logic_gate_id}/nodes`, `PUT /v2/logic-gates/{logic_gate_id}/nodes/{node_id}/state`, and `DELETE /v2/logic-gates/{logic_gate_id}/nodes/{node_id}` commit `work_item.logic_gate_assignment_saved`, `work_item.logic_gate_assignment_moved`, `work_item.logic_gate_issue_toggled`, and `work_item.logic_gate_assignment_removed` domain events but previously did not create notification rows.
+- Current notification producers are still the legacy handler-side `recordNotificationEvent`/`RecordAndProcess` paths for RACI, node, mention, and old Kanban state notifications. `ProcessPending` exists on `notifications.Service`, but no server startup path or worker currently starts it.
+- Added `notifications.Service.ProcessDomainEvent` and `ProcessDomainEvents` as the projector seam for committed `domain.DomainEvent` values. V2 Logic Gate work handlers now call this projector after commit/workspace publish; event-specific notification rules live in the notification service, not in the handlers.
+- Logic Gate work projector behavior now supports saved, moved, removed, and issue-toggled work-item events. It extracts Logic Gate and node target metadata, expands recipients with reverse `effective_resource_access` lookups on the Logic Gate for this Phase 1 path, classifies recipients with `logic_gate_raci_assignments` when available, skips actor self-notifications, and relies on existing notification insert idempotency by recipient/source event/type/entity.
+- Added tests in `backend/internal/notifications/service_test.go` for domain-event projection, Logic Gate/node target extraction, RACI role classification, Logic Gate access eligibility, no-access exclusion, and idempotent replay.
+- Added a route-level V2 test in `backend/internal/http/logic_gate_work_handlers_test.go` proving a V2 state change creates notifications for eligible users and not for the actor or blocked users.
+- Updated `backend/internal/store/logic_gate_work_test.go` source-shape guard to reject `UserCanAccessEntity` and old Kanban notification helper calls from the V2 Logic Gate work handler path.
+- Files touched: `backend/internal/notifications/service.go`, `backend/internal/notifications/service_test.go`, `backend/internal/http/logic_gate_work_handlers.go`, `backend/internal/http/logic_gate_work_handlers_test.go`, `backend/internal/http/notification_handlers.go`, `backend/internal/store/logic_gate_work_test.go`, and this tracker.
+- Validation run: `go test ./...` from `backend`.
+- Follow-up finding: `notification_events` pending processing remains unstarted and should be addressed in Phase 3 unless the project fully standardizes on domain-event projection before then.
 
 ### Phase 2 - Node, Mention, Shared Inbox, And Role Coverage
 

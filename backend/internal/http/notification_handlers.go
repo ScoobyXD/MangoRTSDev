@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	htmlpkg "html"
@@ -229,6 +230,15 @@ func (s *Server) recordNotificationEvent(input store.NotificationEventInput) {
 	items, err := s.notifications.RecordAndProcess(input)
 	if err != nil {
 		log.Printf("failed to process notification event type=%s company_id=%s entity_type=%s entity_id=%s: %v", input.Type, input.CompanyID, input.EntityType, input.EntityID, err)
+		return
+	}
+	s.publishNotifications(items)
+}
+
+func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent) {
+	items, err := s.notifications.ProcessDomainEvents(context.Background(), events)
+	if err != nil {
+		log.Printf("failed to project committed notification events: %v", err)
 		return
 	}
 	s.publishNotifications(items)

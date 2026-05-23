@@ -107,6 +107,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	}
 	s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_assigned")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
 
@@ -164,6 +165,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		}
 		s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_moved")
 		s.publishCommittedWorkspaceEvents(result.Events)
+		s.projectCommittedNotificationEvents(result.Events)
 	}
 	if issueSet {
 		issueResult, err := s.repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
@@ -179,6 +181,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		}
 		s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_issue_toggled")
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
+		s.projectCommittedNotificationEvents(issueResult.Events)
 		result = issueResult
 	}
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
@@ -218,6 +221,7 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 	}
 	s.refreshEffectiveAccessProjection(companyID, "logic_gate_work_node_removed")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	payload := logicGateWorkAssignmentRemoveResultPayload(result)
 	writeJSON(w, http.StatusOK, payload)
 }

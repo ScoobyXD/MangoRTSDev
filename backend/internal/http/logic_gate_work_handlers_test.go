@@ -164,6 +164,102 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}
 }
 
+func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666411"
+	repo.EnsureCompany(companyID, "Logic Gate Work Notifications Co")
+
+	editor := mustLogicGateWorkHTTPUser(t, repo, companyID, "work-v2-notify-editor")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "work-v2-notify-viewer")
+	responsible := mustLogicGateWorkHTTPUser(t, repo, companyID, "work-v2-notify-responsible")
+	blocked := mustLogicGateWorkHTTPUser(t, repo, companyID, "work-v2-notify-blocked")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Notification Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Notification Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	putPayload := map[string]any{
+		"company_id": companyID,
+		"status":     "done",
+	}
+	req := logicGateWorkV2Request(t, http.MethodPut, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes/"+node.NodeID+"/state", putPayload, editor, companyID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT work state status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+
+	responsibleNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, responsible)
+	if len(responsibleNotifications) != 1 {
+		t.Fatalf("responsible notification count = %d, want 1: %+v", len(responsibleNotifications), responsibleNotifications)
+	}
+	item := responsibleNotifications[0]
+	if item.Type != store.WorkItemLogicGateAssignmentMovedEventType {
+		t.Fatalf("responsible notification type = %q, want %q", item.Type, store.WorkItemLogicGateAssignmentMovedEventType)
+	}
+	if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("responsible notification metadata = %+v, want responsible R inbox", item)
+	}
+	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
+		t.Fatalf("responsible notification target = %+v, want gate/node", item)
+	}
+
+	viewerNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, viewer)
+	if len(viewerNotifications) != 1 {
+		t.Fatalf("viewer notification count = %d, want 1: %+v", len(viewerNotifications), viewerNotifications)
+	}
+	if viewerNotifications[0].Surface != domain.NotificationSurfaceACIInbox || viewerNotifications[0].Role != domain.NotificationRoleOther {
+		t.Fatalf("viewer notification metadata = %+v, want ACI other", viewerNotifications[0])
+	}
+	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, editor); len(got) != 0 {
+		t.Fatalf("actor self notifications = %+v, want none", got)
+	}
+	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, blocked); len(got) != 0 {
+		t.Fatalf("blocked notifications = %+v, want none", got)
+	}
+}
+
 func mustLogicGateWorkHTTPUser(t *testing.T, repo *store.MemoryRepo, companyID, subject string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", strings.ReplaceAll(subject, "-", " "))
@@ -218,6 +314,24 @@ func logicGateWorkV2Request(t *testing.T, method, target string, payload map[str
 	req := httptest.NewRequest(method, target, &body)
 	req.Header.Set("Content-Type", "application/json")
 	return requestWithLogicGateWorkActorForTest(req, actor, companyID)
+}
+
+func listLogicGateWorkNotificationsForTest(t *testing.T, handler http.Handler, companyID string, actor domain.User) []domain.Notification {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	req = requestWithLogicGateWorkActorForTest(req, actor, companyID)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications response: %v body=%s", err, rr.Body.String())
+	}
+	return payload.Notifications
 }
 
 type logicGateWorkMutationPayloadForTest struct {
