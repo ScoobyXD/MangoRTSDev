@@ -56,17 +56,32 @@ func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) 
 }
 
 func (r *MemoryRepo) replaceEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) error {
-	companyID = strings.TrimSpace(companyID)
-	resourceType = strings.TrimSpace(resourceType)
-	resourceID = strings.TrimSpace(resourceID)
-	sourceType = strings.TrimSpace(sourceType)
-	if companyID == "" || resourceType == "" || resourceID == "" || sourceType == "" {
-		return ErrInvalid
+	companyID, resourceType, resourceID, sourceType, err := normalizeEffectiveAccessResourceSourceScope(companyID, resourceType, resourceID, sourceType)
+	if err != nil {
+		return err
+	}
+	facts, err = normalizeEffectiveAccessFactsForResourceSource(companyID, resourceType, resourceID, sourceType, facts)
+	if err != nil {
+		return err
+	}
+	if err := r.deleteEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, fact := range facts {
+		addEffectiveAccessFact(r.effectiveAccess, now, fact)
+	}
+	return nil
+}
+
+func (r *MemoryRepo) deleteEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType string) error {
+	companyID, resourceType, resourceID, sourceType, err := normalizeEffectiveAccessResourceSourceScope(companyID, resourceType, resourceID, sourceType)
+	if err != nil {
+		return err
 	}
 	if r.effectiveAccessErr != nil {
 		return r.effectiveAccessErr
 	}
-
 	for accessKey, access := range r.effectiveAccess {
 		if access.CompanyID == companyID &&
 			access.ResourceType == resourceType &&
@@ -75,9 +90,42 @@ func (r *MemoryRepo) replaceEffectiveFactsForResourceSourceLocked(companyID, res
 			delete(r.effectiveAccess, accessKey)
 		}
 	}
+	return nil
+}
+
+func (r *MemoryRepo) replaceEffectiveFactsForSourceLocked(companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) error {
+	companyID, sourceType, sourceID, err := normalizeEffectiveAccessSourceScope(companyID, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	facts, err = normalizeEffectiveAccessFactsForSource(companyID, sourceType, sourceID, facts)
+	if err != nil {
+		return err
+	}
+	if err := r.deleteEffectiveFactsForSourceLocked(companyID, sourceType, sourceID); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	for _, fact := range facts {
 		addEffectiveAccessFact(r.effectiveAccess, now, fact)
+	}
+	return nil
+}
+
+func (r *MemoryRepo) deleteEffectiveFactsForSourceLocked(companyID, sourceType, sourceID string) error {
+	companyID, sourceType, sourceID, err := normalizeEffectiveAccessSourceScope(companyID, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	if r.effectiveAccessErr != nil {
+		return r.effectiveAccessErr
+	}
+	for accessKey, access := range r.effectiveAccess {
+		if access.CompanyID == companyID &&
+			access.SourceType == sourceType &&
+			access.SourceID == sourceID {
+			delete(r.effectiveAccess, accessKey)
+		}
 	}
 	return nil
 }
@@ -510,6 +558,90 @@ func legacyGrantEffectiveAccessCandidateBetter(left, right legacyGrantEffectiveA
 		return left.sourceType < right.sourceType
 	}
 	return left.sourceID < right.sourceID
+}
+
+func normalizeEffectiveAccessSourceScope(companyID, sourceType, sourceID string) (string, string, string, error) {
+	companyID = strings.TrimSpace(companyID)
+	sourceType = strings.TrimSpace(sourceType)
+	sourceID = strings.TrimSpace(sourceID)
+	if companyID == "" || sourceType == "" || sourceID == "" {
+		return "", "", "", ErrInvalid
+	}
+	return companyID, sourceType, sourceID, nil
+}
+
+func normalizeEffectiveAccessResourceSourceScope(companyID, resourceType, resourceID, sourceType string) (string, string, string, string, error) {
+	companyID = strings.TrimSpace(companyID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	sourceType = strings.TrimSpace(sourceType)
+	if companyID == "" || !typeOK || resourceID == "" || sourceType == "" {
+		return "", "", "", "", ErrInvalid
+	}
+	return companyID, resourceType, resourceID, sourceType, nil
+}
+
+func normalizeEffectiveAccessFact(fact domain.EffectiveResourceAccess) (domain.EffectiveResourceAccess, error) {
+	fact.CompanyID = strings.TrimSpace(fact.CompanyID)
+	fact.UserID = strings.TrimSpace(fact.UserID)
+	resourceType, typeOK := NormalizeEntityType(fact.ResourceType)
+	fact.ResourceID = strings.TrimSpace(fact.ResourceID)
+	rawAccessLevel := strings.TrimSpace(fact.AccessLevel)
+	accessLevel, accessOK := NormalizeEntityPermission(rawAccessLevel)
+	fact.SourceType = strings.TrimSpace(fact.SourceType)
+	fact.SourceID = strings.TrimSpace(fact.SourceID)
+	if fact.CompanyID == "" ||
+		fact.UserID == "" ||
+		!typeOK ||
+		fact.ResourceID == "" ||
+		rawAccessLevel == "" ||
+		!accessOK ||
+		EntityPermissionRank(accessLevel) == 0 ||
+		fact.SourceType == "" ||
+		fact.SourceID == "" {
+		return domain.EffectiveResourceAccess{}, ErrInvalid
+	}
+	fact.ResourceType = resourceType
+	fact.AccessLevel = accessLevel
+	return fact, nil
+}
+
+func normalizeEffectiveAccessFacts(facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized := make([]domain.EffectiveResourceAccess, 0, len(facts))
+	for _, fact := range facts {
+		normalizedFact, err := normalizeEffectiveAccessFact(fact)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, normalizedFact)
+	}
+	return normalized, nil
+}
+
+func normalizeEffectiveAccessFactsForSource(companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized, err := normalizeEffectiveAccessFacts(facts)
+	if err != nil {
+		return nil, err
+	}
+	for _, fact := range normalized {
+		if fact.CompanyID != companyID || fact.SourceType != sourceType || fact.SourceID != sourceID {
+			return nil, ErrInvalid
+		}
+	}
+	return normalized, nil
+}
+
+func normalizeEffectiveAccessFactsForResourceSource(companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized, err := normalizeEffectiveAccessFacts(facts)
+	if err != nil {
+		return nil, err
+	}
+	for _, fact := range normalized {
+		if fact.CompanyID != companyID || fact.ResourceType != resourceType || fact.ResourceID != resourceID || fact.SourceType != sourceType {
+			return nil, ErrInvalid
+		}
+	}
+	return normalized, nil
 }
 
 func addEffectiveAccessFact(facts map[string]domain.EffectiveResourceAccess, now time.Time, fact domain.EffectiveResourceAccess) {

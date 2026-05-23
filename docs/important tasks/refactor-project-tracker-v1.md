@@ -109,11 +109,11 @@ Target behavior:
 
 ## Phase 1 - Effective Access Writer Foundation
 
-- [ ] Add a transaction-safe Postgres writer API.
-- [ ] Add matching memory-repo helpers under the existing repo lock.
-- [ ] Keep public repository interfaces small; prefer internal helper functions used by source-owning store methods.
-- [ ] Keep `RebuildEffectiveResourceAccessForCompany` available as repair/admin only.
-- [ ] Preserve existing effective-access read methods.
+- [x] Add a transaction-safe Postgres writer API.
+- [x] Add matching memory-repo helpers under the existing repo lock.
+- [x] Keep public repository interfaces small; prefer internal helper functions used by source-owning store methods.
+- [x] Keep `RebuildEffectiveResourceAccessForCompany` available as repair/admin only.
+- [x] Preserve existing effective-access read methods.
 
 Recommended helper shape:
 
@@ -379,3 +379,4 @@ No handler should repair effective access after a source mutation has already co
 
 - 2026-05-23: Created V1 tracker from read-only implementation plan. No source changes made.
 - 2026-05-23: Split old Phase 2 into `Phase 2A` and `Phase 2B` for Codex handoff size, and combined old Phase 3 and Phase 4 into one final cleanup phase.
+- 2026-05-23: Completed Phase 1 writer foundation with source-scoped and resource/source-family effective-access helpers for Postgres and memory repos, plus focused helper tests.
