@@ -50,6 +50,7 @@ type IdentityRepository interface {
 	CreateCompany(name string) (domain.Company, error)
 	ListCompanies(query string, limit int) ([]domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
+	ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error)
 	ListCompanyUserGroups(companyID string) ([]domain.CompanyUserGroup, error)
@@ -760,6 +761,7 @@ type NotificationCreateInput struct {
 	Role            string
 	LogicGateID     string
 	NodeID          string
+	InformationID   string
 }
 
 type CreateNotificationsInput struct {

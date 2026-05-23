@@ -14,6 +14,7 @@ type LogicGateArenaPageProps = {
     logicGateID: string;
     label: string;
     nodeID?: string;
+    informationID?: string;
     requestID?: number;
   } | null;
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
@@ -31,6 +32,8 @@ type ArenaLogicGateSelection = {
   label: string;
   emptyMessage: string;
   nodeID?: string;
+  informationID?: string;
+  requestID?: number;
 };
 
 const SPLITTER_WIDTH_PX = 5;
@@ -45,6 +48,8 @@ const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/Edi
     forcedEntityID?: string;
     forcedLabel?: string;
     forcedEmptyMessage?: string;
+    focusInformationID?: string;
+    focusRequestID?: number;
   }>,
 })));
 const arenaPanelFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -78,7 +83,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     const pending = consumePendingLogicGateArenaSelection(companyID);
     if (!pending) return;
     lastArenaSelectionChangedAtRef.current = pending.createdAt;
-    setSelectedLogicGate({ id: pending.logicGateID, label: humanLabelOrFallback(pending.label, ""), emptyMessage: "", nodeID: pending.nodeID });
+    setSelectedLogicGate({ id: pending.logicGateID, label: humanLabelOrFallback(pending.label, ""), emptyMessage: "", nodeID: pending.nodeID, informationID: pending.informationID, requestID: pending.createdAt });
   }, [companyID]);
 
   useEffect(() => {
@@ -90,8 +95,10 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
       label: logicGateID ? humanLabelOrFallback(targetLogicGate.label, "") : "",
       emptyMessage: "",
       nodeID: targetLogicGate.nodeID,
+      informationID: targetLogicGate.informationID,
+      requestID: targetLogicGate.requestID,
     });
-  }, [targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
+  }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -217,6 +224,8 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
             forcedEntityID={selectedLogicGate.id}
             forcedLabel={selectedLogicGate.label}
             forcedEmptyMessage={selectedLogicGate.emptyMessage}
+            focusInformationID={selectedLogicGate.informationID}
+            focusRequestID={selectedLogicGate.requestID}
           />
         </React.Suspense>
       </section>

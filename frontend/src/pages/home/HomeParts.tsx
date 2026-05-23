@@ -34,6 +34,8 @@ const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/
     forcedEntityKind?: "node" | "logic_gate";
     forcedEntityID?: string;
     forcedLabel?: string;
+    focusInformationID?: string;
+    focusRequestID?: number;
   }>,
 })));
 
@@ -506,9 +508,11 @@ function defaultNodeEditorPopupSize(): { width: number; height: number } {
   return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
 }
 
-export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }: {
+export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
 }) {
@@ -626,6 +630,8 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }:
             forcedEntityKind="node"
             forcedEntityID={nodeID}
             forcedLabel={nodeTitle}
+            focusInformationID={focusInformationID}
+            focusRequestID={focusRequestID}
           />
         </React.Suspense>
       </div>
@@ -2324,6 +2330,7 @@ type InboxNotificationMenuState = {
 };
 
 function inboxNotificationMatchesGroup(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): boolean {
+  if (item.type === "mention.created") return false;
   if (item.role !== role || item.logic_gate_id !== group.logicGateID) return false;
   const nodeID = item.node_id?.trim() ?? "";
   return !nodeID || group.nodeIDs.includes(nodeID);

@@ -73,6 +73,7 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 		&item.Role,
 		&item.LogicGateID,
 		&item.NodeID,
+		&item.InformationID,
 		&item.ReadTimestamp,
 		&item.CreatedTimestamp,
 	)
@@ -91,7 +92,7 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 const notificationSelectColumns = `
 notification_id::text, company_id::text, recipient_user_id::text, actor_user_id::text,
 notification_type, source_event_id::text, entity_type, entity_id, title, body_preview,
-surface, role, logic_gate_id, node_id, read_timestamp, created_timestamp`
+surface, role, logic_gate_id, node_id, information_id, read_timestamp, created_timestamp`
 
 const notificationRecipientVisibilityWhereSQL = `
   and (
@@ -176,20 +177,21 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		candidate.Role = strings.TrimSpace(candidate.Role)
 		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
 		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
+		candidate.InformationID = strings.TrimSpace(candidate.InformationID)
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
 insert into notifications (
   notification_id, company_id, recipient_user_id, actor_user_id, notification_type,
-  source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, created_timestamp
-) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, now())
+  source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, information_id, created_timestamp
+) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 on conflict (recipient_user_id, source_event_id, notification_type, entity_type, entity_id)
 do nothing
 returning `+notificationSelectColumns,
 			newUUIDv7String(), candidate.CompanyID, candidate.RecipientUserID, candidate.ActorUserID,
 			candidate.Type, candidate.SourceEventID, candidate.EntityType, candidate.EntityID,
-			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID,
+			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID, candidate.InformationID,
 		))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -267,6 +269,7 @@ from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and notification_type <> 'mention.created'
   and (btrim(surface) <> '' or btrim(role) <> '')`+notificationRecipientVisibilityWhereSQL+`
 group by surface, role
 order by surface asc, role asc`, input.UserID, input.CompanyID)
@@ -314,6 +317,7 @@ from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and notification_type <> 'mention.created'
   and btrim(logic_gate_id) <> ''
   and btrim(role) <> ''`+notificationRecipientVisibilityWhereSQL+`
 group by logic_gate_id, node_id, role

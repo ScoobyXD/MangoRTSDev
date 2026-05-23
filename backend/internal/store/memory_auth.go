@@ -299,6 +299,68 @@ func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, e
 	return items, nil
 }
 
+func (r *MemoryRepo) ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	byUserID := map[string]domain.CompanyUser{}
+	userByID := map[string]domain.User{}
+	for _, user := range r.users {
+		userByID[user.UserID] = user
+	}
+	addMembership := func(membership domain.CompanyMembership, role string) {
+		user, ok := userByID[membership.UserID]
+		if !ok {
+			return
+		}
+		if _, exists := byUserID[user.UserID]; exists {
+			return
+		}
+		byUserID[user.UserID] = domain.CompanyUser{
+			CompanyID:        companyID,
+			UserID:           user.UserID,
+			CognitoSubject:   user.CognitoSubject,
+			Email:            user.Email,
+			DisplayName:      user.DisplayName,
+			Role:             role,
+			CreatedTimestamp: membership.CreatedTimestamp,
+			UpdatedTimestamp: membership.UpdatedTimestamp,
+		}
+	}
+	for _, membership := range r.memberships {
+		if membership.CompanyID == companyID {
+			addMembership(membership, membership.Role)
+		}
+	}
+	for _, membership := range r.memberships {
+		if membership.Role == domain.RoleDevAdmin {
+			addMembership(membership, domain.RoleDevAdmin)
+		}
+	}
+
+	items := make([]domain.CompanyUser, 0, len(byUserID))
+	for _, item := range byUserID {
+		items = append(items, item)
+	}
+	slices.SortFunc(items, func(a, b domain.CompanyUser) int {
+		aLabel := a.DisplayName
+		if aLabel == "" {
+			aLabel = a.Email
+		}
+		bLabel := b.DisplayName
+		if bLabel == "" {
+			bLabel = b.Email
+		}
+		return strings.Compare(aLabel, bLabel)
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)

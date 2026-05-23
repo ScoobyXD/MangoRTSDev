@@ -73,15 +73,19 @@ type ExplorerEntityActivatedDetail = {
   id?: string;
   label?: string;
   nodeID?: string;
+  informationID?: string;
 };
 type NodeEditorPopupState = {
   nodeID: string;
   nodeTitle: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
 };
 type LogicGateArenaTarget = {
   logicGateID: string;
   label: string;
   nodeID?: string;
+  informationID?: string;
   requestID: number;
 };
 
@@ -1122,6 +1126,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         setLogicGateArenaTarget({
           logicGateID: id,
           label,
+          nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
+          informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
           requestID: Date.now(),
         });
         writePendingLogicGateArenaSelection({
@@ -1129,6 +1135,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           logicGateID: id,
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
+          informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
         });
         selectPrimaryPage("logic-gate-arena");
         return;
@@ -1137,7 +1144,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       if (detail.kind === "node") {
         closeMenus();
         setActiveDockTabID(null);
-        setExplorerNodePopup({ nodeID: id, nodeTitle: label });
+        setExplorerNodePopup({
+          nodeID: id,
+          nodeTitle: label,
+          focusInformationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          focusRequestID: Date.now(),
+        });
       }
     };
     window.addEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
@@ -1621,6 +1633,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         <AppNodeEditorPopup
           nodeID={explorerNodePopup.nodeID}
           nodeTitle={explorerNodePopup.nodeTitle}
+          focusInformationID={explorerNodePopup.focusInformationID}
+          focusRequestID={explorerNodePopup.focusRequestID}
           onClose={() => {
             setExplorerNodePopup(null);
             setActiveDockTabID((current) => {

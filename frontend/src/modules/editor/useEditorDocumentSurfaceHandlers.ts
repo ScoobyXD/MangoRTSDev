@@ -112,6 +112,7 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   mentionAccent?: string;
   mentionSurfaceText?: string;
   mentionStrokeColor?: string;
+  mentionMenuPosition?: "fixed" | "absolute";
 };
 
 function clampEditorFontSize(value: number): number {
@@ -695,6 +696,7 @@ function applyEditorUndoCommand(
 type RichTextMentionDraft = ActiveMentionDraft & {
   left: number;
   top: number;
+  position: "fixed" | "absolute";
 };
 
 const EDITOR_MENTION_MENU_WIDTH_PX = 320;
@@ -716,7 +718,7 @@ function getCaretRect(root: HTMLElement, range: Range): DOMRect {
   return root.getBoundingClientRect();
 }
 
-function readRichTextMentionDraft(root: HTMLElement): RichTextMentionDraft | null {
+function readRichTextMentionDraft(root: HTMLElement, position: "fixed" | "absolute" = "fixed"): RichTextMentionDraft | null {
   const range = getEditorSelectionRange(root);
   if (!range || !range.collapsed || closestMentionElement(root, range.startContainer)) return null;
   const beforeRange = range.cloneRange();
@@ -727,21 +729,32 @@ function readRichTextMentionDraft(root: HTMLElement): RichTextMentionDraft | nul
   if (!draft) return null;
 
   const rect = getCaretRect(root, range);
+  const container = position === "absolute" ? root.parentElement : null;
+  const containerRect = container?.getBoundingClientRect() ?? null;
   const rootRect = root.getBoundingClientRect();
   const view = root.ownerDocument.defaultView;
   const viewportWidth = view?.innerWidth ?? 1280;
   const viewportHeight = view?.innerHeight ?? 720;
-  const editorMinLeft = Number.isFinite(rootRect.left) ? rootRect.left + EDITOR_MENTION_MENU_MARGIN_PX : EDITOR_MENTION_MENU_MARGIN_PX;
-  const editorMaxLeft = Number.isFinite(rootRect.right)
-    ? rootRect.right - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX
+  const coordinateLeft = position === "absolute" && containerRect ? rect.left - containerRect.left : rect.left;
+  const coordinateTop = position === "absolute" && containerRect ? rect.bottom - containerRect.top + 6 : rect.bottom + 6;
+  const boundaryLeft = position === "absolute" && containerRect ? 0 : rootRect.left;
+  const boundaryRight = position === "absolute" && containerRect ? containerRect.width : rootRect.right;
+  const boundaryHeight = position === "absolute" && containerRect ? containerRect.height : viewportHeight;
+  const editorMinLeft = Number.isFinite(boundaryLeft) ? boundaryLeft + EDITOR_MENTION_MENU_MARGIN_PX : EDITOR_MENTION_MENU_MARGIN_PX;
+  const editorMaxLeft = Number.isFinite(boundaryRight)
+    ? boundaryRight - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX
     : viewportWidth - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
   const viewportMaxLeft = viewportWidth - EDITOR_MENTION_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
-  const minLeft = Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(editorMinLeft, viewportMaxLeft));
-  const maxLeft = Math.max(minLeft, Math.min(editorMaxLeft, viewportMaxLeft));
+  const minLeft = position === "absolute"
+    ? Math.max(EDITOR_MENTION_MENU_MARGIN_PX, editorMinLeft)
+    : Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(editorMinLeft, viewportMaxLeft));
+  const maxLeft = Math.max(minLeft, position === "absolute" ? editorMaxLeft : Math.min(editorMaxLeft, viewportMaxLeft));
+  const maxTop = boundaryHeight - EDITOR_MENTION_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX;
   return {
     ...draft,
-    left: Math.max(minLeft, Math.min(rect.left, maxLeft)),
-    top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(rect.bottom + 6, viewportHeight - EDITOR_MENTION_MENU_MAX_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX)),
+    left: Math.max(minLeft, Math.min(coordinateLeft, maxLeft)),
+    top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(coordinateTop, maxTop)),
+    position,
   };
 }
 
@@ -1099,6 +1112,7 @@ export function useEditorDocumentSurfaceHandlers({
   mentionAccent = "#334155",
   mentionSurfaceText = "#111827",
   mentionStrokeColor = "rgba(15,23,42,0.18)",
+  mentionMenuPosition = "fixed",
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
@@ -1123,10 +1137,10 @@ export function useEditorDocumentSurfaceHandlers({
       setActiveMentionDraft(null);
       return;
     }
-    const draft = readRichTextMentionDraft(root);
+    const draft = readRichTextMentionDraft(root, mentionMenuPosition);
     activeMentionRootRef.current = draft ? root : null;
     setActiveMentionDraft(draft);
-  }, [mentionUsers.length]);
+  }, [mentionMenuPosition, mentionUsers.length]);
 
   const insertMention = useCallback((root: HTMLElement, mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
     replaceEditorMentionDraft(root, mention, user, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
@@ -1141,7 +1155,7 @@ export function useEditorDocumentSurfaceHandlers({
         role: "listbox",
         "aria-label": "Mention users",
         style: {
-        position: "fixed",
+        position: activeMentionDraft.position,
         left: activeMentionDraft.left,
         top: activeMentionDraft.top,
         zIndex: 2000,

@@ -164,6 +164,13 @@ function focusContentEditableAtEnd(element: HTMLElement | null) {
   selection.addRange(range);
 }
 
+function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, informationID: string) {
+  const cleanInformationID = informationID.trim();
+  if (!root || !cleanInformationID) return;
+  const target = root.querySelector<HTMLElement>(`[data-node-text-block-id="${cleanInformationID}"], [data-node-chat-block-id="${cleanInformationID}"], [data-node-chat-message-id="${cleanInformationID}"]`);
+  target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+}
+
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
@@ -174,6 +181,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   unseenChanges,
   companyUsers,
   projectionsLoaded,
+  focusInformationID,
+  focusRequestID,
   topPx,
   accent,
   surfaceText,
@@ -197,6 +206,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
   const focusBlockIDRef = useRef("");
+  const handledFocusRequestRef = useRef("");
   const previousNodeIDRef = useRef(nodeID);
   const [width, setWidth] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
@@ -1020,6 +1030,36 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return grouped;
   }, [chatMessages]);
+
+  useEffect(() => {
+    const cleanInformationID = focusInformationID?.trim() ?? "";
+    if (!cleanInformationID || !projectionsLoaded) return;
+    const requestKey = `${nodeID}:${cleanInformationID}:${focusRequestID ?? 0}`;
+    if (handledFocusRequestRef.current === requestKey) return;
+
+    const block = blocks.find((item) => item.id === cleanInformationID);
+    if (block) {
+      handledFocusRequestRef.current = requestKey;
+      setFocusedTextBlockID(block.id);
+      setActiveChatBlockID("");
+      window.requestAnimationFrame(() => {
+        const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${block.id}"]`) ?? null;
+        scrollNodeWorkspaceInformationIntoView(rootRef.current, block.id);
+        focusContentEditableAtEnd(editor);
+      });
+      return;
+    }
+
+    const message = chatMessages.find((item) => item.id === cleanInformationID);
+    if (!message) return;
+    const messages = chatMessagesByBlock.get(message.blockID) ?? [];
+    handledFocusRequestRef.current = requestKey;
+    navigateToChatMessage(message.blockID, messages, message.id);
+    window.requestAnimationFrame(() => {
+      scrollNodeWorkspaceInformationIntoView(rootRef.current, message.blockID);
+      scrollNodeWorkspaceInformationIntoView(rootRef.current, message.id);
+    });
+  }, [blocks, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
 
   const renderTextChatSplitHandle = (enabled: boolean) => {
     if (compact) return null;

@@ -42,6 +42,8 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
     forcedEntityKind?: "node" | "logic_gate";
     forcedEntityID?: string;
     forcedLabel?: string;
+    focusInformationID?: string;
+    focusRequestID?: number;
   }>,
 })));
 
@@ -336,9 +338,10 @@ export function AppSidebar({
     }
     setNotificationMenu(null);
 
+    const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
-    if (notification.type === "mention.created" && logicGateID) {
+    if (notification.type === "mention.created" && notification.entity_type === "logic_gate" && logicGateID) {
       emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
         companyID: notification.company_id || companyID,
         sourceFrameID: "app-sidebar-notifications",
@@ -346,6 +349,7 @@ export function AppSidebar({
         id: logicGateID,
         label: notification.title || logicGateID,
         nodeID: nodeID || undefined,
+        informationID: informationID || undefined,
         selectedTreeID: `logic-gate-${logicGateID}`,
         changedAt: Date.now(),
       });
@@ -359,6 +363,7 @@ export function AppSidebar({
         id: nodeID,
         label: notification.title || nodeID,
         selectedTreeID: `node-${nodeID}`,
+        informationID: informationID || undefined,
         changedAt: Date.now(),
       });
       return;
@@ -371,6 +376,7 @@ export function AppSidebar({
         id: logicGateID,
         label: notification.title || logicGateID,
         selectedTreeID: `logic-gate-${logicGateID}`,
+        informationID: informationID || undefined,
         changedAt: Date.now(),
       });
       return;
@@ -1222,6 +1228,7 @@ function notificationSummaryTypeCount(summary: NotificationSummary, type: string
 }
 
 function sidebarNotificationMatchesFilter(item: NotificationItem, filter: SidebarNotificationMenuFilter): boolean {
+  if (item.type === "mention.created" && filter.type !== "mention.created") return false;
   if (filter.type && item.type !== filter.type) return false;
   if (filter.surface && item.surface !== filter.surface) return false;
   if (filter.role && item.role !== filter.role) return false;
@@ -1489,9 +1496,11 @@ function defaultNodeEditorPopupSize(): { width: number; height: number } {
   return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
 }): React.ReactElement {
@@ -1609,6 +1618,8 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
             forcedEntityKind="node"
             forcedEntityID={nodeID}
             forcedLabel={nodeTitle}
+            focusInformationID={focusInformationID}
+            focusRequestID={focusRequestID}
           />
         </React.Suspense>
       </div>

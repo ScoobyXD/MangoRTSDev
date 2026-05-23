@@ -16,6 +16,8 @@ type Service struct {
 
 const DefaultDomainEventReplayLimit = 100
 
+var mentionUserIDAttributePattern = regexp.MustCompile(`(?i)data-mango-mention-user-id\s*=\s*(?:\\?["']([^"'\\]+)\\?["']|([^\s>]+))`)
+
 type DomainEventReplayResult struct {
 	ProcessedEvents      int
 	CreatedNotifications int
@@ -23,10 +25,11 @@ type DomainEventReplayResult struct {
 }
 
 type notificationRecipientMeta struct {
-	Surface     string
-	Role        string
-	LogicGateID string
-	NodeID      string
+	Surface       string
+	Role          string
+	LogicGateID   string
+	NodeID        string
+	InformationID string
 }
 
 type notificationProjectionEvent struct {
@@ -396,11 +399,15 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		body = compactPreview(payloadString(payload, "comment"), 180)
 	case domain.NotificationEventMentionCreated:
 		mentionedUserIDs := payloadStringSlice(payload, "mentioned_user_ids")
+		informationID := payloadString(payload, "information_id")
+		entityTitle := ""
 		switch event.EntityType {
 		case "logic_gate":
-			roles, _ := s.logicGateRaciRecipientRoles(event.CompanyID, event.EntityID)
+			if gate, err := s.Repo.GetLogicGate(event.CompanyID, event.EntityID); err == nil {
+				entityTitle = strings.TrimSpace(gate.Header)
+			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeLogicGate, event.EntityID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
-				return notificationMetaForLogicGateRole(roles[strings.TrimSpace(userID)], event.EntityID, "")
+				return notificationRecipientMeta{LogicGateID: event.EntityID}
 			}); err != nil {
 				return nil, err
 			}
@@ -417,23 +424,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 				}
 				break
 			}
-			metas := map[string]notificationRecipientMeta{}
-			firstLogicGateID := firstCleanString(node.LogicGateIDs)
-			if node.AssigneeUserID != nil {
-				userID := strings.TrimSpace(*node.AssigneeUserID)
-				metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
-			}
-			for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
-				roles, roleErr := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
-				if roleErr != nil {
-					continue
-				}
-				for userID, role := range roles {
-					metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationMetaForLogicGateRole(role, logicGateID, node.NodeID))
-				}
-			}
+			entityTitle = strings.TrimSpace(node.Title)
 			if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
-				return metas[strings.TrimSpace(userID)]
+				return notificationRecipientMeta{NodeID: node.NodeID}
 			}); err != nil {
 				return nil, err
 			}
@@ -444,8 +437,16 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		if actorLabel == "" {
 			actorLabel = "Someone"
 		}
-		title = actorLabel + " mentioned you"
+		if entityTitle != "" {
+			title = actorLabel + " mentioned you on " + entityTitle
+		} else {
+			title = actorLabel + " mentioned you"
+		}
 		body = compactPreview(payloadString(payload, "comment"), 180)
+		for userID, meta := range recipients {
+			meta.InformationID = informationID
+			recipients[userID] = meta
+		}
 	case domain.NotificationEventACIInboxChanged:
 		folderID := payloadString(payload, "folder_id")
 		if folderID == "" {
@@ -486,6 +487,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 			Role:            meta.Role,
 			LogicGateID:     meta.LogicGateID,
 			NodeID:          meta.NodeID,
+			InformationID:   meta.InformationID,
 		})
 	}
 	return items, nil
@@ -638,21 +640,39 @@ func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, err
 	if companyID == "" || text == "" || !strings.Contains(text, "@") {
 		return []string{}, nil
 	}
-	users, err := s.Repo.ListCompanyUsers(companyID)
+	mentioned := make([]string, 0)
+	seen := map[string]struct{}{}
+	addMentionedUserID := func(userID string) {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			return
+		}
+		if _, ok := seen[userID]; ok {
+			return
+		}
+		seen[userID] = struct{}{}
+		mentioned = append(mentioned, userID)
+	}
+	for _, match := range mentionUserIDAttributePattern.FindAllStringSubmatch(text, -1) {
+		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+			addMentionedUserID(match[1])
+			continue
+		}
+		if len(match) > 2 {
+			addMentionedUserID(match[2])
+		}
+	}
+
+	users, err := s.Repo.ListMentionableCompanyUsers(companyID)
 	if err != nil {
 		return nil, err
 	}
-	mentioned := make([]string, 0)
-	seen := map[string]struct{}{}
 	for _, user := range users {
 		for _, alias := range mentionAliases(user) {
 			if alias == "" || !containsMentionAlias(text, alias) {
 				continue
 			}
-			if _, ok := seen[user.UserID]; !ok {
-				seen[user.UserID] = struct{}{}
-				mentioned = append(mentioned, user.UserID)
-			}
+			addMentionedUserID(user.UserID)
 			break
 		}
 	}
@@ -686,7 +706,7 @@ func mentionAliases(user domain.CompanyUser) []string {
 }
 
 func containsMentionAlias(text, alias string) bool {
-	pattern := `(?i)(^|[^A-Za-z0-9_@.-])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@.-])`
+	pattern := `(?i)(^|[^A-Za-z0-9_@])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@])`
 	return regexp.MustCompile(pattern).FindStringIndex(text) != nil
 }
 
@@ -914,11 +934,13 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 	current.Role = normalizeNotificationRole(current.Role)
 	current.LogicGateID = strings.TrimSpace(current.LogicGateID)
 	current.NodeID = strings.TrimSpace(current.NodeID)
+	current.InformationID = strings.TrimSpace(current.InformationID)
 	next.Surface = strings.TrimSpace(next.Surface)
 	next.Role = normalizeNotificationRole(next.Role)
 	next.LogicGateID = strings.TrimSpace(next.LogicGateID)
 	next.NodeID = strings.TrimSpace(next.NodeID)
-	if current.Surface == "" && current.Role == "" && current.LogicGateID == "" && current.NodeID == "" {
+	next.InformationID = strings.TrimSpace(next.InformationID)
+	if current.Surface == "" && current.Role == "" && current.LogicGateID == "" && current.NodeID == "" && current.InformationID == "" {
 		return next
 	}
 	roleChanged := false
@@ -934,6 +956,9 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 	}
 	if current.NodeID == "" || (roleChanged && next.NodeID != "") {
 		current.NodeID = next.NodeID
+	}
+	if current.InformationID == "" {
+		current.InformationID = next.InformationID
 	}
 	return current
 }
