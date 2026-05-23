@@ -5,8 +5,8 @@ import { EXPLORER_SYSTEM_FOLDER_COLOR } from "./treePresentation";
 
 export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind, systemKey }) => {
   if (kind === "folder") {
-    const fill = systemKey ? "rgba(0, 233, 255, 0.14)" : "#f8fafc";
-    const tabFill = systemKey ? "rgba(0, 233, 255, 0.28)" : "#e2e8f0";
+    const fill = systemKey ? "rgba(71, 85, 105, 0.14)" : "#f8fafc";
+    const tabFill = systemKey ? "rgba(71, 85, 105, 0.28)" : "#e2e8f0";
     const stroke = systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#64748b";
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
@@ -28,11 +28,11 @@ export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemK
   }
   return (
     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-      <path d="M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9" fill="none" stroke="#0c8f47" strokeWidth="1.25" strokeLinecap="round" />
-      <path d="M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z" fill="#e8fff1" stroke="#0c8f47" strokeWidth="1.25" strokeLinejoin="round" />
-      <circle cx="4.35" cy="5.25" r="0.85" fill="#16b85f" />
-      <circle cx="4.35" cy="10.75" r="0.85" fill="#16b85f" />
-      <circle cx="12.15" cy="8" r="0.85" fill="#16b85f" />
+      <path d="M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9" fill="none" stroke="#334155" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z" fill="#f8fafc" stroke="#334155" strokeWidth="1.25" strokeLinejoin="round" />
+      <circle cx="4.35" cy="5.25" r="0.85" fill="#64748b" />
+      <circle cx="4.35" cy="10.75" r="0.85" fill="#64748b" />
+      <circle cx="12.15" cy="8" r="0.85" fill="#64748b" />
     </svg>
   );
 };

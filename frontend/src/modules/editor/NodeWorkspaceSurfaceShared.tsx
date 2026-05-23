@@ -286,9 +286,8 @@ export function initialsForName(name: string): string {
 }
 
 export function avatarBackgroundForName(name: string): string {
-  let hash = 0;
-  for (let index = 0; index < name.length; index += 1) hash = (hash * 31 + name.charCodeAt(index)) % 360;
-  return `hsl(${hash}, 68%, 86%)`;
+  void name;
+  return `#e2e8f0`;
 }
 
 export const ChatIcon: React.FC<{ color: string }> = ({ color }) => (

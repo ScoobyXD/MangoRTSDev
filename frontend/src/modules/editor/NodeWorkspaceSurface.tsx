@@ -63,8 +63,8 @@ const DEFAULT_TEXT_CHAT_SPLIT_RATIO = 0.704;
 const TEXT_CHAT_SPLIT_MIN_RATIO = 0.50;
 const TEXT_CHAT_SPLIT_MAX_RATIO = 0.84;
 const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v1";
-const LOGIC_GATE_ASSIGN_SUCCESS_COLOR = "#15803d";
-const LOGIC_GATE_ASSIGN_ERROR_COLOR = "#b42318";
+const LOGIC_GATE_ASSIGN_SUCCESS_COLOR = "#166534";
+const LOGIC_GATE_ASSIGN_ERROR_COLOR = "#b00020";
 
 function clampTextChatSplitRatio(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
@@ -1074,15 +1074,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           alignContent: "center",
           justifyItems: "center",
           gap: 7,
-          border: `1px solid ${selected || busy ? accent : "rgba(0, 188, 212, 0.28)"}`,
+          border: `1px solid ${selected || busy ? accent : "rgba(100, 116, 139, 0.28)"}`,
           borderRadius: 7,
-          background: busy ? "rgba(0,188,212,0.16)" : selected ? "#ecfeff" : "#f8fafc",
+          background: busy ? "rgba(100,116,139,0.16)" : selected ? "#f8fafc" : "#f8fafc",
           color: surfaceText,
           cursor: assigningLogicGateID ? "default" : "pointer",
           font: "inherit",
           padding: "10px 8px",
           minWidth: 0,
-          boxShadow: selected ? "0 0 0 2px rgba(0, 188, 212, 0.12) inset" : "none",
+          boxShadow: selected ? "0 0 0 2px rgba(100, 116, 139, 0.12) inset" : "none",
         }}
       >
         <span aria-hidden="true" style={{ width: 28, height: 28, display: "grid", placeItems: "center", transform: "scale(1.3)" }}>
@@ -1161,9 +1161,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               style={{
                 minHeight: 30,
                 borderRadius: 6,
-                border: "1px solid rgba(17, 122, 67, 0.34)",
-                background: "rgba(232, 247, 237, 0.94)",
-                color: "#0f6b3d",
+                border: "1px solid rgba(100, 116, 139, 0.34)",
+                background: "rgba(248, 250, 252, 0.94)",
+                color: "#334155",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1209,7 +1209,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               minHeight: 30,
               borderRadius: 6,
               border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
-              background: logicGateAssignerOpen ? "rgba(0,188,212,0.12)" : panelBackground,
+              background: logicGateAssignerOpen ? "rgba(100,116,139,0.12)" : panelBackground,
               color: surfaceText,
               display: "inline-flex",
               alignItems: "center",
@@ -1262,7 +1262,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 </div>
                 {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
               </div>
-              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(180,35,24,0.32)" : "rgba(21,128,61,0.28)"}`, borderRadius: 7, background: nodePriorityUnassignedForLogicGate ? "rgba(180,35,24,0.06)" : "rgba(21,128,61,0.06)", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3 }}>
+              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(255, 61, 127, 0.28)" : "rgba(22, 163, 74, 0.22)"}`, borderRadius: 7, background: nodePriorityUnassignedForLogicGate ? "#fff0f4" : "#f0fdf4", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3 }}>
                 In order to assign to a Logic Gate, give this node a priority.
               </div>
 
@@ -1288,7 +1288,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   }}
                   placeholder="Search logic gates"
                   aria-label="Search logic gates"
-                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(0,188,212,0.10)" : "none" }}
+                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(100,116,139,0.10)" : "none" }}
                 />
                 <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 10, top: 9, color: accent, pointerEvents: "none" }}>
                   <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -1383,7 +1383,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <React.Fragment key={block.id}>
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(0,188,212,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
+                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(100,116,139,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
@@ -1554,7 +1554,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               minHeight: 58,
               border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
               borderRadius: 8,
-              background: dropActive ? "rgba(0,188,212,0.08)" : panelBackground,
+              background: dropActive ? "rgba(100,116,139,0.08)" : panelBackground,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",

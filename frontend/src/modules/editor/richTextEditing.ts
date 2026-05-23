@@ -11,7 +11,7 @@ import {
 
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
-export const EDITOR_LINK_COLOR = "rgb(0, 86, 214)";
+export const EDITOR_LINK_COLOR = "rgb(51, 65, 85)";
 export const EDITOR_TERMINAL_BREAK_ATTRIBUTE = "data-mango-editor-terminal-break";
 export const EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE = "data-mango-editor-image-clear";
 

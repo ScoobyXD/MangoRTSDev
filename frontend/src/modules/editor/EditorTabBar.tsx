@@ -227,7 +227,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     border: `1px solid ${colorWithAlpha(outlineMenuAccent, 0.45)}`,
                     borderRadius: 6,
                     background: tabSelectedBackground,
-                    boxShadow: `0 12px 28px ${colorWithAlpha("#001014", 0.18)}`,
+                    boxShadow: `0 12px 28px ${colorWithAlpha("#0f172a", 0.18)}`,
                     display: "grid",
                     gap: 3,
                   }}
@@ -324,7 +324,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 border: `1px solid ${strokeColor}`,
                 borderRadius: 6,
                 background: tabSelectedBackground,
-                boxShadow: `0 12px 28px ${colorWithAlpha("#001014", 0.18)}`,
+                boxShadow: `0 12px 28px ${colorWithAlpha("#0f172a", 0.18)}`,
                 display: "grid",
                 gap: 3,
               }}

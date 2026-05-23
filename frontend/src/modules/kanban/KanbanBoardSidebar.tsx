@@ -174,7 +174,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
     </div>
     {boardPickerOpen && (
       <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
-        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
+        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
             <div key={group.folderLabel}>
@@ -189,7 +189,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     type="button"
                     title={board.board_id}
                     onClick={() => onSelectBoard(board.board_id)}
-                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(0,188,212,0.2)" : "rgba(0, 188, 212, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(100,116,139,0.2)" : "rgba(100, 116, 139, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
                     <KanbanBoardIcon />
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }}>

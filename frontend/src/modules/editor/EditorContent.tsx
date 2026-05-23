@@ -1526,8 +1526,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.22)";
   const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(15,23,42,0.14)";
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
-  const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
-  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 188, 212, 0.08)";
+  const scrollbarAccent = theme === "light" ? "rgb(71, 85, 105)" : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)";
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);

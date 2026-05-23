@@ -108,7 +108,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
         </button>
       )}
       {(menu.deleteTargets.length > 0 || menu.deleteTarget) && (
-        <button style={{ ...buttonStyle, color: "#c62828" }} onClick={() => onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!])}>
+        <button style={{ ...buttonStyle, color: "#334155" }} onClick={() => onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!])}>
           Delete
         </button>
       )}

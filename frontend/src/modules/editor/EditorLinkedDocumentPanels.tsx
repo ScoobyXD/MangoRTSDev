@@ -42,10 +42,10 @@ type EditorLinkedDocumentPanelsProps = {
 };
 
 const NODE_PRIORITY_OPTIONS = [
-  { value: "1", label: "1\u00A0\u00A0URGENT (<1 hr)", color: "#b91c1c" },
-  { value: "2", label: "2\u00A0\u00A0By end of day", color: "#dc2626" },
-  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#006f85" },
-  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#0e7490" },
+  { value: "1", label: "1\u00A0\u00A0URGENT (<1 hr)", color: "#334155" },
+  { value: "2", label: "2\u00A0\u00A0By end of day", color: "#475569" },
+  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#334155" },
+  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#64748b" },
   { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
   { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;
@@ -348,9 +348,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               onCommitNodeAssigneeDraft(label);
                               setAssigneeMenuOpen(false);
                             }}
-                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(0, 188, 212, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(100, 116, 139, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
                           >
-                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(0, 188, 212, 0.13)", color: accent }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(100, 116, 139, 0.13)", color: accent }}>
                               <PersonIcon color={accent} />
                             </span>
                             <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
@@ -424,22 +424,22 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         gridTemplateColumns: "minmax(0, 1fr) 18px",
                         alignItems: "center",
                         gap: 7,
-                        border: `1px solid ${priorityHasRequirementError ? "#b42318" : `${selectedPriority.color}66`}`,
+                        border: `1px solid ${priorityHasRequirementError ? "#334155" : `${selectedPriority.color}66`}`,
                         borderRadius: 6,
-                        background: priorityHasRequirementError ? "rgba(180,35,24,0.08)" : hexWithAlpha(selectedPriority.color, "14"),
-                        color: priorityHasRequirementError ? "#b42318" : selectedPriority.color,
+                        background: priorityHasRequirementError ? "rgba(100,116,139,0.08)" : hexWithAlpha(selectedPriority.color, "14"),
+                        color: priorityHasRequirementError ? "#334155" : selectedPriority.color,
                         font: "inherit",
                         fontSize: 11.5,
                         fontWeight: 600,
                         padding: "3px 8px",
                         cursor: "pointer",
                         textAlign: "left",
-                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(180,35,24,0.18)" : "none",
+                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(100,116,139,0.18)" : "none",
                       }}
                     >
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
                       <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "currentColor" }}>
-                        {selectedPriority.value !== "0" ? <PriorityCheckIcon color={priorityHasRequirementError ? "#b42318" : selectedPriority.color} /> : null}
+                        {selectedPriority.value !== "0" ? <PriorityCheckIcon color={priorityHasRequirementError ? "#334155" : selectedPriority.color} /> : null}
                       </span>
                     </button>
                     {priorityMenuOpen && (
@@ -501,7 +501,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       </div>
                     )}
                   </span>
-                  {priorityRequirementError && <span style={{ color: "#b42318", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
+                  {priorityRequirementError && <span style={{ color: "#b00020", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
                 </span>
               </label>
             </div>
@@ -705,7 +705,7 @@ function LogicGateRaciRoleEditor({
                   onClick={() => addUser(user.user_id)}
                   style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
                 >
-                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(0, 188, 212, 0.13)", color: accent }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(100, 116, 139, 0.13)", color: accent }}>
                     <PersonIcon color={accent} />
                   </span>
                   <span style={{ minWidth: 0, display: "grid", gap: 1 }}>

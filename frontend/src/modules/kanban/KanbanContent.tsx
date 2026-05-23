@@ -197,8 +197,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : "#ffffff";
   const text = isDark ? "#f6f8fb" : "#111827";
-  const subtext = isDark ? "#b8c4cc" : "#7c3a12";
-  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(0, 188, 212, 0.16)";
+  const subtext = isDark ? "#b8c4cc" : "#475569";
+  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(100, 116, 139, 0.16)";
   const laneBackground = isDark ? "#1a2229" : "#ffffff";
   const laneBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(17,17,17,0.78)";
   const laneShadow = isDark ? "none" : "0 4px 12px rgba(16,24,40,0.08)";
@@ -1502,8 +1502,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 188, 212, 0.08)" }}>
-        {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
+        {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} yGroupBy={arenaYGroupBy} xGroupBy={arenaXGroupBy} ySortDirection={arenaYSortDirection} xSortDirection={arenaXSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetYGroupBy={selectArenaYGroupBy} onSetXGroupBy={setArenaXGroupBy} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} renderCard={renderCard} /> : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>

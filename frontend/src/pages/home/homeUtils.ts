@@ -275,8 +275,8 @@ export function setLogicGateDragData(dataTransfer: DataTransfer, logicGateIDs: s
   dataTransfer.setData("text/plain", ids.length === 1 ? logicGateTitle(logicGateByID.get(ids[0])) : `${ids.length} Logic Gates`);
   attachStackedDragPreview(
     dataTransfer,
-    ids.map((logicGateID) => ({ label: logicGateTitle(logicGateByID.get(logicGateID)), color: "#006f85" })),
-    "#006f85",
+    ids.map((logicGateID) => ({ label: logicGateTitle(logicGateByID.get(logicGateID)), color: "#334155" })),
+    "#334155",
     "Logic Gates",
   );
 }
@@ -497,8 +497,8 @@ export function setNodeDragData(dataTransfer: DataTransfer, nodeIDs: string[], n
   dataTransfer.setData("text/plain", ids.length === 1 ? nodeTitle(nodeByID.get(ids[0])) : `${ids.length} nodes`);
   attachStackedDragPreview(
     dataTransfer,
-    ids.map((nodeID) => ({ label: nodeTitle(nodeByID.get(nodeID)), color: "#006f85" })),
-    "#006f85",
+    ids.map((nodeID) => ({ label: nodeTitle(nodeByID.get(nodeID)), color: "#334155" })),
+    "#334155",
     "Nodes",
   );
 }

@@ -235,8 +235,8 @@ export function buildPlusGridBackgroundStyle(input: {
   const strokeWidth = clamp(1 / zoom, 0.45, 1.4);
   const minorArm = clamp(3.5 / zoom, 1.8, 5.5);
   const majorArm = clamp(5.5 / zoom, 2.6, 7.5);
-  const minorColor = input.theme === "dark" ? "#bcecf2" : "#425961";
-  const majorColor = input.accent || (input.theme === "dark" ? "#72f1ff" : "#007b88");
+  const minorColor = input.theme === "dark" ? "#e2e8f0" : "#475569";
+  const majorColor = input.accent || (input.theme === "dark" ? "#cbd5e1" : "#475569");
   const minorPanX = gridOffset(input.pan?.x ?? 0, minorStep);
   const minorPanY = gridOffset(input.pan?.y ?? 0, minorStep);
   const majorPanX = gridOffset(input.pan?.x ?? 0, majorStep);

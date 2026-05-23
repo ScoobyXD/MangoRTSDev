@@ -20,8 +20,8 @@ export type MentionTextSegment = {
 
 export const EDITOR_MENTION_ATTRIBUTE = "data-mango-mention";
 export const EDITOR_MENTION_USER_ID_ATTRIBUTE = "data-mango-mention-user-id";
-export const EDITOR_MENTION_BACKGROUND = "#fff3a3";
-export const EDITOR_MENTION_COLOR = "#4a3000";
+export const EDITOR_MENTION_BACKGROUND = "#f1f5f9";
+export const EDITOR_MENTION_COLOR = "#334155";
 
 const MENTION_BOUNDARY_PATTERN = /[A-Za-z0-9_@.-]/;
 

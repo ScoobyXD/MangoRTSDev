@@ -82,10 +82,10 @@ export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLas
         height: isLast ? 25 : undefined,
         left: 15,
         width: 1,
-        background: muted ? "rgba(100,116,139,0.18)" : "rgba(0,188,212,0.35)",
+        background: muted ? "rgba(100,116,139,0.18)" : "rgba(100,116,139,0.35)",
       }}
     />
-    <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(0,188,212,0.08)" }} />
+    <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(100,116,139,0.08)" }} />
   </div>
 );
 
@@ -133,7 +133,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
         aria-expanded={open}
         title="Text box actions"
         onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(0,188,212,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
+        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(100,116,139,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
       >
         ...
       </button>
@@ -174,7 +174,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
               setOpen(false);
               onDelete();
             }}
-            style={{ ...menuItemStyle, color: "#b42318" }}
+            style={{ ...menuItemStyle, color: "#334155" }}
           >
             Delete
           </button>
@@ -217,7 +217,7 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
         <button type="button" onClick={onConfirm} style={{ minHeight: 28, border: `1px solid ${accent}`, background: "#ffffff", color: "#111111", cursor: "pointer", fontWeight: 700 }}>
           Yes
         </button>
-        <button type="button" onClick={onCancel} style={{ minHeight: 28, border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: "pointer", fontWeight: 700 }}>
+        <button type="button" onClick={onCancel} style={{ minHeight: 28, border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: "pointer", fontWeight: 700 }}>
           No
         </button>
       </div>
@@ -887,8 +887,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 width: rect.width,
                 height: rect.height,
                 borderRadius: 3,
-                background: rect.active ? "rgba(38, 166, 91, 0.44)" : "rgba(46, 204, 113, 0.25)",
-                boxShadow: rect.active ? "0 0 0 1px rgba(17,122,67,0.72), 0 0 0 3px rgba(46,204,113,0.18)" : "none",
+                background: rect.active ? "rgba(100, 116, 139, 0.44)" : "rgba(100, 116, 139, 0.25)",
+                boxShadow: rect.active ? "0 0 0 1px rgba(100,116,139,0.72), 0 0 0 3px rgba(100,116,139,0.18)" : "none",
               }}
             />
           ))}
@@ -915,8 +915,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 width: rect.width,
                 height: rect.height,
                 borderRadius: 3,
-                background: rect.active ? "rgba(255, 180, 44, 0.52)" : "rgba(255, 213, 79, 0.34)",
-                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(0,188,212,0.16)` : "none",
+                background: rect.active ? "rgba(100, 116, 139, 0.52)" : "rgba(100, 116, 139, 0.34)",
+                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(100,116,139,0.16)` : "none",
               }}
             />
           ))}
@@ -1001,9 +1001,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           {contentChangeLabels.map((label) => {
             const active = activeContentChangeID === label.change.change_id;
             const addition = label.change.change_type === "addition";
-            const color = addition ? "#0f6b3d" : "#b42318";
-            const border = addition ? "rgba(17,122,67,0.34)" : "rgba(180,35,24,0.34)";
-            const background = addition ? "rgba(232,247,237,0.98)" : "rgba(255,241,240,0.98)";
+            const color = addition ? "#334155" : "#334155";
+            const border = addition ? "rgba(100,116,139,0.34)" : "rgba(100,116,139,0.34)";
+            const background = addition ? "rgba(248,250,252,0.98)" : "rgba(248,250,252,0.98)";
             return (
               <div
                 key={label.change.change_id}
@@ -1410,7 +1410,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
         <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
-            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(0,188,212,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
+            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(100,116,139,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
               {selectionAnchor.quote}
             </div>
           )}
@@ -1470,7 +1470,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         gap: 8,
                         border: "none",
                         borderRadius: 6,
-                        background: selected ? "rgba(0, 188, 212, 0.16)" : "transparent",
+                        background: selected ? "rgba(100, 116, 139, 0.16)" : "transparent",
                         color: surfaceText,
                         cursor: "pointer",
                         padding: "5px 8px",
@@ -1597,7 +1597,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           aria-orientation="horizontal"
           title="Resize chat"
           onPointerDown={beginResize}
-          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(0,188,212,0.10)" : "rgba(100,116,139,0.08)" }}
+          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
         />
       </div>
       {previewAttachment && (
@@ -1639,7 +1639,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
         <span
           key={`${segment.text}:${index}`}
           title={segment.user ? mentionUserOptionLabel(segment.user) : segment.text}
-          style={{ background: "#fff3a3", color: "#4a3000", borderRadius: 3, padding: "0 2px", fontWeight: 800, boxDecorationBreak: "clone" }}
+          style={{ background: "#f1f5f9", color: "#334155", borderRadius: 3, padding: "0 2px", fontWeight: 800, boxDecorationBreak: "clone" }}
         >
           {segment.text}
         </span>
@@ -1678,7 +1678,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         columnGap: 7,
         alignItems: "start",
         borderRadius: 6,
-        background: isActive ? "rgba(0,188,212,0.08)" : "transparent",
+        background: isActive ? "rgba(100,116,139,0.08)" : "transparent",
         boxShadow: isActive ? `inset 0 0 0 1px ${accent}` : "none",
         padding: "4px 4px 4px 0",
         cursor: "pointer",
@@ -1743,7 +1743,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
                 event.stopPropagation();
                 onDelete(message.id);
               }}
-              style={{ border: "none", background: "transparent", color: "rgba(162,0,38,0.82)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+              style={{ border: "none", background: "transparent", color: "rgba(51,65,85,0.82)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
             >
               Delete
             </button>
@@ -1906,7 +1906,7 @@ const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attac
     return <img alt="" src={attachment.dataURL} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
   }
   return (
-    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(0,188,212,0.10)", display: "grid", placeItems: "center", color: "rgba(15,23,42,0.78)", fontSize: 8, fontWeight: 900 }}>
+    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(100,116,139,0.10)", display: "grid", placeItems: "center", color: "rgba(15,23,42,0.78)", fontSize: 8, fontWeight: 900 }}>
       FILE
     </span>
   );
@@ -2153,7 +2153,7 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, a
           </button>
         </div>
         {(loading || error) && (
-          <div style={{ padding: "9px 12px", borderBottom: `1px solid ${strokeColor}`, color: error ? "#b00020" : accent, fontSize: 12, fontWeight: 800 }}>
+          <div style={{ padding: "9px 12px", borderBottom: `1px solid ${strokeColor}`, color: error ? "#334155" : accent, fontSize: 12, fontWeight: 800 }}>
             {error || "Loading"}
           </div>
         )}

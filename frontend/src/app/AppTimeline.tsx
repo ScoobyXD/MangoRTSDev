@@ -64,8 +64,8 @@ const TIMELINE_VISUAL_STEP_MINUTES = 15;
 const COMPACT_HEADER_HEIGHT = 22;
 const EXPANDED_TRACK_HEIGHT = 88;
 const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
-const TIMELINE_NODE_ACCENT = "rgb(0, 233, 255)";
-const TIMELINE_LOGIC_GATE_ACCENT = "rgb(0, 255, 132)";
+const TIMELINE_NODE_ACCENT = "rgb(71, 85, 105)";
+const TIMELINE_LOGIC_GATE_ACCENT = "rgb(71, 85, 105)";
 const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
 const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
@@ -630,10 +630,10 @@ function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProp
     height: compact ? "100%" : EXPANDED_TRACK_HEIGHT,
     overflowX: "hidden",
     overflowY: "hidden",
-    border: compact ? 0 : `1px solid ${active ? "rgba(20, 184, 166, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
+    border: compact ? 0 : `1px solid ${active ? "rgba(100, 116, 139, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
     borderRadius: compact ? "0 15px 15px 0" : 8,
     background: "#ffffff",
-    boxShadow: active ? "0 0 0 2px rgba(20, 184, 166, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
+    boxShadow: active ? "0 0 0 2px rgba(100, 116, 139, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
     scrollbarWidth: "none",
   };
 }
@@ -699,15 +699,15 @@ function timelineItemStyle(
   _compact: boolean,
   readOnly: boolean,
 ): React.CSSProperties {
-  const accent = completed ? "#16a34a" : timelineKindAccent(kind);
+  const accent = completed ? "#475569" : timelineKindAccent(kind);
   const nodeBackground = completed
-    ? "#dcfce7"
+    ? "#f1f5f9"
     : kind === "logic_gate"
-      ? "rgba(0, 255, 132, 0.18)"
-      : "rgba(0, 233, 255, 0.18)";
-  const selectionShadow = kind === "logic_gate" ? "rgba(0, 255, 132, 0.32)" : "rgba(0, 233, 255, 0.32)";
+      ? "rgba(100, 116, 139, 0.18)"
+      : "rgba(71, 85, 105, 0.18)";
+  const selectionShadow = kind === "logic_gate" ? "rgba(100, 116, 139, 0.32)" : "rgba(71, 85, 105, 0.32)";
   const itemShadow = completed
-    ? "inset 0 0 0 1px rgba(22, 163, 74, 0.18)"
+    ? "inset 0 0 0 1px rgba(100, 116, 139, 0.18)"
     : selected
       ? `inset 0 0 0 2px ${selectionShadow}`
       : "inset 0 1px 0 rgba(255, 255, 255, 0.62)";
@@ -734,7 +734,7 @@ function timelineItemStyle(
 }
 
 function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntityKind, completed: boolean): React.CSSProperties {
-  const accent = completed ? "#16a34a" : timelineKindAccent(kind);
+  const accent = completed ? "#475569" : timelineKindAccent(kind);
   return {
     position: "absolute",
     top: 0,
@@ -788,7 +788,7 @@ function timelineItemTextStyle(_compact: boolean, completed: boolean): React.CSS
     fontWeight: 900,
     lineHeight: "22px",
     textDecoration: completed ? "line-through" : "none",
-    color: completed ? "#166534" : "#0f172a",
+    color: completed ? "#334155" : "#0f172a",
   };
 }
 
@@ -796,7 +796,7 @@ function timelineItemBottomRowStyle(_compact: boolean, completed: boolean): Reac
   return {
     minWidth: 0,
     display: "block",
-    color: completed ? "#166534" : "#475569",
+    color: completed ? "#334155" : "#475569",
     fontSize: 9.5,
     fontWeight: 900,
     lineHeight: "11px",
@@ -823,7 +823,7 @@ const timelineCheckboxStyle: React.CSSProperties = {
   width: 15,
   height: 15,
   margin: 0,
-  accentColor: "#16a34a",
+  accentColor: "#475569",
   cursor: "pointer",
 };
 
@@ -831,7 +831,7 @@ function timelineHistoryCheckStyle(completed: boolean): React.CSSProperties {
   return {
     display: "grid",
     placeItems: "center",
-    color: completed ? "#16a34a" : "transparent",
+    color: completed ? "#475569" : "transparent",
     fontSize: 14,
     fontWeight: 900,
   };
@@ -844,7 +844,7 @@ const timelineMenuButtonStyle: React.CSSProperties = {
   padding: "9px 14px",
   border: "none",
   background: "transparent",
-  color: "#c62828",
+  color: "#334155",
   cursor: "pointer",
   fontFamily: "var(--mango-font-family)",
   fontSize: 12,
