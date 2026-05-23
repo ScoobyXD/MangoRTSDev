@@ -2,10 +2,236 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 )
+
+type effectiveAccessExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func replaceEffectiveFactsForSourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) error {
+	companyID, sourceType, sourceID, err := normalizePostgresEffectiveAccessSourceScope(companyID, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	facts, err = normalizePostgresEffectiveAccessFactsForSource(companyID, sourceType, sourceID, facts)
+	if err != nil {
+		return err
+	}
+	if err := deleteEffectiveFactsForSourceTx(ctx, tx, companyID, sourceType, sourceID); err != nil {
+		return err
+	}
+	return insertEffectiveFactsTx(ctx, tx, facts)
+}
+
+func deleteEffectiveFactsForSourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, sourceType, sourceID string) error {
+	companyID, sourceType, sourceID, err := normalizePostgresEffectiveAccessSourceScope(companyID, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	if ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	_, err = tx.ExecContext(ctx, `
+delete from effective_resource_access
+where company_id=$1::uuid
+  and source_type=$2
+  and source_id=$3`, companyID, sourceType, sourceID)
+	return err
+}
+
+func replaceEffectiveFactsForResourceSourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) error {
+	var err error
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	sourceType = strings.TrimSpace(sourceType)
+	if companyID == "" || resourceID == "" || !typeOK || sourceType == "" {
+		return ErrInvalid
+	}
+	facts, err = normalizePostgresEffectiveAccessFactsForResourceSource(companyID, resourceType, resourceID, sourceType, facts)
+	if err != nil {
+		return err
+	}
+	if err := deleteEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, sourceType); err != nil {
+		return err
+	}
+	return insertEffectiveFactsTx(ctx, tx, facts)
+}
+
+func deleteEffectiveFactsForResourceSourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, resourceType, resourceID, sourceType string) error {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	sourceType = strings.TrimSpace(sourceType)
+	if companyID == "" || resourceID == "" || !typeOK || sourceType == "" || ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from effective_resource_access
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid
+  and source_type=$4`, companyID, resourceType, resourceID, sourceType)
+	return err
+}
+
+func insertEffectiveFactsTx(ctx context.Context, tx effectiveAccessExecer, facts []domain.EffectiveResourceAccess) error {
+	if ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	var err error
+	facts, err = normalizePostgresEffectiveAccessFacts(facts)
+	if err != nil {
+		return err
+	}
+	for _, fact := range facts {
+		if _, err := tx.ExecContext(ctx, `
+insert into effective_resource_access (
+  company_id,
+  user_id,
+  resource_type,
+  resource_id,
+  access_level,
+  source_type,
+  source_id,
+  created_timestamp,
+  updated_timestamp
+)
+values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, now(), now())
+on conflict (company_id, user_id, resource_type, resource_id, source_type, source_id)
+	do update set
+	  access_level=case
+	    when mangorts_access_level_rank(effective_resource_access.access_level) >= mangorts_access_level_rank(excluded.access_level)
+	      then effective_resource_access.access_level
+	    else excluded.access_level
+	  end,
+	  updated_timestamp=now()`,
+			fact.CompanyID,
+			fact.UserID,
+			fact.ResourceType,
+			fact.ResourceID,
+			fact.AccessLevel,
+			fact.SourceType,
+			fact.SourceID,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizePostgresEffectiveAccessSourceScope(companyID, sourceType, sourceID string) (string, string, string, error) {
+	companyID = cleanUUIDText(companyID)
+	sourceType = strings.TrimSpace(sourceType)
+	sourceID = strings.TrimSpace(sourceID)
+	if companyID == "" || sourceType == "" || sourceID == "" {
+		return "", "", "", ErrInvalid
+	}
+	return companyID, sourceType, sourceID, nil
+}
+
+func normalizePostgresEffectiveAccessFact(fact domain.EffectiveResourceAccess) (domain.EffectiveResourceAccess, error) {
+	fact, err := normalizeEffectiveAccessFact(fact)
+	if err != nil {
+		return domain.EffectiveResourceAccess{}, err
+	}
+	fact.CompanyID = cleanUUIDText(fact.CompanyID)
+	fact.UserID = cleanUUIDText(fact.UserID)
+	fact.ResourceID = cleanUUIDText(fact.ResourceID)
+	if fact.CompanyID == "" || fact.UserID == "" || fact.ResourceID == "" {
+		return domain.EffectiveResourceAccess{}, ErrInvalid
+	}
+	return fact, nil
+}
+
+func normalizePostgresEffectiveAccessFacts(facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized := make([]domain.EffectiveResourceAccess, 0, len(facts))
+	for _, fact := range facts {
+		normalizedFact, err := normalizePostgresEffectiveAccessFact(fact)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, normalizedFact)
+	}
+	return normalized, nil
+}
+
+func normalizePostgresEffectiveAccessFactsForSource(companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized, err := normalizePostgresEffectiveAccessFacts(facts)
+	if err != nil {
+		return nil, err
+	}
+	for _, fact := range normalized {
+		if fact.CompanyID != companyID || fact.SourceType != sourceType || fact.SourceID != sourceID {
+			return nil, ErrInvalid
+		}
+	}
+	return normalized, nil
+}
+
+func normalizePostgresEffectiveAccessFactsForResourceSource(companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) ([]domain.EffectiveResourceAccess, error) {
+	normalized, err := normalizePostgresEffectiveAccessFacts(facts)
+	if err != nil {
+		return nil, err
+	}
+	for _, fact := range normalized {
+		if fact.CompanyID != companyID || fact.ResourceType != resourceType || fact.ResourceID != resourceID || fact.SourceType != sourceType {
+			return nil, ErrInvalid
+		}
+	}
+	return normalized, nil
+}
+
+func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	companyID = cleanUUIDText(companyID)
+	nodeID = cleanUUIDText(nodeID)
+	if companyID == "" || nodeID == "" {
+		return ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select node.company_id::text,
+       node.assignee_user_id::text,
+       node.node_id::text
+from nodes node
+join company_memberships membership
+  on membership.company_id=node.company_id
+ and membership.user_id=node.assignee_user_id
+where node.company_id=$1::uuid
+  and node.node_id=$2::uuid
+  and node.assignee_user_id is not null`, companyID, nodeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	facts := []domain.EffectiveResourceAccess{}
+	for rows.Next() {
+		var factCompanyID string
+		var userID string
+		var factNodeID string
+		if err := rows.Scan(&factCompanyID, &userID, &factNodeID); err != nil {
+			return err
+		}
+		facts = append(facts, domain.EffectiveResourceAccess{
+			CompanyID:    factCompanyID,
+			UserID:       userID,
+			ResourceType: EntityTypeNode,
+			ResourceID:   factNodeID,
+			AccessLevel:  EntityPermissionEdit,
+			SourceType:   effectiveAccessSourceNodeAssignee,
+			SourceID:     nodeAssigneeEffectiveAccessSourceID(factNodeID, userID),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, facts)
+}
 
 func (r *PostgresRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
 	companyID = cleanUUIDText(companyID)

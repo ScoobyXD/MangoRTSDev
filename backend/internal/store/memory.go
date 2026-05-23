@@ -44,6 +44,7 @@ type MemoryRepo struct {
 	emailNodeLinks           map[string]communicationsEmailNodeLink
 	logicGateShortcuts       map[string]domain.UserLogicGateShortcut
 	domainEvents             map[string]domain.DomainEvent
+	effectiveAccessErr       error
 	workspaceReadVersions    map[string]int64
 	domainEventAppendErr     error
 	notificationCheckpoints  map[string]NotificationDomainEventCheckpoint
