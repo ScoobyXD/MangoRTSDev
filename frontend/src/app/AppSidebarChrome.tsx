@@ -59,18 +59,20 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 const SIDEBAR_ELEVATED_RADIUS = 11;
-const SIDEBAR_CYAN_ACCENT = "rgb(255, 136, 32)";
-const SIDEBAR_CYAN_ACTIVE_BG = "rgba(255, 136, 32, 0.15)";
-const SIDEBAR_CYAN_OPEN_BG = "rgba(255, 136, 32, 0.10)";
-const SIDEBAR_CYAN_DROP_BG = "rgba(255, 136, 32, 0.13)";
-const SIDEBAR_CYAN_HOVER_BG = "rgba(255, 136, 32, 0.18)";
-const SIDEBAR_CYAN_ACTIVE_BORDER = "rgba(255, 136, 32, 0.74)";
-const SIDEBAR_CYAN_OPEN_BORDER = "rgba(255, 136, 32, 0.52)";
+const SIDEBAR_ORANGE_ACCENT = "rgb(255, 136, 32)";
+const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
+const SIDEBAR_STATE_OPEN_BG = "rgba(15, 23, 42, 0.035)";
+const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
+const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
+const SIDEBAR_STATE_ACTIVE_BORDER = "rgba(148, 163, 184, 0.34)";
+const SIDEBAR_STATE_OPEN_BORDER = "rgba(148, 163, 184, 0.28)";
+const SIDEBAR_DIVIDER = "rgba(15, 23, 42, 0.12)";
+const SIDEBAR_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
 const SIDEBAR_NEUMORPHIC_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
-const SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE = "linear-gradient(145deg, #fff7ed 0%, #ffffff 54%, #fff1df 100%)";
+const SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
 const SIDEBAR_NEUMORPHIC_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
 const SIDEBAR_NEUMORPHIC_RAISED_SHADOW = "10px 10px 22px rgba(174, 174, 192, 0.32), -8px -8px 18px rgba(255, 255, 255, 0.96), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
-const SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW = "8px 8px 20px rgba(212, 91, 0, 0.16), -7px -7px 16px rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 136, 32, 0.20)";
+const SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7px 16px rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(148, 163, 184, 0.14)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
@@ -1040,7 +1042,7 @@ export function AppSidebar({
         </div>
       </section>
 
-      <section style={appSidebarSectionStyle} aria-label="Primary pages">
+      <section style={appSidebarPrimaryPagesSectionStyle} aria-label="Primary pages">
         <AppSidebarScopedExplorerSection
           label="Logic Gates by Function"
           open={logicGatesByFunctionOpen}
@@ -1340,7 +1342,7 @@ function AppSidebarScopedExplorerSection({
 }): React.ReactElement {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const raised = floating && (open || hovered || focused);
+  const raised = floating && (hovered || focused);
   return (
     <div
       style={appSidebarMiniExplorerBlockStyle(floating, raised)}
@@ -1352,7 +1354,7 @@ function AppSidebarScopedExplorerSection({
         setFocused(false);
       }}
     >
-      <div style={appSidebarMiniExplorerRowStyle(open, floating, raised)}>
+      <div style={appSidebarMiniExplorerRowStyle(open, floating)}>
         <button
           type="button"
           style={appSidebarMiniExplorerLabelButtonStyle(floating)}
@@ -1365,7 +1367,7 @@ function AppSidebarScopedExplorerSection({
           type="button"
           title={open ? `Collapse ${label}` : `Expand ${label}`}
           aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
-          style={appSidebarSharedDisclosureStyle}
+          style={floating ? appSidebarMiniExplorerDisclosureStyle : appSidebarSharedDisclosureStyle}
           onClick={(event) => {
             event.stopPropagation();
             onToggle();
@@ -1627,9 +1629,9 @@ const appSidebarStyle: React.CSSProperties = {
   overflowY: "auto",
   overflowX: "hidden",
   scrollbarGutter: "stable",
-  ["--company-explorer-scroll-accent" as string]: SIDEBAR_CYAN_ACCENT,
+  ["--company-explorer-scroll-accent" as string]: SIDEBAR_ORANGE_ACCENT,
   ["--company-explorer-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
-  ["--company-explorer-hover-bg" as string]: "rgba(255, 136, 32, 0.10)",
+  ["--company-explorer-hover-bg" as string]: SIDEBAR_STATE_HOVER_BG,
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
@@ -1650,20 +1652,20 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const appSidebarSectionStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 2,
-  minWidth: 0,
-  paddingBottom: 10,
-  borderBottom: "1px solid rgba(255, 136, 32, 0.20)",
-};
-
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
   minWidth: 0,
   padding: "2px 3px 14px",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.24)",
+  borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
+};
+
+const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  minWidth: 0,
+  padding: "0 3px 12px",
+  borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
 };
 
 function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
@@ -1673,8 +1675,8 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
     gap: 5,
     minWidth: 0,
     padding: "0 0 10px",
-    borderBottom: "1px solid rgba(255, 136, 32, 0.20)",
-    outline: active ? "2px solid rgba(255, 136, 32, 0.28)" : "2px solid transparent",
+    borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
+    outline: active ? "2px solid rgba(148, 163, 184, 0.24)" : "2px solid transparent",
     outlineOffset: 2,
     borderRadius: 6,
   };
@@ -1699,7 +1701,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       alignItems: "center",
       gap: 8,
       margin: 0,
-      border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(255, 136, 32, 0.24)" : "rgba(255, 255, 255, 0.76)"}`,
+      border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
       background: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE,
       color: SIDEBAR_ACTIVE_TEXT,
@@ -1724,9 +1726,9 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
     alignItems: "center",
     gap: 7,
-    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "transparent"}`,
+    border: `1px solid ${active ? SIDEBAR_STATE_ACTIVE_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? SIDEBAR_CYAN_ACTIVE_BG : "transparent",
+    background: active ? SIDEBAR_STATE_ACTIVE_BG : "transparent",
     color: active ? SIDEBAR_ACTIVE_TEXT : "#334155",
     cursor: "pointer",
     font: "inherit",
@@ -1826,7 +1828,7 @@ function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React
     gap: 0,
     minWidth: 0,
     margin: 0,
-    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(255, 136, 32, 0.22)" : "rgba(255, 255, 255, 0.76)"}`,
+    border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
     borderRadius: SIDEBAR_ELEVATED_RADIUS,
     background: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : SIDEBAR_NEUMORPHIC_SURFACE,
     boxShadow: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW : raised ? SIDEBAR_NEUMORPHIC_RAISED_SHADOW : SIDEBAR_NEUMORPHIC_SHADOW,
@@ -1841,30 +1843,28 @@ function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): Re
     display: "grid",
     gap: floating ? 0 : 3,
     minWidth: 0,
-    margin: floating ? "0 2px" : 0,
-    border: floating ? `1px solid ${raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}` : undefined,
+    margin: 0,
+    border: floating ? `1px solid ${SIDEBAR_SOFT_BORDER}` : undefined,
     borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
-    background: floating && raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : undefined,
-    boxShadow: floating && raised ? "0 18px 42px rgba(15, 23, 42, 0.18), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : undefined,
-    transform: floating && raised ? "translateY(-1px)" : "translateY(0)",
-    backdropFilter: floating && raised ? "blur(18px)" : undefined,
-    WebkitBackdropFilter: floating && raised ? "blur(18px)" : undefined,
+    background: floating ? SIDEBAR_NEUMORPHIC_SURFACE : undefined,
+    boxShadow: floating ? (raised ? SIDEBAR_NEUMORPHIC_RAISED_SHADOW : SIDEBAR_NEUMORPHIC_SHADOW) : undefined,
+    transform: floating && raised ? "translateY(-2px)" : "translateY(0)",
     overflow: floating ? "hidden" : "visible",
-    transition: floating ? "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease, transform 140ms ease, backdrop-filter 140ms ease" : undefined,
+    transition: floating ? "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease" : undefined,
   };
 }
 
-function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised = false): React.CSSProperties {
+function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React.CSSProperties {
   if (floating) {
     return {
       width: "100%",
-      minHeight: 31,
+      minHeight: 44,
       display: "grid",
-      gridTemplateColumns: "minmax(0, 1fr) 28px",
+      gridTemplateColumns: "minmax(0, 1fr) 26px",
       alignItems: "center",
       border: "none",
       borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
-      background: raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
+      background: "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
       transition: "background 120ms ease",
@@ -1876,9 +1876,9 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 22px",
     alignItems: "center",
-    border: `1px solid ${open ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
+    border: `1px solid ${open ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: open ? SIDEBAR_CYAN_OPEN_BG : "transparent",
+    background: open ? SIDEBAR_STATE_OPEN_BG : "transparent",
     color: open ? SIDEBAR_ACTIVE_TEXT : "#334155",
     minWidth: 0,
   };
@@ -1887,30 +1887,31 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised
 function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSProperties {
   return {
     minWidth: 0,
-    minHeight: floating ? 29 : 29,
+    minHeight: floating ? 42 : 29,
     display: "grid",
-    gridTemplateColumns: "18px minmax(0, 1fr)",
+    gridTemplateColumns: floating ? "17px minmax(0, 1fr)" : "18px minmax(0, 1fr)",
     alignItems: "center",
-    gap: floating ? 7 : 6,
+    gap: 6,
     border: "none",
     background: "transparent",
     color: "inherit",
     cursor: "pointer",
     font: "inherit",
-    fontSize: 12,
-    fontWeight: 500,
+    fontSize: floating ? 11.5 : 12,
+    fontWeight: floating ? 650 : 500,
+    lineHeight: 1.1,
     letterSpacing: 0,
-    padding: floating ? "0 0 0 10px" : "0 0 0 8px",
+    padding: floating ? "0 0 0 8px" : "0 0 0 8px",
     textAlign: "left",
   };
 }
 
 const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
-  width: 18,
-  height: 18,
+  width: 17,
+  height: 17,
   display: "grid",
   placeItems: "center",
-  color: SIDEBAR_CYAN_ACCENT,
+  color: "#334155",
 };
 
 function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSProperties {
@@ -1948,9 +1949,9 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
     gridTemplateColumns: "minmax(0, 1fr) 22px",
     alignItems: "center",
     gap: 0,
-    border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : dropActive ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
+    border: `1px solid ${active ? SIDEBAR_STATE_ACTIVE_BORDER : dropActive ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? SIDEBAR_CYAN_ACTIVE_BG : dropActive ? SIDEBAR_CYAN_DROP_BG : "transparent",
+    background: active ? SIDEBAR_STATE_ACTIVE_BG : dropActive ? SIDEBAR_STATE_DROP_BG : "transparent",
     color: active ? SIDEBAR_ACTIVE_TEXT : "#334155",
     minWidth: 0,
   };
@@ -1986,6 +1987,11 @@ const appSidebarSharedDisclosureStyle: React.CSSProperties = {
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
+};
+
+const appSidebarMiniExplorerDisclosureStyle: React.CSSProperties = {
+  ...appSidebarSharedDisclosureStyle,
+  width: 26,
 };
 
 const appSidebarSharedMetaStyle: React.CSSProperties = {
@@ -2024,9 +2030,9 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.58)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : hovered ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
+    border: `1px solid ${active ? SIDEBAR_STATE_ACTIVE_BORDER : dropPlacement === "inside" ? SIDEBAR_STATE_OPEN_BORDER : hovered ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
     borderRadius: 5,
-    background: active ? "rgba(255, 136, 32, 0.14)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : hovered ? SIDEBAR_CYAN_HOVER_BG : "transparent",
+    background: active ? SIDEBAR_STATE_ACTIVE_BG : dropPlacement === "inside" ? SIDEBAR_STATE_DROP_BG : hovered ? SIDEBAR_STATE_HOVER_BG : "transparent",
     color: "#334155",
     cursor: "pointer",
     font: "inherit",
@@ -2037,9 +2043,9 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     minWidth: 0,
     transition: "background 120ms ease, border-color 120ms ease",
     boxShadow: dropPlacement === "before"
-      ? `inset 0 2px 0 ${SIDEBAR_CYAN_ACCENT}`
+      ? "inset 0 2px 0 rgba(100, 116, 139, 0.66)"
       : dropPlacement === "after"
-        ? `inset 0 -2px 0 ${SIDEBAR_CYAN_ACCENT}`
+        ? "inset 0 -2px 0 rgba(100, 116, 139, 0.66)"
         : undefined,
   };
 }
