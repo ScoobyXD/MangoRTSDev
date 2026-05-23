@@ -151,6 +151,7 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 		candidate.Role = strings.TrimSpace(candidate.Role)
 		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
 		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
+		candidate.InformationID = strings.TrimSpace(candidate.InformationID)
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
@@ -180,6 +181,7 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 			Role:             candidate.Role,
 			LogicGateID:      candidate.LogicGateID,
 			NodeID:           candidate.NodeID,
+			InformationID:    candidate.InformationID,
 			CreatedTimestamp: now,
 		}
 		r.notifications[item.NotificationID] = item
@@ -274,7 +276,7 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			count.Count++
 			typeCounts[item.Type] = count
 		}
-		if item.Surface != "" || item.Role != "" {
+		if item.Type != domain.NotificationEventMentionCreated && (item.Surface != "" || item.Role != "") {
 			key := item.Surface + "\x00" + item.Role
 			count := roleCounts[key]
 			if count.Count == 0 {
@@ -288,7 +290,7 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			count.Count = len(roleTargets[key])
 			roleCounts[key] = count
 		}
-		if item.LogicGateID != "" && item.Role != "" {
+		if item.Type != domain.NotificationEventMentionCreated && item.LogicGateID != "" && item.Role != "" {
 			key := item.LogicGateID + "\x00" + item.NodeID + "\x00" + item.Role
 			count := logicGateCounts[key]
 			if count.Count == 0 {

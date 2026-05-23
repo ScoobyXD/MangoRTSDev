@@ -71,6 +71,8 @@ export type HomeColumnWidths = [number, number, number, number];
 export type NodeEditorOverlayState = {
   nodeID: string;
   nodeTitle: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
 };
 
 export type HomeColumnResizeDrag = {

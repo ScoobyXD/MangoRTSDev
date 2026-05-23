@@ -2303,6 +2303,7 @@ create table if not exists notifications (
   role text not null default '',
   logic_gate_id text not null default '',
   node_id text not null default '',
+  information_id text not null default '',
   read_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   constraint notifications_type_nonblank_chk check (btrim(notification_type) <> ''),

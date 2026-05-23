@@ -238,6 +238,52 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+
+	rows, err := r.db.Query(
+		`select company_id::text, user_id::text, cognito_subject, email, display_name, role, created_timestamp, updated_timestamp
+		 from (
+		   select distinct on (candidate.user_id)
+		     candidate.company_id, candidate.user_id, candidate.cognito_subject, candidate.email, candidate.display_name,
+		     candidate.role, candidate.created_timestamp, candidate.updated_timestamp
+		   from (
+		     select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role,
+		            cm.created_timestamp, cm.updated_timestamp, 0 as priority
+		     from company_memberships cm
+		     join users u on u.user_id = cm.user_id
+		     where cm.company_id = $1::uuid
+		     union all
+		     select $1::uuid as company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role,
+		            cm.created_timestamp, cm.updated_timestamp, 1 as priority
+		     from company_memberships cm
+		     join users u on u.user_id = cm.user_id
+		     where cm.role = 'dev_admin'
+		   ) candidate
+		   order by candidate.user_id, candidate.priority
+		 ) deduped
+		 order by coalesce(nullif(display_name, ''), email), user_id`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.CompanyUser, 0)
+	for rows.Next() {
+		var item domain.CompanyUser
+		if err := rows.Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)

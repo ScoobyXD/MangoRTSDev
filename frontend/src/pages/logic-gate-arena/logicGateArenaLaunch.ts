@@ -3,6 +3,7 @@ export type PendingLogicGateArenaSelection = {
   logicGateID: string;
   label: string;
   nodeID?: string;
+  informationID?: string;
   createdAt: number;
 };
 
@@ -21,6 +22,7 @@ export function writePendingLogicGateArenaSelection(selection: Omit<PendingLogic
       logicGateID,
       label: selection.label.trim(),
       nodeID: selection.nodeID?.trim() || undefined,
+      informationID: selection.informationID?.trim() || undefined,
       createdAt: Date.now(),
     }));
   } catch {
@@ -42,6 +44,7 @@ export function consumePendingLogicGateArenaSelection(companyID: string): Pendin
       logicGateID,
       label: typeof parsed.label === "string" ? parsed.label.trim() : "",
       nodeID: typeof parsed.nodeID === "string" ? parsed.nodeID.trim() : undefined,
+      informationID: typeof parsed.informationID === "string" ? parsed.informationID.trim() : undefined,
       createdAt: typeof parsed.createdAt === "number" && Number.isFinite(parsed.createdAt) ? parsed.createdAt : Date.now(),
     };
   } catch {

@@ -1679,14 +1679,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!nodeID) return;
     setNodeEditorOverlay({ nodeID, nodeTitle: nodeTitle(node) });
   }, []);
-  const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string) => {
+  const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
+    const cleanInformationID = informationID?.trim() ?? "";
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
       label,
       nodeID,
+      informationID: cleanInformationID || undefined,
     });
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
       companyID,
@@ -1695,6 +1697,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       id: cleanLogicGateID,
       label,
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
+      informationID: cleanInformationID || undefined,
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();
@@ -1702,19 +1705,24 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     else window.location.assign("/logic-gate-arena");
   }, [companyID, onNavigate]);
   const openMentionNotificationTarget = useCallback((notification: NotificationItem) => {
+    const informationID = notification.information_id?.trim() ?? "";
     const rawNodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const node = rawNodeID ? nodeByID.get(rawNodeID) : undefined;
     const rawLogicGateID = notification.logic_gate_id?.trim()
       || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "")
-      || cleanIDList(node?.logic_gate_ids ?? [])[0]
       || "";
-    if (rawLogicGateID) {
+    if (notification.entity_type === "logic_gate" && rawLogicGateID) {
       const gate = logicGateByID.get(rawLogicGateID);
-      openLogicGateArena(rawLogicGateID, gate?.header?.trim() || notification.title || rawLogicGateID, rawNodeID);
+      openLogicGateArena(rawLogicGateID, gate?.header?.trim() || notification.title || rawLogicGateID, rawNodeID, informationID);
       return;
     }
     if (rawNodeID) {
-      setNodeEditorOverlay({ nodeID: rawNodeID, nodeTitle: node ? nodeTitle(node) : notification.title || rawNodeID });
+      setNodeEditorOverlay({
+        nodeID: rawNodeID,
+        nodeTitle: node ? nodeTitle(node) : notification.title || rawNodeID,
+        focusInformationID: informationID || undefined,
+        focusRequestID: Date.now(),
+      });
     }
   }, [logicGateByID, nodeByID, openLogicGateArena]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
@@ -2301,6 +2309,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         <NodeEditorPopup
           nodeID={nodeEditorOverlay.nodeID}
           nodeTitle={nodeEditorOverlay.nodeTitle}
+          focusInformationID={nodeEditorOverlay.focusInformationID}
+          focusRequestID={nodeEditorOverlay.focusRequestID}
           onClose={() => setNodeEditorOverlay(null)}
           onCollapseToTab={() => {
             requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });

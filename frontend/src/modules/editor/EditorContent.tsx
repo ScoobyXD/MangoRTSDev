@@ -165,6 +165,8 @@ type EditorContentProps = {
   forcedEntityID?: string;
   forcedLabel?: string;
   forcedEmptyMessage?: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
 };
 
 type CompanyUser = {
@@ -221,7 +223,7 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
 }
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1462,7 +1464,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
           ];
           setLinkedNodeHistoryRows(historyRows);
-          const currentTextBox = selectCurrentEditorTextProjection(projections);
+          const cleanFocusInformationID = focusInformationID?.trim() ?? "";
+          const focusedTextBox = cleanFocusInformationID
+            ? projections.find((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === cleanFocusInformationID)
+            : undefined;
+          const currentTextBox = focusedTextBox ?? selectCurrentEditorTextProjection(projections);
           const initialDocument = currentTextBox?.information ?? "";
           applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
           return;
@@ -1516,7 +1522,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
+  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -1741,6 +1747,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
+            focusInformationID={focusInformationID}
+            focusRequestID={focusRequestID}
             topPx={documentTopPx}
             accent={accent}
             surfaceText={surfaceText}

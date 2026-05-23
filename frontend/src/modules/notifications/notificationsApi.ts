@@ -20,6 +20,7 @@ export type NotificationItem = {
   role?: NotificationRaciRole | "";
   logic_gate_id?: string;
   node_id?: string;
+  information_id?: string;
   read_timestamp?: string;
   created_timestamp: string;
 };
@@ -182,6 +183,7 @@ function normalizeNotification(item: NotificationItem): NotificationItem {
     role: normalizeRole(item.role),
     logic_gate_id: item.logic_gate_id?.trim() || undefined,
     node_id: item.node_id?.trim() || undefined,
+    information_id: item.information_id?.trim() || undefined,
     read_timestamp: item.read_timestamp,
     created_timestamp: item.created_timestamp,
   };

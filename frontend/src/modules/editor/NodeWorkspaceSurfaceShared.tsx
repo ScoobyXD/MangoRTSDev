@@ -19,6 +19,8 @@ export type NodeWorkspaceSurfaceProps = {
   unseenChanges: NodeContentChange[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
+  focusInformationID?: string;
+  focusRequestID?: number;
   topPx: number;
   accent: string;
   surfaceText: string;

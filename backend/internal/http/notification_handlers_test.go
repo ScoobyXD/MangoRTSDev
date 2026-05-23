@@ -423,9 +423,10 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
 
 	commentBody, _ := json.Marshal(map[string]any{
-		"company_id":  companyID,
-		"type":        "Text block chat",
-		"information": "Please review this, @Mentioned User.",
+		"company_id":     companyID,
+		"type":           "Text block chat",
+		"information":    "Please review this, @Mentioned User.",
+		"information_id": "22222222-2222-4222-8222-222222222299",
 	})
 	commentReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(commentBody))
 	commentReq = requestWithActorForNotifications(commentReq, author, companyID)
@@ -458,6 +459,9 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(payload.Notifications[0].Title, "Author User") {
 		t.Fatalf("notification title = %q, want author label", payload.Notifications[0].Title)
 	}
+	if payload.Notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
+		t.Fatalf("notification information id = %q, want chat information id", payload.Notifications[0].InformationID)
+	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
 	summaryReq = requestWithActorForNotifications(summaryReq, mentioned, companyID)
@@ -472,6 +476,72 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	}
 	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
 		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
+	}
+	if len(summary.RoleCounts) != 0 || len(summary.LogicGateCounts) != 0 {
+		t.Fatalf("mention summary routing counts = roles %+v logic gates %+v, want none", summary.RoleCounts, summary.LogicGateCounts)
+	}
+}
+
+func TestNodeChatMentionResolvesDevAdminOutsideCompany(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "22222222-2222-4222-8222-222222222224"
+	adminCompanyID := "22222222-2222-4222-8222-222222222225"
+
+	author, err := repo.UpsertAuthUser("dev-mention-author-subject", "author-dev-mention@example.com", "Author User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("dev-mention-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	devAdmin, err := repo.UpsertAuthUser("dev-mentioned-subject", "dev-mentioned@example.com", "Jonathan Kim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("dev-mentioned-subject", adminCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Dev admin mention node")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commentBody, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"type":        "Text block chat",
+		"information": "Please review this, @Jonathan Kim.",
+	})
+	commentReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(commentBody))
+	commentReq = requestWithActorForNotifications(commentReq, author, companyID)
+	commentReq.Header.Set("Content-Type", "application/json")
+	commentRec := httptest.NewRecorder()
+	handler.ServeHTTP(commentRec, commentReq)
+	if commentRec.Code != http.StatusCreated {
+		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+	listReq = requestWithActorForNotifications(listReq, devAdmin, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 1 {
+		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
+	}
+	if payload.Notifications[0].RecipientUserID != devAdmin.UserID {
+		t.Fatalf("recipient = %q, want dev admin %q", payload.Notifications[0].RecipientUserID, devAdmin.UserID)
 	}
 }
 

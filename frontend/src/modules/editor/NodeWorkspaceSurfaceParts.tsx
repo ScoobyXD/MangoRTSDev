@@ -717,6 +717,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
+    mentionMenuPosition: "absolute",
   });
   const { mentionMenu: documentMentionMenu, ...documentSurfaceHandlers } = handlers;
 
@@ -1243,6 +1244,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
@@ -1295,6 +1297,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [active, replyTargetID, selectionAnchor?.quote]);
+
+  useEffect(() => {
+    if (!activeMessageID) return;
+    const frame = window.requestAnimationFrame(() => {
+      messageListRef.current
+        ?.querySelector<HTMLElement>(`[data-node-chat-message-id="${activeMessageID}"]`)
+        ?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMessageID, messages]);
 
   const focusComposer = () => {
     onFocus();
@@ -1385,7 +1397,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
           <span>{messages.length}</span>
         </div>
-        <div className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+        <div ref={messageListRef} className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
           {threads.map((thread) => (
             <ChatThreadItem
               key={thread.message.id}
@@ -1663,6 +1675,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
     : { position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor };
   return (
     <div
+      data-node-chat-message-id={message.id}
       onClick={(event) => {
         event.stopPropagation();
         onActivate(message.id);
