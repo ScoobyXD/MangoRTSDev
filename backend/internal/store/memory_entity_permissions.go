@@ -73,6 +73,8 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	group, ok := r.userGroups[userGroupKey(companyID, groupID)]
 	if !ok {
 		return domain.CompanyUserGroup{}, ErrNotFound
@@ -110,6 +112,13 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 	}
 	group.UpdatedTimestamp = time.Now().UTC()
 	r.userGroups[userGroupKey(companyID, group.GroupID)] = group
+	if parentChanged {
+		if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
+			r.userGroups = userGroupsSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return domain.CompanyUserGroup{}, err
+		}
+	}
 	return cloneCompanyUserGroup(group), nil
 }
 
@@ -123,6 +132,11 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
+	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
+	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
+	sharedInboxRaciSnapshot := cloneMemorySliceMap(r.sharedInboxRaci)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return ErrNotFound
 	}
@@ -139,6 +153,28 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 		if permission.CompanyID == companyID && permission.SubjectType == EntityPermissionSubjectGroup && groupIDs[permission.SubjectID] {
 			delete(r.entityPermissions, permissionKey)
 		}
+	}
+	for raciKey, assignments := range r.sharedInboxRaci {
+		next := assignments[:0]
+		for _, assignment := range assignments {
+			if assignment.CompanyID == companyID && assignment.SubjectType == EntityPermissionSubjectGroup && groupIDs[assignment.SubjectID] {
+				continue
+			}
+			next = append(next, assignment)
+		}
+		if len(next) == 0 {
+			delete(r.sharedInboxRaci, raciKey)
+		} else {
+			r.sharedInboxRaci[raciKey] = next
+		}
+	}
+	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
+		r.userGroups = userGroupsSnapshot
+		r.userGroupMembers = userGroupMembersSnapshot
+		r.entityPermissions = entityPermissionsSnapshot
+		r.sharedInboxRaci = sharedInboxRaciSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		return err
 	}
 	return nil
 }
@@ -175,6 +211,8 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return nil, ErrNotFound
 	}
@@ -208,6 +246,11 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		}
 		r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)] = member
 		items = append(items, r.withCompanyUserGroupMemberUserLocked(member))
+	}
+	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
+		r.userGroupMembers = userGroupMembersSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		return nil, err
 	}
 	sortCompanyUserGroupMembers(items)
 	return items, nil
@@ -326,6 +369,13 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	}
 	for _, targetEntityID := range targetEntityIDs {
 		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, entityType, targetEntityID); err != nil {
+			r.entityPermissions = permissionsSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return nil, err
+		}
+	}
+	if entityType == EntityTypeLogicGate {
+		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{entityID}, nil); err != nil {
 			r.entityPermissions = permissionsSnapshot
 			r.effectiveAccess = effectiveAccessSnapshot
 			return nil, err

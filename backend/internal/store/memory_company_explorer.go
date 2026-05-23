@@ -323,6 +323,16 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 			r.effectiveAccess = effectiveAccessSnapshot
 			return domain.CompanyExplorerFolder{}, err
 		}
+		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
+			r.folders = foldersSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return domain.CompanyExplorerFolder{}, err
+		}
+		if err := r.recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, item.FolderID); err != nil {
+			r.folders = foldersSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return domain.CompanyExplorerFolder{}, err
+		}
 	}
 	return r.withSharedInboxRaciLocked(item), nil
 }
@@ -527,6 +537,8 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	foldersSnapshot := cloneMemoryMap(r.folders)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
@@ -581,6 +593,13 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
+	if item.FolderKind == "communications" && parentChanged {
+		if err := r.recomputeSharedTriageInheritedEffectiveAccessForSubtreeLocked(companyID, item.FolderID); err != nil {
+			r.folders = foldersSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
 	return r.withSharedInboxRaciLocked(item), nil
 }
 

@@ -592,6 +592,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	nodeKey := key(input.CompanyID, input.NodeID)
+	previousNode := r.nodes[nodeKey]
+	previousAssigneeUserID := nodeAssigneeUserID(previousNode)
+	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 
 	card, err := r.upsertKanbanCardLocked(KanbanCardMutationInput{
 		CompanyID:           input.CompanyID,
@@ -608,7 +612,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
-	nodeKey := key(input.CompanyID, input.NodeID)
 	if input.PrioritySet {
 		node := r.nodes[nodeKey]
 		if input.Priority == nil {
@@ -618,6 +621,18 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 			node.Priority = &priority
 		}
 		r.nodes[nodeKey] = node
+	}
+	if nodeAssigneeUserID(r.nodes[nodeKey]) != previousAssigneeUserID {
+		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
+			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
+		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
+			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+			return LogicGateNodeAssignmentResult{}, err
+		}
 	}
 
 	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
@@ -781,7 +796,14 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	if input.AssigneePolicySet {
+		previousAssigneeUserID := nodeAssigneeUserID(r.nodes[nodeKey])
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)
+		if nodeAssigneeUserID(r.nodes[nodeKey]) != previousAssigneeUserID {
+			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
+				r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+				return LogicGateNodeAssignmentResult{}, err
+			}
+		}
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	if input.PrioritySet {
@@ -845,6 +867,10 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus, input.FallbackStatusColor)
+	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
 
 	result := LogicGateNodeAssignmentRemoveResult{
 		Card:       location.card,

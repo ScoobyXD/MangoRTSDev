@@ -534,6 +534,367 @@ where node.company_id=$1::uuid
 	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, facts)
 }
 
+func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select assignment.company_id::text,
+       assignment.user_id::text,
+       assignment.logic_gate_id::text,
+       assignment.role
+from logic_gate_raci_assignments assignment
+where assignment.company_id=$1::uuid
+  and assignment.logic_gate_id=$2::uuid
+order by assignment.role asc, assignment.user_id::text asc`, companyID, logicGateID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	facts := []domain.EffectiveResourceAccess{}
+	for rows.Next() {
+		var factCompanyID string
+		var userID string
+		var factLogicGateID string
+		var role string
+		if err := rows.Scan(&factCompanyID, &userID, &factLogicGateID, &role); err != nil {
+			return err
+		}
+		facts = append(facts, domain.EffectiveResourceAccess{
+			CompanyID:    factCompanyID,
+			UserID:       userID,
+			ResourceType: EntityTypeLogicGate,
+			ResourceID:   factLogicGateID,
+			AccessLevel:  EntityPermissionEdit,
+			SourceType:   effectiveAccessSourceLogicGateRaci,
+			SourceID:     logicGateRaciEffectiveAccessSourceID(factLogicGateID, role, userID),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID, effectiveAccessSourceLogicGateRaci, facts)
+}
+
+func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+with recursive ancestry(folder_id, parent_folder_id, path) as (
+  select folder.folder_id,
+         folder.parent_folder_id,
+         array[folder.folder_id]
+  from company_explorer_folders folder
+  where folder.company_id=$1::uuid
+    and folder.folder_id=$2::uuid
+    and folder.folder_kind='communications'
+  union all
+  select parent.folder_id,
+         parent.parent_folder_id,
+         ancestry.path || parent.folder_id
+  from company_explorer_folders parent
+  join ancestry
+    on ancestry.parent_folder_id=parent.folder_id
+  where parent.company_id=$1::uuid
+    and parent.folder_kind='communications'
+    and not parent.folder_id = any(ancestry.path)
+),
+group_descendants as (
+  select user_group.company_id,
+         user_group.group_id as root_group_id,
+         user_group.group_id,
+         array[user_group.group_id] as path
+  from company_user_groups user_group
+  where user_group.company_id=$1::uuid
+  union all
+  select parent.company_id,
+         parent.root_group_id,
+         child.group_id,
+         parent.path || child.group_id
+  from group_descendants parent
+  join company_user_groups child
+    on child.company_id=parent.company_id
+   and child.parent_group_id=parent.group_id
+  where not child.group_id = any(parent.path)
+),
+facts as (
+  select assignment.company_id::text as company_id,
+         assignment.user_id::text as user_id,
+         assignment.folder_id::text as source_folder_id,
+         assignment.role,
+         'user'::text as subject_type,
+         assignment.user_id::text as subject_id
+  from communications_shared_inbox_raci_assignments assignment
+  join ancestry
+    on ancestry.folder_id=assignment.folder_id
+  where assignment.company_id=$1::uuid
+  union all
+  select assignment.company_id::text,
+         member.user_id::text,
+         assignment.folder_id::text,
+         assignment.role,
+         'group'::text,
+         assignment.group_id::text
+  from communications_shared_inbox_raci_group_assignments assignment
+  join ancestry
+    on ancestry.folder_id=assignment.folder_id
+  join group_descendants descendant
+    on descendant.company_id=assignment.company_id
+   and descendant.root_group_id=assignment.group_id
+  join company_user_group_members member
+    on member.company_id=assignment.company_id
+   and member.group_id=descendant.group_id
+  where assignment.company_id=$1::uuid
+)
+select company_id,
+       user_id,
+       source_folder_id,
+       role,
+       subject_type,
+       subject_id
+from facts
+order by source_folder_id asc, role asc, subject_type asc, subject_id asc, user_id asc`, companyID, folderID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	facts := []domain.EffectiveResourceAccess{}
+	for rows.Next() {
+		var factCompanyID string
+		var userID string
+		var sourceFolderID string
+		var role string
+		var subjectType string
+		var subjectID string
+		if err := rows.Scan(&factCompanyID, &userID, &sourceFolderID, &role, &subjectType, &subjectID); err != nil {
+			return err
+		}
+		facts = append(facts, domain.EffectiveResourceAccess{
+			CompanyID:    factCompanyID,
+			UserID:       userID,
+			ResourceType: EntityTypeSharedTriageFolder,
+			ResourceID:   folderID,
+			AccessLevel:  EntityPermissionEdit,
+			SourceType:   effectiveAccessSourceSharedTriageRaci,
+			SourceID:     sharedTriageRaciEffectiveAccessSourceID(sourceFolderID, role, subjectType, subjectID),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID, effectiveAccessSourceSharedTriageRaci, facts)
+}
+
+func recomputeSharedTriageRaciEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+	targetIDs, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID)
+	if err != nil {
+		return err
+	}
+	for _, targetID := range targetIDs {
+		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+	targetIDs, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID)
+	if err != nil {
+		return err
+	}
+	for _, targetID := range targetIDs {
+		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, targetID); err != nil {
+			return err
+		}
+		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs, nodeIDs []string) error {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	logicGateIDs = cleanUUIDTextSlice(logicGateIDs)
+	nodeIDs = cleanUUIDTextSlice(nodeIDs)
+	rows, err := tx.QueryContext(ctx, `
+select distinct assignment.node_id::text
+from node_logic_gate_assignments assignment
+where assignment.company_id=$1::uuid
+  and (cardinality($2::text[]) = 0 or assignment.logic_gate_id::text = any($2::text[]))
+  and (cardinality($3::text[]) = 0 or assignment.node_id::text = any($3::text[]))
+order by assignment.node_id::text`, companyID, logicGateIDs, nodeIDs)
+	if err != nil {
+		return err
+	}
+	targetNodes := map[string]bool{}
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			rows.Close()
+			return err
+		}
+		targetNodes[nodeID] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, nodeID := range nodeIDs {
+		targetNodes[nodeID] = true
+	}
+	if len(targetNodes) == 0 {
+		return nil
+	}
+	targetNodeIDs := make([]string, 0, len(targetNodes))
+	for nodeID := range targetNodes {
+		targetNodeIDs = append(targetNodeIDs, nodeID)
+	}
+	sort.Strings(targetNodeIDs)
+
+	factRows, err := tx.QueryContext(ctx, `
+with target_nodes as (
+  select distinct raw.node_id
+  from unnest($2::text[]) as raw(node_id)
+)
+select access.company_id::text,
+       access.user_id::text,
+       assignment.node_id::text,
+       assignment.logic_gate_id::text,
+       access.source_type,
+       access.source_id
+from target_nodes target
+join node_logic_gate_assignments assignment
+  on assignment.company_id=$1::uuid
+ and assignment.node_id::text=target.node_id
+join effective_resource_access access
+  on access.company_id=assignment.company_id
+ and access.resource_type='logic_gate'
+ and access.resource_id=assignment.logic_gate_id
+ and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
+order by assignment.node_id::text, access.user_id::text, access.source_type, access.source_id`, companyID, targetNodeIDs, EntityPermissionView)
+	if err != nil {
+		return err
+	}
+	defer factRows.Close()
+	factsByNode := map[string][]domain.EffectiveResourceAccess{}
+	for factRows.Next() {
+		var factCompanyID string
+		var userID string
+		var nodeID string
+		var logicGateID string
+		var sourceType string
+		var sourceID string
+		if err := factRows.Scan(&factCompanyID, &userID, &nodeID, &logicGateID, &sourceType, &sourceID); err != nil {
+			return err
+		}
+		factsByNode[nodeID] = append(factsByNode[nodeID], domain.EffectiveResourceAccess{
+			CompanyID:    factCompanyID,
+			UserID:       userID,
+			ResourceType: EntityTypeNode,
+			ResourceID:   nodeID,
+			AccessLevel:  EntityPermissionView,
+			SourceType:   effectiveAccessSourceGateVisibility,
+			SourceID:     logicGateAssignmentVisibilityEffectiveAccessSourceID(sourceType, sourceID, logicGateID, nodeID),
+		})
+	}
+	if err := factRows.Err(); err != nil {
+		return err
+	}
+	for _, nodeID := range targetNodeIDs {
+		if err := replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeNode, nodeID, effectiveAccessSourceGateVisibility, factsByNode[nodeID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select resource_type, resource_id::text
+from (
+  select 'node'::text as resource_type, node_id as resource_id
+  from nodes
+  where company_id=$1::uuid
+  union all
+  select 'logic_gate'::text, logic_gate_id
+  from logic_gates
+  where company_id=$1::uuid
+  union all
+  select 'shared_triage_folder'::text, folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_kind='communications'
+) resource
+order by resource_type asc, resource_id::text asc`, companyID)
+	if err != nil {
+		return err
+	}
+	resources := []effectiveAccessResource{}
+	for rows.Next() {
+		var resource effectiveAccessResource
+		if err := rows.Scan(&resource.resourceType, &resource.resourceID); err != nil {
+			rows.Close()
+			return err
+		}
+		resources = append(resources, resource)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, resource := range resources {
+		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, resource.resourceType, resource.resourceID); err != nil {
+			return err
+		}
+	}
+	for _, resource := range resources {
+		if resource.resourceType != EntityTypeSharedTriageFolder {
+			continue
+		}
+		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, resource.resourceID); err != nil {
+			return err
+		}
+	}
+	return recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, nil, nil)
+}
+
+func cleanUUIDTextSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = cleanUUIDText(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (r *PostgresRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
 	companyID = cleanUUIDText(companyID)
 	if companyID == "" {

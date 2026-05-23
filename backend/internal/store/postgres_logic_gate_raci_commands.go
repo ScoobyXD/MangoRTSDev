@@ -180,6 +180,12 @@ where company_id=$1::uuid
 		Events:            []domain.DomainEvent{},
 	}
 	if changed {
+		if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, companyID, logicGateID); err != nil {
+			return LogicGateRaciAssignmentCommandResult{}, err
+		}
+		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, []string{logicGateID}, nil); err != nil {
+			return LogicGateRaciAssignmentCommandResult{}, err
+		}
 		event, err := r.appendDomainEventTx(ctx, tx, logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))
 		if err != nil {
 			return LogicGateRaciAssignmentCommandResult{}, err
