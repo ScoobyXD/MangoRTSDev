@@ -1611,9 +1611,9 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_CYAN : unread ? "#38bdf8" : "rgba(100, 116, 139, 0.22)",
+    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : unread ? "#38bdf8" : "rgba(100, 116, 139, 0.22)",
     boxShadow: active
-      ? "0 0 0 4px rgba(71, 85, 105, 0.12), 2px 2px 5px rgba(157, 171, 191, 0.5)"
+      ? "0 0 0 4px rgba(92, 238, 255, 0.18), 0 0 13px rgba(183, 124, 255, 0.34), 2px 2px 5px rgba(157, 171, 191, 0.5)"
       : unread
         ? "0 0 0 4px rgba(56, 189, 248, 0.16), 0 0 12px rgba(56, 189, 248, 0.34)"
         : "inset 1px 1px 2px rgba(15, 23, 42, 0.12), inset -1px -1px 2px rgba(255, 255, 255, 0.75)",
@@ -1627,7 +1627,8 @@ export function messagePlacementIconStyle(active: boolean): React.CSSProperties 
     marginTop: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#111827" : HOME_CYAN,
+    color: active ? "#38bdf8" : HOME_CYAN,
+    filter: active ? "drop-shadow(0 0 5px rgba(183, 124, 255, 0.46)) drop-shadow(0 0 4px rgba(92, 238, 255, 0.38))" : undefined,
     transform: "scale(1.25)",
   };
 }

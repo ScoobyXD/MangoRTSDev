@@ -370,6 +370,11 @@ export function HomeMailWorkspace({
                 draggable={draggable}
                 onPointerEnter={() => setHoveredMessageID(message.id)}
                 onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
+                onMouseDown={(event) => {
+                  if (!event.shiftKey) return;
+                  event.preventDefault();
+                  event.currentTarget.ownerDocument.getSelection()?.removeAllRanges();
+                }}
                 onClick={(event) => onSelectMessage(message, event)}
                 onKeyDown={(event) => {
                   if (event.target !== event.currentTarget) return;
