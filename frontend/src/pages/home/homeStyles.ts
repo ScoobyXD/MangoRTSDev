@@ -11,11 +11,15 @@ const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
-const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
-const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
 const HOME_NODE_RAIL_ORANGE = "#ff9708";
 const HOME_NODE_RAIL_ORANGE_DEEP = "#ff8f00";
 const HOME_NODE_RAIL_WHITE = "#ffffff";
+const HOME_NODE_ICON_BLUE = "#19a8ff";
+const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
+const HOME_NODE_ICON_BLUE_BORDER = "rgba(25, 168, 255, 0.68)";
+const HOME_LOGIC_GATE_GREEN = "#19f07a";
+const HOME_LOGIC_GATE_GREEN_SOFT = "rgba(25, 240, 122, 0.12)";
+const HOME_LOGIC_GATE_GREEN_BORDER = "rgba(25, 240, 122, 0.72)";
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
   const trimmed = color.trim();
@@ -383,11 +387,11 @@ export function nodeInboxRailStyle(topHeight: number): React.CSSProperties {
     display: "grid",
     gridTemplateRows: `${topHeight}px ${HOME_ROW_RESIZER_HEIGHT}px minmax(0, 1fr)`,
     gap: 0,
-    padding: "18px 14px 16px",
+    padding: 0,
     overflow: "hidden",
-    background: `linear-gradient(180deg, ${HOME_NODE_RAIL_ORANGE} 0%, ${HOME_NODE_RAIL_ORANGE_DEEP} 100%)`,
+    background: HOME_NODE_RAIL_WHITE,
     borderRadius: "34px 34px 46px 46px",
-    boxShadow: "0 22px 42px rgba(255, 143, 0, 0.22), 0 16px 34px rgba(15, 23, 42, 0.14)",
+    boxShadow: "0 22px 42px rgba(255, 143, 0, 0.16), 0 16px 34px rgba(15, 23, 42, 0.14)",
   };
 }
 
@@ -401,6 +405,18 @@ export const nodeInboxRailSectionStyle: React.CSSProperties = {
   background: "transparent",
   borderRadius: 0,
   overflow: "hidden",
+};
+
+export const nodeInboxPrimarySectionStyle: React.CSSProperties = {
+  ...nodeInboxRailSectionStyle,
+  padding: "18px 14px 10px",
+  background: `linear-gradient(180deg, ${HOME_NODE_RAIL_ORANGE} 0%, ${HOME_NODE_RAIL_ORANGE_DEEP} 100%)`,
+};
+
+export const nodeInboxOtherSectionStyle: React.CSSProperties = {
+  ...nodeInboxRailSectionStyle,
+  padding: "10px 14px 16px",
+  background: HOME_NODE_RAIL_WHITE,
 };
 
 export const nodeInboxRailHeaderStyle: React.CSSProperties = {
@@ -426,6 +442,16 @@ export const nodeInboxMutedSmallStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
+export const nodeInboxOtherPanelTitleStyle: React.CSSProperties = {
+  ...nodeInboxPanelTitleStyle,
+  color: HOME_NODE_RAIL_ORANGE,
+};
+
+export const nodeInboxOtherMutedSmallStyle: React.CSSProperties = {
+  ...nodeInboxMutedSmallStyle,
+  color: "rgba(255, 151, 8, 0.70)",
+};
+
 export const nodeInboxListStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
@@ -434,6 +460,11 @@ export const nodeInboxListStyle: React.CSSProperties = {
   overflowY: "auto",
   padding: "2px 2px 6px 0",
   scrollbarColor: "rgba(255, 255, 255, 0.72) transparent",
+};
+
+export const nodeInboxOtherListStyle: React.CSSProperties = {
+  ...nodeInboxListStyle,
+  scrollbarColor: "rgba(255, 151, 8, 0.56) transparent",
 };
 
 export const nodeInboxGroupStyle: React.CSSProperties = {
@@ -472,7 +503,10 @@ export const nodeInboxGridStyle: React.CSSProperties = {
   gap: 7,
 };
 
-export function nodeInboxTileStyle(selected: boolean): React.CSSProperties {
+export type NodeInboxTileTone = "orange" | "light";
+
+export function nodeInboxTileStyle(selected: boolean, tone: NodeInboxTileTone = "orange"): React.CSSProperties {
+  const lightTone = tone === "light";
   return {
     position: "relative",
     minHeight: 68,
@@ -480,15 +514,17 @@ export function nodeInboxTileStyle(selected: boolean): React.CSSProperties {
     alignContent: "center",
     justifyItems: "center",
     gap: 5,
-    border: `1px solid ${HOME_NODE_RAIL_WHITE}`,
+    border: `1px solid ${lightTone ? HOME_NODE_RAIL_ORANGE : HOME_NODE_RAIL_WHITE}`,
     borderRadius: 7,
-    background: selected ? "rgba(255, 255, 255, 0.18)" : "rgba(255, 255, 255, 0.05)",
-    color: HOME_NODE_RAIL_WHITE,
+    background: lightTone
+      ? selected ? "rgba(255, 151, 8, 0.10)" : HOME_NODE_RAIL_WHITE
+      : selected ? "rgba(255, 255, 255, 0.18)" : "rgba(255, 255, 255, 0.05)",
+    color: lightTone ? HOME_NODE_RAIL_ORANGE : HOME_NODE_RAIL_WHITE,
     cursor: "grab",
     font: "inherit",
     padding: "7px 6px",
     minWidth: 0,
-    boxShadow: selected ? "0 0 0 2px rgba(255, 255, 255, 0.22)" : "none",
+    boxShadow: selected ? (lightTone ? "0 0 0 2px rgba(255, 151, 8, 0.14)" : "0 0 0 2px rgba(255, 255, 255, 0.22)") : "none",
   };
 }
 
@@ -501,20 +537,22 @@ export const nodeInboxTileIconStyle: React.CSSProperties = {
   background: "transparent",
 };
 
-export const nodeInboxTileTextStyle: React.CSSProperties = {
-  maxWidth: "100%",
-  minWidth: 0,
-  overflow: "hidden",
-  display: "-webkit-box",
-  WebkitBoxOrient: "vertical",
-  WebkitLineClamp: 2,
-  overflowWrap: "anywhere",
-  textAlign: "center",
-  color: HOME_NODE_RAIL_WHITE,
-  fontSize: 10,
-  fontWeight: 800,
-  lineHeight: 1.15,
-};
+export function nodeInboxTileTextStyle(tone: NodeInboxTileTone = "orange"): React.CSSProperties {
+  return {
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflowWrap: "anywhere",
+    textAlign: "center",
+    color: tone === "light" ? HOME_NODE_RAIL_ORANGE : HOME_NODE_RAIL_WHITE,
+    fontSize: 10,
+    fontWeight: 800,
+    lineHeight: 1.15,
+  };
+}
 
 export const nodeInboxEmptyStyle: React.CSSProperties = {
   minHeight: 64,
@@ -524,6 +562,11 @@ export const nodeInboxEmptyStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
   textAlign: "center",
+};
+
+export const nodeInboxOtherEmptyStyle: React.CSSProperties = {
+  ...nodeInboxEmptyStyle,
+  color: "rgba(255, 151, 8, 0.68)",
 };
 
 export const myLogicGatesListStyle: React.CSSProperties = {
@@ -565,7 +608,7 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     alignContent: "center",
     justifyItems: "center",
     gap: 7,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_TASKBAR_TILE_GRAY_BORDER}`,
+    border: `1px solid ${selected ? HOME_LOGIC_GATE_GREEN : HOME_LOGIC_GATE_GREEN_BORDER}`,
     borderRadius: 7,
     background: "#ffffff",
     color: "#111827",
@@ -573,7 +616,7 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     font: "inherit",
     padding: "10px 8px",
     minWidth: 0,
-    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_SOFT}` : "none",
+    boxShadow: selected ? `0 0 0 2px ${HOME_LOGIC_GATE_GREEN_SOFT}` : "none",
   };
 }
 
@@ -812,7 +855,7 @@ export const logicGateInboxGroupStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gridTemplateRows: "44px minmax(0, 1fr)",
-  border: `1px solid ${HOME_CARD_BORDER}`,
+  border: `1px solid ${HOME_LOGIC_GATE_GREEN_BORDER}`,
   borderRadius: 8,
   background: "#ffffff",
   overflow: "hidden",
@@ -868,9 +911,9 @@ export const logicGateInboxGroupIconStyle: React.CSSProperties = {
   height: 28,
   display: "grid",
   placeItems: "center",
-  border: `1px solid ${HOME_CYAN_MEDIUM}`,
+  border: `1px solid ${HOME_LOGIC_GATE_GREEN_BORDER}`,
   borderRadius: 6,
-  background: HOME_CYAN_FAINT,
+  background: "#ffffff",
 };
 
 export const logicGateInboxGroupTitleStyle: React.CSSProperties = {
@@ -957,14 +1000,14 @@ export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0, hasUnre
     gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto auto`,
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(100, 116, 139, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
+    border: `1px solid ${selected ? HOME_NODE_ICON_BLUE : HOME_NODE_ICON_BLUE_BORDER}`,
     borderRadius: 6,
-    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#f8fafc" : "rgba(255, 255, 255, 0.94)",
+    background: selected ? HOME_NODE_ICON_BLUE_SOFT : hasUnreadNotification ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
     color: "#111827",
     cursor: "grab",
     padding: "4px 5px 4px 0",
     boxShadow: selected
-      ? `0 0 0 2px ${HOME_CYAN_FAINT} inset`
+      ? `0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT} inset`
       : hasUnreadNotification
         ? "0 0 0 1px rgba(100, 116, 139, 0.16) inset"
         : "0 1px 2px rgba(15, 23, 42, 0.04)",

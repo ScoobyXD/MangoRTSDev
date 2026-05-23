@@ -17,7 +17,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxPanelTitleStyle, nodeInboxRailHeaderStyle, nodeInboxRailSectionStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -2100,7 +2100,7 @@ export function NodeInboxRail({
   return (
     <>
     <aside ref={railSplit.railRef} style={nodeInboxRailStyle(railSplit.topHeight)}>
-      <section style={nodeInboxRailSectionStyle} onContextMenu={openCreateNodeMenu}>
+      <section style={nodeInboxPrimarySectionStyle} onContextMenu={openCreateNodeMenu}>
         <div style={nodeInboxRailHeaderStyle}>
           <h2 style={nodeInboxPanelTitleStyle}>My Nodes</h2>
           {loading && <span style={nodeInboxMutedSmallStyle}>Loading</span>}
@@ -2129,6 +2129,7 @@ export function NodeInboxRail({
                       onOpenNode={onOpenNode}
                       onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                       onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                      tone="orange"
                     />
                   ))}
                 </div>
@@ -2140,14 +2141,14 @@ export function NodeInboxRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
-      <section style={nodeInboxRailSectionStyle} onContextMenu={openCreateNodeMenu}>
+      <section style={nodeInboxOtherSectionStyle} onContextMenu={openCreateNodeMenu}>
         <div style={nodeInboxRailHeaderStyle}>
-          <h2 style={nodeInboxPanelTitleStyle}>Others</h2>
-          {loading && <span style={nodeInboxMutedSmallStyle}>Loading</span>}
+          <h2 style={nodeInboxOtherPanelTitleStyle}>Others</h2>
+          {loading && <span style={nodeInboxOtherMutedSmallStyle}>Loading</span>}
         </div>
-        <div className="mango-home-scroll" style={nodeInboxListStyle}>
+        <div className="mango-home-scroll" style={nodeInboxOtherListStyle}>
           {otherNodes.length === 0 && !loading ? (
-            <div style={nodeInboxEmptyStyle}>No other nodes</div>
+            <div style={nodeInboxOtherEmptyStyle}>No other nodes</div>
           ) : (
             <div style={nodeInboxGridStyle}>
               {otherNodes.map((node) => (
@@ -2162,6 +2163,7 @@ export function NodeInboxRail({
                   onOpenNode={onOpenNode}
                   onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                   onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                  tone="light"
                 />
               ))}
             </div>
@@ -2198,6 +2200,7 @@ export function MyNodeTile({
   onOpenNode,
   onOpenNodeBulkMenu,
   onOpenPinContextMenu,
+  tone = "orange",
 }: {
   node: NodeRecord;
   selected: boolean;
@@ -2208,13 +2211,14 @@ export function MyNodeTile({
   onOpenNode: (node: NodeRecord) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
+  tone?: "orange" | "light";
 }) {
   const nodeID = node.node_id;
   return (
     <button
       type="button"
       draggable
-      style={nodeInboxTileStyle(selected)}
+      style={nodeInboxTileStyle(selected, tone)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
@@ -2237,8 +2241,8 @@ export function MyNodeTile({
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
       }}
     >
-      <span style={nodeInboxTileIconStyle}><ExplorerRowIcon kind="node" tone="inverse" /></span>
-      <span style={nodeInboxTileTextStyle}>{nodeTitle(node)}</span>
+      <span style={nodeInboxTileIconStyle}><ExplorerRowIcon kind="node" tone={tone === "light" ? "orange" : "inverse"} /></span>
+      <span style={nodeInboxTileTextStyle(tone)}>{nodeTitle(node)}</span>
     </button>
   );
 }
