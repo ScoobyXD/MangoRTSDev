@@ -1235,6 +1235,8 @@ type noRepairLogicGateArenaRepo struct {
 	hideArenaBoards  bool
 	dropArenaColumns bool
 	ensureCalls      int
+	boardListCalls   int
+	columnListCalls  int
 }
 
 func (r *noRepairLogicGateArenaRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error) {
@@ -1243,6 +1245,7 @@ func (r *noRepairLogicGateArenaRepo) EnsureLogicGateKanbanBoard(companyID, logic
 }
 
 func (r *noRepairLogicGateArenaRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
+	r.boardListCalls++
 	if r.hideArenaBoards && query.LogicGateID != "" {
 		return []domain.KanbanBoard{}, nil
 	}
@@ -1250,6 +1253,7 @@ func (r *noRepairLogicGateArenaRepo) ListKanbanBoards(companyID string, query st
 }
 
 func (r *noRepairLogicGateArenaRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
+	r.columnListCalls++
 	if r.dropArenaColumns {
 		return []domain.KanbanColumn{}, nil
 	}
@@ -1276,6 +1280,9 @@ func TestLogicGateArenaGETLoadsExistingBoardWithoutRepair(t *testing.T) {
 	}
 	if repo.ensureCalls != 0 {
 		t.Fatalf("GET arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
+		t.Fatalf("GET arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
 	}
 	var payload struct {
 		Board struct {
@@ -1306,11 +1313,14 @@ func TestLogicGateArenaGETDoesNotProvisionMissingBoard(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "logic_gate_arena_board_not_found") {
-		t.Fatalf("GET missing-board arena status = %d body=%s, want explicit missing board", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET missing-board arena status = %d body=%s, want projected arena", rec.Code, rec.Body.String())
 	}
 	if repo.ensureCalls != 0 {
 		t.Fatalf("GET missing-board arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
+		t.Fatalf("GET missing-board arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
 	}
 }
 
@@ -1329,11 +1339,14 @@ func TestLogicGateArenaGETDoesNotRepairMissingDefaultColumns(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "logic_gate_arena_columns_not_provisioned") {
-		t.Fatalf("GET missing-column arena status = %d body=%s, want explicit missing columns", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET missing-column arena status = %d body=%s, want projected arena", rec.Code, rec.Body.String())
 	}
 	if repo.ensureCalls != 0 {
 		t.Fatalf("GET missing-column arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
+		t.Fatalf("GET missing-column arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
 	}
 }
 

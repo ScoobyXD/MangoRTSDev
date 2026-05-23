@@ -24,52 +24,27 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logicGate, err := s.repo.GetLogicGate(companyID, logicGateID)
+	work, err := s.repo.GetLogicGateWork(companyID, logicGateID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_request")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "logic_gate_not_found")
 		return
 	}
 	if err != nil {
-		log.Printf("failed to load logic gate for arena company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
-		return
-	}
-
-	boards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{LogicGateID: logicGateID, Limit: 2})
-	if err != nil {
-		log.Printf("failed to list logic gate arena boards company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
-		return
-	}
-	expectedBoardID := store.LogicGateKanbanBoardID(logicGateID)
-	board, ok := selectLogicGateArenaBoard(boards, expectedBoardID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "logic_gate_arena_board_not_found")
-		return
-	}
-	columns, err := s.repo.ListKanbanColumns(companyID, board.BoardID)
-	if err != nil {
-		log.Printf("failed to list logic gate arena columns company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
-		return
-	}
-	if logicGateArenaDefaultColumnsMissing(columns) {
-		writeError(w, http.StatusConflict, "logic_gate_arena_columns_not_provisioned")
-		return
-	}
-	cards, err := s.repo.ListKanbanCards(companyID, board.BoardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
-	if err != nil {
-		log.Printf("failed to list logic gate arena cards company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
+		log.Printf("failed to load logic gate work for arena company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
 
 	writeJSONMaybeNotModified(w, r, http.StatusOK, domain.LogicGateArenaView{
-		LogicGate:  logicGate,
-		Board:      board,
-		Columns:    columns,
-		Cards:      cards,
-		CardsLimit: store.KanbanMaxCardsLimit,
+		LogicGate:  work.LogicGate,
+		Board:      work.Board,
+		Columns:    work.Columns,
+		Cards:      work.Cards,
+		CardsLimit: work.CardsLimit,
 	})
 }
 

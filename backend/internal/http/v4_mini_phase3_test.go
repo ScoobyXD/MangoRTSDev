@@ -166,8 +166,24 @@ func TestV4MiniPhase3OldKanbanRoutePolicy(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID, nil)
+	listReq = requestWithLogicGateWorkActorForTest(listReq, user, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET projected kanban boards status = %d body=%s, want empty projection list", listRec.Code, listRec.Body.String())
+	}
+	var listPayload struct {
+		Boards []domain.KanbanBoard `json:"boards"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode projected board list: %v", err)
+	}
+	if len(listPayload.Boards) != 0 {
+		t.Fatalf("projected boards = %+v, want none without visible Logic Gates", listPayload.Boards)
+	}
+
 	for _, target := range []string{
-		"/v1/kanban/boards?company_id=" + companyID,
 		"/v1/kanban/columns?company_id=" + companyID + "&board_id=standalone-board",
 		"/v1/kanban/cards?company_id=" + companyID + "&board_id=standalone-board",
 	} {
@@ -191,6 +207,65 @@ func TestV4MiniPhase3OldKanbanRoutePolicy(t *testing.T) {
 	}
 }
 
+func TestV4MiniPhase3KanbanBoardListProjectsVisibleLogicGates(t *testing.T) {
+	t.Parallel()
+
+	base := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777735"
+	base.EnsureCompany(companyID, "V4 Mini Kanban Projection Co")
+	viewer := mustLogicGateWorkHTTPUser(t, base, companyID, "v4-mini-kanban-projection-viewer")
+	visible, err := base.CreateLogicGate(companyID, "Visible Projection Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate visible: %v", err)
+	}
+	hidden, err := base.CreateLogicGate(companyID, "Hidden Projection Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate hidden: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   visible.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	repo := &phase3ForbiddenKanbanBoardListRepo{Repository: base}
+	server := NewServer(repo)
+	defer server.Close()
+	req := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID+"&limit=50", nil)
+	req = requestWithLogicGateWorkActorForTest(req, viewer, companyID)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET projected kanban boards status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.boardListCalls != 0 {
+		t.Fatalf("projected board list loaded legacy Kanban boards %d times", repo.boardListCalls)
+	}
+	var payload struct {
+		Boards []domain.KanbanBoard `json:"boards"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode projected board list: %v", err)
+	}
+	if len(payload.Boards) != 1 {
+		t.Fatalf("projected boards = %+v, want only visible gate %s and not hidden %s", payload.Boards, visible.LogicGateID, hidden.LogicGateID)
+	}
+	board := payload.Boards[0]
+	if board.BoardID != store.LogicGateKanbanBoardID(visible.LogicGateID) || board.LogicGateID == nil || *board.LogicGateID != visible.LogicGateID || board.Title != visible.Header {
+		t.Fatalf("projected board = %+v, want visible Logic Gate board", board)
+	}
+}
+
 type phase3ForbiddenKanbanCardListRepo struct {
 	store.Repository
 	cardListCalls int
@@ -198,5 +273,15 @@ type phase3ForbiddenKanbanCardListRepo struct {
 
 func (r *phase3ForbiddenKanbanCardListRepo) ListKanbanCards(companyID, boardID string, query store.KanbanCardQuery) ([]domain.KanbanCard, error) {
 	r.cardListCalls++
+	return nil, store.ErrInvalid
+}
+
+type phase3ForbiddenKanbanBoardListRepo struct {
+	store.Repository
+	boardListCalls int
+}
+
+func (r *phase3ForbiddenKanbanBoardListRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
+	r.boardListCalls++
 	return nil, store.ErrInvalid
 }

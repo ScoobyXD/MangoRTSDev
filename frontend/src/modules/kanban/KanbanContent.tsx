@@ -3,7 +3,6 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import {
@@ -103,11 +102,6 @@ import {
   type WorkspaceStreamEnvelope,
 } from "./KanbanContentModel";
 
-type KanbanNodeCreateBatchResponse = {
-  nodes?: NodeRecord[];
-  folder_items?: CompanyExplorerFolderItem[];
-};
-
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -121,8 +115,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
+  const initialLogicGateID = logicGateIDFromKanbanBoardID(frameBoardID);
   const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
-  const [activeLogicGateID, setActiveLogicGateID] = useState("");
+  const [activeLogicGateID, setActiveLogicGateID] = useState(initialLogicGateID);
   const [activeLogicGateLabel, setActiveLogicGateLabel] = useState("");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [boardSearchQuery, setBoardSearchQuery] = useState("");
@@ -207,23 +202,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardHeaderLeftPaddingPx = arenaMode ? 0 : 162;
   const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
 
-  const resolveActiveNodesFolderID = useCallback(async (): Promise<string> => {
-    const currentActiveFolder = explorerFolders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes");
-    if (currentActiveFolder?.folder_id) return currentActiveFolder.folder_id;
-    const payload = await requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}&folder_kind=node`).catch(() => null);
-    const folders = payload?.folders ?? [];
-    if (folders.length === 0) return "";
-    setExplorerFolders((previous) => {
-      const byID = new Map(previous.map((folder) => [folder.folder_id, folder]));
-      for (const folder of folders) byID.set(folder.folder_id, folder);
-      return Array.from(byID.values());
-    });
-    return folders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes")?.folder_id ?? "";
-  }, [companyID, explorerFolders, requestJSON]);
-
   useEffect(() => {
+    const nextLogicGateID = logicGateIDFromKanbanBoardID(frameBoardID);
     setActiveBoardID(frameBoardID);
-    setActiveLogicGateID("");
+    setActiveLogicGateID(nextLogicGateID);
     setActiveLogicGateLabel("");
     setNodeEditorOverlay(null);
     setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID));
@@ -328,6 +310,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }), [arenaNodeByID, arenaUserByID, arenaXGroupBy, arenaXSortDirection, arenaYGroupBy, arenaYSortDirection, cards, orderedColumns]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
+  const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
   const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Logic Gate")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
@@ -512,6 +495,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setBoards(sortedBoards);
       if (folderPayload) setExplorerFolders(folderPayload.folders ?? []);
       if (folderItemPayload) setExplorerFolderItems(folderItemPayload.folder_items ?? []);
+      const currentBoardID = activeBoardIDRef.current;
+      const currentBoardVisible = sortedBoards.some((board) => board.board_id === currentBoardID);
+      if ((!logicGateIDFromKanbanBoardID(currentBoardID) || !currentBoardVisible) && sortedBoards.length > 0) {
+        const nextBoard = sortedBoards[0];
+        const nextLogicGateID = nextBoard.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(nextBoard.board_id);
+        activeBoardIDRef.current = nextBoard.board_id;
+        setSelectedCardIDs(new Set());
+        setSelectionAnchorCardID("");
+        setHighlightedEntity(null);
+        setActiveLogicGateID(nextLogicGateID);
+        setActiveLogicGateLabel(nextLogicGateID ? getKanbanBoardDisplayTitle(nextBoard) : "");
+        setNodeEditorOverlay(null);
+        setActiveBoardID(nextBoard.board_id);
+      } else if (!currentBoardVisible && sortedBoards.length === 0 && !logicGateIDFromKanbanBoardID(currentBoardID)) {
+        setColumns([]);
+        setCards([]);
+      }
     } catch {
       setError("Kanban board list API unavailable");
     } finally {
@@ -587,6 +587,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const requestedBoardID = requestedBoardIDOverride?.trim() || boardID;
     setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, requestedBoardID));
     setError("");
+    if (!logicGateIDFromKanbanBoardID(requestedBoardID) && !boardsRef.current.some((board) => board.board_id === requestedBoardID)) {
+      setColumns([]);
+      setCards([]);
+      setLoading(false);
+      return;
+    }
     try {
       // The UI renders a bounded first window. Headless agents should page by
       // column through the cards API instead of loading company-scale boards.
@@ -714,6 +720,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           if (envelope.type === "kanban_board_deleted") {
             const boardID = typeof data.board_id === "string" ? data.board_id : "";
             if (boardID) removeBoardFromList(boardID);
+            return;
+          }
+          if (envelope.type === "logic_gate_created") {
+            invalidateKanbanBoardListCache(apiBase, companyID);
+            void refreshBoards();
             return;
           }
           if (envelope.type === "logic_gate_updated") {
@@ -1255,29 +1266,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const createNodeInColumn = useCallback(async (columnID: string) => {
     setError("");
     try {
-      const activeNodesFolderID = await resolveActiveNodesFolderID();
-      if (!activeNodesFolderID) throw new Error("active_nodes_folder_not_found");
-      const response = await createMapEntityBatchCommand<KanbanNodeCreateBatchResponse>({
-        companyID,
-        entityKind: "node",
-        folderID: activeNodesFolderID,
-        items: [{
-          client_id: createMapEntityBatchClientID("kanban-node"),
-          title: "new node",
-          x: 120,
-          y: 120,
-        }],
-        requestJSON,
-      });
-      const node = response.nodes?.[0];
-      if (!node) throw new Error("node_batch_create_missing_node");
-      if (response.folder_items?.length) {
-        setExplorerFolderItems((previous) => {
-          const byKey = new Map(previous.map((item) => [`${item.item_type}:${item.item_id}`, item]));
-          for (const item of response.folder_items ?? []) byKey.set(`${item.item_type}:${item.item_id}`, item);
-          return Array.from(byKey.values());
-        });
+      if (!logicGateIDFromKanbanBoardID(boardID)) {
+        setError("Select a Logic Gate board first");
+        return;
       }
+      const node = await requestJSON<NodeRecord>("/v1/nodes", {
+        method: "POST",
+        json: {
+          company_id: companyID,
+          title: "new node",
+        },
+      });
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       const label = getNodeTitle(node) || node.node_id;
       const result = await addExplorerNodesToKanbanColumnCommand({
@@ -1301,7 +1300,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setError("Node create failed");
       refreshBoard();
     }
-  }, [apiBase, cards, companyID, frameID, kanbanCommandContext, refreshBoard, requestJSON, resolveActiveNodesFolderID, syncNodeStatusesFromCards]);
+  }, [apiBase, boardID, cards, companyID, kanbanCommandContext, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
@@ -1544,7 +1543,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               />
             );
           })}
-          {!arenaMode && <button
+          {!arenaMode && !activeBoardIsLogicGate && <button
             type="button"
             title="Add column"
             onClick={() => void addColumn()}
