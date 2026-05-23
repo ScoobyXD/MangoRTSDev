@@ -94,6 +94,71 @@ func TestMemoryLogicGateRaciScopedWritesCommandsAndAssignedNodeVisibility(t *tes
 	assertEffectiveAccessSource(t, repo, companyID, first.UserID, EntityTypeNode, node.NodeID, effectiveAccessSourceGateVisibility, firstCommandVisibilitySource, EntityPermissionView, true)
 }
 
+func TestMemoryDerivedAccessSourcesDoNotCreateCompatibilityResourceGrants(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555507"
+	repo.EnsureCompany(companyID, "Phase 3 Compatibility Cleanup Co")
+
+	raciUser := mustEffectiveAccessUser(t, repo, companyID, "phase3-raci-user")
+	commandUser := mustEffectiveAccessUser(t, repo, companyID, "phase3-raci-command-user")
+	assignee := mustEffectiveAccessUser(t, repo, companyID, "phase3-assignee-user")
+	gate, err := repo.CreateLogicGate(companyID, "Compatibility cleanup gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Compatibility cleanup node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: gate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: raciUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: gate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleConsulted,
+			UserID: commandUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+	gatePermissions, err := repo.ListEntityPermissions(companyID, EntityTypeLogicGate, gate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions gate: %v", err)
+	}
+	if len(gatePermissions) != 0 {
+		t.Fatalf("Logic Gate RACI created compatibility resource grants: %+v", gatePermissions)
+	}
+	assertEffectiveAccess(t, repo, companyID, raciUser.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, commandUser.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit, true)
+
+	if _, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:         companyID,
+		NodeID:            node.NodeID,
+		AssigneeUserID:    &assignee.UserID,
+		AssigneeUserIDSet: true,
+	}); err != nil {
+		t.Fatalf("UpdateNode assignee: %v", err)
+	}
+	nodePermissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions node: %v", err)
+	}
+	if len(nodePermissions) != 0 {
+		t.Fatalf("node assignee created compatibility resource grants: %+v", nodePermissions)
+	}
+	assertEffectiveAccess(t, repo, companyID, assignee.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
+}
+
 func TestMemorySharedInboxRaciUserGroupDescendantsAndRemoval(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555502"

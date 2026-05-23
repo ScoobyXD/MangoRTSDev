@@ -250,16 +250,6 @@ func (s *Server) publishNotifications(items []domain.Notification) {
 	}
 }
 
-func (s *Server) refreshEffectiveAccessProjection(companyID, reason string) {
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return
-	}
-	if err := s.repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		log.Printf("failed to refresh effective access company_id=%s reason=%s: %v", companyID, reason, err)
-	}
-}
-
 func notificationActorPayload(r *http.Request) (string, string) {
 	actor, ok := authenticatedActor(r)
 	if !ok {

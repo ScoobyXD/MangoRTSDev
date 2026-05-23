@@ -267,7 +267,6 @@ func (s *Server) handleKanbanCardsCompatibility(w http.ResponseWriter, r *http.R
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
-	s.refreshEffectiveAccessProjection(req.CompanyID, "legacy_kanban_card_assigned_to_logic_gate_work")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusCreated, s.logicGateWorkCompatibilityCardAfterMutation(req.CompanyID, logicGateID, result.Card))
@@ -357,7 +356,6 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		if !writeLogicGateWorkRemoveError(w, err) {
 			return
 		}
-		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_removed_from_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(result.Events)
 		s.projectCommittedNotificationEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -379,7 +377,6 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
-		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_moved_as_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(result.Events)
 		s.projectCommittedNotificationEvents(result.Events)
 		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, result.Card)
@@ -396,7 +393,6 @@ func (s *Server) handleKanbanCardByIDCompatibility(w http.ResponseWriter, r *htt
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_issue_state") {
 			return
 		}
-		s.refreshEffectiveAccessProjection(companyID, "legacy_kanban_card_issue_toggled_as_logic_gate_work")
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
 		s.projectCommittedNotificationEvents(issueResult.Events)
 		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, issueResult.Card)

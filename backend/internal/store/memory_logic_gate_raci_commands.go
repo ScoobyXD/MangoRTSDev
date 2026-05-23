@@ -135,12 +135,6 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	if changed {
 		snapshot = r.snapshotLogicGateRaciCommandStateLocked()
 	}
-	if operation == LogicGateRaciCommandAdd {
-		now := time.Now().UTC()
-		for _, commandAssignment := range commandAssignments {
-			r.grantEntityAccessAtLeastLocked(companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, commandAssignment.userID, EntityPermissionEdit, now)
-		}
-	}
 	if !changed {
 		return result, nil
 	}

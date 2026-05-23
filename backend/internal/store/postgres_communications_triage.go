@@ -352,6 +352,12 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{input.LogicGateID}, []string{nodeID}); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n

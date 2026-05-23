@@ -519,7 +519,8 @@ func TestCompanyExplorerCommunicationsDefaultFoldersSeedOnceAndAreMutable(t *tes
 func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	t.Parallel()
 
-	repo := store.NewMemoryRepo()
+	backing := store.NewMemoryRepo()
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-raci-test"
@@ -617,6 +618,9 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		}
 		if !foundGroup {
 			t.Fatalf("listed assignments = %+v, want informed department assignment", listed.Assignments)
+		}
+		if repo.rebuildCalls != 0 {
+			t.Fatalf("shared inbox RACI route called full-company rebuild %d times, want 0", repo.rebuildCalls)
 		}
 		return
 	}

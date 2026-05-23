@@ -401,8 +401,9 @@ where company_id=$1 and node_id=$4`,
 	return err
 }
 
-func assignNodeToLogicGateResponsibleSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, logicGateID, nodeID string) error {
-	_, err := exec.ExecContext(ctx, `
+func assignNodeToLogicGateResponsibleSQL(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) error {
+	var changedCount int
+	err := tx.QueryRowContext(ctx, `
 with responsible as (
   select user_id
   from logic_gate_raci_assignments
@@ -418,24 +419,22 @@ updated_node as (
   from responsible
   where nodes.company_id=$1
     and nodes.node_id=$3
-  returning nodes.company_id, nodes.node_id, responsible.user_id
+    and nodes.assignee_user_id is distinct from responsible.user_id
+  returning 1
 )
-insert into resource_access_grants
-  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-select company_id, 'node', node_id, 'user', user_id, 'edit', now()
-from updated_node
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level=case
-    when mangorts_access_level_rank(resource_access_grants.access_level) >= mangorts_access_level_rank(excluded.access_level)
-      then resource_access_grants.access_level
-    else excluded.access_level
-  end`,
+select count(*) from updated_node`,
 		companyID, logicGateID, nodeID, domain.LogicGateRaciRoleResponsible,
-	)
+	).Scan(&changedCount)
 	if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if changedCount == 0 {
+		return nil
+	}
+	return recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, companyID, nodeID)
 }
 
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {

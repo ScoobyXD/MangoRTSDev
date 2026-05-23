@@ -347,7 +347,6 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	defer r.mu.Unlock()
 
 	logicGateRaciSnapshot := cloneMemorySliceMap(r.logicGateRaci)
-	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return nil, ErrNotFound
@@ -382,18 +381,13 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	}
 	sortLogicGateRaciAssignments(assignments)
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
-	for _, assignment := range assignments {
-		r.grantEntityAccessAtLeastLocked(companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, assignment.UserID, EntityPermissionEdit, now)
-	}
 	if err := r.recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID); err != nil {
 		r.logicGateRaci = logicGateRaciSnapshot
-		r.entityPermissions = entityPermissionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		return nil, err
 	}
 	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{logicGateID}, nil); err != nil {
 		r.logicGateRaci = logicGateRaciSnapshot
-		r.entityPermissions = entityPermissionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		return nil, err
 	}

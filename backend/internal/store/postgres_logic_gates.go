@@ -669,9 +669,6 @@ on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
 			}
 			return nil, err
 		}
-		if err := grantResourceAccessAtLeastSQL(ctx, tx, companyID, EntityTypeLogicGate, logicGateID, EntityPermissionSubjectUser, assignment.userID, EntityPermissionEdit); err != nil {
-			return nil, err
-		}
 	}
 	if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, companyID, logicGateID); err != nil {
 		return nil, err

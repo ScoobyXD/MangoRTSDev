@@ -12,12 +12,12 @@ import (
 	"testing"
 )
 
-type noRebuildNodeAssigneeRepo struct {
-	store.Repository
+type noRebuildEffectiveAccessRepo struct {
+	*store.MemoryRepo
 	rebuildCalls int
 }
 
-func (r *noRebuildNodeAssigneeRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
+func (r *noRebuildEffectiveAccessRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
 	r.rebuildCalls++
 	return errors.New("unexpected full-company effective access rebuild")
 }
@@ -30,7 +30,7 @@ func TestNodeAssigneeHandlersMaintainEffectiveAccessWithoutFullRebuild(t *testin
 	backing.EnsureCompany(companyID, "No Rebuild Co")
 	creator := mustHTTPNodeAssigneeUser(t, backing, companyID, "node-assignee-handler-creator")
 	nextAssignee := mustHTTPNodeAssigneeUser(t, backing, companyID, "node-assignee-handler-next")
-	repo := &noRebuildNodeAssigneeRepo{Repository: backing}
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	handler := NewServer(repo).Routes()
 
 	createBody, _ := json.Marshal(map[string]string{

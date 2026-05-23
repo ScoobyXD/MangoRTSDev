@@ -307,9 +307,8 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		})
 	case http.MethodPut:
 		var req struct {
-			CompanyID   string                                 `json:"company_id"`
-			Permissions []store.EntityPermissionInput          `json:"permissions"`
-			Assignments []store.SharedInboxRaciAssignmentInput `json:"assignments"`
+			CompanyID   string                        `json:"company_id"`
+			Permissions []store.EntityPermissionInput `json:"permissions"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -319,15 +318,11 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		if !requireCompanyManager(w, r, req.CompanyID) {
 			return
 		}
-		permissions := req.Permissions
-		if len(permissions) == 0 && len(req.Assignments) > 0 {
-			permissions = sharedInboxRaciAssignmentsToAccessPermissions(req.Assignments)
-		}
 		grants, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 			CompanyID:   req.CompanyID,
 			EntityType:  store.EntityTypeSharedTriageFolder,
 			EntityID:    folderID,
-			Permissions: permissions,
+			Permissions: req.Permissions,
 		})
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_grants")
@@ -345,9 +340,6 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_access")
 			return
 		}
-		// TODO(V4): replace this repair-style full-company refresh with a source-scoped
-		// shared triage effective-access writer in the same transaction as the source mutation.
-		s.refreshEffectiveAccessProjection(req.CompanyID, "shared_triage_access_updated")
 		actorUserID, actorLabel := notificationActorPayload(r)
 		event, projected := s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "access_grants": grants, "permissions": grants, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
 		if projected {
@@ -362,34 +354,6 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
-}
-
-func sharedInboxRaciAssignmentsToAccessPermissions(assignments []store.SharedInboxRaciAssignmentInput) []store.EntityPermissionInput {
-	permissions := make([]store.EntityPermissionInput, 0, len(assignments))
-	seen := map[string]bool{}
-	for _, assignment := range assignments {
-		userID := strings.TrimSpace(assignment.UserID)
-		if userID == "" {
-			continue
-		}
-		accessLevel := store.EntityPermissionView
-		role := strings.TrimSpace(assignment.Role)
-		if role == "" || role == domain.LogicGateRaciRoleResponsible || role == domain.LogicGateRaciRoleAccountable {
-			accessLevel = store.EntityPermissionEdit
-		}
-		key := store.EntityPermissionSubjectUser + ":" + userID
-		if seen[key] && accessLevel == store.EntityPermissionView {
-			continue
-		}
-		seen[key] = true
-		permissions = append(permissions, store.EntityPermissionInput{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   userID,
-			Permission:  accessLevel,
-			AccessLevel: accessLevel,
-		})
-	}
-	return permissions
 }
 
 func (s *Server) requireCommunicationsSharedInboxAccess(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, folderID, accessLevel string) bool {

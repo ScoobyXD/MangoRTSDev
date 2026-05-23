@@ -15,7 +15,8 @@ import (
 func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 	t.Parallel()
 
-	repo := store.NewMemoryRepo()
+	backing := store.NewMemoryRepo()
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	server := NewServer(repo)
 	companyID := "company-raci-command-api"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
@@ -160,6 +161,9 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 		t.Fatalf("outsider add status = %d body=%s, want raci_user_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
 	}
 	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 3)
+	if repo.rebuildCalls != 0 {
+		t.Fatalf("Logic Gate RACI command API called full-company rebuild %d times, want 0", repo.rebuildCalls)
+	}
 }
 
 type logicGateRaciCommandPayloadForTest struct {

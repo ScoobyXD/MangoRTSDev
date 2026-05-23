@@ -504,11 +504,14 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
 	}
 	description := strings.TrimSpace(input.DescriptionSnapshot)
-	assignResponsible := func() {
+	assignResponsible := func() error {
 		if board.LogicGateID == nil {
-			return
+			return nil
 		}
-		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID)
+		if r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID) {
+			return r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID)
+		}
+		return nil
 	}
 	for index, card := range r.kanbanCards[k] {
 		if card.NodeID != input.NodeID {
@@ -531,7 +534,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
-		assignResponsible()
+		if err := assignResponsible(); err != nil {
+			return domain.KanbanCard{}, err
+		}
 		if card.LogicGateID != nil {
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 		}
@@ -561,7 +566,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		card.LogicGateID = &value
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
-	assignResponsible()
+	if err := assignResponsible(); err != nil {
+		return domain.KanbanCard{}, err
+	}
 	if card.LogicGateID != nil {
 		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 	}
@@ -665,19 +672,22 @@ func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID 
 	return ""
 }
 
-func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGateID, nodeID string) {
+func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGateID, nodeID string) bool {
 	responsibleUserID := r.responsibleUserIDForLogicGateLocked(companyID, logicGateID)
 	if responsibleUserID == "" {
-		return
+		return false
 	}
 	nodeKey := key(companyID, nodeID)
 	node, ok := r.nodes[nodeKey]
 	if !ok {
-		return
+		return false
+	}
+	if nodeAssigneeUserID(node) == responsibleUserID {
+		return false
 	}
 	node.AssigneeUserID = &responsibleUserID
 	r.nodes[nodeKey] = node
-	r.grantEntityAccessAtLeastLocked(companyID, EntityTypeNode, nodeID, EntityPermissionSubjectUser, responsibleUserID, EntityPermissionEdit, time.Now().UTC())
+	return true
 }
 
 type memoryKanbanCardLocation struct {

@@ -15,7 +15,8 @@ import (
 func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	t.Parallel()
 
-	repo := store.NewMemoryRepo()
+	backing := store.NewMemoryRepo()
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	server := NewServer(repo)
 	companyID := "company-shared-inbox-route-test"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
@@ -63,8 +64,8 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 
 	accessBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
-		"assignments": []map[string]string{
-			{"user_id": user.UserID},
+		"permissions": []map[string]string{
+			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": user.UserID, "access_level": store.EntityPermissionEdit},
 		},
 	})
 	accessReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+created.FolderID+"/access", bytes.NewReader(accessBody))
@@ -105,6 +106,65 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 	if len(listPayload.SharedInboxes) != 1 || listPayload.SharedInboxes[0].FolderID != created.FolderID || listPayload.SharedInboxes[0].AccountEmail != "shared@example.com" {
 		t.Fatalf("shared inbox list = %+v", listPayload.SharedInboxes)
+	}
+	if repo.rebuildCalls != 0 {
+		t.Fatalf("shared inbox access route called full-company rebuild %d times, want 0", repo.rebuildCalls)
+	}
+}
+
+func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPermissions(t *testing.T) {
+	t.Parallel()
+
+	backing := store.NewMemoryRepo()
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
+	server := NewServer(repo)
+	companyID := "company-shared-inbox-access-no-raci-compat"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+	repo.EnsureCompany(companyID, "Shared Inbox No RACI Compat")
+
+	user, err := repo.UpsertAuthUser("subject-shared-access-no-raci-compat", "no-raci-compat@example.com", "No RACI Compat")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership error = %v", err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Access")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": domain.LogicGateRaciRoleResponsible, "user_id": user.UserID},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT shared inbox access status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		AccessGrants []domain.EntityPermission `json:"access_grants"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode access payload: %v", err)
+	}
+	if len(payload.AccessGrants) != 0 {
+		t.Fatalf("assignments-only access update created compatibility grants: %+v", payload.AccessGrants)
+	}
+	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedTriageFolder, folder.FolderID, store.EntityPermissionView)
+	if err != nil {
+		t.Fatalf("UserHasEffectiveAccess: %v", err)
+	}
+	if allowed {
+		t.Fatal("assignments-only access update created effective access, want no derived compatibility")
+	}
+	if repo.rebuildCalls != 0 {
+		t.Fatalf("shared inbox assignments-only access route called full-company rebuild %d times, want 0", repo.rebuildCalls)
 	}
 }
 

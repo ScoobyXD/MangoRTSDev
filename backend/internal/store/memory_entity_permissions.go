@@ -385,26 +385,6 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	return out, nil
 }
 
-func (r *MemoryRepo) grantEntityAccessAtLeastLocked(companyID, entityType, entityID, subjectType, subjectID, accessLevel string, now time.Time) {
-	if EntityPermissionRank(accessLevel) == 0 {
-		return
-	}
-	permissionKey := entityPermissionKey(companyID, entityType, entityID, subjectType, subjectID, accessLevel)
-	if existing, ok := r.entityPermissions[permissionKey]; ok && EntityPermissionRank(existing.Permission) >= EntityPermissionRank(accessLevel) {
-		return
-	}
-	r.entityPermissions[permissionKey] = domain.EntityPermission{
-		CompanyID:        companyID,
-		EntityType:       entityType,
-		EntityID:         entityID,
-		SubjectType:      subjectType,
-		SubjectID:        subjectID,
-		Permission:       accessLevel,
-		AccessLevel:      accessLevel,
-		CreatedTimestamp: now,
-	}
-}
-
 func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
 	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
 }

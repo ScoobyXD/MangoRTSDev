@@ -28,7 +28,7 @@ func TestEntityPermissionHandlersSkipFullRebuildForNodeAndLogicGateDirectGrants(
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
 
-	repo := &noRebuildNodeAssigneeRepo{Repository: backing}
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	handler := NewServer(repo).Routes()
 	for _, tc := range []struct {
 		name         string
@@ -71,7 +71,7 @@ func TestLogicGateCreateProjectsCreatorAccessWithoutFullRebuild(t *testing.T) {
 	companyID := "company-phase2a-gate-create-handler"
 	backing.EnsureCompany(companyID, "Phase 2A Gate Create Handler Co")
 	creator := mustHTTPPhase2AUser(t, backing, companyID, "phase2a-gate-create-creator", domain.RoleCompanyUser)
-	repo := &noRebuildNodeAssigneeRepo{Repository: backing}
+	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
 	handler := NewServer(repo).Routes()
 
 	body, _ := json.Marshal(map[string]string{
