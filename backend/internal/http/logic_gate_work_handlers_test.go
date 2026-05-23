@@ -128,6 +128,9 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	if postResult.Assignment.NodeID != mutableNode.NodeID || postResult.Assignment.StatusKey != store.LogicGateWorkStatusPending {
 		t.Fatalf("POST assignment = %+v, want pending mutable node", postResult.Assignment)
 	}
+	if postResult.Card.ColumnID != store.LogicGateWorkStatusPending {
+		t.Fatalf("POST card column = %q, want %q", postResult.Card.ColumnID, store.LogicGateWorkStatusPending)
+	}
 
 	clientGeneratedNodeID := "019e476d-ee56-7aaa-aaaa-aaaaaaaaaaaa"
 	createNodePayload := map[string]any{
@@ -150,6 +153,9 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}
 	if createNodeResult.Card.NodeID != clientGeneratedNodeID || createNodeResult.Assignment.StatusKey != store.LogicGateWorkStatusDone {
 		t.Fatalf("created assignment/card = %+v / %+v, want done client-generated node", createNodeResult.Assignment, createNodeResult.Card)
+	}
+	if createNodeResult.Card.ColumnID != store.LogicGateWorkStatusDone {
+		t.Fatalf("created card column = %q, want %q", createNodeResult.Card.ColumnID, store.LogicGateWorkStatusDone)
 	}
 	afterCreate := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	createdVisible := false
@@ -178,6 +184,9 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	putResult := decodeLogicGateWorkMutationPayloadForTest(t, putRecord)
 	if putResult.Assignment.StatusKey != store.LogicGateWorkStatusDone || !putResult.Assignment.IsIssue {
 		t.Fatalf("PUT assignment = %+v, want done issue assignment", putResult.Assignment)
+	}
+	if putResult.Card.ColumnID != store.LogicGateWorkStatusDone || !putResult.Card.IsIssue {
+		t.Fatalf("PUT card = %+v, want done issue card", putResult.Card)
 	}
 
 	deleteAsEditor := httptest.NewRequest(http.MethodDelete, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes/"+mutableNode.NodeID+"?company_id="+companyID, nil)
