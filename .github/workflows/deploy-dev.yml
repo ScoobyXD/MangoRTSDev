@@ -348,8 +348,26 @@ jobs:
           require_status "rich-text API write edge pass-through" "401" "$status" "$tmp_body"
           jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
 
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"company_id":"'"${DEV_COMPANY_ID}"'","type":"Text box","information":"deploy smoke logic gate note","information_id":"deploy-smoke-logic-gate-info"}' \
+            "${APP_URL}/v1/logic-gates/deploy-smoke-logic-gate/information")"
+          require_status "logic gate information write edge pass-through" "401" "$status" "$tmp_body"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
+
           status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
           require_status "backend unauthorized route" "401" "$status" "$tmp_body"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
+            "${APP_URL}/v2/nodes/deploy-smoke-node/view?company_id=${DEV_COMPANY_ID}")"
+          require_status "v2 node view edge pass-through" "401" "$status" "$tmp_body"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
+            "${APP_URL}/v2/logic-gates/deploy-smoke-logic-gate/view?company_id=${DEV_COMPANY_ID}")"
+          require_status "v2 logic gate view edge pass-through" "401" "$status" "$tmp_body"
           jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
 
           status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/nylas/webhook?challenge=deploy-smoke-nylas-webhook")"
