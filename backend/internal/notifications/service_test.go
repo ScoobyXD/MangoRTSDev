@@ -896,6 +896,9 @@ func TestLogicGateWorkNotificationTargetsIncludeGateAndNode(t *testing.T) {
 }
 
 func TestPhase6NotificationSourceShape(t *testing.T) {
+	legacyTable := "notification_" + "events"
+	legacySourceAnchor := "ensurenotification" + "sourceanchortx"
+	legacyQueueInput := "notification" + "eventinput"
 	for _, path := range []string{
 		"service.go",
 		"../http/notification_handlers.go",
@@ -910,6 +913,9 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 	} {
 		source := strings.ToLower(readNotificationSourceForTest(t, path))
 		for _, forbidden := range []string{
+			legacyTable,
+			legacySourceAnchor,
+			legacyQueueInput,
 			"recordandprocess",
 			"processpending",
 			"recordnotificationevent",
@@ -935,6 +941,9 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 	} {
 		source := strings.ToLower(readNotificationSourceForTest(t, path))
 		for _, forbidden := range []string{
+			legacyTable,
+			legacySourceAnchor,
+			legacyQueueInput,
 			"createnotificationevent",
 			"listpendingnotificationevents",
 			"marknotificationeventprocessed",
