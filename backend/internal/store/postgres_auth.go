@@ -292,6 +292,25 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 		return DeleteCompanyUserResult{}, err
 	}
 
+	assignedNodeRows, err := tx.Query(`select node_id::text from nodes where company_id = $1 and assignee_user_id = $2`, companyID, userID)
+	if err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	assignedNodeIDs := []string{}
+	for assignedNodeRows.Next() {
+		var nodeID string
+		if scanErr := assignedNodeRows.Scan(&nodeID); scanErr != nil {
+			assignedNodeRows.Close()
+			return DeleteCompanyUserResult{}, scanErr
+		}
+		assignedNodeIDs = append(assignedNodeIDs, nodeID)
+	}
+	if err = assignedNodeRows.Err(); err != nil {
+		assignedNodeRows.Close()
+		return DeleteCompanyUserResult{}, err
+	}
+	assignedNodeRows.Close()
+
 	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1 and assignee_user_id = $2`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
@@ -299,6 +318,21 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 		return DeleteCompanyUserResult{}, err
 	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1 and user_id = $2`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	for _, nodeID := range assignedNodeIDs {
+		if err = recomputeNodeAssigneeEffectiveAccessTx(context.Background(), tx, companyID, nodeID); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+	}
+	if _, err = tx.Exec(`
+delete from effective_resource_access
+where company_id=$1::uuid
+  and user_id=$2::uuid
+  and source_type=$3`, companyID, userID, effectiveAccessSourceDirectUserGrant); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 
@@ -641,6 +675,9 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		invitation.Role,
 	)
 	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, user.UserID); err != nil {
 		return domain.Invitation{}, err
 	}
 

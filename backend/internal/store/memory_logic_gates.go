@@ -89,6 +89,10 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
+	kanbanBoardsSnapshot := cloneMemoryMap(r.kanbanBoards)
+	kanbanColumnsSnapshot := cloneMemorySliceMap(r.kanbanColumns)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	item := domain.LogicGate{
 		CompanyID:        companyID,
 		LogicGateID:      newUUIDv7String(),
@@ -97,6 +101,13 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
+	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
+		r.logicGates = logicGatesSnapshot
+		r.kanbanBoards = kanbanBoardsSnapshot
+		r.kanbanColumns = kanbanColumnsSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		return domain.LogicGate{}, err
+	}
 	return r.withLogicGateRaciLocked(item), nil
 }
 
@@ -386,6 +397,9 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	k := key(companyID, logicGateID)
 	if _, ok := r.logicGates[k]; !ok {
 		return ErrNotFound
+	}
+	if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
 	}
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)

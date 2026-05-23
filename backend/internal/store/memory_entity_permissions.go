@@ -248,6 +248,8 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	permissionsSnapshot := cloneMemoryMap(r.entityPermissions)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
 		return nil, ErrNotFound
 	}
@@ -320,6 +322,13 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			if targetEntityID == entityID {
 				out = append(out, r.withEntityPermissionSubjectLocked(permission))
 			}
+		}
+	}
+	for _, targetEntityID := range targetEntityIDs {
+		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, entityType, targetEntityID); err != nil {
+			r.entityPermissions = permissionsSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			return nil, err
 		}
 	}
 	sortEntityPermissions(out)

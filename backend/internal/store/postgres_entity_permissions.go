@@ -548,6 +548,11 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 			}
 		}
 	}
+	for _, targetEntityID := range targetEntityIDs {
+		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, entityType, targetEntityID); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

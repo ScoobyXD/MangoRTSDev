@@ -13,6 +13,10 @@ type effectiveAccessExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+type effectiveAccessQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func replaceEffectiveFactsForSourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) error {
 	companyID, sourceType, sourceID, err := normalizePostgresEffectiveAccessSourceScope(companyID, sourceType, sourceID)
 	if err != nil {
@@ -76,7 +80,22 @@ delete from effective_resource_access
 where company_id=$1::uuid
   and resource_type=$2
   and resource_id=$3::uuid
-  and source_type=$4`, companyID, resourceType, resourceID, sourceType)
+	  and source_type=$4`, companyID, resourceType, resourceID, sourceType)
+	return err
+}
+
+func deleteEffectiveFactsForResourceTx(ctx context.Context, tx effectiveAccessExecer, companyID, resourceType, resourceID string) error {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	if companyID == "" || resourceID == "" || !typeOK || ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from effective_resource_access
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid`, companyID, resourceType, resourceID)
 	return err
 }
 
@@ -185,6 +204,288 @@ func normalizePostgresEffectiveAccessFactsForResourceSource(companyID, resourceT
 		}
 	}
 	return normalized, nil
+}
+
+func recomputeDirectGrantEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) error {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	if companyID == "" || resourceID == "" || !typeOK {
+		return ErrInvalid
+	}
+	facts, err := queryDirectGrantEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	userFacts := make([]domain.EffectiveResourceAccess, 0, len(facts))
+	groupFacts := make([]domain.EffectiveResourceAccess, 0, len(facts))
+	for _, fact := range facts {
+		switch fact.SourceType {
+		case effectiveAccessSourceDirectUserGrant:
+			userFacts = append(userFacts, fact)
+		case effectiveAccessSourceDirectGroupGrant:
+			groupFacts = append(groupFacts, fact)
+		}
+	}
+	if err := replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceDirectUserGrant, userFacts); err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceDirectGroupGrant, groupFacts)
+}
+
+func queryDirectGrantEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
+	rows, err := tx.QueryContext(ctx, `
+with recursive normalized_resource(resource_type) as (
+  select $2::text
+),
+resource_scope(resource_id, depth, path) as (
+  select $3::uuid, 0, array[$3::uuid]
+  union all
+  select folder.parent_folder_id,
+         resource_scope.depth + 1,
+         resource_scope.path || folder.parent_folder_id
+  from resource_scope
+  join company_explorer_folders folder
+    on folder.company_id=$1::uuid
+   and folder.folder_kind='communications'
+   and folder.folder_id=resource_scope.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type='shared_triage_folder'
+  where folder.parent_folder_id is not null
+    and not folder.parent_folder_id = any(resource_scope.path)
+),
+group_descendants as (
+  select user_group.company_id,
+         user_group.group_id as root_group_id,
+         user_group.group_id,
+         array[user_group.group_id] as path
+  from company_user_groups user_group
+  where user_group.company_id=$1::uuid
+  union all
+  select parent.company_id,
+         parent.root_group_id,
+         child.group_id,
+         parent.path || child.group_id
+  from group_descendants parent
+  join company_user_groups child
+    on child.company_id=parent.company_id
+   and child.parent_group_id=parent.group_id
+  where not child.group_id = any(parent.path)
+),
+legacy_candidates as (
+  select grant_row.company_id,
+         grant_row.principal_id as user_id,
+         grant_row.resource_type,
+         $3::uuid as resource_id,
+         lower(btrim(grant_row.access_level)) as access_level,
+         'direct_user_grant'::text as source_type,
+         grant_row.resource_type || ':' || grant_row.resource_id::text || ':user:' || grant_row.principal_id::text as source_id,
+         resource_scope.depth,
+         2 as subject_rank,
+         mangorts_access_level_rank(grant_row.access_level) as access_rank
+  from resource_access_grants grant_row
+  join resource_scope
+    on resource_scope.resource_id=grant_row.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type=grant_row.resource_type
+  join company_memberships membership
+    on membership.company_id=grant_row.company_id
+   and membership.user_id=grant_row.principal_id
+  where grant_row.company_id=$1::uuid
+    and grant_row.principal_type='user'
+  union all
+  select grant_row.company_id,
+         member.user_id,
+         grant_row.resource_type,
+         $3::uuid,
+         lower(btrim(grant_row.access_level)),
+         'direct_group_grant'::text,
+         grant_row.resource_type || ':' || grant_row.resource_id::text || ':group:' || grant_row.principal_id::text,
+         resource_scope.depth,
+         1,
+         mangorts_access_level_rank(grant_row.access_level)
+  from resource_access_grants grant_row
+  join resource_scope
+    on resource_scope.resource_id=grant_row.resource_id
+  join normalized_resource normalized
+    on normalized.resource_type=grant_row.resource_type
+  join group_descendants descendant
+    on descendant.company_id=grant_row.company_id
+   and descendant.root_group_id=grant_row.principal_id
+  join company_user_group_members member
+    on member.company_id=grant_row.company_id
+   and member.group_id=descendant.group_id
+  where grant_row.company_id=$1::uuid
+    and grant_row.principal_type='group'
+),
+ranked_legacy_facts as (
+  select legacy_candidates.*,
+         row_number() over (
+           partition by company_id, user_id, resource_type, resource_id
+           order by depth asc, subject_rank desc, access_rank desc, source_type asc, source_id asc
+         ) as rn
+  from legacy_candidates
+)
+select company_id::text,
+       user_id::text,
+       resource_type,
+       resource_id::text,
+       access_level,
+       source_type,
+       source_id
+from ranked_legacy_facts
+where rn=1
+  and access_rank > 0
+order by user_id::text asc, source_type asc, source_id asc`, companyID, resourceType, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEffectiveResourceAccessRows(rows)
+}
+
+func recomputeCompanyAdminEffectiveAccessForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	userID = cleanUUIDText(userID)
+	if userID == "" {
+		return ErrInvalid
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from effective_resource_access
+where user_id=$1::uuid
+  and source_type=$2`, userID, effectiveAccessSourceCompanyAdmin); err != nil {
+		return err
+	}
+	facts, err := queryCompanyAdminEffectiveAccessFactsForUserTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	return insertEffectiveFactsTx(ctx, tx, facts)
+}
+
+func queryCompanyAdminEffectiveAccessFactsForUserTx(ctx context.Context, tx effectiveAccessQueryer, userID string) ([]domain.EffectiveResourceAccess, error) {
+	rows, err := tx.QueryContext(ctx, `
+with resources as (
+  select company_id, 'node'::text as resource_type, node_id as resource_id
+  from nodes
+  union all
+  select company_id, 'logic_gate'::text, logic_gate_id
+  from logic_gates
+  union all
+  select company_id, 'shared_triage_folder'::text, folder_id
+  from company_explorer_folders
+  where folder_kind='communications'
+),
+admin_source_candidates as (
+  select resources.company_id as target_company_id,
+         membership.user_id,
+         'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+         row_number() over (
+           partition by resources.company_id, membership.user_id
+           order by case when membership.company_id=resources.company_id then 0 else 1 end, membership.company_id::text
+         ) as rn
+  from resources
+  join company_memberships membership
+    on membership.user_id=$1::uuid
+   and (
+     membership.role='dev_admin'
+     or (membership.company_id=resources.company_id and membership.role='company_admin')
+   )
+  group by resources.company_id, membership.company_id, membership.user_id
+),
+admin_sources as (
+  select target_company_id, user_id, source_id
+  from admin_source_candidates
+  where rn=1
+)
+select resources.company_id::text,
+       admin_sources.user_id::text,
+       resources.resource_type,
+       resources.resource_id::text,
+       'admin'::text as access_level,
+       'company_admin'::text as source_type,
+       admin_sources.source_id
+from admin_sources
+join resources
+  on resources.company_id=admin_sources.target_company_id
+order by resources.company_id::text asc,
+         resources.resource_type asc,
+         resources.resource_id::text asc`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEffectiveResourceAccessRows(rows)
+}
+
+func recomputeCompanyAdminEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) error {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	if companyID == "" || resourceID == "" || !typeOK {
+		return ErrInvalid
+	}
+	facts, err := queryCompanyAdminEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceCompanyAdmin, facts)
+}
+
+func queryCompanyAdminEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
+	rows, err := tx.QueryContext(ctx, `
+with admin_source_candidates as (
+  select membership.user_id,
+         'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+         row_number() over (
+           partition by membership.user_id
+           order by case when membership.company_id=$1::uuid then 0 else 1 end, membership.company_id::text
+         ) as rn
+  from company_memberships membership
+  where membership.role='dev_admin'
+     or (membership.company_id=$1::uuid and membership.role='company_admin')
+),
+admin_sources as (
+  select user_id, source_id
+  from admin_source_candidates
+  where rn=1
+)
+select $1::text as company_id,
+       user_id::text,
+       $2::text as resource_type,
+       $3::text as resource_id,
+       'admin'::text as access_level,
+       'company_admin'::text as source_type,
+       source_id
+from admin_sources
+order by user_id::text asc`, companyID, resourceType, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEffectiveResourceAccessRows(rows)
+}
+
+func scanEffectiveResourceAccessRows(rows *sql.Rows) ([]domain.EffectiveResourceAccess, error) {
+	facts := []domain.EffectiveResourceAccess{}
+	for rows.Next() {
+		var fact domain.EffectiveResourceAccess
+		if err := rows.Scan(
+			&fact.CompanyID,
+			&fact.UserID,
+			&fact.ResourceType,
+			&fact.ResourceID,
+			&fact.AccessLevel,
+			&fact.SourceType,
+			&fact.SourceID,
+		); err != nil {
+			return nil, err
+		}
+		facts = append(facts, fact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return facts, nil
 }
 
 func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {

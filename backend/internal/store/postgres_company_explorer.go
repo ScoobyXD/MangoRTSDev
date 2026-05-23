@@ -354,6 +354,11 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
+	if item.FolderKind == "communications" {
+		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -1091,6 +1096,13 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("kanban", kanbanBoardIDs)
 
+	for folderID := range folderIDs {
+		if folderKinds[folderID] == "communications" {
+			if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+		}
+	}
 	for logicGateID := range logicGateIDs {
 		if err := postgresDeleteLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return CompanyExplorerDeleteResult{}, err
@@ -1151,6 +1163,9 @@ func postgresTxExists(ctx context.Context, tx *sql.Tx, query string, args ...any
 }
 
 func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_relationships
 		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
@@ -1219,6 +1234,9 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 }
 
 func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_relationships
 		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,

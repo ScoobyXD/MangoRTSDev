@@ -120,7 +120,6 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.refreshEffectiveAccessProjection(req.CompanyID, "logic_gate_created")
 	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	writeJSON(w, http.StatusCreated, item)
 }
