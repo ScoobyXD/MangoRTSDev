@@ -124,12 +124,20 @@ $codexExe = ""
 if (-not $NoStart) {
   $codexExe = Get-NewestVsCodeCodexExe
   $escapedCodexExe = $codexExe.Replace("'", "''")
+  $codexCommand = @(
+    "Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue"
+    "Remove-Item Env:FORCE_COLOR -ErrorAction SilentlyContinue"
+    "`$env:CLICOLOR = '1'"
+    "`$env:TERM = 'xterm-256color'"
+    "`$env:COLORTERM = 'truecolor'"
+    "& '$escapedCodexExe'"
+  ) -join "; "
   $process = Start-Process -FilePath powershell.exe -WorkingDirectory $workerPath -ArgumentList @(
     "-NoExit",
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
-    "`$env:TERM = 'xterm-256color'; `$env:COLORTERM = 'truecolor'; & '$escapedCodexExe'"
+    $codexCommand
   ) -PassThru
   $pidValue = $process.Id
 }
