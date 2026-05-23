@@ -14,7 +14,7 @@ export function nextPathForAuthState(pathname: string, authenticated: boolean): 
   const path = normalizePath(pathname);
   if (!authenticated && !isAuthPath(path)) return "/login";
   if (authenticated && LEGACY_AUTHENTICATED_PATHS.has(path)) return LEGACY_AUTHENTICATED_PATHS.get(path) ?? path;
-  if (authenticated && path === "/login") return "/";
+  if (authenticated && path === "/login") return "/home";
   return path;
 }
 

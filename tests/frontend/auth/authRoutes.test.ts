@@ -11,7 +11,7 @@ test("auth route guard sends unauthenticated app routes to login", () => {
 });
 
 test("auth route guard sends authenticated login routes back to app", () => {
-  assert.equal(nextPathForAuthState("/login", true), "/");
+  assert.equal(nextPathForAuthState("/login", true), "/home");
   assert.equal(nextPathForAuthState("/admin/users", true), "/settings");
   assert.equal(nextPathForAuthState("/settings", true), "/settings");
   assert.equal(nextPathForAuthState("/communications", true), "/home");
