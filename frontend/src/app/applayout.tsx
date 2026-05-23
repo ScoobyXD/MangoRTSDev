@@ -284,13 +284,6 @@ const appResizeHandleStyle: React.CSSProperties = {
   touchAction: "none",
 };
 
-const appResizeGripStyle: React.CSSProperties = {
-  width: 2,
-  minHeight: 0,
-  borderRadius: 2,
-  background: "rgba(100, 116, 139, 0.24)",
-};
-
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
   const activeCompanyID = getActiveCompanyID();
   const taskbarScope = useMemo(() => (
@@ -1177,9 +1170,19 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     updateActiveFrames,
     setDraggingId,
   });
+  const frameCanvasStyle: React.CSSProperties = {
+    position: "relative",
+    width: canvasW,
+    height: canvasH,
+    margin: 0,
+    overflow: "hidden",
+    background: isHomeView ? "#ffffff" : bgColor || UI_THEME.surface,
+    borderRadius: isHomeView ? 0 : PAGE_SURFACE_RADIUS,
+    boxShadow: isHomeView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
+  };
 
   return (
-    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "#f1f5f9" }}>
+    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
       <AppLiveFreshnessBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
@@ -1312,9 +1315,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
             document.body.style.cursor = "col-resize";
             document.body.style.userSelect = "none";
           }}
-        >
-          <span style={appResizeGripStyle} />
-        </button>
+        />
 
       {overrideContent ? (
         <main
@@ -1333,16 +1334,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         </main>
       ) : (
       <FrameCanvas
-        style={{
-          position: "relative",
-          width: canvasW,
-          height: canvasH,
-          margin: 0,
-          overflow: "hidden",
-          background: bgColor || UI_THEME.surface,
-          borderRadius: PAGE_SURFACE_RADIUS,
-          boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
-        }}
+        style={frameCanvasStyle}
         onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
         onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => {
           e.preventDefault();
