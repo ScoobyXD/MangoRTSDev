@@ -310,7 +310,6 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_raci")
 			return
 		}
-		s.refreshEffectiveAccessProjection(req.CompanyID, "logic_gate_raci_updated")
 		actorUserID, actorLabel := notificationActorPayload(r)
 		newlyAssignedUserIDs := newlyAssignedLogicGateRaciUserIDs(beforeAssignments, assignments)
 		logicGateTitle := ""

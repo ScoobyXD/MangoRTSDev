@@ -626,29 +626,6 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 	return r.ListEntityPermissions(companyID, entityType, entityID)
 }
 
-type resourceAccessGrantExecer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func grantResourceAccessAtLeastSQL(ctx context.Context, execer resourceAccessGrantExecer, companyID, resourceType, resourceID, principalType, principalID, accessLevel string) error {
-	if EntityPermissionRank(accessLevel) == 0 {
-		return nil
-	}
-	_, err := execer.ExecContext(ctx, `
-insert into resource_access_grants
-  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-values ($1::uuid, $2, $3::uuid, $4, $5::uuid, $6, now())
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level=case
-    when mangorts_access_level_rank(resource_access_grants.access_level) >= mangorts_access_level_rank(excluded.access_level)
-      then resource_access_grants.access_level
-    else excluded.access_level
-  end`,
-		companyID, resourceType, resourceID, principalType, principalID, accessLevel,
-	)
-	return err
-}
-
 func postgresSharedTriagePermissionTargetIDs(ctx context.Context, tx *sql.Tx, companyID, folderID string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `
 with recursive root(folder_id, parent_folder_id) as (

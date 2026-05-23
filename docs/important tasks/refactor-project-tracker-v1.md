@@ -80,7 +80,7 @@ Target behavior:
 - [x] Classify every call site.
 - [x] Identify source tables represented by the full-company rebuild.
 - [x] Identify current derived access writes into `resource_access_grants`.
-- [ ] Add a guard test or counting fake proving normal handlers stop calling full rebuild after migration.
+- [x] Add a guard test or counting fake proving normal handlers stop calling full rebuild after migration.
 
 ### `refreshEffectiveAccessProjection` Call Sites
 
@@ -255,10 +255,10 @@ This is the final cleanup Codex instance. It should run after `Phase 2A` and `Ph
 
 ### Remove Handler Repair Calls
 
-- [ ] Remove handler-level calls to `refreshEffectiveAccessProjection`.
-- [ ] Keep event publishing and notification projection behavior unchanged.
-- [ ] Ensure committed notification fanout sees current effective access.
-- [ ] Add regression coverage that normal write handlers no longer call full-company rebuild.
+- [x] Remove handler-level calls to `refreshEffectiveAccessProjection`.
+- [x] Keep event publishing and notification projection behavior unchanged.
+- [x] Ensure committed notification fanout sees current effective access.
+- [x] Add regression coverage that normal write handlers no longer call full-company rebuild.
 
 After this phase, `refreshEffectiveAccessProjection` should not be part of correctness paths. It may remain as an admin/repair utility.
 
@@ -268,11 +268,11 @@ After this phase, `refreshEffectiveAccessProjection` should not be part of corre
 
 Current derived usage to remove or migrate:
 
-- [ ] DB triggers/backfills that grant node assignee access into `resource_access_grants`.
-- [ ] DB triggers/backfills that grant Logic Gate RACI access into `resource_access_grants`.
-- [ ] Store writes that grant assignee access into `resource_access_grants`.
-- [ ] Store writes that grant Logic Gate RACI access into `resource_access_grants`.
-- [ ] Shared inbox route compatibility that converts RACI-looking assignments into access grants.
+- [x] DB triggers/backfills that grant node assignee access into `resource_access_grants`.
+- [x] DB triggers/backfills that grant Logic Gate RACI access into `resource_access_grants`.
+- [x] Store writes that grant assignee access into `resource_access_grants`.
+- [x] Store writes that grant Logic Gate RACI access into `resource_access_grants`.
+- [x] Shared inbox route compatibility that converts RACI-looking assignments into access grants.
 
 Recommendation:
 
@@ -380,3 +380,4 @@ No handler should repair effective access after a source mutation has already co
 - 2026-05-23: Created V1 tracker from read-only implementation plan. No source changes made.
 - 2026-05-23: Split old Phase 2 into `Phase 2A` and `Phase 2B` for Codex handoff size, and combined old Phase 3 and Phase 4 into one final cleanup phase.
 - 2026-05-23: Completed Phase 1 writer foundation with source-scoped and resource/source-family effective-access helpers for Postgres and memory repos, plus focused helper tests.
+- 2026-05-23: Completed Phase 3 by removing normal HTTP handler full-company effective-access repair calls, preserving event/notification ordering, stopping new derived assignee/RACI compatibility grants, dropping the remaining DB compatibility trigger path, and adding no-rebuild/compatibility regression coverage.

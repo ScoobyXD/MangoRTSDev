@@ -604,9 +604,6 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "failed_to_update_entity_permissions")
 		return
 	}
-	if entityType == store.EntityTypeSharedTriageFolder {
-		s.refreshEffectiveAccessProjection(req.CompanyID, "entity_permissions_updated")
-	}
 	payload := map[string]any{
 		"entity_type": entityType,
 		"entity_id":   entityID,

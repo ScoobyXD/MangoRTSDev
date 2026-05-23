@@ -77,7 +77,6 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	s.refreshEffectiveAccessProjection(companyID, "logic_gate_raci_command")
 	s.publishCommittedWorkspaceEvents(result.Events)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)

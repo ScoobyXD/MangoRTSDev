@@ -342,9 +342,6 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_raci")
 		return
 	}
-	// TODO(V4): replace this repair-style full-company refresh with a source-scoped
-	// shared inbox RACI effective-access writer in the same transaction as the source mutation.
-	s.refreshEffectiveAccessProjection(req.CompanyID, "communications_shared_inbox_raci_updated")
 	actorUserID := ""
 	actorLabel := ""
 	if hasActor {
