@@ -44,8 +44,8 @@ type EditorLinkedDocumentPanelsProps = {
 const NODE_PRIORITY_OPTIONS = [
   { value: "1", label: "1\u00A0\u00A0URGENT (<1 hr)", color: "#b91c1c" },
   { value: "2", label: "2\u00A0\u00A0By end of day", color: "#dc2626" },
-  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#ff8820" },
-  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#f59e0b" },
+  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#006f85" },
+  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#0e7490" },
   { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
   { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;
@@ -348,9 +348,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               onCommitNodeAssigneeDraft(label);
                               setAssigneeMenuOpen(false);
                             }}
-                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(255, 136, 32, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(0, 188, 212, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
                           >
-                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(255, 136, 32, 0.13)", color: accent }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(0, 188, 212, 0.13)", color: accent }}>
                               <PersonIcon color={accent} />
                             </span>
                             <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
@@ -638,7 +638,7 @@ function LogicGateRaciRoleEditor({
       <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</strong>
       <div style={{ minHeight: 30, display: "flex", flexWrap: "wrap", gap: 4 }}>
         {assignments.length === 0 ? (
-          <span style={{ color: "rgba(36,18,10,0.52)", fontSize: 11 }}>No people</span>
+          <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11 }}>No people</span>
         ) : assignments.map((assignment) => (
           <span
             key={`${assignment.role}:${assignment.user_id}`}
@@ -705,7 +705,7 @@ function LogicGateRaciRoleEditor({
                   onClick={() => addUser(user.user_id)}
                   style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
                 >
-                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(255, 136, 32, 0.13)", color: accent }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(0, 188, 212, 0.13)", color: accent }}>
                     <PersonIcon color={accent} />
                   </span>
                   <span style={{ minWidth: 0, display: "grid", gap: 1 }}>

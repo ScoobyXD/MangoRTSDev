@@ -1074,15 +1074,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           alignContent: "center",
           justifyItems: "center",
           gap: 7,
-          border: `1px solid ${selected || busy ? accent : "rgba(255, 136, 32, 0.28)"}`,
+          border: `1px solid ${selected || busy ? accent : "rgba(0, 188, 212, 0.28)"}`,
           borderRadius: 7,
-          background: busy ? "rgba(255,136,32,0.16)" : selected ? "#fff2e0" : "#fffaf3",
+          background: busy ? "rgba(0,188,212,0.16)" : selected ? "#ecfeff" : "#f8fafc",
           color: surfaceText,
           cursor: assigningLogicGateID ? "default" : "pointer",
           font: "inherit",
           padding: "10px 8px",
           minWidth: 0,
-          boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "none",
+          boxShadow: selected ? "0 0 0 2px rgba(0, 188, 212, 0.12) inset" : "none",
         }}
       >
         <span aria-hidden="true" style={{ width: 28, height: 28, display: "grid", placeItems: "center", transform: "scale(1.3)" }}>
@@ -1209,7 +1209,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               minHeight: 30,
               borderRadius: 6,
               border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
-              background: logicGateAssignerOpen ? "rgba(255,136,32,0.12)" : panelBackground,
+              background: logicGateAssignerOpen ? "rgba(0,188,212,0.12)" : panelBackground,
               color: surfaceText,
               display: "inline-flex",
               alignItems: "center",
@@ -1288,7 +1288,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   }}
                   placeholder="Search logic gates"
                   aria-label="Search logic gates"
-                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(255,136,32,0.10)" : "none" }}
+                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(0,188,212,0.10)" : "none" }}
                 />
                 <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 10, top: 9, color: accent, pointerEvents: "none" }}>
                   <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -1383,7 +1383,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <React.Fragment key={block.id}>
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
+                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(0,188,212,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
@@ -1554,7 +1554,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               minHeight: 58,
               border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
               borderRadius: 8,
-              background: dropActive ? "rgba(255,136,32,0.08)" : panelBackground,
+              background: dropActive ? "rgba(0,188,212,0.08)" : panelBackground,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",

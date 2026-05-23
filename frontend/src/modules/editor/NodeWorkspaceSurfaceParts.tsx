@@ -82,10 +82,10 @@ export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLas
         height: isLast ? 25 : undefined,
         left: 15,
         width: 1,
-        background: muted ? "rgba(100,116,139,0.18)" : "rgba(255,136,32,0.35)",
+        background: muted ? "rgba(100,116,139,0.18)" : "rgba(0,188,212,0.35)",
       }}
     />
-    <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(255,136,32,0.08)" }} />
+    <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(0,188,212,0.08)" }} />
   </div>
 );
 
@@ -133,7 +133,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
         aria-expanded={open}
         title="Text box actions"
         onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(255,136,32,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
+        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(0,188,212,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
       >
         ...
       </button>
@@ -916,7 +916,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 height: rect.height,
                 borderRadius: 3,
                 background: rect.active ? "rgba(255, 180, 44, 0.52)" : "rgba(255, 213, 79, 0.34)",
-                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(255,136,32,0.16)` : "none",
+                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(0,188,212,0.16)` : "none",
               }}
             />
           ))}
@@ -1410,7 +1410,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
         <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
-            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
+            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(0,188,212,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
               {selectionAnchor.quote}
             </div>
           )}
@@ -1470,7 +1470,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         gap: 8,
                         border: "none",
                         borderRadius: 6,
-                        background: selected ? "rgba(255, 136, 32, 0.16)" : "transparent",
+                        background: selected ? "rgba(0, 188, 212, 0.16)" : "transparent",
                         color: surfaceText,
                         cursor: "pointer",
                         padding: "5px 8px",
@@ -1597,7 +1597,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           aria-orientation="horizontal"
           title="Resize chat"
           onPointerDown={beginResize}
-          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(255,136,32,0.10)" : "rgba(100,116,139,0.08)" }}
+          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(0,188,212,0.10)" : "rgba(100,116,139,0.08)" }}
         />
       </div>
       {previewAttachment && (
@@ -1678,7 +1678,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         columnGap: 7,
         alignItems: "start",
         borderRadius: 6,
-        background: isActive ? "rgba(255,136,32,0.08)" : "transparent",
+        background: isActive ? "rgba(0,188,212,0.08)" : "transparent",
         boxShadow: isActive ? `inset 0 0 0 1px ${accent}` : "none",
         padding: "4px 4px 4px 0",
         cursor: "pointer",
@@ -1705,7 +1705,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               border: `1px solid ${ruleColor}`,
               borderRadius: 999,
               background: "#ffffff",
-              color: "rgba(36,18,10,0.72)",
+              color: "rgba(15,23,42,0.72)",
               display: "grid",
               placeItems: "center",
               padding: 0,
@@ -1755,7 +1755,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
                 event.stopPropagation();
                 onToggleCollapse(message.id);
               }}
-              style={{ border: "none", background: "transparent", color: "rgba(36,18,10,0.54)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+              style={{ border: "none", background: "transparent", color: "rgba(15,23,42,0.54)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
             >
               {hiddenReplyCount} {hiddenReplyCount === 1 ? "reply" : "replies"} hidden
             </button>
@@ -1906,7 +1906,7 @@ const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attac
     return <img alt="" src={attachment.dataURL} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
   }
   return (
-    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(255,136,32,0.10)", display: "grid", placeItems: "center", color: "rgba(36,18,10,0.78)", fontSize: 8, fontWeight: 900 }}>
+    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(0,188,212,0.10)", display: "grid", placeItems: "center", color: "rgba(15,23,42,0.78)", fontSize: 8, fontWeight: 900 }}>
       FILE
     </span>
   );

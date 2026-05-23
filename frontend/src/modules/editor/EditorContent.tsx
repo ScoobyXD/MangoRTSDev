@@ -1520,15 +1520,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
-  const surfaceText = isDarkTheme ? "#f4f7fa" : "#24120a";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#111827";
   const tabBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)";
   const tabSelectedBackground = isDarkTheme ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)";
-  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.22)";
-  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(36,18,10,0.14)";
+  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.22)";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(15,23,42,0.14)";
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
-  const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
-  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";
-  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.2)";
+  const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 188, 212, 0.08)";
+  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";

@@ -125,10 +125,10 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
   const fieldStyle: React.CSSProperties = {
     width: "100%",
     minHeight: 30,
-    border: "1px solid rgba(255, 136, 32, 0.24)",
+    border: "1px solid rgba(0, 188, 212, 0.24)",
     borderRadius: 6,
     background: "#ffffff",
-    color: "#24120a",
+    color: "#111827",
     font: "inherit",
     fontSize: 12,
     padding: "0 8px",
@@ -137,16 +137,16 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
     display: "grid",
     gap: 4,
     minWidth: 0,
-    color: "#24120a",
+    color: "#111827",
     fontSize: 11,
     fontWeight: 700,
   };
   const actionButtonStyle: React.CSSProperties = {
     minHeight: 31,
-    border: "1px solid rgba(255, 136, 32, 0.38)",
+    border: "1px solid rgba(0, 188, 212, 0.38)",
     borderRadius: 6,
-    background: "#fff2e0",
-    color: "#24120a",
+    background: "#ecfeff",
+    color: "#111827",
     cursor: busy ? "not-allowed" : "pointer",
     font: "inherit",
     fontSize: 12,
@@ -175,8 +175,8 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-          <strong style={{ fontSize: 12, color: "#24120a" }}>{title}</strong>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#7c2d12", font: "inherit", fontWeight: 800 }}>x</button>
+          <strong style={{ fontSize: 12, color: "#111827" }}>{title}</strong>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#334155", font: "inherit", fontWeight: 800 }}>x</button>
         </div>
         {menu.kind === "node" ? (
           <>
@@ -620,7 +620,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }:
         </button>
         <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
           <LazyHomeNodeEditorContent
-            accent="#ff8820"
+            accent="#006f85"
             widgetId={`communications-node-editor-overlay:${nodeID}`}
             theme="mango"
             forcedEntityKind="node"
@@ -1042,7 +1042,7 @@ export function HomeSidebar({
               toggleSharedFolder(folder.folder_id);
             }}
           >
-            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(36, 18, 10, 0.62)" />
+            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(15, 23, 42, 0.62)" />
           </button>
         ) : (
           <span style={{ width: 18, height: 20 }} />
@@ -1129,7 +1129,7 @@ export function HomeSidebar({
                 setSharedRootOpen((open) => !open);
               }}
             >
-              <ExplorerDisclosureIcon open={sharedRootOpen} color="rgba(36, 18, 10, 0.62)" />
+              <ExplorerDisclosureIcon open={sharedRootOpen} color="rgba(15, 23, 42, 0.62)" />
             </button>
           </div>
           {sharedRootOpen && (
@@ -1571,10 +1571,10 @@ const sharedRaciModalStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 12,
   padding: 14,
-  border: "1px solid rgba(255, 136, 32, 0.3)",
+  border: "1px solid rgba(0, 188, 212, 0.3)",
   borderRadius: 8,
   background: "#ffffff",
-  boxShadow: "0 18px 44px rgba(36, 18, 10, 0.22)",
+  boxShadow: "0 18px 44px rgba(15, 23, 42, 0.22)",
   overflow: "hidden",
 };
 
@@ -1593,7 +1593,7 @@ const sharedRaciRoleColumnStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr) auto",
   gap: 10,
   padding: 10,
-  border: "1px solid rgba(255, 136, 32, 0.2)",
+  border: "1px solid rgba(0, 188, 212, 0.2)",
   borderRadius: 8,
   background: "#fffaf4",
 };
@@ -1620,7 +1620,7 @@ const sharedRaciChipStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "3px 4px 3px 8px",
-  border: "1px solid rgba(255, 136, 32, 0.2)",
+  border: "1px solid rgba(0, 188, 212, 0.2)",
   borderRadius: 6,
   background: "#ffffff",
   fontSize: 11,
@@ -1638,10 +1638,10 @@ const sharedRaciSelectStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 30,
-  border: "1px solid rgba(255, 136, 32, 0.24)",
+  border: "1px solid rgba(0, 188, 212, 0.24)",
   borderRadius: 6,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   font: "inherit",
   fontSize: 11,
   padding: "0 6px",
@@ -1936,7 +1936,7 @@ export function LogicGateRail({
                       onToggleFolder(row.id);
                     }}
                   >
-                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(36, 18, 10, 0.62)" />
+                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(15, 23, 42, 0.62)" />
                   </button>
                 ) : (
                   <span style={{ width: 18, flexShrink: 0 }} />
@@ -2197,7 +2197,7 @@ export function NodeInboxRail({
                       onToggleFolder(row.id);
                     }}
                   >
-                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(36, 18, 10, 0.62)" />
+                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(15, 23, 42, 0.62)" />
                   </button>
                 ) : (
                   <span style={{ width: 18, flexShrink: 0 }} />
@@ -2421,7 +2421,7 @@ const inboxNotificationMenuStyle: React.CSSProperties = {
 
 const inboxNotificationMenuHeaderStyle: React.CSSProperties = {
   padding: "5px 12px 8px",
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   fontWeight: 800,
   textTransform: "uppercase",
@@ -2434,7 +2434,7 @@ const inboxNotificationMenuItemStyle: React.CSSProperties = {
   gap: 3,
   border: "none",
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   textAlign: "left",
@@ -2455,20 +2455,20 @@ const inboxNotificationMenuBodyStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   fontWeight: 500,
 };
 
 const inboxNotificationMenuMetaStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.45)",
+  color: "rgba(15, 23, 42, 0.45)",
   fontSize: 10,
   fontWeight: 700,
 };
 
 const inboxNotificationMenuEmptyStyle: React.CSSProperties = {
   padding: "10px 12px",
-  color: "rgba(36, 18, 10, 0.55)",
+  color: "rgba(15, 23, 42, 0.55)",
   fontSize: 12,
   fontWeight: 600,
 };
@@ -2483,10 +2483,10 @@ const mentionNotificationBadgeStyle: React.CSSProperties = {
   height: 18,
   display: "inline-grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.28)",
+  border: "1px solid rgba(0, 188, 212, 0.28)",
   borderRadius: 999,
   background: "#fff7eb",
-  color: "#7c2d12",
+  color: "#334155",
   fontSize: 10,
   fontWeight: 800,
   padding: "0 6px",
@@ -3360,7 +3360,7 @@ export function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCanc
           This deletes the selected email{count === 1 ? "" : "s"} from your mailbox immediately.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
             {busy ? "Deleting" : "Yes"}
           </button>
           <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>

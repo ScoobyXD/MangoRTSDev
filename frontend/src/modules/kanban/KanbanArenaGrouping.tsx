@@ -52,9 +52,9 @@ function ArenaGroupSelect({
   text,
 }: ArenaGroupSelectProps) {
   const selectedField = KANBAN_GROUP_FIELDS.find((field) => field.value === value) ?? KANBAN_GROUP_FIELDS[0];
-  const groupMenuAccent = "rgb(255, 136, 32)";
-  const selectedBackground = isDark ? "rgba(255, 136, 32, 0.18)" : "rgba(255, 136, 32, 0.22)";
-  const hoveredBackground = "rgba(255, 136, 32, 0.14)";
+  const groupMenuAccent = "rgb(0, 233, 255)";
+  const selectedBackground = isDark ? "rgba(0, 188, 212, 0.18)" : "rgba(0, 188, 212, 0.22)";
+  const hoveredBackground = "rgba(0, 188, 212, 0.14)";
   const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
   const compact = layout === "compact";
   const sortButton = (
@@ -105,7 +105,7 @@ function ArenaGroupSelect({
           padding: compact ? "4px 6px" : "4px 8px",
           cursor: "pointer",
           textAlign: "left",
-          boxShadow: menuOpen ? "0 0 0 2px rgba(255, 136, 32, 0.14)" : "none",
+          boxShadow: menuOpen ? "0 0 0 2px rgba(0, 188, 212, 0.14)" : "none",
         }}
       >
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
@@ -124,11 +124,11 @@ function ArenaGroupSelect({
             left: 0,
             width: "min(220px, 78vw)",
             padding: 5,
-            border: "1px solid rgba(255, 136, 32, 0.34)",
+            border: "1px solid rgba(0, 188, 212, 0.34)",
             borderRadius: 6,
             background: "#ffffff",
             boxShadow: "0 12px 28px rgba(0,16,20,0.18)",
-            color: "#24120a",
+            color: "#111827",
           }}
         >
           {KANBAN_GROUP_FIELDS.map((field) => {
@@ -153,7 +153,7 @@ function ArenaGroupSelect({
                   border: "none",
                   borderRadius: 5,
                   background: selected ? selectedBackground : "transparent",
-                  color: selected ? groupMenuAccent : "#24120a",
+                  color: selected ? groupMenuAccent : "#111827",
                   font: "inherit",
                   fontSize: 11,
                   fontWeight: selected ? 700 : 500,
@@ -245,10 +245,10 @@ export function KanbanArenaGroupingControls({
         onClick={onToggleGroupingOpen}
         style={{
           height: 28,
-          border: `1px solid ${groupingOpen ? "rgb(255, 136, 32)" : line}`,
+          border: `1px solid ${groupingOpen ? "rgb(0, 233, 255)" : line}`,
           borderRadius: 6,
-          background: groupingOpen ? "rgba(255, 136, 32, 0.16)" : cardBackground,
-          color: groupingOpen ? "rgb(255, 136, 32)" : text,
+          background: groupingOpen ? "rgba(0, 188, 212, 0.16)" : cardBackground,
+          color: groupingOpen ? "rgb(0, 233, 255)" : text,
           font: "inherit",
           fontSize: 11,
           fontWeight: 700,

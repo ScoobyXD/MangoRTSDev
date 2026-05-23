@@ -115,7 +115,7 @@ const panelStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   fontFamily: "var(--mango-font-family)",
 };
 
@@ -124,15 +124,15 @@ const formStyle: React.CSSProperties = {
   display: "grid",
   gap: 12,
   padding: 18,
-  border: "1px solid rgba(255, 136, 32, 0.35)",
+  border: "1px solid rgba(0, 188, 212, 0.35)",
   background: "#ffffff",
   borderRadius: 8,
-  boxShadow: "0 12px 34px rgba(36, 18, 10, 0.12)",
+  boxShadow: "0 12px 34px rgba(15, 23, 42, 0.12)",
 };
 
 const inputStyle: React.CSSProperties = {
   height: 38,
-  border: "1px solid rgba(255, 136, 32, 0.35)",
+  border: "1px solid rgba(0, 188, 212, 0.35)",
   borderRadius: 6,
   padding: "0 10px",
   font: "inherit",
@@ -140,10 +140,10 @@ const inputStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   height: 38,
-  border: "1px solid #ff8820",
+  border: "1px solid #006f85",
   borderRadius: 6,
-  background: "linear-gradient(90deg, rgba(251, 177, 82, 1), rgba(254, 169, 78, 1), rgba(254, 155, 70, 1), rgba(255, 136, 32, 1))",
-  color: "#24120a",
+  background: "var(--mango-gradient)",
+  color: "#111827",
   cursor: "pointer",
   fontWeight: 600,
 };
@@ -306,7 +306,7 @@ function filterCompanyOptions(options: CompanyOption[], query: string): CompanyO
   return options.filter((company) => companyOptionKeywords(company).includes(normalizedQuery)).slice(0, COMPANY_SEARCH_LIMIT);
 }
 
-function SettingsCheckIcon({ color = "rgb(255, 136, 32)" }: { color?: string }) {
+function SettingsCheckIcon({ color = "rgb(0, 233, 255)" }: { color?: string }) {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
       <path d="M3.2 8.2 6.4 11.4 12.9 4.6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -375,10 +375,10 @@ function SettingsSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{ ...settingsSelectButtonStyle, borderColor: open ? "rgba(255, 136, 32, 0.92)" : settingsSelectButtonStyle.borderColor }}
+        style={{ ...settingsSelectButtonStyle, borderColor: open ? "rgba(0, 188, 212, 0.92)" : settingsSelectButtonStyle.borderColor }}
       >
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label ?? "Select"}</span>
-        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(255, 136, 32)" }}>
+        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(0, 233, 255)" }}>
           <SettingsDisclosureIcon open={open} />
         </span>
       </button>
@@ -396,7 +396,7 @@ function SettingsSelect({
                   onChange(option.value);
                   setOpen(false);
                 }}
-                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(255, 136, 32, 0.18)" : "#ffffff", color: "#000000" }}
+                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(0, 188, 212, 0.18)" : "#ffffff", color: "#000000" }}
               >
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
@@ -471,7 +471,7 @@ function CompanySearchSelect({
           aria-expanded={open}
           style={{ ...settingsInputStyle, paddingRight: 58 }}
         />
-        <span aria-hidden="true" style={{ position: "absolute", right: 31, top: 11, color: "rgba(255, 136, 32, 0.84)", pointerEvents: "none" }}>
+        <span aria-hidden="true" style={{ position: "absolute", right: 31, top: 11, color: "rgba(0, 188, 212, 0.84)", pointerEvents: "none" }}>
           <SettingsSearchIcon />
         </span>
         <button
@@ -498,7 +498,7 @@ function CompanySearchSelect({
                 title={company.company_id}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectCompany(company)}
-                style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(255, 136, 32, 0.18)" : "transparent" }}
+                style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(0, 188, 212, 0.18)" : "transparent" }}
               >
                 <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontWeight: 600 }}>{companyName(company)}</span>
@@ -898,7 +898,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             justifyContent: "space-between",
             display: "flex",
             minHeight: 30,
-            borderColor: selectedUserGroupID === group.group_id ? "rgba(255,136,32,0.84)" : "rgba(0,0,0,0.16)",
+            borderColor: selectedUserGroupID === group.group_id ? "rgba(0,188,212,0.84)" : "rgba(0,0,0,0.16)",
           }}
           onClick={() => setSelectedUserGroupID(group.group_id)}
         >
@@ -1250,7 +1250,7 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
     height: 30,
     display: "grid",
     placeItems: "center",
-    border: "1px solid rgba(255, 136, 32, 0.22)",
+    border: "1px solid rgba(0, 188, 212, 0.22)",
     borderRadius: 6,
     background: "#ffffff",
     color: "#60646c",
@@ -1280,7 +1280,7 @@ function logoutAndNavigate(navigate: (path: string) => void): void {
 const linkButtonStyle: React.CSSProperties = {
   border: "none",
   background: "transparent",
-  color: "#ff8820",
+  color: "#006f85",
   cursor: "pointer",
   font: "inherit",
   padding: 0,
@@ -1288,7 +1288,7 @@ const linkButtonStyle: React.CSSProperties = {
 
 const smallButtonStyle: React.CSSProperties = {
   minHeight: 30,
-  border: "1px solid rgba(255, 136, 32, 0.62)",
+  border: "1px solid rgba(0, 188, 212, 0.62)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#000000",
@@ -1296,7 +1296,7 @@ const smallButtonStyle: React.CSSProperties = {
   font: "inherit",
   fontWeight: 600,
   padding: "0 10px",
-  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset",
+  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.12) inset",
 };
 
 const settingsPageStyle: React.CSSProperties = {
@@ -1358,7 +1358,7 @@ const settingsInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 38,
-  border: "1px solid rgba(255, 136, 32, 0.44)",
+  border: "1px solid rgba(0, 188, 212, 0.44)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#000000",
@@ -1367,20 +1367,20 @@ const settingsInputStyle: React.CSSProperties = {
   fontWeight: 500,
   padding: "0 10px",
   outline: "none",
-  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.08) inset",
+  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.08) inset",
 };
 
 const settingsPrimaryButtonStyle: React.CSSProperties = {
   minHeight: 38,
-  border: "1px solid rgba(255, 136, 32, 0.84)",
+  border: "1px solid rgba(0, 188, 212, 0.84)",
   borderRadius: 6,
-  background: "linear-gradient(90deg, rgba(251, 177, 82, 1), rgba(254, 169, 78, 1), rgba(254, 155, 70, 1), rgba(255, 136, 32, 1))",
+  background: "var(--mango-gradient)",
   color: "#000000",
   cursor: "pointer",
   font: "inherit",
   fontWeight: 600,
   padding: "0 12px",
-  boxShadow: "0 0 18px rgba(255, 136, 32, 0.22)",
+  boxShadow: "0 0 18px rgba(0, 188, 212, 0.22)",
 };
 
 const settingsSelectButtonStyle: React.CSSProperties = {
@@ -1390,7 +1390,7 @@ const settingsSelectButtonStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) 18px",
   alignItems: "center",
   gap: 8,
-  border: "1px solid rgba(255, 136, 32, 0.44)",
+  border: "1px solid rgba(0, 188, 212, 0.44)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#000000",
@@ -1410,7 +1410,7 @@ const settingsComboIconButtonStyle: React.CSSProperties = {
   height: 28,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.36)",
+  border: "1px solid rgba(0, 188, 212, 0.36)",
   borderRadius: 5,
   background: "#ffffff",
   color: "#000000",
@@ -1427,11 +1427,11 @@ const settingsMenuStyle: React.CSSProperties = {
   overflowY: "auto",
   overflowX: "hidden",
   padding: 5,
-  border: "1px solid rgba(255, 136, 32, 0.58)",
+  border: "1px solid rgba(0, 188, 212, 0.58)",
   borderRadius: 8,
   background: "#ffffff",
   color: "#000000",
-  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(255, 136, 32, 0.12) inset",
+  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 188, 212, 0.12) inset",
 };
 
 const settingsOptionButtonStyle: React.CSSProperties = {
@@ -1466,7 +1466,7 @@ const settingsEmptyOptionStyle: React.CSSProperties = {
 const settingsScopePlateStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  border: "1px solid rgba(255, 136, 32, 0.32)",
+  border: "1px solid rgba(0, 188, 212, 0.32)",
   borderRadius: 8,
   background: "#ffffff",
   padding: 10,
@@ -1495,9 +1495,9 @@ const settingsScopeUUIDStyle: React.CSSProperties = {
 };
 
 const settingsActiveScopeStyle: React.CSSProperties = {
-  border: "1px solid rgba(255, 136, 32, 0.34)",
+  border: "1px solid rgba(0, 188, 212, 0.34)",
   borderRadius: 6,
-  background: "#fff7ed",
+  background: "#f8fafc",
   color: "#000000",
   fontSize: 11,
   fontWeight: 600,
@@ -1507,7 +1507,7 @@ const settingsActiveScopeStyle: React.CSSProperties = {
 const settingsSubsectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
-  borderTop: "1px solid rgba(255, 136, 32, 0.18)",
+  borderTop: "1px solid rgba(0, 188, 212, 0.18)",
   paddingTop: 10,
 };
 
@@ -1541,11 +1541,11 @@ const sectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 10,
   padding: 14,
-  border: "1px solid rgba(255, 136, 32, 0.68)",
+  border: "1px solid rgba(0, 188, 212, 0.68)",
   background: "#ffffff",
   borderRadius: 8,
   color: "#000000",
-  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset, 0 12px 24px rgba(0, 0, 0, 0.12)",
+  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.12) inset, 0 12px 24px rgba(0, 0, 0, 0.12)",
 };
 
 const settingsTopRowStyle: React.CSSProperties = {
@@ -1585,9 +1585,9 @@ const successBoxStyle: React.CSSProperties = {
   color: "#000000",
   fontSize: 12,
   fontWeight: 600,
-  border: "1px solid rgba(255, 136, 32, 0.32)",
+  border: "1px solid rgba(0, 188, 212, 0.32)",
   borderRadius: 6,
-  background: "#fff7ed",
+  background: "#f8fafc",
   padding: 8,
 };
 
@@ -1597,7 +1597,7 @@ const rowStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   minHeight: 32,
-  borderBottom: "1px solid rgba(255, 136, 32, 0.14)",
+  borderBottom: "1px solid rgba(0, 188, 212, 0.14)",
   fontSize: 12,
 };
 
@@ -1641,13 +1641,13 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   borderRadius: 8,
-  border: "1px solid rgba(255,136,32,0.68)",
+  border: "1px solid rgba(0,188,212,0.68)",
   background: "#ffffff",
   color: "#000000",
   padding: 12,
   display: "grid",
   gap: 10,
-  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.18)",
+  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.18)",
 };
 
 function companyUserLabel(user: CompanyUser): string {

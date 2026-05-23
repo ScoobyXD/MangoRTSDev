@@ -114,7 +114,7 @@ export function useNodeMapGraphPersistence({
       setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
       if (cached.relationshipRoleColors) {
         setRelationshipRoleColors({
-          parent: cached.relationshipRoleColors.parent ?? "#ff8a00",
+          parent: cached.relationshipRoleColors.parent ?? "#00bcd4",
           peer: cached.relationshipRoleColors.peer ?? "#0095ff",
           child: cached.relationshipRoleColors.child ?? "#6f5cff",
         });
@@ -168,7 +168,7 @@ export function useNodeMapGraphPersistence({
       }
       if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
         setRelationshipRoleColors({
-          parent: typeof parsed.relationshipRoleColors.parent === "string" ? parsed.relationshipRoleColors.parent : "#ff8a00",
+          parent: typeof parsed.relationshipRoleColors.parent === "string" ? parsed.relationshipRoleColors.parent : "#00bcd4",
           peer: typeof parsed.relationshipRoleColors.peer === "string" ? parsed.relationshipRoleColors.peer : "#0095ff",
           child: typeof parsed.relationshipRoleColors.child === "string" ? parsed.relationshipRoleColors.child : "#6f5cff",
         });

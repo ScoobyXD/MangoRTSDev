@@ -10,7 +10,7 @@ const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
 const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
-const HOME_MATRIX_LINE = "rgba(36, 18, 10, 0.22)";
+const HOME_MATRIX_LINE = "rgba(15, 23, 42, 0.22)";
 const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
 const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
@@ -36,7 +36,7 @@ export const pageStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   fontFamily: "var(--mango-font-family)",
 };
 
@@ -174,7 +174,7 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : hovered ? HOME_CYAN_MEDIUM : "transparent"}`,
     borderRadius: 6,
     background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" ? HOME_CYAN_FAINT : hovered ? HOME_CYAN_HOVER : "#ffffff",
-    color: "#24120a",
+    color: "#111827",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
@@ -197,7 +197,7 @@ export const sharedInboxDisclosureButtonStyle: React.CSSProperties = {
   placeItems: "center",
   border: "none",
   background: "transparent",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
 };
@@ -209,7 +209,7 @@ export const sharedInboxRenameInputStyle: React.CSSProperties = {
   border: `1px solid ${HOME_CYAN}`,
   borderRadius: 5,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   font: "inherit",
   fontSize: 12,
   fontWeight: 700,
@@ -222,7 +222,7 @@ export const sharedInboxContextMenuButtonStyle: React.CSSProperties = {
   minHeight: 31,
   border: "none",
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
@@ -242,7 +242,7 @@ export function navButtonStyle(active: boolean): React.CSSProperties {
     border: `1px solid ${active ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
     borderRadius: 6,
     background: active ? HOME_CYAN_SOFT : "#ffffff",
-    color: "#24120a",
+    color: "#111827",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
@@ -271,14 +271,14 @@ export const sharedInboxAccountMetaStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "rgba(36, 18, 10, 0.54)",
+  color: "rgba(15, 23, 42, 0.54)",
   fontSize: 10,
   fontWeight: 600,
 };
 
 export const navMetaStyle: React.CSSProperties = {
   fontSize: 10,
-  color: "rgba(36, 18, 10, 0.54)",
+  color: "rgba(15, 23, 42, 0.54)",
 };
 
 export const sharedInboxCreateStyle: React.CSSProperties = {
@@ -304,7 +304,7 @@ export const sharedInboxCreateButtonStyle: React.CSSProperties = {
   border: `1px solid ${HOME_CYAN_BORDER}`,
   borderRadius: 6,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 16,
@@ -391,7 +391,7 @@ export const myLogicGateFolderLabelStyle: React.CSSProperties = {
   gap: 6,
   fontSize: 11,
   fontWeight: 700,
-  color: "rgba(36, 18, 10, 0.76)",
+  color: "rgba(15, 23, 42, 0.76)",
 };
 
 export const myLogicGateGridStyle: React.CSSProperties = {
@@ -411,7 +411,7 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_TASKBAR_TILE_GRAY_BORDER}`,
     borderRadius: 7,
     background: "#ffffff",
-    color: "#24120a",
+    color: "#111827",
     cursor: "grab",
     font: "inherit",
     padding: "10px 8px",
@@ -463,7 +463,7 @@ export const shortcutRemoveStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   borderRadius: 4,
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "rgba(15, 23, 42, 0.58)",
   fontSize: 12,
   lineHeight: 1,
   cursor: "pointer",
@@ -487,7 +487,7 @@ export function logicGateTreeRowStyle(depth: number, selected: boolean, isDropTa
     border: `1px solid ${selected ? HOME_CYAN_BORDER : "transparent"}`,
     borderRadius: 6,
     background: selected ? HOME_CYAN_SOFT : isDropTarget ? "#ffffff" : "transparent",
-    color: "#24120a",
+    color: "#111827",
     cursor: "pointer",
     padding: `3px 7px 3px ${6 + depth * 14}px`,
     minWidth: 0,
@@ -499,7 +499,7 @@ export const logicGateDisclosureStyle: React.CSSProperties = {
   height: 20,
   border: "none",
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   display: "grid",
   placeItems: "center",
@@ -553,7 +553,7 @@ export const logicGateRaciMetaStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  color: "rgba(36, 18, 10, 0.56)",
+  color: "rgba(15, 23, 42, 0.56)",
   fontSize: 11,
   fontWeight: 600,
   whiteSpace: "nowrap",
@@ -628,7 +628,7 @@ export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
   borderRight: `2px solid ${HOME_MATRIX_LINE}`,
   borderBottom: `2px solid ${HOME_MATRIX_LINE}`,
   background: "#fbfdfe",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1.2,
@@ -704,7 +704,7 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: str
     border: "none",
     borderBottom: `1px solid rgba(15, 23, 42, 0.10)`,
     background: `linear-gradient(180deg, ${strongerTint} 0%, ${tint} 100%)`,
-    color: "#24120a",
+    color: "#111827",
     cursor: interactive ? "pointer" : "default",
     padding: "0 9px",
     minWidth: 0,
@@ -758,13 +758,13 @@ function inboxNotificationRoleColors(role: string): { background: string; border
     case "responsible":
       return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
     case "accountable":
-      return { background: "#fef3c7", border: "rgba(217, 119, 6, 0.38)", color: "#b45309" };
+      return { background: "#ede9fe", border: "rgba(124, 58, 237, 0.38)", color: "#6d28d9" };
     case "consulted":
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
     case "other":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
     default:
       return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#042028" };
   }
@@ -777,7 +777,7 @@ export const logicGateInboxGroupCountStyle: React.CSSProperties = {
   border: `1px solid ${HOME_BLACK_SOFT}`,
   borderRadius: 4,
   background: "rgba(255, 255, 255, 0.78)",
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
@@ -807,16 +807,16 @@ export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0, hasUnre
     gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto auto`,
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(255, 136, 32, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(0, 188, 212, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
     borderRadius: 6,
     background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#fff7eb" : "rgba(255, 255, 255, 0.94)",
-    color: "#24120a",
+    color: "#111827",
     cursor: "grab",
     padding: "4px 5px 4px 0",
     boxShadow: selected
       ? `0 0 0 2px ${HOME_CYAN_FAINT} inset`
       : hasUnreadNotification
-        ? "0 0 0 1px rgba(255, 136, 32, 0.16) inset"
+        ? "0 0 0 1px rgba(0, 188, 212, 0.16) inset"
         : "0 1px 2px rgba(15, 23, 42, 0.04)",
   };
 }
@@ -874,7 +874,7 @@ export const logicGateInboxNodeRemoveStyle: React.CSSProperties = {
   border: "none",
   borderRadius: 4,
   background: "transparent",
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "rgba(15, 23, 42, 0.58)",
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
@@ -884,13 +884,13 @@ export const logicGateInboxNodeRemoveStyle: React.CSSProperties = {
 
 export function logicGateInboxNodeStatusStyle(value: unknown): React.CSSProperties {
   const status = normalizeResponsibleInboxStatus(value);
-  const color = status ? responsibleStatusColor(status) : "rgba(36, 18, 10, 0.48)";
+  const color = status ? responsibleStatusColor(status) : "rgba(15, 23, 42, 0.48)";
   return {
     minWidth: 21,
     height: 18,
     display: "grid",
     placeItems: "center",
-    border: `1px solid ${status ? color : "rgba(36, 18, 10, 0.16)"}`,
+    border: `1px solid ${status ? color : "rgba(15, 23, 42, 0.16)"}`,
     borderRadius: 4,
     background: "rgba(255, 255, 255, 0.72)",
     color,
@@ -904,7 +904,7 @@ export const emptySmallStyle: React.CSSProperties = {
   minHeight: 64,
   display: "grid",
   placeItems: "center",
-  color: "rgba(36, 18, 10, 0.52)",
+  color: "rgba(15, 23, 42, 0.52)",
   fontSize: 11,
 };
 
@@ -913,7 +913,7 @@ export const messageContextMenuStyle: React.CSSProperties = {
   zIndex: 80,
   minWidth: 178,
   padding: 4,
-  border: "1px solid rgba(36, 18, 10, 0.16)",
+  border: "1px solid rgba(15, 23, 42, 0.16)",
   borderRadius: 7,
   background: "#ffffff",
   boxShadow: "0 12px 28px rgba(0, 0, 0, 0.16)",
@@ -925,7 +925,7 @@ export const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   zIndex: 130,
   display: "grid",
   placeItems: "center",
-  background: "rgba(36, 18, 10, 0.18)",
+  background: "rgba(15, 23, 42, 0.18)",
   padding: 22,
 };
 
@@ -935,10 +935,10 @@ export const nodeEditorPopupStyle: React.CSSProperties = {
   height: "min(820px, calc(100vh - 64px))",
   minWidth: "min(420px, calc(100vw - 44px))",
   minHeight: "min(320px, calc(100vh - 64px))",
-  border: "1px solid rgba(255, 136, 32, 0.54)",
+  border: "1px solid rgba(0, 188, 212, 0.54)",
   borderRadius: 16,
   background: "#ffffff",
-  boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
   overflow: "hidden",
   cursor: "default",
 };
@@ -969,10 +969,10 @@ export const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.56)",
+  border: "1px solid rgba(0, 188, 212, 0.56)",
   borderRadius: 4,
   background: "#ffffff",
-  color: "#ff8820",
+  color: "#006f85",
   padding: 0,
   cursor: "pointer",
 };
@@ -990,16 +990,16 @@ export const deleteModalStyle: React.CSSProperties = {
   width: "min(420px, 90%)",
   display: "grid",
   gap: 10,
-  border: "1px solid rgba(255,136,32,0.45)",
+  border: "1px solid rgba(0,188,212,0.45)",
   borderRadius: 10,
   background: "#ffffff",
-  color: "#24120a",
+  color: "#111827",
   padding: 12,
   boxShadow: "0 18px 48px rgba(0,0,0,0.24)",
 };
 
 export const deleteModalDetailStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   lineHeight: 1.35,
 };
@@ -1010,7 +1010,7 @@ export const contextMenuActionStyle: React.CSSProperties = {
   border: "none",
   borderRadius: 5,
   background: "transparent",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
@@ -1024,7 +1024,7 @@ export const connectPanelStyle: React.CSSProperties = {
   display: "grid",
   gap: 12,
   padding: 16,
-  border: "1px solid rgba(255, 136, 32, 0.24)",
+  border: "1px solid rgba(0, 188, 212, 0.24)",
   background: "#ffffff",
   borderRadius: 8,
 };
@@ -1052,23 +1052,23 @@ export const panelTitleStyle: React.CSSProperties = {
 };
 
 export const mutedTextStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.68)",
+  color: "rgba(15, 23, 42, 0.68)",
   fontSize: 12,
   lineHeight: 1.45,
 };
 
 export const mutedSmallStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   overflowWrap: "anywhere",
 };
 
 export const smallButtonStyle: React.CSSProperties = {
   minHeight: 30,
-  border: "1px solid rgba(255, 136, 32, 0.32)",
+  border: "1px solid rgba(0, 188, 212, 0.32)",
   borderRadius: 6,
   background: "#fff",
-  color: "#24120a",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -1077,19 +1077,19 @@ export const smallButtonStyle: React.CSSProperties = {
 
 export const headerButtonStyle: React.CSSProperties = {
   ...smallButtonStyle,
-  border: "1px solid rgba(255, 136, 32, 0.62)",
+  border: "1px solid rgba(0, 188, 212, 0.62)",
   background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
   color: "#e8fbff",
   fontWeight: 500,
-  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
+  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
 };
 
 export const primaryButtonStyle: React.CSSProperties = {
   minHeight: 34,
-  border: "1px solid #ff8820",
+  border: "1px solid #006f85",
   borderRadius: 6,
-  background: "linear-gradient(90deg, rgba(251, 177, 82, 1), rgba(254, 169, 78, 1), rgba(254, 155, 70, 1), rgba(255, 136, 32, 1))",
-  color: "#24120a",
+  background: "var(--mango-gradient)",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -1106,7 +1106,7 @@ export const inputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 34,
-  border: "1px solid rgba(255, 136, 32, 0.28)",
+  border: "1px solid rgba(0, 188, 212, 0.28)",
   borderRadius: 6,
   padding: "0 9px",
   font: "inherit",
@@ -1237,7 +1237,7 @@ export const checkboxStyle: React.CSSProperties = {
 };
 
 export const selectedCountStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.58)",
+  color: "rgba(15, 23, 42, 0.58)",
   fontSize: 11,
   fontWeight: 600,
   whiteSpace: "nowrap",
@@ -1263,7 +1263,7 @@ export const loadingMoreStyle: React.CSSProperties = {
   minHeight: 28,
   display: "grid",
   placeItems: "center",
-  color: "rgba(36, 18, 10, 0.56)",
+  color: "rgba(15, 23, 42, 0.56)",
   fontSize: 11,
 };
 
@@ -1276,7 +1276,7 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
     borderRadius: 7,
     background: active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
     cursor: "pointer",
-    color: "#24120a",
+    color: "#111827",
     font: "inherit",
     fontSize: 12,
     fontWeight: unread ? 700 : 500,
@@ -1293,11 +1293,11 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${pendingAutoArchive ? "rgba(36, 18, 10, 0.26)" : active ? HOME_CYAN : unread ? HOME_CYAN_MEDIUM : HOME_BLACK_SOFT}`,
+    border: `1px solid ${pendingAutoArchive ? "rgba(15, 23, 42, 0.26)" : active ? HOME_CYAN : unread ? HOME_CYAN_MEDIUM : HOME_BLACK_SOFT}`,
     borderRadius: 7,
     background: pendingAutoArchive ? "#e7e7e7" : active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
     cursor: draggable ? "grab" : "pointer",
-    color: pendingAutoArchive ? "rgba(36, 18, 10, 0.72)" : "#24120a",
+    color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
     font: "inherit",
     fontSize: 12,
     padding: "10px 10px 9px",
@@ -1313,7 +1313,7 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : "rgba(36, 18, 10, 0.16)",
+    background: active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : "rgba(15, 23, 42, 0.16)",
     boxShadow: active ? `0 0 0 3px ${HOME_CYAN_SOFT}` : undefined,
   };
 }
@@ -1325,7 +1325,7 @@ export function messagePlacementIconStyle(active: boolean): React.CSSProperties 
     marginTop: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#24120a" : HOME_CYAN,
+    color: active ? "#111827" : HOME_CYAN,
     transform: "scale(1.25)",
   };
 }
@@ -1353,7 +1353,7 @@ export const triageSubjectStyle: React.CSSProperties = {
 };
 
 export const triageDateStyle: React.CSSProperties = {
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   fontWeight: 700,
   whiteSpace: "nowrap",
@@ -1376,9 +1376,9 @@ export function messageStarButtonStyle(active: boolean): React.CSSProperties {
     padding: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#b85f00" : "rgba(36, 18, 10, 0.45)",
+    color: active ? "#006f85" : "rgba(15, 23, 42, 0.45)",
     background: active ? "#fff2d8" : "#ffffff",
-    borderColor: active ? "rgba(255, 136, 32, 0.62)" : "rgba(36, 18, 10, 0.16)",
+    borderColor: active ? "rgba(0, 188, 212, 0.62)" : "rgba(15, 23, 42, 0.16)",
   };
 }
 
@@ -1404,7 +1404,7 @@ export const snippetStyle: React.CSSProperties = {
   display: "-webkit-box",
   WebkitBoxOrient: "vertical",
   WebkitLineClamp: 2,
-  color: "rgba(36, 18, 10, 0.62)",
+  color: "rgba(15, 23, 42, 0.62)",
   fontSize: 11,
   lineHeight: 1.35,
 };
@@ -1433,7 +1433,7 @@ export const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
   height: "100%",
-  border: "1px solid rgba(255, 136, 32, 0.16)",
+  border: "1px solid rgba(0, 188, 212, 0.16)",
   borderRadius: 6,
   background: "#fff",
 };
@@ -1449,7 +1449,7 @@ export const emptyStateStyle: React.CSSProperties = {
   minHeight: 120,
   display: "grid",
   placeItems: "center",
-  color: "rgba(36, 18, 10, 0.56)",
+  color: "rgba(15, 23, 42, 0.56)",
   fontSize: 12,
 };
 

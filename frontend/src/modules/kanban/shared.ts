@@ -15,7 +15,7 @@ export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
 export const KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX = KANBAN_DEFAULT_COLUMN_HEIGHT_PX * 3;
 export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 10000;
-export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#fbb152";
+export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#00e9ff";
 export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
 export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#808080";
 export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#ff9500";
@@ -802,7 +802,7 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
-  const palette = ["#fbb152", "#fea94e", "#fe9b46", "#ff8820"];
+  const palette = ["#00e9ff", "#38bdf8", "#0ea5e9", "#006f85"];
   const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {

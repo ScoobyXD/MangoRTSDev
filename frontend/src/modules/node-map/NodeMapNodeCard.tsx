@@ -223,7 +223,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         outlineOffset: isSelected ? 1 : 0,
         display: "grid",
         gridTemplateRows: "1fr",
-        boxShadow: isSelected ? "0 0 0 3px rgba(255,136,32,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+        boxShadow: isSelected ? "0 0 0 3px rgba(0,188,212,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
         userSelect: "none",
         color: nodeCardText,
         cursor: isEditingTitle ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),

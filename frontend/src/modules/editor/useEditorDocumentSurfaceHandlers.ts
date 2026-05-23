@@ -1097,9 +1097,9 @@ export function useEditorDocumentSurfaceHandlers({
   flushPendingDocumentSave,
   onSelectionFontSizeChange,
   mentionUsers = [],
-  mentionAccent = "#ff8820",
-  mentionSurfaceText = "#24120a",
-  mentionStrokeColor = "rgba(36,18,10,0.18)",
+  mentionAccent = "#006f85",
+  mentionSurfaceText = "#111827",
+  mentionStrokeColor = "rgba(15,23,42,0.18)",
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
@@ -1189,7 +1189,7 @@ export function useEditorDocumentSurfaceHandlers({
               gap: 8,
               border: "none",
               borderRadius: 6,
-              background: selected ? "rgba(255, 136, 32, 0.16)" : "transparent",
+              background: selected ? "rgba(0, 188, 212, 0.16)" : "transparent",
               boxShadow: selected ? `inset 3px 0 0 ${mentionAccent}` : "none",
               color: mentionSurfaceText,
               cursor: "pointer",

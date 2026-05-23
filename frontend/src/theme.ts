@@ -1,23 +1,23 @@
 export const MANGO_FONT_FAMILY = "\"Inter\", \"Inter var\", system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
 
-export const MANGO_ORANGE_COLUMNS = [
-  "rgba(251, 177, 82, 1)",
-  "rgba(254, 169, 78, 1)",
-  "rgba(254, 155, 70, 1)",
-  "rgba(255, 136, 32, 1)",
+export const MANGO_UI_GRADIENT_COLUMNS = [
+  "rgba(0, 233, 255, 1)",
+  "rgba(56, 189, 248, 1)",
+  "rgba(14, 165, 233, 1)",
+  "rgba(0, 188, 212, 1)",
 ] as const;
 
-export const MANGO_ORANGE_HEX = {
-  column1: "#fbb152",
-  column2: "#fea94e",
-  column3: "#fe9b46",
-  column4: "#ff8820",
+export const MANGO_UI_HEX = {
+  column1: "#00e9ff",
+  column2: "#38bdf8",
+  column3: "#0ea5e9",
+  column4: "#00bcd4",
 } as const;
 
-export const MANGO_ACCENT = "rgb(255, 136, 32)";
-export const MANGO_ACCENT_HEX = MANGO_ORANGE_HEX.column4;
-export const MANGO_GRADIENT = `linear-gradient(90deg, ${MANGO_ORANGE_COLUMNS.join(", ")})`;
-export const MANGO_TEXT = "#24120a";
+export const MANGO_ACCENT = "rgb(0, 233, 255)";
+export const MANGO_ACCENT_HEX = MANGO_UI_HEX.column1;
+export const MANGO_GRADIENT = `linear-gradient(90deg, ${MANGO_UI_GRADIENT_COLUMNS.join(", ")})`;
+export const MANGO_TEXT = "#111827";
 export const MANGO_SURFACE = "#ffffff";
 
 export const TEAL_COLORWAY = {

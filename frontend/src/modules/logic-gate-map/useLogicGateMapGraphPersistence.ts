@@ -115,7 +115,7 @@ export function useLogicGateMapGraphPersistence({
       if (cached.relationshipRoleColors) {
         setRelationshipRoleColors({
           input: cached.relationshipRoleColors.input ?? "#0095ff",
-          output: cached.relationshipRoleColors.output ?? "#ff8a00",
+          output: cached.relationshipRoleColors.output ?? "#00bcd4",
         });
       }
       setRestoredViewport(true);
@@ -168,7 +168,7 @@ export function useLogicGateMapGraphPersistence({
       if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
         setRelationshipRoleColors({
           input: typeof parsed.relationshipRoleColors.input === "string" ? parsed.relationshipRoleColors.input : "#0095ff",
-          output: typeof parsed.relationshipRoleColors.output === "string" ? parsed.relationshipRoleColors.output : "#ff8a00",
+          output: typeof parsed.relationshipRoleColors.output === "string" ? parsed.relationshipRoleColors.output : "#00bcd4",
         });
       }
     } catch {

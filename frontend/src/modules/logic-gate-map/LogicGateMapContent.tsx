@@ -41,7 +41,7 @@ type ExplorerSelectionOrigin = {
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
 
 export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "mango" }) => {
-  const SELECTION_CYAN = "rgb(255, 136, 32)";
+  const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";
@@ -118,7 +118,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const layoutInteractionActiveRef = useRef(false);
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
-  const [relationshipRoleColors, setRelationshipRoleColors] = useState({ input: "#0095ff", output: "#ff8a00" });
+  const [relationshipRoleColors, setRelationshipRoleColors] = useState({ input: "#0095ff", output: "#00bcd4" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);

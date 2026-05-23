@@ -100,7 +100,7 @@ function roleLabel(row: NodeRelationshipTreeRow): string {
 
 function rowAccentColor(row: NodeRelationshipTreeRow, accent: string): string {
   if (row.role === "Current") return accent;
-  if (row.role === "Parent") return "#ff8a00";
+  if (row.role === "Parent") return "#00bcd4";
   if (row.role === "Peer") return "#0095ff";
   if (row.role === "Child") return "#6f5cff";
   return "rgba(100,116,139,0.72)";
@@ -154,7 +154,7 @@ function TreeRow({
         padding: `4px 7px 4px ${8 + row.depth * 16}px`,
         border: `1px solid ${active ? accent : "transparent"}`,
         borderRadius: 6,
-        background: active ? "rgba(255,136,32,0.12)" : panelBackground,
+        background: active ? "rgba(0,188,212,0.12)" : panelBackground,
         color: surfaceText,
         cursor: "pointer",
         font: "inherit",
@@ -442,7 +442,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
               minHeight: 8,
               cursor: "row-resize",
               touchAction: "none",
-              background: mapSplitDrag ? "rgba(255,136,32,0.14)" : "transparent",
+              background: mapSplitDrag ? "rgba(0,188,212,0.14)" : "transparent",
               borderTop: `1px solid ${ruleColor}`,
               borderBottom: `1px solid ${ruleColor}`,
             }}
@@ -476,7 +476,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
             height: "100%",
             cursor: "col-resize",
             touchAction: "none",
-            background: splitDrag ? "rgba(255,136,32,0.14)" : "transparent",
+            background: splitDrag ? "rgba(0,188,212,0.14)" : "transparent",
             borderLeft: `1px solid ${ruleColor}`,
             borderRight: `1px solid ${ruleColor}`,
           }}

@@ -386,7 +386,7 @@ const permissionBackdropStyle: React.CSSProperties = {
 const permissionDialogStyle: React.CSSProperties = {
   width: "min(680px, 100%)",
   maxHeight: "min(760px, calc(100vh - 32px))",
-  border: "1px solid rgba(255, 136, 32, 0.64)",
+  border: "1px solid rgba(0, 188, 212, 0.64)",
   borderRadius: 8,
   background: "#ffffff",
   color: "#111111",
@@ -402,7 +402,7 @@ const permissionEmbeddedStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   minHeight: 0,
-  border: "1px solid rgba(255, 136, 32, 0.42)",
+  border: "1px solid rgba(0, 188, 212, 0.42)",
   borderRadius: 8,
   background: "#ffffff",
   color: "#111111",
@@ -518,7 +518,7 @@ const permissionSecondaryButtonStyle: React.CSSProperties = {
 
 const permissionPrimaryButtonStyle: React.CSSProperties = {
   ...permissionSecondaryButtonStyle,
-  borderColor: "rgba(255,136,32,0.74)",
-  background: "#ff8a00",
+  borderColor: "rgba(0,188,212,0.74)",
+  background: "#00bcd4",
   color: "#111111",
 };

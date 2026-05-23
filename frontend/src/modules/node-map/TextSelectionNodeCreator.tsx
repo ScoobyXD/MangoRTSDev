@@ -253,7 +253,7 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
                 border: "none",
                 borderRadius: 5,
                 background: "transparent",
-                color: "#24120a",
+                color: "#111827",
                 cursor: creating ? "wait" : "pointer",
                 font: "inherit",
                 fontSize: 11,

@@ -1,12 +1,15 @@
 # Module theme and brand rule
 
 All frame modules must honor the frame colorway (`theme`) consistently.
-The default MangoRTS brand theme is the Mango orange scheme with Helvetica Neue typography.
-Teal remains a selectable legacy colorway, but it is not the default.
+
+The MangoRTS logo's text is orange scheme with Helvetica Neue typography. The actual font used throughout the app is Inter (normal)
+
+!!! This is important our site's ui will be Neumorphism with white and orange themes.!!!
+
 
 ## Default brand tokens
 
-- Font family: `Helvetica Neue` (`"Helvetica Neue", Helvetica, Arial, sans-serif` fallback stack).
+- Font family: `Inter` 
 - Mango gradient, left to right:
   - `rgba(251, 177, 82, 1)` / `#fbb152`
   - `rgba(254, 169, 78, 1)` / `#fea94e`
