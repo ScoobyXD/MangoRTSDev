@@ -1248,6 +1248,9 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
+	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_relationships
 		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,

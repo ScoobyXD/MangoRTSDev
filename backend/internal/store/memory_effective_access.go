@@ -121,6 +121,23 @@ func (r *MemoryRepo) deleteEffectiveFactsForResourceLocked(companyID, resourceTy
 	return nil
 }
 
+func (r *MemoryRepo) deleteEffectiveFactsForCompanyUserLocked(companyID, userID string) error {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return ErrInvalid
+	}
+	if r.effectiveAccessErr != nil {
+		return r.effectiveAccessErr
+	}
+	for accessKey, access := range r.effectiveAccess {
+		if access.CompanyID == companyID && access.UserID == userID {
+			delete(r.effectiveAccess, accessKey)
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepo) replaceEffectiveFactsForSourceLocked(companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) error {
 	companyID, sourceType, sourceID, err := normalizeEffectiveAccessSourceScope(companyID, sourceType, sourceID)
 	if err != nil {
