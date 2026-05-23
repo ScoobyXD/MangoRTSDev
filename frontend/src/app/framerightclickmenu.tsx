@@ -37,18 +37,22 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
 
   return createPortal(
     <div
+      className="mango-liquid-context-menu"
       ref={menuRef}
       style={{
         position: "fixed",
         left: pos.x,
         top: pos.y,
-        background: "#fff",
-        border: "1px solid #e0e0e0",
-        borderRadius: 10,
-        boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
-        padding: "4px 0",
+        background: "linear-gradient(145deg, rgba(255,255,255,0.72), rgba(245,248,252,0.52))",
+        border: "1px solid rgba(255,255,255,0.64)",
+        borderRadius: 14,
+        boxShadow: "0 18px 44px rgba(15, 23, 42, 0.18), inset 1px 1px 0 rgba(255,255,255,0.72), inset -1px -1px 0 rgba(148,163,184,0.12)",
+        backdropFilter: "blur(18px) saturate(1.3)",
+        WebkitBackdropFilter: "blur(18px) saturate(1.3)",
+        padding: "5px 0",
         zIndex: 1000,
         minWidth: 190,
+        overflow: "hidden",
       }}
     >
       {children}
