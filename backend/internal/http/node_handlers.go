@@ -70,7 +70,6 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return
 		}
-		s.refreshEffectiveAccessProjection(req.CompanyID, "node_created")
 		s.publishCommittedWorkspaceEvent(event)
 		writeJSON(w, http.StatusCreated, item)
 		return
@@ -242,9 +241,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_update_node")
 				return
-			}
-			if input.AssigneeUserIDSet {
-				s.refreshEffectiveAccessProjection(input.CompanyID, "node_assignee_updated")
 			}
 			s.publishCommittedWorkspaceEvent(event)
 			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})

@@ -40,6 +40,19 @@ Out of scope:
 - `[x]` Done
 - `[!]` Blocked
 
+## Codex Instance Plan
+
+This tracker is organized around Codex handoff size, not just architectural phases.
+
+Recommended remaining execution:
+
+1. `Phase 1` stays as its own foundation instance.
+2. `Phase 2A` is one implementation instance for direct/core resource sources.
+3. `Phase 2B` is one implementation instance for inherited/cross-resource sources.
+4. `Phase 3` is one final cleanup instance combining old handler repair removal and derived-grant compatibility cleanup.
+
+Do not hand all source-scoped updates to one Codex instance. The old Phase 2 was intentionally split because it mixed direct grants, admin access, assignee access, RACI, folder inheritance, group hierarchy, and assigned-node visibility.
+
 ## Current Problem
 
 Many HTTP write handlers call `refreshEffectiveAccessProjection`, which calls `RebuildEffectiveResourceAccessForCompany`.
@@ -111,13 +124,20 @@ Recommended helper shape:
 
 Do not overfit the first helper to one source. The write model needs source cleanup by `(company_id, source_type, source_id)` and resource cleanup by `(company_id, resource_type, resource_id, source_type)`.
 
-## Phase 2 - Source-Scoped Transactional Updates
+## Phase 2A - Core Source-Scoped Transactional Updates
+
+Goal for this Codex instance:
+
+- Finish direct effective-access sources that attach to a specific resource or user/company role.
+- Keep changes transactional and source-scoped.
+- Remove normal request-path rebuild calls only where this instance has installed scoped writers and regression coverage.
+- Leave inherited folder/group work and contextual assigned-node visibility to `Phase 2B`.
 
 ### Explicit User/Group Grants
 
 - [ ] Update `SetEntityPermissions` to maintain effective access in the same transaction.
 - [ ] For `node` and `logic_gate`, recompute only that resource.
-- [ ] For `shared_triage_folder`, recompute the target folder and communication descendants because access inherits down the folder tree.
+- [ ] For `shared_triage_folder`, keep the existing source truth and compatibility behavior, but defer descendant-tree correctness to `Phase 2B`.
 - [ ] Preserve `no_access` handling exactly as the current full rebuild does: it is a legacy grant input and does not write positive effective facts.
 - [ ] Preserve direct-user-before-group and nearest-folder precedence.
 
@@ -126,7 +146,7 @@ Strategy:
 - Delete effective facts for `direct_user_grant` and `direct_group_grant` on affected resources.
 - Re-expand current `resource_access_grants` rows through group descendants.
 - Insert positive `view`, `edit`, or `admin` facts.
-- Recompute assigned-node visibility if the affected resource is a Logic Gate, because Logic Gate effective access creates contextual node visibility.
+- If the affected resource is a Logic Gate, record the affected gate IDs for `Phase 2B` assigned-node visibility work; do not broaden this instance into contextual node visibility unless explicitly requested.
 
 ### Company Admin And Dev Admin Access
 
@@ -153,6 +173,15 @@ Strategy:
 - Delete `node_assignee` effective facts for the node.
 - If `nodes.assignee_user_id` is non-null and still a company member, insert `edit` for that node.
 - If current behavior requires creator `admin`, preserve it as an explicit creator grant or a distinct source, not as assignee-derived access.
+
+## Phase 2B - Inherited And Cross-Resource Source-Scoped Updates
+
+Goal for this Codex instance:
+
+- Use the scoped writer foundation and Phase 2A direct-resource facts.
+- Implement source families whose facts depend on RACI, folder descendants, group descendants, or Logic Gate assignment context.
+- Keep status-only moves and issue toggles as access no-ops.
+- Remove normal request-path rebuild calls only where this instance has installed scoped writers and regression coverage.
 
 ### Logic Gate RACI Access
 
@@ -220,7 +249,11 @@ Strategy:
 - Folder creation needs inherited facts from ancestors.
 - Folder deletion can delete effective rows for deleted resources before deleting source rows.
 
-## Phase 3 - Remove Handler Repair Calls
+## Phase 3 - Handler Repair Removal And Derived Grant Compatibility Cleanup
+
+This is the final cleanup Codex instance. It should run after `Phase 2A` and `Phase 2B` have scoped transactional writers and focused regression coverage.
+
+### Remove Handler Repair Calls
 
 - [ ] Remove handler-level calls to `refreshEffectiveAccessProjection`.
 - [ ] Keep event publishing and notification projection behavior unchanged.
@@ -229,7 +262,7 @@ Strategy:
 
 After this phase, `refreshEffectiveAccessProjection` should not be part of correctness paths. It may remain as an admin/repair utility.
 
-## Phase 4 - Derived Grant Compatibility Cleanup
+### Derived Grant Compatibility Cleanup
 
 `resource_access_grants` should represent explicit user/group grants only.
 
@@ -345,3 +378,4 @@ No handler should repair effective access after a source mutation has already co
 ## Progress Log
 
 - 2026-05-23: Created V1 tracker from read-only implementation plan. No source changes made.
+- 2026-05-23: Split old Phase 2 into `Phase 2A` and `Phase 2B` for Codex handoff size, and combined old Phase 3 and Phase 4 into one final cleanup phase.

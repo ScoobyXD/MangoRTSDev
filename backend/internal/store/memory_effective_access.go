@@ -24,6 +24,8 @@ type legacyGrantEffectiveAccessCandidate struct {
 	accessRank   int
 }
 
+const effectiveAccessSourceNodeAssignee = "node_assignee"
+
 func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
@@ -51,6 +53,58 @@ func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) 
 		r.effectiveAccess[accessKey] = access
 	}
 	return nil
+}
+
+func (r *MemoryRepo) replaceEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) error {
+	companyID = strings.TrimSpace(companyID)
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	sourceType = strings.TrimSpace(sourceType)
+	if companyID == "" || resourceType == "" || resourceID == "" || sourceType == "" {
+		return ErrInvalid
+	}
+	if r.effectiveAccessErr != nil {
+		return r.effectiveAccessErr
+	}
+
+	for accessKey, access := range r.effectiveAccess {
+		if access.CompanyID == companyID &&
+			access.ResourceType == resourceType &&
+			access.ResourceID == resourceID &&
+			access.SourceType == sourceType {
+			delete(r.effectiveAccess, accessKey)
+		}
+	}
+	now := time.Now().UTC()
+	for _, fact := range facts {
+		addEffectiveAccessFact(r.effectiveAccess, now, fact)
+	}
+	return nil
+}
+
+func (r *MemoryRepo) recomputeNodeAssigneeEffectiveAccessLocked(companyID, nodeID string) error {
+	node, ok := r.nodes[key(companyID, nodeID)]
+	if !ok {
+		return ErrNotFound
+	}
+	facts := []domain.EffectiveResourceAccess{}
+	if node.AssigneeUserID != nil {
+		userID := strings.TrimSpace(*node.AssigneeUserID)
+		if userID != "" {
+			if _, ok := r.memberships[membershipKey(companyID, userID)]; ok {
+				facts = append(facts, domain.EffectiveResourceAccess{
+					CompanyID:    companyID,
+					UserID:       userID,
+					ResourceType: EntityTypeNode,
+					ResourceID:   nodeID,
+					AccessLevel:  EntityPermissionEdit,
+					SourceType:   effectiveAccessSourceNodeAssignee,
+					SourceID:     nodeAssigneeEffectiveAccessSourceID(nodeID, userID),
+				})
+			}
+		}
+	}
+	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, facts)
 }
 
 func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
@@ -316,8 +370,8 @@ func (r *MemoryRepo) projectNodeAssigneeEffectiveAccessLocked(companyID string, 
 			ResourceType: EntityTypeNode,
 			ResourceID:   node.NodeID,
 			AccessLevel:  EntityPermissionEdit,
-			SourceType:   "node_assignee",
-			SourceID:     "node:" + node.NodeID + ":assignee:" + userID,
+			SourceType:   effectiveAccessSourceNodeAssignee,
+			SourceID:     nodeAssigneeEffectiveAccessSourceID(node.NodeID, userID),
 		})
 	}
 }
@@ -555,4 +609,8 @@ func effectiveAccessSourceID(parts ...string) string {
 		}
 	}
 	return strings.Join(clean, ":")
+}
+
+func nodeAssigneeEffectiveAccessSourceID(nodeID, userID string) string {
+	return effectiveAccessSourceID("node", nodeID, "assignee", userID)
 }
