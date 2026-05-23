@@ -2414,31 +2414,6 @@ do update set
   version = greatest(workspace_read_versions.version, excluded.version),
   updated_timestamp = greatest(workspace_read_versions.updated_timestamp, excluded.updated_timestamp);
 
-create table if not exists notification_events (
-  event_id uuid not null,
-  company_id uuid,
-  actor_user_id uuid,
-  event_type text not null,
-  entity_type text not null,
-  entity_id text not null,
-  idempotency_key text not null default '',
-  payload jsonb not null default '{}'::jsonb,
-  created_timestamp timestamptz not null default now(),
-  constraint notification_events_type_nonblank_chk check (btrim(event_type) <> ''),
-  constraint notification_events_entity_type_nonblank_chk check (btrim(entity_type) <> ''),
-  constraint notification_events_entity_id_nonblank_chk check (btrim(entity_id) <> ''),
-  constraint notification_events_payload_object_chk check (jsonb_typeof(payload) = 'object'),
-  primary key (event_id),
-  foreign key (actor_user_id) references users (user_id) on delete set null
-);
-
-create unique index if not exists idx_notification_events_idempotency_key
-  on notification_events(idempotency_key)
-  where btrim(idempotency_key) <> '';
-
-create index if not exists idx_notification_events_company_created
-  on notification_events(company_id, created_timestamp desc, event_id desc);
-
 create table if not exists notification_domain_event_projection_checkpoints (
   company_id uuid primary key,
   checkpoint_timestamp timestamptz not null,
@@ -2471,12 +2446,17 @@ create table if not exists notifications (
   constraint notifications_role_chk check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed', 'other')),
   primary key (notification_id),
   foreign key (recipient_user_id) references users (user_id) on delete cascade,
-  foreign key (actor_user_id) references users (user_id) on delete set null,
-  foreign key (source_event_id) references notification_events (event_id) on delete cascade
+  foreign key (actor_user_id) references users (user_id) on delete set null
 );
+
+comment on column notifications.source_event_id is
+  'Notification source UUID. Notifications V1 writes committed domain_events event_id values for new projected rows, but this column is intentionally not foreign-key constrained so existing historical source UUIDs remain valid.';
 
 create unique index if not exists idx_notifications_dedupe
   on notifications(recipient_user_id, source_event_id, notification_type, entity_type, entity_id);
+
+create index if not exists idx_notifications_source_event_id
+  on notifications(source_event_id);
 
 create index if not exists idx_notifications_recipient_created
   on notifications(recipient_user_id, created_timestamp desc, notification_id desc);
