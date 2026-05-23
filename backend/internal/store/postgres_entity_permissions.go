@@ -252,6 +252,11 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
+	if parentChanged {
+		if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
@@ -264,7 +269,58 @@ func (r *PostgresRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	if companyID == "" || groupID == "" {
 		return ErrInvalid
 	}
-	deleted, err := r.db.Exec(`
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
+with recursive subtree as (
+  select group_id
+  from company_user_groups
+  where company_id=$1::uuid and group_id=$2::uuid
+  union all
+  select child.group_id
+  from company_user_groups child
+  join subtree parent
+    on child.company_id=$1::uuid
+   and child.parent_group_id=parent.group_id
+)
+select group_id::text
+from subtree`, companyID, groupID)
+	if err != nil {
+		return err
+	}
+	groupIDs := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		groupIDs = append(groupIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(groupIDs) == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_access_grants
+where company_id=$1::uuid
+  and principal_type='group'
+  and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx, `
 delete from company_user_groups
 where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	if err != nil {
@@ -277,7 +333,10 @@ where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	if affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *PostgresRepo) ListCompanyUserGroupMembers(companyID string) ([]domain.CompanyUserGroupMember, error) {
@@ -380,6 +439,9 @@ on conflict (company_id, group_id, user_id) do update
 set updated_timestamp=now()`, companyID, groupID, cleanUserIDs); err != nil {
 			return nil, err
 		}
+	}
+	if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -550,6 +612,11 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 	}
 	for _, targetEntityID := range targetEntityIDs {
 		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, entityType, targetEntityID); err != nil {
+			return nil, err
+		}
+	}
+	if entityType == EntityTypeLogicGate {
+		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, []string{entityID}, nil); err != nil {
 			return nil, err
 		}
 	}

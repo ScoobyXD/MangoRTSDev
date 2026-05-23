@@ -782,14 +782,20 @@ order by kc.position asc, kc.created_timestamp asc, kc.column_id asc`, input.Com
 	}
 
 	var canonicalNodeTitle string
+	var previousAssignee sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-select title
+select title, assignee_user_id::text
 from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle); err != nil {
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &previousAssignee); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
 		return LogicGateNodeAssignmentResult{}, err
+	}
+	previousAssignment, previousAssignmentErr := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")
+	hadPreviousAssignment := previousAssignmentErr == nil
+	if previousAssignmentErr != nil && !errors.Is(previousAssignmentErr, ErrNotFound) {
+		return LogicGateNodeAssignmentResult{}, previousAssignmentErr
 	}
 
 	position := input.Position
@@ -887,6 +893,23 @@ returning `+kanbanCardSelectColumns,
 	if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	var currentAssignee sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select assignee_user_id::text
+from nodes
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&currentAssignee); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if previousAssignee.String != currentAssignee.String || previousAssignee.Valid != currentAssignee.Valid {
+		if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
+		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
 	if input.PrioritySet {
 		var priority any
 		if input.Priority != nil {
@@ -971,6 +994,15 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
+	}
+	var previousAssignee sql.NullString
+	if input.AssigneePolicySet {
+		if err := tx.QueryRowContext(ctx, `
+select assignee_user_id::text
+from nodes
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&previousAssignee); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
 	}
 
 	columnID := card.ColumnID
@@ -1063,6 +1095,18 @@ returning `+kanbanCardSelectColumns,
 	if input.AssigneePolicySet {
 		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
+		}
+		var currentAssignee sql.NullString
+		if err := tx.QueryRowContext(ctx, `
+select assignee_user_id::text
+from nodes
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&currentAssignee); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		if previousAssignee.String != currentAssignee.String || previousAssignee.Valid != currentAssignee.Valid {
+			if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+				return LogicGateNodeAssignmentResult{}, err
+			}
 		}
 	}
 	if input.PrioritySet {
@@ -1164,6 +1208,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStat
 			return LogicGateNodeAssignmentRemoveResult{}, err
 		}
 	} else if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 

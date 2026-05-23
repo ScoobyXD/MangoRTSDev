@@ -29,6 +29,9 @@ const (
 	effectiveAccessSourceDirectGroupGrant = "direct_group_grant"
 	effectiveAccessSourceCompanyAdmin     = "company_admin"
 	effectiveAccessSourceNodeAssignee     = "node_assignee"
+	effectiveAccessSourceLogicGateRaci    = "logic_gate_raci"
+	effectiveAccessSourceSharedTriageRaci = "shared_triage_raci"
+	effectiveAccessSourceGateVisibility   = "logic_gate_assignment_visibility"
 )
 
 func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
@@ -178,6 +181,218 @@ func (r *MemoryRepo) recomputeNodeAssigneeEffectiveAccessLocked(companyID, nodeI
 		}
 	}
 	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, facts)
+}
+
+func (r *MemoryRepo) recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID string) error {
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return ErrNotFound
+	}
+	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(companyID, logicGateID)]...)
+	sortLogicGateRaciAssignments(assignments)
+	facts := make([]domain.EffectiveResourceAccess, 0, len(assignments))
+	for _, assignment := range assignments {
+		if assignment.CompanyID != companyID || assignment.LogicGateID != logicGateID || strings.TrimSpace(assignment.UserID) == "" {
+			continue
+		}
+		facts = append(facts, domain.EffectiveResourceAccess{
+			CompanyID:    companyID,
+			UserID:       assignment.UserID,
+			ResourceType: EntityTypeLogicGate,
+			ResourceID:   logicGateID,
+			AccessLevel:  EntityPermissionEdit,
+			SourceType:   effectiveAccessSourceLogicGateRaci,
+			SourceID:     logicGateRaciEffectiveAccessSourceID(logicGateID, assignment.Role, assignment.UserID),
+		})
+	}
+	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeLogicGate, logicGateID, effectiveAccessSourceLogicGateRaci, facts)
+}
+
+func (r *MemoryRepo) recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, folderID string) error {
+	folder, ok := r.folders[key(companyID, folderID)]
+	if !ok || folder.FolderKind != "communications" {
+		return ErrNotFound
+	}
+	ancestorIDs := r.sharedTriageFolderAncestryLocked(companyID, folderID)
+	facts := []domain.EffectiveResourceAccess{}
+	for _, sourceFolderID := range ancestorIDs {
+		assignments := append([]domain.SharedInboxRaciAssignment{}, r.sharedInboxRaci[sharedInboxRaciKey(companyID, sourceFolderID)]...)
+		sortSharedInboxRaciAssignments(assignments)
+		for _, assignment := range assignments {
+			if assignment.CompanyID != companyID {
+				continue
+			}
+			subjectType := strings.TrimSpace(assignment.SubjectType)
+			subjectID := strings.TrimSpace(assignment.SubjectID)
+			if subjectType == "" {
+				subjectType = EntityPermissionSubjectUser
+				subjectID = strings.TrimSpace(assignment.UserID)
+			}
+			sourceID := sharedTriageRaciEffectiveAccessSourceID(sourceFolderID, assignment.Role, subjectType, subjectID)
+			switch subjectType {
+			case EntityPermissionSubjectUser:
+				if subjectID == "" {
+					continue
+				}
+				if _, ok := r.memberships[membershipKey(companyID, subjectID)]; !ok {
+					continue
+				}
+				facts = append(facts, domain.EffectiveResourceAccess{
+					CompanyID:    companyID,
+					UserID:       subjectID,
+					ResourceType: EntityTypeSharedTriageFolder,
+					ResourceID:   folderID,
+					AccessLevel:  EntityPermissionEdit,
+					SourceType:   effectiveAccessSourceSharedTriageRaci,
+					SourceID:     sourceID,
+				})
+			case EntityPermissionSubjectGroup:
+				if subjectID == "" {
+					continue
+				}
+				groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, subjectID)
+				for _, member := range r.userGroupMembers {
+					if member.CompanyID != companyID || !groupIDs[member.GroupID] {
+						continue
+					}
+					facts = append(facts, domain.EffectiveResourceAccess{
+						CompanyID:    companyID,
+						UserID:       member.UserID,
+						ResourceType: EntityTypeSharedTriageFolder,
+						ResourceID:   folderID,
+						AccessLevel:  EntityPermissionEdit,
+						SourceType:   effectiveAccessSourceSharedTriageRaci,
+						SourceID:     sourceID,
+					})
+				}
+			}
+		}
+	}
+	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeSharedTriageFolder, folderID, effectiveAccessSourceSharedTriageRaci, facts)
+}
+
+func (r *MemoryRepo) recomputeSharedTriageRaciEffectiveAccessForSubtreeLocked(companyID, folderID string) error {
+	for _, targetID := range r.sharedTriagePermissionTargetIDsLocked(companyID, folderID) {
+		if err := r.recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) recomputeSharedTriageInheritedEffectiveAccessForSubtreeLocked(companyID, folderID string) error {
+	for _, targetID := range r.sharedTriagePermissionTargetIDsLocked(companyID, folderID) {
+		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, EntityTypeSharedTriageFolder, targetID); err != nil {
+			return err
+		}
+		if err := r.recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) recomputeLogicGateAssignedNodeVisibilityLocked(companyID string, logicGateIDs, nodeIDs []string) error {
+	logicGateFilter := make(map[string]bool, len(logicGateIDs))
+	for _, logicGateID := range logicGateIDs {
+		logicGateID = strings.TrimSpace(logicGateID)
+		if logicGateID != "" {
+			logicGateFilter[logicGateID] = true
+		}
+	}
+	nodeFilter := make(map[string]bool, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			nodeFilter[nodeID] = true
+		}
+	}
+	targetNodes := map[string]bool{}
+	for _, assignment := range r.nodeLogicGateAssignments {
+		if assignment.CompanyID != companyID {
+			continue
+		}
+		if len(logicGateFilter) > 0 && !logicGateFilter[assignment.LogicGateID] {
+			continue
+		}
+		if len(nodeFilter) > 0 && !nodeFilter[assignment.NodeID] {
+			continue
+		}
+		targetNodes[assignment.NodeID] = true
+	}
+	for nodeID := range nodeFilter {
+		targetNodes[nodeID] = true
+	}
+	if len(targetNodes) == 0 {
+		return nil
+	}
+
+	baseFacts := make([]domain.EffectiveResourceAccess, 0)
+	for _, fact := range r.effectiveAccess {
+		if fact.CompanyID != companyID || fact.ResourceType != EntityTypeLogicGate || !EntityPermissionSatisfies(fact.AccessLevel, EntityPermissionView) {
+			continue
+		}
+		if len(logicGateFilter) > 0 && !logicGateFilter[fact.ResourceID] {
+			continue
+		}
+		baseFacts = append(baseFacts, fact)
+	}
+	sort.Slice(baseFacts, func(i, j int) bool {
+		if baseFacts[i].UserID != baseFacts[j].UserID {
+			return baseFacts[i].UserID < baseFacts[j].UserID
+		}
+		if baseFacts[i].ResourceID != baseFacts[j].ResourceID {
+			return baseFacts[i].ResourceID < baseFacts[j].ResourceID
+		}
+		if baseFacts[i].SourceType != baseFacts[j].SourceType {
+			return baseFacts[i].SourceType < baseFacts[j].SourceType
+		}
+		return baseFacts[i].SourceID < baseFacts[j].SourceID
+	})
+
+	factsByNode := map[string][]domain.EffectiveResourceAccess{}
+	for _, fact := range baseFacts {
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID != companyID || assignment.LogicGateID != fact.ResourceID || !targetNodes[assignment.NodeID] {
+				continue
+			}
+			if _, ok := r.nodes[key(companyID, assignment.NodeID)]; !ok {
+				continue
+			}
+			factsByNode[assignment.NodeID] = append(factsByNode[assignment.NodeID], domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       fact.UserID,
+				ResourceType: EntityTypeNode,
+				ResourceID:   assignment.NodeID,
+				AccessLevel:  EntityPermissionView,
+				SourceType:   effectiveAccessSourceGateVisibility,
+				SourceID:     logicGateAssignmentVisibilityEffectiveAccessSourceID(fact.SourceType, fact.SourceID, assignment.LogicGateID, assignment.NodeID),
+			})
+		}
+	}
+	for nodeID := range targetNodes {
+		if err := r.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeNode, nodeID, effectiveAccessSourceGateVisibility, factsByNode[nodeID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID string) error {
+	resources := r.effectiveAccessCompanyResourcesLocked(companyID)
+	for _, resource := range resources {
+		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, resource.resourceType, resource.resourceID); err != nil {
+			return err
+		}
+	}
+	for _, resource := range resources {
+		if resource.resourceType != EntityTypeSharedTriageFolder {
+			continue
+		}
+		if err := r.recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, resource.resourceID); err != nil {
+			return err
+		}
+	}
+	return r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, nil, nil)
 }
 
 func (r *MemoryRepo) recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
@@ -614,8 +829,8 @@ func (r *MemoryRepo) projectLogicGateRaciEffectiveAccessLocked(companyID string,
 				ResourceType: EntityTypeLogicGate,
 				ResourceID:   assignment.LogicGateID,
 				AccessLevel:  EntityPermissionEdit,
-				SourceType:   "logic_gate_raci",
-				SourceID:     "logic_gate:" + assignment.LogicGateID + ":role:" + assignment.Role + ":user:" + assignment.UserID,
+				SourceType:   effectiveAccessSourceLogicGateRaci,
+				SourceID:     logicGateRaciEffectiveAccessSourceID(assignment.LogicGateID, assignment.Role, assignment.UserID),
 			})
 		}
 	}
@@ -634,7 +849,7 @@ func (r *MemoryRepo) projectSharedTriageRaciEffectiveAccessLocked(companyID stri
 				subjectType = EntityPermissionSubjectUser
 				subjectID = strings.TrimSpace(assignment.UserID)
 			}
-			sourceID := "folder:" + assignment.FolderID + ":role:" + assignment.Role + ":" + subjectType + ":" + subjectID
+			sourceID := sharedTriageRaciEffectiveAccessSourceID(assignment.FolderID, assignment.Role, subjectType, subjectID)
 			switch subjectType {
 			case EntityPermissionSubjectUser:
 				if _, ok := r.memberships[membershipKey(companyID, subjectID)]; !ok {
@@ -647,7 +862,7 @@ func (r *MemoryRepo) projectSharedTriageRaciEffectiveAccessLocked(companyID stri
 						ResourceType: EntityTypeSharedTriageFolder,
 						ResourceID:   targetID,
 						AccessLevel:  EntityPermissionEdit,
-						SourceType:   "shared_triage_raci",
+						SourceType:   effectiveAccessSourceSharedTriageRaci,
 						SourceID:     sourceID,
 					})
 				}
@@ -664,7 +879,7 @@ func (r *MemoryRepo) projectSharedTriageRaciEffectiveAccessLocked(companyID stri
 							ResourceType: EntityTypeSharedTriageFolder,
 							ResourceID:   targetID,
 							AccessLevel:  EntityPermissionEdit,
-							SourceType:   "shared_triage_raci",
+							SourceType:   effectiveAccessSourceSharedTriageRaci,
 							SourceID:     sourceID,
 						})
 					}
@@ -707,8 +922,8 @@ func (r *MemoryRepo) projectLogicGateAssignmentVisibilityLocked(companyID string
 				ResourceType: EntityTypeNode,
 				ResourceID:   assignment.NodeID,
 				AccessLevel:  EntityPermissionView,
-				SourceType:   "logic_gate_assignment_visibility",
-				SourceID:     fact.SourceType + ":" + fact.SourceID + ":logic_gate:" + assignment.LogicGateID + ":node:" + assignment.NodeID,
+				SourceType:   effectiveAccessSourceGateVisibility,
+				SourceID:     logicGateAssignmentVisibilityEffectiveAccessSourceID(fact.SourceType, fact.SourceID, assignment.LogicGateID, assignment.NodeID),
 			})
 		}
 	}
@@ -1020,4 +1235,16 @@ func effectiveAccessSourceID(parts ...string) string {
 
 func nodeAssigneeEffectiveAccessSourceID(nodeID, userID string) string {
 	return effectiveAccessSourceID("node", nodeID, "assignee", userID)
+}
+
+func logicGateRaciEffectiveAccessSourceID(logicGateID, role, userID string) string {
+	return effectiveAccessSourceID("logic_gate", logicGateID, "role", role, EntityPermissionSubjectUser, userID)
+}
+
+func sharedTriageRaciEffectiveAccessSourceID(folderID, role, subjectType, subjectID string) string {
+	return effectiveAccessSourceID("folder", folderID, "role", role, subjectType, subjectID)
+}
+
+func logicGateAssignmentVisibilityEffectiveAccessSourceID(sourceType, sourceID, logicGateID, nodeID string) string {
+	return effectiveAccessSourceID(sourceType, sourceID, "logic_gate", logicGateID, "node", nodeID)
 }

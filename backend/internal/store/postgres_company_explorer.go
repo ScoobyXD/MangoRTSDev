@@ -358,6 +358,12 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
 			return domain.CompanyExplorerFolder{}, err
 		}
+		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, item.FolderID); err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -733,6 +739,11 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
+	}
+	if folderKind == "communications" && parentChanged {
+		if err := recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx, tx, companyID, folderID); err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err

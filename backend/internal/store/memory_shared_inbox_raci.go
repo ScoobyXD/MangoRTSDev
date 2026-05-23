@@ -110,6 +110,8 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	sharedInboxRaciSnapshot := cloneMemorySliceMap(r.sharedInboxRaci)
+	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	folder, ok := r.folders[key(companyID, folderID)]
 	if !ok {
 		return nil, ErrNotFound
@@ -175,6 +177,11 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	}
 	sortSharedInboxRaciAssignments(assignments)
 	r.sharedInboxRaci[sharedInboxRaciKey(companyID, folderID)] = assignments
+	if err := r.recomputeSharedTriageRaciEffectiveAccessForSubtreeLocked(companyID, folderID); err != nil {
+		r.sharedInboxRaci = sharedInboxRaciSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		return nil, err
+	}
 	next := r.withSharedInboxRaciLocked(folder).RaciAssignments
 	return append([]domain.SharedInboxRaciAssignment{}, next...), nil
 }

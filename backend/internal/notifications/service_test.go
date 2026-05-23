@@ -561,12 +561,12 @@ func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T)
 		}
 		byUser[item.RecipientUserID] = item
 	}
-	for _, user := range []domain.User{responsible, accountable, groupMember, viewer} {
+	for _, user := range []domain.User{responsible, accountable, groupMember, viewer, blocked} {
 		if _, ok := byUser[user.UserID]; !ok {
 			t.Fatalf("missing shared inbox notification for %s; got %+v", user.UserID, items)
 		}
 	}
-	for _, user := range []domain.User{actor, blocked} {
+	for _, user := range []domain.User{actor} {
 		if _, ok := byUser[user.UserID]; ok {
 			t.Fatalf("unexpected shared inbox notification for %s: %+v", user.UserID, byUser[user.UserID])
 		}
@@ -582,6 +582,9 @@ func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T)
 	}
 	if got := byUser[viewer.UserID]; got.Role != domain.NotificationRoleOther {
 		t.Fatalf("viewer role = %+v, want other", got)
+	}
+	if got := byUser[blocked.UserID]; got.Role != domain.LogicGateRaciRoleInformed {
+		t.Fatalf("blocked role = %+v, want informed", got)
 	}
 	visible, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 50})
 	if err != nil {

@@ -425,6 +425,9 @@ on conflict (company_id, folder_id, role, user_id) do nothing`,
 			return nil, err
 		}
 	}
+	if err := recomputeSharedTriageRaciEffectiveAccessForSubtreeTx(ctx, tx, companyID, folderID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

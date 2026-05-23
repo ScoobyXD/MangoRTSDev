@@ -9,6 +9,7 @@ import (
 type memoryLogicGateRaciCommandSnapshot struct {
 	logicGateRaci         map[string][]domain.LogicGateRaciAssignment
 	entityPermissions     map[string]domain.EntityPermission
+	effectiveAccess       map[string]domain.EffectiveResourceAccess
 	workItemInboxEntries  map[string]memoryWorkItemInboxEntry
 	domainEvents          map[string]domain.DomainEvent
 	workspaceReadVersions map[string]int64
@@ -18,6 +19,7 @@ func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRa
 	return memoryLogicGateRaciCommandSnapshot{
 		logicGateRaci:         cloneMemorySliceMap(r.logicGateRaci),
 		entityPermissions:     cloneMemoryMap(r.entityPermissions),
+		effectiveAccess:       cloneMemoryMap(r.effectiveAccess),
 		workItemInboxEntries:  cloneMemoryMap(r.workItemInboxEntries),
 		domainEvents:          cloneMemoryMap(r.domainEvents),
 		workspaceReadVersions: cloneMemoryMap(r.workspaceReadVersions),
@@ -27,6 +29,7 @@ func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRa
 func (r *MemoryRepo) restoreLogicGateRaciCommandStateLocked(snapshot memoryLogicGateRaciCommandSnapshot) {
 	r.logicGateRaci = snapshot.logicGateRaci
 	r.entityPermissions = snapshot.entityPermissions
+	r.effectiveAccess = snapshot.effectiveAccess
 	r.workItemInboxEntries = snapshot.workItemInboxEntries
 	r.domainEvents = snapshot.domainEvents
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
@@ -143,6 +146,14 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	}
 
 	r.logicGateRaci[raciKey] = assignments
+	if err := r.recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID); err != nil {
+		r.restoreLogicGateRaciCommandStateLocked(snapshot)
+		return LogicGateRaciAssignmentCommandResult{}, err
+	}
+	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{logicGateID}, nil); err != nil {
+		r.restoreLogicGateRaciCommandStateLocked(snapshot)
+		return LogicGateRaciAssignmentCommandResult{}, err
+	}
 	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	event, err := r.appendDomainEventLocked(logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))
 	if err != nil {
