@@ -1,17 +1,18 @@
 import type React from "react";
 import { KanbanBoardIcon } from "../kanban/KanbanBoardIcon";
 import type { ExplorerTreeNode } from "./companyExplorerTypes";
-import { EXPLORER_SYSTEM_FOLDER_COLOR } from "./treePresentation";
 
-export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind, systemKey }) => {
+export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind }) => {
   if (kind === "folder") {
-    const fill = systemKey ? "rgba(71, 85, 105, 0.14)" : "#f8fafc";
-    const tabFill = systemKey ? "rgba(71, 85, 105, 0.28)" : "#e2e8f0";
-    const stroke = systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#64748b";
     return (
-      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <path d="M1.4 4.3h4.8l1.1 1.35h7.1v6.35a1.45 1.45 0 0 1-1.45 1.45H2.85A1.45 1.45 0 0 1 1.4 12z" fill={fill} stroke={stroke} strokeWidth="1.15" strokeLinejoin="round" />
-        <path d="M1.4 5.65V3.9c0-.8.65-1.45 1.45-1.45h3.1L7.2 4.3" fill={tabFill} stroke={stroke} strokeWidth="1.15" strokeLinejoin="round" />
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0, filter: "drop-shadow(0 1px 1px rgba(180, 84, 0, 0.28))" }}>
+        <path d="M1.7 4.55c0-.83.67-1.5 1.5-1.5h3.45c.44 0 .85.19 1.13.52l.78.91h4.24c.83 0 1.5.67 1.5 1.5v.93H1.7z" fill="#f28a13" />
+        <path d="M2.05 5.95h11.9c.64 0 1.12.57 1.01 1.2l-.86 5.12c-.12.72-.75 1.25-1.48 1.25H3.38c-.73 0-1.36-.53-1.48-1.25l-.86-5.12c-.11-.63.37-1.2 1.01-1.2z" fill="#ff9f1a" />
+        <path d="M2.15 6.08h11.7c.53 0 .93.48.84 1l-.15.87H1.46l-.15-.87c-.09-.52.31-1 .84-1z" fill="#ffb33a" opacity="0.96" />
+        <path d="M2.06 4.75c.06-.67.59-1.2 1.24-1.2h3.22c.31 0 .61.13.82.37l.79.9h4.62c.61 0 1.12.44 1.23 1.02H8.03l-.9-1.02c-.2-.23-.49-.36-.8-.36H3.2c-.46 0-.87.17-1.14.29z" fill="#ffc45d" opacity="0.85" />
+        <path d="M2.3 12.04c.16.57.68.98 1.29.98h8.82c.61 0 1.13-.41 1.29-.98l.42-2.53c-1.78 2.25-4.86 3.06-11.82 2.53z" fill="#f28b10" opacity="0.48" />
+        <path d="M2.32 6.26h11.36c.46 0 .81.41.73.86l-.84 4.98c-.09.53-.55.92-1.09.92H3.52c-.54 0-1-.39-1.09-.92l-.84-4.98c-.08-.45.27-.86.73-.86z" fill="none" stroke="rgba(180, 84, 0, 0.34)" strokeWidth="0.55" />
+        <path d="M2.95 6.52h10.5" fill="none" stroke="rgba(255, 235, 198, 0.75)" strokeWidth="0.7" strokeLinecap="round" />
       </svg>
     );
   }
