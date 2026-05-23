@@ -97,25 +97,39 @@ export const menuBtnBase: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 10,
-  width: "100%",
-  padding: "9px 16px",
+  width: "calc(100% - 10px)",
+  margin: "2px 5px",
+  padding: "9px 11px",
   fontSize: 12,
   fontWeight: 600,
   letterSpacing: 0,
   fontFamily: "var(--mango-font-family)",
   background: "none",
-  border: "none",
+  border: "1px solid transparent",
+  borderRadius: 10,
   color: "#333",
   cursor: "pointer",
   textAlign: "left",
+  transition: "background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease",
+  boxSizing: "border-box",
 };
 
 export const hoverHandlers = {
   onMouseEnter: (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "#f5f5f5";
+    const target = e.currentTarget as HTMLElement;
+    target.style.background = "radial-gradient(circle at 18% 18%, rgba(255,255,255,0.96), rgba(255,255,255,0.34) 38%, transparent 72%), linear-gradient(135deg, rgba(255,255,255,0.72), rgba(203, 245, 255, 0.34) 48%, rgba(224, 207, 255, 0.38))";
+    target.style.borderColor = "rgba(255, 255, 255, 0.72)";
+    target.style.boxShadow = "0 9px 24px rgba(15, 23, 42, 0.16), inset 1px 1px 0 rgba(255,255,255,0.86), inset -1px -1px 0 rgba(148,163,184,0.14)";
+    target.style.backdropFilter = "blur(14px) saturate(1.28)";
+    target.style.transform = "translateY(-1px)";
   },
   onMouseLeave: (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "none";
+    const target = e.currentTarget as HTMLElement;
+    target.style.background = "none";
+    target.style.borderColor = "transparent";
+    target.style.boxShadow = "none";
+    target.style.backdropFilter = "none";
+    target.style.transform = "translateY(0)";
   },
 };
 

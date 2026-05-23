@@ -1510,6 +1510,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const rowIconColor = isDarkTheme ? "#cbd5e1" : "#475569";
   const scrollbarAccent = theme === "light" ? LIGHT_EXPLORER_CYAN_ACCENT : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(71, 85, 105, 0.08)";
+  const elevatedExplorerControls = useParentScroll && theme === "light" && !hideTopControls;
   const explorerMenuButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -1532,7 +1533,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr)",
         alignContent: useParentScroll ? "start" : undefined,
-        background: surfaceBackground,
+        background: elevatedExplorerControls ? "transparent" : surfaceBackground,
         color: surfaceText,
         overflow: useParentScroll ? "visible" : "hidden",
         minWidth: 0,
@@ -1552,6 +1553,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         scrollbarAccent={scrollbarAccent}
         scrollbarTrack={scrollbarTrack}
         isDarkTheme={isDarkTheme}
+        elevatedControls={elevatedExplorerControls}
         hideTopControls={hideTopControls}
         useParentScroll={useParentScroll}
         treeViewportRef={treeViewportRef}

@@ -2234,16 +2234,18 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
 const appSidebarExplorerSectionStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
-  overflow: "visible",
-  borderRadius: 6,
-  border: "1px solid rgba(17, 17, 17, 0.22)",
-  background: "#ffffff",
+  margin: "0 3px",
+  overflow: "hidden",
+  borderRadius: SIDEBAR_ELEVATED_RADIUS,
+  border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
+  background: SIDEBAR_NEUMORPHIC_SURFACE,
+  boxShadow: SIDEBAR_NEUMORPHIC_SHADOW,
 };
 
 const appSidebarExplorerFallbackStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
-  background: "#ffffff",
+  background: "transparent",
 };
 
 const sharedInboxEmailModalBackdropStyle: React.CSSProperties = {
