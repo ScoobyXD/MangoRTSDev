@@ -17,21 +17,23 @@ func TestWorkItemInboxReadEndpointValidation(t *testing.T) {
 	handler := NewServer(repo).Routes()
 	companyID := "11111111-1111-4111-8111-333333333333"
 	userID := "22222222-2222-4222-8222-444444444444"
+	otherUserID := "33333333-3333-4333-8333-555555555555"
 
 	cases := []struct {
 		name string
 		path string
 	}{
-		{name: "missing company", path: "/v1/work-items/responsible-inbox?user_id=" + userID},
-		{name: "invalid company", path: "/v1/work-items/responsible-inbox?company_id=not-a-uuid&user_id=" + userID},
-		{name: "missing user", path: "/v1/work-items/responsible-inbox?company_id=" + companyID},
+		{name: "missing company", path: "/v1/work-items/responsible-inbox"},
+		{name: "invalid company", path: "/v1/work-items/responsible-inbox?company_id=not-a-uuid"},
 		{name: "invalid user", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=not-a-uuid"},
-		{name: "invalid limit", path: "/v1/work-items/aci-inbox?company_id=" + companyID + "&user_id=" + userID + "&limit=0"},
+		{name: "conflicting user aliases", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=" + userID + "&target_user_id=" + otherUserID},
+		{name: "invalid limit", path: "/v1/work-items/aci-inbox?company_id=" + companyID + "&limit=0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
@@ -39,8 +41,15 @@ func TestWorkItemInboxReadEndpointValidation(t *testing.T) {
 		})
 	}
 
+	unauthenticatedRec := httptest.NewRecorder()
+	unauthenticatedReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID, nil)
+	handler.ServeHTTP(unauthenticatedRec, unauthenticatedReq)
+	if unauthenticatedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want %d body=%s", unauthenticatedRec.Code, http.StatusUnauthorized, unauthenticatedRec.Body.String())
+	}
+
 	methodRec := httptest.NewRecorder()
-	methodReq := httptest.NewRequest(http.MethodPost, "/v1/work-items/my-nodes?company_id="+companyID+"&user_id="+userID, nil)
+	methodReq := httptest.NewRequest(http.MethodPost, "/v1/work-items/my-nodes?company_id="+companyID, nil)
 	handler.ServeHTTP(methodRec, methodReq)
 	if methodRec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST my-nodes status = %d, want %d", methodRec.Code, http.StatusMethodNotAllowed)
@@ -102,9 +111,9 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 
 	handler := NewServer(repo).Routes()
-	baseQuery := "company_id=" + companyID + "&user_id=" + user.UserID
+	baseQuery := "company_id=" + companyID
 
-	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?"+baseQuery+"&limit=1")
+	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?"+baseQuery+"&limit=1", user.UserID, companyID, domain.RoleCompanyUser)
 	var responsiblePayload struct {
 		CompanyID string        `json:"company_id"`
 		UserID    string        `json:"user_id"`
@@ -122,7 +131,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsiblePayload.Nodes[0].LogicGateIDs, responsibleGate.LogicGateID)
 	}
 
-	myNodesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-nodes?"+baseQuery)
+	myNodesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-nodes?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
 	var myNodesPayload struct {
 		Nodes []domain.Node `json:"nodes"`
 	}
@@ -131,7 +140,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("my nodes = %+v, want assigned node", myNodesPayload.Nodes)
 	}
 
-	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/aci-inbox?"+baseQuery)
+	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/aci-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
 	var aciPayload struct {
 		LogicGates []store.WorkItemLogicGateInboxItem `json:"logic_gates"`
 	}
@@ -140,7 +149,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("ACI payload = %+v, want accountable gate only", aciPayload.LogicGates)
 	}
 
-	myGatesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-logic-gates?"+baseQuery)
+	myGatesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-logic-gates?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
 	var myGatesPayload struct {
 		LogicGates []store.WorkItemLogicGateInboxItem `json:"logic_gates"`
 	}
@@ -153,6 +162,89 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, aciGate.LogicGateID, domain.LogicGateRaciRoleAccountable) {
 		t.Fatalf("my logic gates missing accountable role: %+v", myGatesPayload.LogicGates)
+	}
+}
+
+func TestWorkItemInboxReadUsesAuthenticatedActorUserID(t *testing.T) {
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-888888888888"
+	repo.EnsureCompany(companyID, "Authenticated Inbox Read Company")
+	actor, err := repo.UpsertAuthUser("work-item-read-actor", "actor@example.com", "Actor")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser actor: %v", err)
+	}
+	other, err := repo.UpsertAuthUser("work-item-read-other", "other@example.com", "Other")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser other: %v", err)
+	}
+	admin, err := repo.UpsertAuthUser("work-item-read-admin", "admin@example.com", "Admin")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership actor: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(other.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership other: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership admin: %v", err)
+	}
+	ownNode, err := repo.CreateNodeWithAssignee(companyID, "Actor assigned node", actor.UserID)
+	if err != nil {
+		t.Fatalf("CreateNodeWithAssignee actor: %v", err)
+	}
+	otherNode, err := repo.CreateNodeWithAssignee(companyID, "Other assigned node", other.UserID)
+	if err != nil {
+		t.Fatalf("CreateNodeWithAssignee other: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	actorToken := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+	adminToken := "Bearer " + testJWT(t, key, "kid", admin.CognitoSubject, admin.Email)
+
+	ownReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID, nil)
+	ownReq.Header.Set("Authorization", actorToken)
+	ownRec := httptest.NewRecorder()
+	handler.ServeHTTP(ownRec, ownReq)
+	if ownRec.Code != http.StatusOK {
+		t.Fatalf("own inbox status = %d, want %d body=%s", ownRec.Code, http.StatusOK, ownRec.Body.String())
+	}
+	var ownPayload struct {
+		UserID string        `json:"user_id"`
+		Nodes  []domain.Node `json:"nodes"`
+	}
+	decodeWorkItemInboxReadPayload(t, ownRec, &ownPayload)
+	if ownPayload.UserID != actor.UserID || !inboxReadHTTPNodesExactly(ownPayload.Nodes, ownNode.NodeID) {
+		t.Fatalf("own inbox payload = %+v, want only actor node %s", ownPayload, ownNode.NodeID)
+	}
+
+	spoofReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID+"&user_id="+other.UserID, nil)
+	spoofReq.Header.Set("Authorization", actorToken)
+	spoofRec := httptest.NewRecorder()
+	handler.ServeHTTP(spoofRec, spoofReq)
+	if spoofRec.Code != http.StatusForbidden {
+		t.Fatalf("spoofed user_id status = %d, want %d body=%s", spoofRec.Code, http.StatusForbidden, spoofRec.Body.String())
+	}
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID+"&target_user_id="+other.UserID, nil)
+	adminReq.Header.Set("Authorization", adminToken)
+	adminRec := httptest.NewRecorder()
+	handler.ServeHTTP(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("admin cross-user status = %d, want %d body=%s", adminRec.Code, http.StatusOK, adminRec.Body.String())
+	}
+	var adminPayload struct {
+		UserID string        `json:"user_id"`
+		Nodes  []domain.Node `json:"nodes"`
+	}
+	decodeWorkItemInboxReadPayload(t, adminRec, &adminPayload)
+	if adminPayload.UserID != other.UserID || !inboxReadHTTPNodesExactly(adminPayload.Nodes, otherNode.NodeID) {
+		t.Fatalf("admin cross-user payload = %+v, want only target node %s", adminPayload, otherNode.NodeID)
 	}
 }
 
@@ -175,8 +267,9 @@ func TestWorkItemInboxReadHandlersUseRequestContext(t *testing.T) {
 			repo := &contextRecordingWorkItemReadRepo{Repository: store.NewMemoryRepo(), requestValue: requestValue}
 			handler := NewServer(repo).Routes()
 			ctx := context.WithValue(context.Background(), workItemReadRequestContextKey{}, requestValue)
+			ctx = context.WithValue(ctx, actorContextKey{}, workItemInboxReadActorContext(userID, companyID, domain.RoleCompanyUser, false))
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, tc.path+"?company_id="+companyID+"&user_id="+userID, nil).WithContext(ctx)
+			req := httptest.NewRequest(http.MethodGet, tc.path+"?company_id="+companyID, nil).WithContext(ctx)
 
 			handler.ServeHTTP(rec, req)
 
@@ -203,10 +296,11 @@ func TestWorkItemInboxReadHandlerPreservesCancelledRequestContext(t *testing.T) 
 	repo := &contextRecordingWorkItemReadRepo{Repository: store.NewMemoryRepo(), requestValue: requestValue}
 	handler := NewServer(repo).Routes()
 	ctx := context.WithValue(context.Background(), workItemReadRequestContextKey{}, requestValue)
+	ctx = context.WithValue(ctx, actorContextKey{}, workItemInboxReadActorContext(userID, companyID, domain.RoleCompanyUser, false))
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID+"&user_id="+userID, nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil).WithContext(ctx)
 
 	handler.ServeHTTP(rec, req)
 
@@ -301,15 +395,37 @@ var (
 	errMissingWorkItemReadRequestContext = errors.New("missing work item read request context")
 )
 
-func getWorkItemInboxRead(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecorder {
+func getWorkItemInboxRead(t *testing.T, handler http.Handler, path, userID, companyID, role string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req = workItemInboxReadRequestWithActor(req, userID, companyID, role, false)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s status = %d, want %d body=%s", path, rec.Code, http.StatusOK, rec.Body.String())
 	}
 	return rec
+}
+
+func workItemInboxReadRequestWithActor(req *http.Request, userID, companyID, role string, isDevAdmin bool) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, workItemInboxReadActorContext(userID, companyID, role, isDevAdmin)))
+}
+
+func workItemInboxReadActorContext(userID, companyID, role string, isDevAdmin bool) ActorContext {
+	actor := ActorContext{
+		User:       domain.User{UserID: userID, Email: userID + "@example.com", DisplayName: "Work Item Read User"},
+		CompanyID:  companyID,
+		IsDevAdmin: isDevAdmin,
+	}
+	if role != "" {
+		actor.Memberships = []domain.CompanyMembership{{
+			CompanyID: companyID,
+			UserID:    userID,
+			Role:      role,
+		}}
+		actor.CompanyRole = role
+	}
+	return actor
 }
 
 func decodeWorkItemInboxReadPayload(t *testing.T, rec *httptest.ResponseRecorder, target any) {
@@ -335,4 +451,8 @@ func inboxReadHTTPRolesContain(roles []string, role string) bool {
 		}
 	}
 	return false
+}
+
+func inboxReadHTTPNodesExactly(nodes []domain.Node, nodeID string) bool {
+	return len(nodes) == 1 && nodes[0].NodeID == nodeID
 }

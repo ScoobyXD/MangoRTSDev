@@ -32,7 +32,8 @@ func TestHTTPMetricsRecordStatusConditionalAndRoute(t *testing.T) {
 	}
 
 	firstRec := httptest.NewRecorder()
-	firstReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID+"&user_id="+userID, nil)
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil)
+	firstReq = workItemInboxReadRequestWithActor(firstReq, userID, companyID, domain.RoleCompanyUser, false)
 	handler.ServeHTTP(firstRec, firstReq)
 	if firstRec.Code != http.StatusOK {
 		t.Fatalf("first inbox status = %d, want %d body=%s", firstRec.Code, http.StatusOK, firstRec.Body.String())
@@ -43,7 +44,8 @@ func TestHTTPMetricsRecordStatusConditionalAndRoute(t *testing.T) {
 	}
 
 	conditionalRec := httptest.NewRecorder()
-	conditionalReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID+"&user_id="+userID, nil)
+	conditionalReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil)
+	conditionalReq = workItemInboxReadRequestWithActor(conditionalReq, userID, companyID, domain.RoleCompanyUser, false)
 	conditionalReq.Header.Set("If-None-Match", etag)
 	handler.ServeHTTP(conditionalRec, conditionalReq)
 	if conditionalRec.Code != http.StatusNotModified {

@@ -5,7 +5,7 @@ import type { NodeRecord } from "../node-map/shared.js";
 export type WorkItemInboxReadParams = {
   apiBase: string;
   companyID: string;
-  userID: string;
+  targetUserID?: string;
   limit?: number;
 };
 
@@ -65,8 +65,9 @@ async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: 
 function workItemInboxReadQuery(params: WorkItemInboxReadParams): string {
   const query = new URLSearchParams({
     company_id: params.companyID.trim(),
-    user_id: params.userID.trim(),
   });
+  const targetUserID = params.targetUserID?.trim();
+  if (targetUserID) query.set("target_user_id", targetUserID);
   if (params.limit !== undefined) query.set("limit", String(params.limit));
   return query.toString();
 }

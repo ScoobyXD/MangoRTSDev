@@ -35,21 +35,60 @@ func parseWorkItemInboxReadQuery(w http.ResponseWriter, r *http.Request) (store.
 		writeError(w, http.StatusBadRequest, "invalid_company_id")
 		return store.WorkItemInboxQuery{}, false
 	}
-	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
-	if userID == "" {
-		writeError(w, http.StatusBadRequest, "user_id_required")
+
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return store.WorkItemInboxQuery{}, false
 	}
-	if !isCanonicalUUID(userID) {
+	if actorRoleForCompany(actor, companyID) == "" {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return store.WorkItemInboxQuery{}, false
+	}
+
+	userID := strings.TrimSpace(actor.User.UserID)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return store.WorkItemInboxQuery{}, false
+	}
+
+	requestedUserID, requestedUserIDSet, requestedUserIDOK := workItemInboxRequestedUserID(r)
+	if !requestedUserIDOK {
 		writeError(w, http.StatusBadRequest, "invalid_user_id")
 		return store.WorkItemInboxQuery{}, false
 	}
+	if requestedUserIDSet && requestedUserID != userID {
+		if !actorCanManageCompany(actor, companyID) {
+			writeError(w, http.StatusForbidden, "company_admin_required")
+			return store.WorkItemInboxQuery{}, false
+		}
+		userID = requestedUserID
+	}
+
 	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), store.WorkItemInboxDefaultLimit, store.WorkItemInboxMaxLimit)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_limit")
 		return store.WorkItemInboxQuery{}, false
 	}
 	return store.WorkItemInboxQuery{CompanyID: companyID, UserID: userID, Limit: limit}, true
+}
+
+func workItemInboxRequestedUserID(r *http.Request) (string, bool, bool) {
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	targetUserID := strings.TrimSpace(r.URL.Query().Get("target_user_id"))
+	switch {
+	case userID != "" && targetUserID != "" && userID != targetUserID:
+		return "", true, false
+	case targetUserID != "":
+		userID = targetUserID
+	}
+	if userID == "" {
+		return "", false, true
+	}
+	if !isCanonicalUUID(userID) {
+		return "", true, false
+	}
+	return userID, true, true
 }
 
 func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.Request) {
