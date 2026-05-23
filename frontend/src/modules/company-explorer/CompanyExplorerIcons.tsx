@@ -3,11 +3,18 @@ import { KanbanBoardIcon } from "../kanban/KanbanBoardIcon";
 import type { ExplorerTreeNode } from "./companyExplorerTypes";
 import { EXPLORER_SYSTEM_FOLDER_COLOR } from "./treePresentation";
 
-export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind, systemKey }) => {
+type ExplorerRowIconTone = "default" | "inverse";
+
+export const ExplorerRowIcon: React.FC<{
+  kind: ExplorerTreeNode["kind"];
+  systemKey?: ExplorerTreeNode["systemKey"];
+  tone?: ExplorerRowIconTone;
+}> = ({ kind, systemKey, tone = "default" }) => {
+  const inverse = tone === "inverse";
   if (kind === "folder") {
-    const fill = systemKey ? "rgba(71, 85, 105, 0.14)" : "#f8fafc";
-    const tabFill = systemKey ? "rgba(71, 85, 105, 0.28)" : "#e2e8f0";
-    const stroke = systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#64748b";
+    const fill = inverse ? "rgba(255, 255, 255, 0.12)" : systemKey ? "rgba(71, 85, 105, 0.14)" : "#f8fafc";
+    const tabFill = inverse ? "rgba(255, 255, 255, 0.22)" : systemKey ? "rgba(71, 85, 105, 0.28)" : "#e2e8f0";
+    const stroke = inverse ? "#ffffff" : systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#64748b";
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
         <path d="M1.4 4.3h4.8l1.1 1.35h7.1v6.35a1.45 1.45 0 0 1-1.45 1.45H2.85A1.45 1.45 0 0 1 1.4 12z" fill={fill} stroke={stroke} strokeWidth="1.15" strokeLinejoin="round" />
@@ -16,10 +23,13 @@ export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemK
     );
   }
   if (kind === "node") {
+    const fill = inverse ? "#ffffff" : "#ffffff";
+    const stroke = inverse ? "#ffffff" : "#101010";
+    const detailStroke = inverse ? "#ff9708" : "#101010";
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <path d="M3.7 1.7h5.45l3.15 3.15v9.45H3.7z" fill="#ffffff" stroke="#101010" strokeWidth="1.2" strokeLinejoin="round" />
-        <path d="M9.15 1.7v3.15h3.15M5.55 7.25h4.9M5.55 9.55h4.9M5.55 11.85h3.25" fill="none" stroke="#101010" strokeWidth="1" strokeLinecap="round" />
+        <path d="M3.7 1.7h5.45l3.15 3.15v9.45H3.7z" fill={fill} stroke={stroke} strokeWidth="1.2" strokeLinejoin="round" />
+        <path d="M9.15 1.7v3.15h3.15M5.55 7.25h4.9M5.55 9.55h4.9M5.55 11.85h3.25" fill="none" stroke={detailStroke} strokeWidth="1" strokeLinecap="round" />
       </svg>
     );
   }

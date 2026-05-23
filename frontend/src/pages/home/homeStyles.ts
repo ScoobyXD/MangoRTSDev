@@ -13,6 +13,9 @@ const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_SURFACE_BORDER = "rgba(15, 23, 42, 0.10)";
 const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
+const HOME_NODE_RAIL_ORANGE = "#ff9708";
+const HOME_NODE_RAIL_ORANGE_DEEP = "#ff8f00";
+const HOME_NODE_RAIL_WHITE = "#ffffff";
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
   const trimmed = color.trim();
@@ -369,6 +372,158 @@ export const logicGateRailHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   gap: 8,
+};
+
+export function nodeInboxRailStyle(topHeight: number): React.CSSProperties {
+  return {
+    position: "sticky",
+    right: 0,
+    zIndex: 2,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: `${topHeight}px ${HOME_ROW_RESIZER_HEIGHT}px minmax(0, 1fr)`,
+    gap: 0,
+    padding: "18px 14px 16px",
+    overflow: "hidden",
+    background: `linear-gradient(180deg, ${HOME_NODE_RAIL_ORANGE} 0%, ${HOME_NODE_RAIL_ORANGE_DEEP} 100%)`,
+    borderRadius: "34px 34px 46px 46px",
+    boxShadow: "0 22px 42px rgba(255, 143, 0, 0.22), 0 16px 34px rgba(15, 23, 42, 0.14)",
+  };
+}
+
+export const nodeInboxRailSectionStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 10,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  borderRadius: 0,
+  overflow: "hidden",
+};
+
+export const nodeInboxRailHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 2px",
+};
+
+export const nodeInboxPanelTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: HOME_NODE_RAIL_WHITE,
+  fontSize: 14,
+  fontWeight: 800,
+  lineHeight: 1.1,
+};
+
+export const nodeInboxMutedSmallStyle: React.CSSProperties = {
+  color: "rgba(255, 255, 255, 0.72)",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+export const nodeInboxListStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 12,
+  overflowY: "auto",
+  padding: "2px 2px 6px 0",
+  scrollbarColor: "rgba(255, 255, 255, 0.72) transparent",
+};
+
+export const nodeInboxGroupStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 8,
+};
+
+export const nodeInboxFolderLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 6,
+  color: HOME_NODE_RAIL_WHITE,
+  fontSize: 10,
+  fontWeight: 800,
+};
+
+export const nodeInboxGroupCountStyle: React.CSSProperties = {
+  minWidth: 17,
+  height: 17,
+  display: "grid",
+  placeItems: "center",
+  border: `1px solid rgba(255, 255, 255, 0.72)`,
+  borderRadius: 999,
+  color: HOME_NODE_RAIL_WHITE,
+  fontSize: 9,
+  fontWeight: 800,
+  lineHeight: 1,
+};
+
+export const nodeInboxGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
+  gap: 7,
+};
+
+export function nodeInboxTileStyle(selected: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    minHeight: 68,
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: 5,
+    border: `1px solid ${HOME_NODE_RAIL_WHITE}`,
+    borderRadius: 7,
+    background: selected ? "rgba(255, 255, 255, 0.18)" : "rgba(255, 255, 255, 0.05)",
+    color: HOME_NODE_RAIL_WHITE,
+    cursor: "grab",
+    font: "inherit",
+    padding: "7px 6px",
+    minWidth: 0,
+    boxShadow: selected ? "0 0 0 2px rgba(255, 255, 255, 0.22)" : "none",
+  };
+}
+
+export const nodeInboxTileIconStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 6,
+  background: "transparent",
+};
+
+export const nodeInboxTileTextStyle: React.CSSProperties = {
+  maxWidth: "100%",
+  minWidth: 0,
+  overflow: "hidden",
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflowWrap: "anywhere",
+  textAlign: "center",
+  color: HOME_NODE_RAIL_WHITE,
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1.15,
+};
+
+export const nodeInboxEmptyStyle: React.CSSProperties = {
+  minHeight: 64,
+  display: "grid",
+  placeItems: "center",
+  color: "rgba(255, 255, 255, 0.72)",
+  fontSize: 11,
+  fontWeight: 700,
+  textAlign: "center",
 };
 
 export const myLogicGatesListStyle: React.CSSProperties = {
