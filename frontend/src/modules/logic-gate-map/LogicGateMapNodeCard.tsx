@@ -108,7 +108,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const gateFill = isSelected ? nodeCardSelectedBackground : nodeCardBackground;
   const gateStroke = isSelected ? selectionColor : nodeCardBorder;
   const gateShadow = isSelected
-    ? "drop-shadow(0 0 4px rgba(0,188,212,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
+    ? "drop-shadow(0 0 4px rgba(100,116,139,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
     : "drop-shadow(0 4px 12px rgba(0,0,0,0.12))";
 
   return (

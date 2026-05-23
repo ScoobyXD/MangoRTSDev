@@ -782,9 +782,8 @@ function initialsForMentionName(name: string): string {
 }
 
 function avatarBackgroundForMentionName(name: string): string {
-  let hash = 0;
-  for (let index = 0; index < name.length; index += 1) hash = (hash * 31 + name.charCodeAt(index)) % 360;
-  return `hsl(${hash}, 68%, 42%)`;
+  void name;
+  return `#475569`;
 }
 
 function isEditorUndoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boolean {
@@ -1097,7 +1096,7 @@ export function useEditorDocumentSurfaceHandlers({
   flushPendingDocumentSave,
   onSelectionFontSizeChange,
   mentionUsers = [],
-  mentionAccent = "#006f85",
+  mentionAccent = "#334155",
   mentionSurfaceText = "#111827",
   mentionStrokeColor = "rgba(15,23,42,0.18)",
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
@@ -1189,7 +1188,7 @@ export function useEditorDocumentSurfaceHandlers({
               gap: 8,
               border: "none",
               borderRadius: 6,
-              background: selected ? "rgba(0, 188, 212, 0.16)" : "transparent",
+              background: selected ? "rgba(100, 116, 139, 0.16)" : "transparent",
               boxShadow: selected ? `inset 3px 0 0 ${mentionAccent}` : "none",
               color: mentionSurfaceText,
               cursor: "pointer",

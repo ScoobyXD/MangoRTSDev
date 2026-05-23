@@ -17,6 +17,11 @@ import {
 } from "./shared";
 import type { LogicGateMapRelationshipRole } from "./LogicGateMapContextMenus";
 
+const DEFAULT_RELATIONSHIP_ROLE_COLORS: Record<LogicGateMapRelationshipRole, string> = {
+  input: "#475569",
+  output: "#64748b",
+};
+
 type UseLogicGateMapGraphPersistenceInput = {
   companyID: string;
   mapStateKey: string;
@@ -113,10 +118,7 @@ export function useLogicGateMapGraphPersistence({
       setNodePositions(cached.nodePositions);
       setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
       if (cached.relationshipRoleColors) {
-        setRelationshipRoleColors({
-          input: cached.relationshipRoleColors.input ?? "#0095ff",
-          output: cached.relationshipRoleColors.output ?? "#00bcd4",
-        });
+        setRelationshipRoleColors(DEFAULT_RELATIONSHIP_ROLE_COLORS);
       }
       setRestoredViewport(true);
       return;
@@ -166,10 +168,7 @@ export function useLogicGateMapGraphPersistence({
         setRelationshipColorsEnabled(parsed.relationshipColorsEnabled);
       }
       if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
-        setRelationshipRoleColors({
-          input: typeof parsed.relationshipRoleColors.input === "string" ? parsed.relationshipRoleColors.input : "#0095ff",
-          output: typeof parsed.relationshipRoleColors.output === "string" ? parsed.relationshipRoleColors.output : "#00bcd4",
-        });
+        setRelationshipRoleColors(DEFAULT_RELATIONSHIP_ROLE_COLORS);
       }
     } catch {
       // ignore local cache parse errors

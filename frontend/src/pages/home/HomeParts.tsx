@@ -125,7 +125,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
   const fieldStyle: React.CSSProperties = {
     width: "100%",
     minHeight: 30,
-    border: "1px solid rgba(0, 188, 212, 0.24)",
+    border: "1px solid rgba(100, 116, 139, 0.24)",
     borderRadius: 6,
     background: "#ffffff",
     color: "#111827",
@@ -143,9 +143,9 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
   };
   const actionButtonStyle: React.CSSProperties = {
     minHeight: 31,
-    border: "1px solid rgba(0, 188, 212, 0.38)",
+    border: "1px solid rgba(100, 116, 139, 0.38)",
     borderRadius: 6,
-    background: "#ecfeff",
+    background: "#f8fafc",
     color: "#111827",
     cursor: busy ? "not-allowed" : "pointer",
     font: "inherit",
@@ -620,7 +620,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }:
         </button>
         <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
           <LazyHomeNodeEditorContent
-            accent="#006f85"
+            accent="#334155"
             widgetId={`communications-node-editor-overlay:${nodeID}`}
             theme="mango"
             forcedEntityKind="node"
@@ -1212,7 +1212,7 @@ export function HomeSidebar({
                 </button>
                 <button
                   type="button"
-                  style={{ ...sharedInboxContextMenuButtonStyle, color: "#8b123f" }}
+                  style={{ ...sharedInboxContextMenuButtonStyle, color: "#334155" }}
                   disabled={sharedBusy}
                   onClick={() => void requestDeleteSharedFolder(contextFolder)}
                 >
@@ -1560,7 +1560,7 @@ const sharedRaciBackdropStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   padding: 20,
-  background: "rgba(20, 10, 4, 0.22)",
+  background: "rgba(15, 23, 42, 0.22)",
 };
 
 const sharedRaciModalStyle: React.CSSProperties = {
@@ -1571,7 +1571,7 @@ const sharedRaciModalStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 12,
   padding: 14,
-  border: "1px solid rgba(0, 188, 212, 0.3)",
+  border: "1px solid rgba(100, 116, 139, 0.3)",
   borderRadius: 8,
   background: "#ffffff",
   boxShadow: "0 18px 44px rgba(15, 23, 42, 0.22)",
@@ -1593,9 +1593,9 @@ const sharedRaciRoleColumnStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr) auto",
   gap: 10,
   padding: 10,
-  border: "1px solid rgba(0, 188, 212, 0.2)",
+  border: "1px solid rgba(100, 116, 139, 0.2)",
   borderRadius: 8,
-  background: "#fffaf4",
+  background: "#f8fafc",
 };
 
 const sharedRaciControlStackStyle: React.CSSProperties = {
@@ -1620,7 +1620,7 @@ const sharedRaciChipStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "3px 4px 3px 8px",
-  border: "1px solid rgba(0, 188, 212, 0.2)",
+  border: "1px solid rgba(100, 116, 139, 0.2)",
   borderRadius: 6,
   background: "#ffffff",
   fontSize: 11,
@@ -1638,7 +1638,7 @@ const sharedRaciSelectStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 30,
-  border: "1px solid rgba(0, 188, 212, 0.24)",
+  border: "1px solid rgba(100, 116, 139, 0.24)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#111827",
@@ -2483,9 +2483,9 @@ const mentionNotificationBadgeStyle: React.CSSProperties = {
   height: 18,
   display: "inline-grid",
   placeItems: "center",
-  border: "1px solid rgba(0, 188, 212, 0.28)",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 999,
-  background: "#fff7eb",
+  background: "#f8fafc",
   color: "#334155",
   fontSize: 10,
   fontWeight: 800,
@@ -3360,10 +3360,10 @@ export function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCanc
           This deletes the selected email{count === 1 ? "" : "s"} from your mailbox immediately.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
             {busy ? "Deleting" : "Yes"}
           </button>
-          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
             No
           </button>
         </div>

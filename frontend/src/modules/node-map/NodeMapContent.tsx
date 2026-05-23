@@ -59,7 +59,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   structureNodeID = "",
   initialSelectedNodeID = "",
 }) => {
-  const SELECTION_CYAN = "rgb(0, 233, 255)";
+  const SELECTION_CYAN = "rgb(71, 85, 105)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";
@@ -142,7 +142,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const layoutInteractionActiveRef = useRef(false);
   const appliedInitialFocusNodeIDRef = useRef("");
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
-  const [relationshipRoleColors, setRelationshipRoleColors] = useState<Record<NodeMapRelationshipRole, string>>({ parent: "#00bcd4", peer: "#0095ff", child: "#6f5cff" });
+  const [relationshipRoleColors, setRelationshipRoleColors] = useState<Record<NodeMapRelationshipRole, string>>({ parent: "#64748b", peer: "#475569", child: "#64748b" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);
@@ -159,10 +159,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
   const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
   const panelMutedText = isDarkTheme ? "rgba(243,247,251,0.72)" : "#2e2e2e";
-  const panelDangerText = isDarkTheme ? "#ff6f98" : "#a20026";
+  const panelDangerText = isDarkTheme ? "#cbd5e1" : "#334155";
   const dialogButtonBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
   const dialogPrimaryButtonText = isDarkTheme ? panelText : "#111111";
-  const dialogCancelButtonText = isDarkTheme ? "#ff8aab" : "#8b123f";
+  const dialogCancelButtonText = isDarkTheme ? "#cbd5e1" : "#334155";
   const contextMenuButtonStyle: React.CSSProperties = {
     border: "none",
     background: "transparent",
@@ -1519,7 +1519,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               width: Math.abs(selectionBox.currentX - selectionBox.startX),
               height: Math.abs(selectionBox.currentY - selectionBox.startY),
               border: `1px dashed ${accent}`,
-              backgroundColor: "rgba(111,231,238,0.2)",
+              backgroundColor: "rgba(100,116,139,0.2)",
               pointerEvents: "none",
               zIndex: 20,
             }}

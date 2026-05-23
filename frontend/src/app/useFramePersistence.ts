@@ -53,8 +53,31 @@ function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 }
 
+const NEUTRAL_SETTING_COLORS = new Set([
+  "#000000",
+  "#0f172a",
+  "#111111",
+  "#111827",
+  "#334155",
+  "#475569",
+  "#64748b",
+  "#94a3b8",
+  "#cbd5e1",
+  "#e2e8f0",
+  "#ececea",
+  "#f1f5f9",
+  "#f8fafc",
+  "#ffffff",
+]);
+
 function isLegacyDefaultSetting(value: unknown, legacyDefaults: string[]): boolean {
   return typeof value === "string" && legacyDefaults.some((legacy) => legacy.toLowerCase() === value.toLowerCase());
+}
+
+function neutralSettingColor(value: unknown, legacyDefaults: string[] = []): string | undefined {
+  if (!isHexColor(value) || isLegacyDefaultSetting(value, legacyDefaults)) return undefined;
+  const normalized = value.toLowerCase();
+  return NEUTRAL_SETTING_COLORS.has(normalized) ? normalized : undefined;
 }
 
 // Storage migration guard: sanitize persisted frame payloads from localStorage.
@@ -251,12 +274,12 @@ export function loadSettings(): DashboardSettings {
     const parsed = JSON.parse(raw);
     if (!isObject(parsed)) return {};
     return {
-      bgColor: isHexColor(parsed.bgColor) && !isLegacyDefaultSetting(parsed.bgColor, ["#f7fffe", "#ffffff"]) ? parsed.bgColor : undefined,
-      crossColor: isHexColor(parsed.crossColor) && !isLegacyDefaultSetting(parsed.crossColor, ["#00a8b8", "#ff8820"]) ? parsed.crossColor : undefined,
-      headerBgColor: isHexColor(parsed.headerBgColor) && !isLegacyDefaultSetting(parsed.headerBgColor, ["#00e9ff", "#ff8820"]) ? parsed.headerBgColor : undefined,
-      headerTextColor: isHexColor(parsed.headerTextColor) ? parsed.headerTextColor : undefined,
-      tabBgColor: isHexColor(parsed.tabBgColor) ? parsed.tabBgColor : undefined,
-      tabTextColor: isHexColor(parsed.tabTextColor) && !isLegacyDefaultSetting(parsed.tabTextColor, ["#08343a", "#24120a"]) ? parsed.tabTextColor : undefined,
+      bgColor: neutralSettingColor(parsed.bgColor, ["#f7fffe", "#ffffff"]),
+      crossColor: neutralSettingColor(parsed.crossColor, ["#475569", "#ff8820"]),
+      headerBgColor: neutralSettingColor(parsed.headerBgColor, ["#475569", "#ff8820"]),
+      headerTextColor: neutralSettingColor(parsed.headerTextColor),
+      tabBgColor: neutralSettingColor(parsed.tabBgColor),
+      tabTextColor: neutralSettingColor(parsed.tabTextColor, ["#334155", "#24120a"]),
     };
   } catch {
     return {};

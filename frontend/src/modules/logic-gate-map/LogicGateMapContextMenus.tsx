@@ -138,7 +138,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
               width: 28,
               height: 18,
               borderRadius: 999,
-              background: relationshipColorsEnabled ? "#34c759" : "#b7c0c7",
+              background: relationshipColorsEnabled ? "#64748b" : "#b7c0c7",
               boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
               display: "inline-flex",
               alignItems: "center",
@@ -304,7 +304,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
           padding: "6px 8px",
           fontSize: 11,
           fontFamily: "var(--mango-font-family)",
-          background: error ? "rgba(178, 0, 32, 0.9)" : "rgba(0, 0, 0, 0.78)",
+          background: error ? "rgba(51, 65, 85, 0.9)" : "rgba(0, 0, 0, 0.78)",
           color: "#ffffff",
           boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
         }}
@@ -315,7 +315,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
 
     {confirmDelete && (
       <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-        <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,188,212,0.45)", background: panelSurface, color: panelText, padding: 12, display: "grid", gap: 10 }}>
+        <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: panelSurface, color: panelText, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 700 }}>
             Are you sure you want to delete {confirmDelete.nodeIDs.length} logic gate{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
             {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
@@ -324,8 +324,8 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
             This removes the selected logic gate data immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <button onClick={onConfirmDelete} style={{ border: "1px solid rgba(0,188,212,0.45)", background: dialogButtonBackground, color: dialogPrimaryButtonText, cursor: "pointer", fontWeight: 700 }}>Yes</button>
-            <button onClick={onCancelDelete} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: dialogCancelButtonText, background: dialogButtonBackground, cursor: "pointer", fontWeight: 700 }}>No</button>
+            <button onClick={onConfirmDelete} style={{ border: "1px solid rgba(100,116,139,0.45)", background: dialogButtonBackground, color: dialogPrimaryButtonText, cursor: "pointer", fontWeight: 700 }}>Yes</button>
+            <button onClick={onCancelDelete} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: dialogCancelButtonText, background: dialogButtonBackground, cursor: "pointer", fontWeight: 700 }}>No</button>
           </div>
         </div>
       </div>

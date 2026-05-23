@@ -36,7 +36,7 @@ export const COLORWAY_ORDER: ColorwayKey[] = ["mango", "light", "teal", "dark"];
 export const UI_THEME = {
   surface: MANGO_SURFACE,
   panel: MANGO_ACCENT_HEX,
-  line: "rgba(0, 188, 212, 0.45)",
+  line: "rgba(100, 116, 139, 0.45)",
   text: MANGO_TEXT,
   subtext: "#64748b",
 };

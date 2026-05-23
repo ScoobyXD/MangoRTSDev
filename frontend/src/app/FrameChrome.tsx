@@ -147,8 +147,8 @@ export const PlacementSplash: React.FC<{
               top: cell.y * stepY + 1.5,
               width: Math.max(2, stepX - 3),
               height: Math.max(2, stepY - 3),
-              border: "1px solid rgba(0, 188, 212, 0.72)",
-              background: `rgba(0, 188, 212, ${opacity})`,
+              border: "1px solid rgba(100, 116, 139, 0.72)",
+              background: `rgba(100, 116, 139, ${opacity})`,
               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
             }}
           />
@@ -278,7 +278,7 @@ export const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChi
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
         boxShadow: isSelected
-          ? `inset 0 0 0 1px ${FRAME_SELECTION_COLOR}, 0 0 0 2px ${FRAME_SELECTION_COLOR}, 0 8px 20px rgba(2,22,46,0.24)`
+          ? `inset 0 0 0 1px ${FRAME_SELECTION_COLOR}, 0 0 0 2px ${FRAME_SELECTION_COLOR}, 0 8px 20px rgba(15,23,42,0.24)`
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,

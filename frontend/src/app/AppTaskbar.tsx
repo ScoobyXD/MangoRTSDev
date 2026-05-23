@@ -347,7 +347,7 @@ function attachDottedDockDragPreview(dataTransfer: DataTransfer, kind: "node" | 
   preview.style.border = "2px dotted rgba(51, 65, 85, 0.72)";
   preview.style.borderRadius = "7px";
   preview.style.background = "rgba(248, 250, 252, 0.8)";
-  preview.style.color = kind === "logic_gate" ? "rgba(0, 160, 86, 0.8)" : "rgba(51, 65, 85, 0.8)";
+  preview.style.color = kind === "logic_gate" ? "rgba(51, 65, 85, 0.8)" : "rgba(51, 65, 85, 0.8)";
   preview.style.boxShadow = "0 7px 16px rgba(15, 23, 42, 0.18)";
   preview.style.pointerEvents = "none";
   preview.innerHTML = kind === "logic_gate" ? logicGateDockDragPreviewIcon() : nodeDockDragPreviewIcon();
@@ -544,16 +544,16 @@ function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties 
     display: "grid",
     gridTemplateRows: "36px 20px",
     placeItems: "center",
-    border: `1px solid ${active ? "rgba(37, 99, 235, 0.62)" : "rgba(100, 116, 139, 0.26)"}`,
+    border: `1px solid ${active ? "rgba(100, 116, 139, 0.62)" : "rgba(100, 116, 139, 0.26)"}`,
     borderRadius: 8,
-    background: active ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)" : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-    color: active ? "#1d4ed8" : "#334155",
+    background: active ? "linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%)" : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+    color: active ? "#334155" : "#334155",
     cursor: moving ? "grabbing" : "pointer",
     font: "inherit",
     letterSpacing: 0,
     padding: "5px 5px 4px",
     opacity: moving ? 0.78 : 1,
-    boxShadow: active ? "0 6px 14px rgba(37, 99, 235, 0.16)" : "0 4px 10px rgba(15, 23, 42, 0.08)",
+    boxShadow: active ? "0 6px 14px rgba(100, 116, 139, 0.16)" : "0 4px 10px rgba(15, 23, 42, 0.08)",
     transform: "none",
     transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease",
   };
@@ -565,7 +565,7 @@ function dockIconStyle(active: boolean): React.CSSProperties {
     height: 34,
     display: "grid",
     placeItems: "center",
-    color: active ? "#1d4ed8" : "#334155",
+    color: active ? "#334155" : "#334155",
     transform: "scale(1.45)",
   };
 }
@@ -576,7 +576,7 @@ function dockLabelStyle(active: boolean): React.CSSProperties {
     minWidth: 0,
     height: 20,
     overflow: "hidden",
-    color: active ? "#1e3a8a" : "#475569",
+    color: active ? "#334155" : "#475569",
     fontSize: 9,
     fontWeight: 800,
     lineHeight: "10px",
@@ -593,7 +593,7 @@ const dockPinnedStyle: React.CSSProperties = {
   top: 4,
   display: "grid",
   placeItems: "center",
-  color: "#2563eb",
+  color: "#475569",
 };
 
 function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", timelineVisible: boolean, active: boolean): React.CSSProperties {

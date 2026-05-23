@@ -54,12 +54,8 @@ export function editorCollaborationLabel(clientID: string, clientName?: string):
 }
 
 export function editorCollaboratorColor(clientID: string): string {
-  let hash = 0;
-  for (let index = 0; index < clientID.length; index += 1) {
-    hash = (hash * 31 + clientID.charCodeAt(index)) >>> 0;
-  }
-  const hue = hash % 360;
-  return `hsl(${hue} 72% 42%)`;
+  void clientID;
+  return `#475569`;
 }
 
 export async function publishEditorCollaborationEvent(

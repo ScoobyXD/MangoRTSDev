@@ -2,12 +2,12 @@ import React from "react";
 import { HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
 import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeUtils";
 
-export const HOME_CYAN = "rgb(0, 233, 255)";
-const HOME_CYAN_FAINT = "rgba(0, 233, 255, 0.10)";
-const HOME_CYAN_SOFT = "rgba(0, 233, 255, 0.16)";
-const HOME_CYAN_HOVER = "rgba(0, 233, 255, 0.24)";
-const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
-const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
+export const HOME_CYAN = "rgb(71, 85, 105)";
+const HOME_CYAN_FAINT = "rgba(71, 85, 105, 0.10)";
+const HOME_CYAN_SOFT = "rgba(71, 85, 105, 0.16)";
+const HOME_CYAN_HOVER = "rgba(71, 85, 105, 0.24)";
+const HOME_CYAN_MEDIUM = "rgba(71, 85, 105, 0.28)";
+const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_MATRIX_LINE = "rgba(15, 23, 42, 0.22)";
@@ -756,17 +756,17 @@ export function logicGateInboxGroupNotificationStyle(role: string): React.CSSPro
 function inboxNotificationRoleColors(role: string): { background: string; border: string; color: string } {
   switch (role) {
     case "responsible":
-      return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.36)", color: "#334155" };
     case "accountable":
-      return { background: "#ede9fe", border: "rgba(124, 58, 237, 0.38)", color: "#6d28d9" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.38)", color: "#334155" };
     case "consulted":
-      return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };
     case "informed":
-      return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.32)", color: "#334155" };
     case "other":
-      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
+      return { background: "#f8fafc", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };
     default:
-      return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#042028" };
+      return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#334155" };
   }
 }
 export const logicGateInboxGroupCountStyle: React.CSSProperties = {
@@ -807,16 +807,16 @@ export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0, hasUnre
     gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto auto`,
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(0, 188, 212, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : hasUnreadNotification ? "rgba(100, 116, 139, 0.42)" : "rgba(15, 23, 42, 0.12)"}`,
     borderRadius: 6,
-    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#fff7eb" : "rgba(255, 255, 255, 0.94)",
+    background: selected ? HOME_CYAN_SOFT : hasUnreadNotification ? "#f8fafc" : "rgba(255, 255, 255, 0.94)",
     color: "#111827",
     cursor: "grab",
     padding: "4px 5px 4px 0",
     boxShadow: selected
       ? `0 0 0 2px ${HOME_CYAN_FAINT} inset`
       : hasUnreadNotification
-        ? "0 0 0 1px rgba(0, 188, 212, 0.16) inset"
+        ? "0 0 0 1px rgba(100, 116, 139, 0.16) inset"
         : "0 1px 2px rgba(15, 23, 42, 0.04)",
   };
 }
@@ -935,7 +935,7 @@ export const nodeEditorPopupStyle: React.CSSProperties = {
   height: "min(820px, calc(100vh - 64px))",
   minWidth: "min(420px, calc(100vw - 44px))",
   minHeight: "min(320px, calc(100vh - 64px))",
-  border: "1px solid rgba(0, 188, 212, 0.54)",
+  border: "1px solid rgba(100, 116, 139, 0.54)",
   borderRadius: 16,
   background: "#ffffff",
   boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
@@ -950,9 +950,9 @@ export const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   zIndex: 8,
   width: 24,
   height: 24,
-  border: "1px solid #8b0000",
+  border: "1px solid #334155",
   borderRadius: 4,
-  background: "#ff1f1f",
+  background: "#475569",
   color: "#ffffff",
   fontSize: 16,
   fontWeight: 600,
@@ -969,10 +969,10 @@ export const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(0, 188, 212, 0.56)",
+  border: "1px solid rgba(100, 116, 139, 0.56)",
   borderRadius: 4,
   background: "#ffffff",
-  color: "#006f85",
+  color: "#334155",
   padding: 0,
   cursor: "pointer",
 };
@@ -990,7 +990,7 @@ export const deleteModalStyle: React.CSSProperties = {
   width: "min(420px, 90%)",
   display: "grid",
   gap: 10,
-  border: "1px solid rgba(0,188,212,0.45)",
+  border: "1px solid rgba(100,116,139,0.45)",
   borderRadius: 10,
   background: "#ffffff",
   color: "#111827",
@@ -1024,7 +1024,7 @@ export const connectPanelStyle: React.CSSProperties = {
   display: "grid",
   gap: 12,
   padding: 16,
-  border: "1px solid rgba(0, 188, 212, 0.24)",
+  border: "1px solid rgba(100, 116, 139, 0.24)",
   background: "#ffffff",
   borderRadius: 8,
 };
@@ -1065,7 +1065,7 @@ export const mutedSmallStyle: React.CSSProperties = {
 
 export const smallButtonStyle: React.CSSProperties = {
   minHeight: 30,
-  border: "1px solid rgba(0, 188, 212, 0.32)",
+  border: "1px solid rgba(100, 116, 139, 0.32)",
   borderRadius: 6,
   background: "#fff",
   color: "#111827",
@@ -1077,16 +1077,16 @@ export const smallButtonStyle: React.CSSProperties = {
 
 export const headerButtonStyle: React.CSSProperties = {
   ...smallButtonStyle,
-  border: "1px solid rgba(0, 188, 212, 0.62)",
-  background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
-  color: "#e8fbff",
+  border: "1px solid rgba(100, 116, 139, 0.62)",
+  background: "linear-gradient(180deg, rgba(15, 23, 42, 0.84), rgba(15, 23, 42, 0.72))",
+  color: "#f8fafc",
   fontWeight: 500,
-  boxShadow: "0 0 0 1px rgba(0, 188, 212, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
+  boxShadow: "0 0 0 1px rgba(100, 116, 139, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
 };
 
 export const primaryButtonStyle: React.CSSProperties = {
   minHeight: 34,
-  border: "1px solid #006f85",
+  border: "1px solid #334155",
   borderRadius: 6,
   background: "var(--mango-gradient)",
   color: "#111827",
@@ -1098,15 +1098,15 @@ export const primaryButtonStyle: React.CSSProperties = {
 };
 
 export const dangerButtonStyle: React.CSSProperties = {
-  borderColor: "#ff3d7f",
-  color: "#8b123f",
+  borderColor: "#64748b",
+  color: "#334155",
 };
 
 export const inputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 34,
-  border: "1px solid rgba(0, 188, 212, 0.28)",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 6,
   padding: "0 9px",
   font: "inherit",
@@ -1195,7 +1195,7 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     fontWeight: 700,
     borderColor: active ? HOME_CYAN : smallButtonStyle.borderColor,
     background: active ? HOME_CYAN_SOFT : smallButtonStyle.background,
-    color: active ? "#042028" : smallButtonStyle.color,
+    color: active ? "#334155" : smallButtonStyle.color,
   };
 }
 
@@ -1214,8 +1214,8 @@ export const mailArchiveActionCountStyle: React.CSSProperties = {
   placeItems: "center",
   borderRadius: 9,
   padding: "0 5px",
-  background: "rgba(15, 169, 192, 0.14)",
-  color: "#0a5260",
+  background: "rgba(100, 116, 139, 0.14)",
+  color: "#475569",
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
@@ -1376,9 +1376,9 @@ export function messageStarButtonStyle(active: boolean): React.CSSProperties {
     padding: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#006f85" : "rgba(15, 23, 42, 0.45)",
-    background: active ? "#fff2d8" : "#ffffff",
-    borderColor: active ? "rgba(0, 188, 212, 0.62)" : "rgba(15, 23, 42, 0.16)",
+    color: active ? "#334155" : "rgba(15, 23, 42, 0.45)",
+    background: active ? "#f8fafc" : "#ffffff",
+    borderColor: active ? "rgba(100, 116, 139, 0.62)" : "rgba(15, 23, 42, 0.16)",
   };
 }
 
@@ -1433,7 +1433,7 @@ export const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
   height: "100%",
-  border: "1px solid rgba(0, 188, 212, 0.16)",
+  border: "1px solid rgba(100, 116, 139, 0.16)",
   borderRadius: 6,
   background: "#fff",
 };
@@ -1463,9 +1463,9 @@ export const errorStyle: React.CSSProperties = {
 
 export const noticeStyle: React.CSSProperties = {
   padding: "8px 14px",
-  background: "#effff6",
-  color: "#0f7b3f",
-  borderBottom: "1px solid rgba(15, 123, 63, 0.22)",
+  background: "#f0fdf4",
+  color: "#166534",
+  borderBottom: "1px solid rgba(22, 163, 74, 0.22)",
   fontSize: 12,
   fontWeight: 600,
 };
@@ -1482,10 +1482,10 @@ export const inlineErrorStyle: React.CSSProperties = {
 
 export const inlineNoticeStyle: React.CSSProperties = {
   padding: "8px 10px",
-  border: "1px solid rgba(15, 123, 63, 0.22)",
+  border: "1px solid rgba(22, 163, 74, 0.22)",
   borderRadius: 6,
-  background: "#effff6",
-  color: "#0f7b3f",
+  background: "#f0fdf4",
+  color: "#166534",
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1.35,

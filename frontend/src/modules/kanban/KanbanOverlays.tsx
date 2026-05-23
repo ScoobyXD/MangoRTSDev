@@ -68,7 +68,7 @@ export function KanbanContextMenus({
           <button type="button" style={contextMenuButtonStyle} onClick={() => onEditColumn(contextColumn.column_id)} {...contextMenuHoverHandlers}>
             Rename column
           </button>
-          <button type="button" style={{ ...contextMenuButtonStyle, color: "#c62828" }} onClick={() => onRequestColumnDelete(contextColumn.column_id)} {...contextMenuHoverHandlers}>
+          <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => onRequestColumnDelete(contextColumn.column_id)} {...contextMenuHoverHandlers}>
             Delete column
           </button>
           <label style={{ ...contextMenuButtonStyle, cursor: "default", justifyContent: "space-between" }}>
@@ -103,7 +103,7 @@ export function KanbanContextMenus({
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRevertCardsToMyTriage(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Revert back to Pending
           </button>
-          <button type="button" style={{ ...contextMenuButtonStyle, color: "#c62828" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
+          <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Delete node
           </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRequestCardDelete(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
@@ -153,7 +153,7 @@ export function KanbanNodeEditorOverlay({
         transform: "translateX(-50%)",
         minWidth: "min(420px, calc(100% - 44px))",
         minHeight: "min(320px, calc(100% - 64px))",
-        border: "1px solid rgba(0, 188, 212, 0.54)",
+        border: "1px solid rgba(100, 116, 139, 0.54)",
         borderRadius: 16,
         background: "#ffffff",
         boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
@@ -175,10 +175,10 @@ export function KanbanNodeEditorOverlay({
           height: 24,
           display: "grid",
           placeItems: "center",
-          border: "1px solid rgba(0, 188, 212, 0.56)",
+          border: "1px solid rgba(100, 116, 139, 0.56)",
           borderRadius: 4,
           background: "#ffffff",
-          color: "#006f85",
+          color: "#334155",
           padding: 0,
           cursor: "pointer",
         }}
@@ -196,9 +196,9 @@ export function KanbanNodeEditorOverlay({
           zIndex: 8,
           width: 24,
           height: 24,
-          border: "1px solid #8b0000",
+          border: "1px solid #334155",
           borderRadius: 4,
-          background: "#ff1f1f",
+          background: "#475569",
           color: "#ffffff",
           fontSize: 16,
           fontWeight: 600,
@@ -262,7 +262,7 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalPanelStyle: React.CSSProperties = {
   width: "min(420px, 90%)",
   borderRadius: 10,
-  border: "1px solid rgba(0,188,212,0.45)",
+  border: "1px solid rgba(100,116,139,0.45)",
   background: "rgba(255,255,255,0.95)",
   padding: 12,
   display: "grid",
@@ -270,16 +270,16 @@ const modalPanelStyle: React.CSSProperties = {
 };
 
 const yesButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(0,188,212,0.45)",
+  border: "1px solid rgba(100,116,139,0.45)",
   background: "#fff",
   cursor: "pointer",
   fontWeight: 700,
 };
 
 const noButtonStyle: React.CSSProperties = {
-  border: "1px solid #ff3d7f",
-  boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)",
-  color: "#8b123f",
+  border: "1px solid #64748b",
+  boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)",
+  color: "#334155",
   background: "#fff",
   cursor: "pointer",
   fontWeight: 700,

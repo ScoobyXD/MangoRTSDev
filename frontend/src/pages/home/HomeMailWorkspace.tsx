@@ -494,7 +494,7 @@ export function HomeMailOverlays({
             {isArchiveMailbox ? "Unarchive" : "Archive"}
           </button>
           <button
-            style={{ ...contextMenuActionStyle, color: "#8b123f" }}
+            style={{ ...contextMenuActionStyle, color: "#334155" }}
             disabled={busy === "delete" || !mailMutationAvailable}
             onClick={() => onRequestDeleteMessages(messageContextMenu.messageIDs)}
           >

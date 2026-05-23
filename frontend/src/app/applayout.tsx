@@ -53,6 +53,12 @@ const PAGE_EDGE_GAP = 10;
 const PAGE_SURFACE_RADIUS = 16;
 const APP_SIDEBAR_W = 320;
 const APP_SIDEBAR_MIN_W = 240;
+const COLORWAY_LABELS: Record<ColorwayKey, string> = {
+  mango: "Mango",
+  light: "Light",
+  teal: "Slate",
+  dark: "Dark",
+};
 const APP_SIDEBAR_MAX_W = 420;
 const APP_RESIZE_HANDLE_W = 10;
 const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
@@ -282,7 +288,7 @@ const appResizeGripStyle: React.CSSProperties = {
   width: 2,
   minHeight: 0,
   borderRadius: 2,
-  background: "rgba(0, 188, 212, 0.24)",
+  background: "rgba(100, 116, 139, 0.24)",
 };
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
@@ -1240,7 +1246,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
                       onNavigate(routeForPage(nextPage));
                     }
                   }}
-                  style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(0, 188, 212, 0.22)" : "1px solid transparent", background: selected ? "rgba(0, 188, 212, 0.13)" : "transparent", color: selected ? "#006f85" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+                  style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(100, 116, 139, 0.22)" : "1px solid transparent", background: selected ? "rgba(100, 116, 139, 0.13)" : "transparent", color: selected ? "#334155" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
                 >
                   {renamingTabId === tab.id ? (
                     <input
@@ -1253,7 +1259,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
                         if (e.key === "Escape") cancelRenameTab();
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      style={{ width: 92, border: "1px solid rgba(0, 188, 212, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
+                      style={{ width: 92, border: "1px solid rgba(100, 116, 139, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
                     />
                   ) : (
                     <>
@@ -1320,7 +1326,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
             overflow: "auto",
             background: "#ffffff",
             borderRadius: PAGE_SURFACE_RADIUS,
-            boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+            boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
           }}
         >
           {overrideContent}
@@ -1335,7 +1341,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           overflow: "hidden",
           background: bgColor || UI_THEME.surface,
           borderRadius: PAGE_SURFACE_RADIUS,
-          boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+          boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
         }}
         onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
         onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => {
@@ -1543,7 +1549,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           <button style={menuBtnBase} onClick={() => { toggleDockTabPinned(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
             {dockTabs.find((tab) => tab.id === dockTabMenu.id)?.pinned ? "Unpin tab" : "Pin tab"}
           </button>
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { deleteDockTab(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
+          <button style={{ ...menuBtnBase, color: "#334155" }} onClick={() => { deleteDockTab(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
             Delete tab
           </button>
         </FrameRightClickMenu>
@@ -1552,7 +1558,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       {tabMenu && (
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
-          <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#334155" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
           <button style={menuBtnBase} onPointerEnter={preloadHomeSurface} onFocus={preloadHomeSurface} onPointerDown={preloadHomeSurface} onClick={() => { openHomeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
@@ -1608,10 +1614,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
               updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? applyColorway(w, theme) : w)));
               closeMenus();
             }} {...hoverHandlers}>
-              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.charAt(0).toUpperCase() + theme.slice(1)}
+              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {COLORWAY_LABELS[theme]}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
+          <button style={{ ...menuBtnBase, color: "#334155" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
 
@@ -1632,7 +1638,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       {frameDeleteConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,188,212,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>
               Are you sure you want to delete {frameDeleteConfirmation.frameIDs.length} frame{frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?
             </div>
@@ -1640,8 +1646,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
               This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(0,188,212,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-              <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+              <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
             </div>
           </div>
         </div>

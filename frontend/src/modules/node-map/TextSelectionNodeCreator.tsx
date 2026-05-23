@@ -268,7 +268,7 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
         </div>
       )}
       {error && (
-        <div style={{ minWidth: 118, border: `1px solid ${accent}`, borderRadius: 6, background: "#ffffff", color: "#9a1c1c", padding: "5px 7px", fontSize: 11, fontWeight: 700, boxShadow: "0 8px 20px rgba(0,0,0,0.16)", textAlign: "center", letterSpacing: 0 }}>
+        <div style={{ minWidth: 118, border: `1px solid ${accent}`, borderRadius: 6, background: "#ffffff", color: "#b00020", padding: "5px 7px", fontSize: 11, fontWeight: 700, boxShadow: "0 8px 20px rgba(0,0,0,0.16)", textAlign: "center", letterSpacing: 0 }}>
           {error}
         </div>
       )}

@@ -193,7 +193,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
               onOpenInlineCommentThread(threadID);
             } : undefined}
             style={{
-              background: isCommented ? (isActiveComment ? "rgba(255, 202, 40, 0.72)" : "rgba(255, 213, 79, 0.46)") : "transparent",
+              background: isCommented ? (isActiveComment ? "rgba(100, 116, 139, 0.72)" : "rgba(100, 116, 139, 0.46)") : "transparent",
               borderBottom: isCommented ? `1px solid ${selectionColor}` : "none",
               borderRadius: isCommented ? 3 : 0,
               cursor: isCommented ? "pointer" : "inherit",
@@ -223,7 +223,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         outlineOffset: isSelected ? 1 : 0,
         display: "grid",
         gridTemplateRows: "1fr",
-        boxShadow: isSelected ? "0 0 0 3px rgba(0,188,212,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+        boxShadow: isSelected ? "0 0 0 3px rgba(100,116,139,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
         userSelect: "none",
         color: nodeCardText,
         cursor: isEditingTitle ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),

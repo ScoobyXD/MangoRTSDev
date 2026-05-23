@@ -59,13 +59,13 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 const SIDEBAR_ELEVATED_RADIUS = 10;
-const SIDEBAR_CYAN_ACCENT = "rgb(0, 233, 255)";
-const SIDEBAR_CYAN_ACTIVE_BG = "rgba(0, 233, 255, 0.13)";
-const SIDEBAR_CYAN_OPEN_BG = "rgba(0, 233, 255, 0.09)";
-const SIDEBAR_CYAN_DROP_BG = "rgba(0, 233, 255, 0.12)";
-const SIDEBAR_CYAN_HOVER_BG = "rgba(0, 233, 255, 0.20)";
-const SIDEBAR_CYAN_ACTIVE_BORDER = "rgba(0, 233, 255, 0.68)";
-const SIDEBAR_CYAN_OPEN_BORDER = "rgba(0, 233, 255, 0.52)";
+const SIDEBAR_CYAN_ACCENT = "rgb(71, 85, 105)";
+const SIDEBAR_CYAN_ACTIVE_BG = "rgba(71, 85, 105, 0.13)";
+const SIDEBAR_CYAN_OPEN_BG = "rgba(71, 85, 105, 0.09)";
+const SIDEBAR_CYAN_DROP_BG = "rgba(71, 85, 105, 0.12)";
+const SIDEBAR_CYAN_HOVER_BG = "rgba(71, 85, 105, 0.20)";
+const SIDEBAR_CYAN_ACTIVE_BORDER = "rgba(71, 85, 105, 0.68)";
+const SIDEBAR_CYAN_OPEN_BORDER = "rgba(71, 85, 105, 0.52)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
@@ -1121,7 +1121,7 @@ export function AppSidebar({
                 </button>
                 <button
                   type="button"
-                  style={{ ...appSidebarContextMenuButtonStyle, color: "#8b123f" }}
+                  style={{ ...appSidebarContextMenuButtonStyle, color: "#334155" }}
                   disabled={sharedBusy}
                   onClick={() => void requestDeleteSharedFolder(contextFolder)}
                 >
@@ -1594,7 +1594,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
         </button>
         <React.Suspense fallback={fullPageFallback}>
           <AppNodeEditorContent
-            accent="#006f85"
+            accent="#334155"
             widgetId={`app-explorer-node-editor-popup:${nodeID}`}
             theme="mango"
             forcedEntityKind="node"
@@ -1618,13 +1618,13 @@ const appSidebarStyle: React.CSSProperties = {
   borderRadius: PAGE_SURFACE_RADIUS,
   background: "#ffffff",
   color: UI_THEME.text,
-  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
   overflowY: "auto",
   overflowX: "hidden",
   scrollbarGutter: "stable",
   ["--company-explorer-scroll-accent" as string]: SIDEBAR_CYAN_ACCENT,
-  ["--company-explorer-scroll-track" as string]: "rgba(0, 233, 255, 0.08)",
-  ["--company-explorer-hover-bg" as string]: "rgba(0, 233, 255, 0.10)",
+  ["--company-explorer-scroll-track" as string]: "rgba(71, 85, 105, 0.08)",
+  ["--company-explorer-hover-bg" as string]: "rgba(71, 85, 105, 0.10)",
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
@@ -1661,7 +1661,7 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
     minWidth: 0,
     padding: "0 0 10px",
     borderBottom: "1px solid rgba(17, 17, 17, 0.28)",
-    outline: active ? "2px solid rgba(0, 233, 255, 0.32)" : "2px solid transparent",
+    outline: active ? "2px solid rgba(71, 85, 105, 0.32)" : "2px solid transparent",
     outlineOffset: 2,
     borderRadius: 6,
   };
@@ -1689,12 +1689,12 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
       border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : raised ? "rgba(148, 163, 184, 0.38)" : "transparent"}`,
       borderRadius: SIDEBAR_ELEVATED_RADIUS,
       background: active
-        ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
+        ? "linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.94) 100%)"
         : raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       boxShadow: raised
         ? active
-          ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+          ? "0 16px 34px rgba(100, 116, 139, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
           : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
         : "none",
       transform: raised ? "translateY(-1px)" : "translateY(0)",
@@ -1721,7 +1721,7 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : "transparent"}`,
     borderRadius: 6,
     background: active ? SIDEBAR_CYAN_ACTIVE_BG : "transparent",
-    color: active ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
+    color: active ? SIDEBAR_ACTIVE_TEXT : "#334155",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
@@ -1795,22 +1795,22 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
 function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
   switch (tone) {
     case "responsible":
-      return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.36)", color: "#334155" };
     case "accountable":
-      return { background: "#ede9fe", border: "rgba(124, 58, 237, 0.38)", color: "#6d28d9" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.38)", color: "#334155" };
     case "consulted":
-      return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };
     case "informed":
-      return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.32)", color: "#334155" };
     case "other":
-      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
+      return { background: "#f8fafc", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };
     case "aci":
-      return { background: "#eef2ff", border: "rgba(79, 70, 229, 0.30)", color: "#3730a3" };
+      return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.30)", color: "#334155" };
     case "mention":
-      return { background: "#f5f3ff", border: "rgba(124, 58, 237, 0.32)", color: "#6d28d9" };
+      return { background: "#f8fafc", border: "rgba(100, 116, 139, 0.32)", color: "#334155" };
     case "mail":
     default:
-      return { background: "#f8fafc", border: "rgba(0, 188, 212, 0.34)", color: "#334155" };
+      return { background: "#f8fafc", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };
   }
 }
 function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React.CSSProperties {
@@ -1824,7 +1824,7 @@ function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React
     background: raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
     boxShadow: raised
       ? active
-        ? "0 16px 34px rgba(0, 188, 212, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+        ? "0 16px 34px rgba(100, 116, 139, 0.16), 0 8px 18px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
         : "0 14px 32px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
       : "none",
     transform: raised ? "translateY(-1px)" : "translateY(0)",
@@ -1878,7 +1878,7 @@ function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean, raised
     border: `1px solid ${open ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
     background: open ? SIDEBAR_CYAN_OPEN_BG : "transparent",
-    color: open ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
+    color: open ? SIDEBAR_ACTIVE_TEXT : "#334155",
     minWidth: 0,
   };
 }
@@ -1935,7 +1935,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
       border: "none",
       borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
       background: active || dropActive
-        ? "linear-gradient(180deg, rgba(230, 253, 255, 0.98) 0%, rgba(209, 250, 255, 0.94) 100%)"
+        ? "linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.94) 100%)"
         : raised ? "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%)" : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
@@ -1952,7 +1952,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
     border: `1px solid ${active ? SIDEBAR_CYAN_ACTIVE_BORDER : dropActive ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 6,
     background: active ? SIDEBAR_CYAN_ACTIVE_BG : dropActive ? SIDEBAR_CYAN_DROP_BG : "transparent",
-    color: active ? SIDEBAR_ACTIVE_TEXT : "#3f332b",
+    color: active ? SIDEBAR_ACTIVE_TEXT : "#334155",
     minWidth: 0,
   };
 }
@@ -2024,10 +2024,10 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? "rgba(0, 233, 255, 0.64)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : hovered ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
+    border: `1px solid ${active ? "rgba(71, 85, 105, 0.64)" : dropPlacement === "inside" ? SIDEBAR_CYAN_OPEN_BORDER : hovered ? SIDEBAR_CYAN_OPEN_BORDER : "transparent"}`,
     borderRadius: 5,
-    background: active ? "rgba(0, 233, 255, 0.16)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : hovered ? SIDEBAR_CYAN_HOVER_BG : "transparent",
-    color: "#3f332b",
+    background: active ? "rgba(71, 85, 105, 0.16)" : dropPlacement === "inside" ? SIDEBAR_CYAN_DROP_BG : hovered ? SIDEBAR_CYAN_HOVER_BG : "transparent",
+    color: "#334155",
     cursor: "pointer",
     font: "inherit",
     fontSize: 11,
@@ -2056,7 +2056,7 @@ const appSidebarSharedRenameInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 22,
-  border: "1px solid #006f85",
+  border: "1px solid #334155",
   borderRadius: 4,
   background: "#ffffff",
   color: "#111827",
@@ -2193,7 +2193,7 @@ const appSidebarPinButtonStyle: React.CSSProperties = {
   border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 6,
   background: "#ffffff",
-  color: "#3f332b",
+  color: "#334155",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -2254,7 +2254,7 @@ const sharedInboxEmailModalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   display: "grid",
   gap: 10,
-  border: "1px solid rgba(0,188,212,0.45)",
+  border: "1px solid rgba(100,116,139,0.45)",
   borderRadius: 10,
   background: "#ffffff",
   color: "#111827",
@@ -2285,7 +2285,7 @@ const sharedInboxEmailModalInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 34,
-  border: "1px solid rgba(0, 188, 212, 0.28)",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
   borderRadius: 6,
   padding: "0 9px",
   font: "inherit",
@@ -2318,8 +2318,8 @@ const sharedInboxEmailModalSecondaryButtonStyle: React.CSSProperties = {
 
 const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
   ...sharedInboxEmailModalSecondaryButtonStyle,
-  border: "1px solid rgba(0,188,212,0.74)",
-  background: "#00bcd4",
+  border: "1px solid rgba(100,116,139,0.74)",
+  background: "#64748b",
   color: "#111111",
 };
 
@@ -2342,7 +2342,7 @@ const nodeEditorPopupStyle: React.CSSProperties = {
   maxWidth: "calc(100vw - 44px)",
   maxHeight: "calc(100vh - 64px)",
   boxSizing: "border-box",
-  border: "1px solid rgba(0, 188, 212, 0.54)",
+  border: "1px solid rgba(100, 116, 139, 0.54)",
   borderRadius: 16,
   background: "#ffffff",
   boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
@@ -2357,9 +2357,9 @@ const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   zIndex: 8,
   width: 24,
   height: 24,
-  border: "1px solid #8b0000",
+  border: "1px solid #334155",
   borderRadius: 4,
-  background: "#ff1f1f",
+  background: "#475569",
   color: "#ffffff",
   fontSize: 16,
   fontWeight: 600,
@@ -2376,10 +2376,10 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(0, 188, 212, 0.56)",
+  border: "1px solid rgba(100, 116, 139, 0.56)",
   borderRadius: 4,
   background: "#ffffff",
-  color: "#006f85",
+  color: "#334155",
   padding: 0,
   cursor: "pointer",
 };
