@@ -1640,7 +1640,7 @@ const appSidebarBrandStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 8,
-  padding: "5px 6px 6px",
+  padding: "5px 6px 5px",
   color: "#111827",
   minWidth: 0,
 };
