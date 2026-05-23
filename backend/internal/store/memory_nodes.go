@@ -14,7 +14,13 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 func (r *MemoryRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	item, err := r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, err
+	}
+	return item, nil
 }
 
 func (r *MemoryRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
@@ -55,8 +61,8 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
 	}
-	if assigneeUserID != "" {
-		r.grantEntityAccessAtLeastLocked(companyID, EntityTypeNode, n.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin, n.CreatedTimestamp)
+	if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, n.NodeID); err != nil {
+		return domain.Node{}, err
 	}
 	return r.withNodeReadModelLocked(n), nil
 }
@@ -141,7 +147,13 @@ func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.updateNodeLocked(input)
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	item, err := r.updateNodeLocked(input)
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, err
+	}
+	return item, nil
 }
 
 func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
@@ -206,10 +218,14 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 				return domain.Node{}, ErrAssigneeNotInCompany
 			}
 			node.AssigneeUserID = &value
-			r.grantEntityAccessAtLeastLocked(input.CompanyID, EntityTypeNode, input.NodeID, EntityPermissionSubjectUser, value, EntityPermissionEdit, time.Now().UTC())
 		}
 	}
 	r.nodes[k] = node
+	if input.AssigneeUserIDSet {
+		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
+			return domain.Node{}, err
+		}
+	}
 	return r.withNodeReadModelLocked(node), nil
 }
 

@@ -423,6 +423,9 @@ func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, 
 	if r.userHasRoleAdminAccessLocked(companyID, userID) {
 		return true
 	}
+	if r.userHasEffectiveAccessLocked(companyID, userID, entityType, entityID, accessLevel) {
+		return true
+	}
 	entityIDs := []string{entityID}
 	if entityType == EntityTypeSharedTriageFolder {
 		entityIDs = r.sharedTriageFolderAncestryLocked(companyID, entityID)

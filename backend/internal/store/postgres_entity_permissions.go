@@ -816,6 +816,11 @@ func (r *PostgresRepo) UserCanAccessEntity(companyID, entityType, entityID, user
 	} else if !exists {
 		return false, ErrNotFound
 	}
+	if allowed, err := r.UserHasEffectiveAccess(companyID, userID, entityType, entityID, accessLevel); err == nil && allowed {
+		return true, nil
+	} else if err != nil && !errors.Is(err, ErrInvalid) && !isPostgresUndefinedTable(err, "effective_resource_access") {
+		return false, err
+	}
 	var allowed bool
 	err := r.db.QueryRowContext(ctx, `select mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, $4::uuid, $5::text)`, companyID, entityType, entityID, userID, accessLevel).Scan(&allowed)
 	return allowed, err

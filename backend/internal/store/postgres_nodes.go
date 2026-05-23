@@ -301,10 +301,8 @@ func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx,
 	if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
 		return domain.Node{}, err
 	}
-	if assigneeUserID != "" {
-		if err := grantResourceAccessAtLeastSQL(ctx, tx, companyID, EntityTypeNode, item.NodeID, EntityPermissionSubjectUser, assigneeUserID, EntityPermissionAdmin); err != nil {
-			return domain.Node{}, err
-		}
+	if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, companyID, item.NodeID); err != nil {
+		return domain.Node{}, err
 	}
 	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}
@@ -424,8 +422,8 @@ where company_id = $1 and node_id = $2`,
 	if err != nil {
 		return domain.Node{}, err
 	}
-	if input.AssigneeUserIDSet && assigneeUserID != nil && *assigneeUserID != "" {
-		if err := grantResourceAccessAtLeastSQL(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID, EntityPermissionSubjectUser, *assigneeUserID, EntityPermissionEdit); err != nil {
+	if input.AssigneeUserIDSet {
+		if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 			return domain.Node{}, err
 		}
 	}
