@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -93,26 +92,6 @@ func (s *Server) publishLogicGateAssignmentWorkspaceEvents(companyID, eventType 
 	s.publishWorkspaceEvent(companyID, "node_updated", map[string]any{"node_id": result.Node.NodeID, "node": result.Node})
 }
 
-func (s *Server) logicGateAssignmentNotificationSnapshot(companyID, logicGateID, nodeID string) (domain.KanbanCard, map[string]string, bool) {
-	boardID := store.LogicGateKanbanBoardID(logicGateID)
-	columnTitles := map[string]string{}
-	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
-	if err == nil {
-		for _, column := range columns {
-			columnTitles[column.ColumnID] = column.Title
-		}
-	}
-	cards, err := s.repo.ListKanbanCards(companyID, boardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
-	if err != nil {
-		return domain.KanbanCard{}, columnTitles, false
-	}
-	for _, card := range cards {
-		if card.NodeID == nodeID && card.LogicGateID != nil && *card.LogicGateID == logicGateID {
-			return card, columnTitles, true
-		}
-	}
-	return domain.KanbanCard{}, columnTitles, false
-}
 func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -214,6 +193,7 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 	}
 	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_saved")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -302,7 +282,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 		return
 	}
 
-	beforeCard, columnTitles, hadBeforeCard := s.logicGateAssignmentNotificationSnapshot(input.CompanyID, input.LogicGateID, input.NodeID)
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.MoveLogicGateNodeAssignment(input)
 	if errors.Is(err, store.ErrInvalid) {
@@ -319,9 +298,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	}
 	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_moved")
 	s.publishCommittedWorkspaceEvents(result.Events)
-	if hadBeforeCard {
-		s.recordKanbanStateNotification(r, beforeCard, result.Card, columnTitles)
-	}
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -398,6 +375,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 	}
 	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_assignment_removed")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -471,5 +449,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 	}
 	s.refreshEffectiveAccessProjection(input.CompanyID, "work_item_logic_gate_issue_toggled")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

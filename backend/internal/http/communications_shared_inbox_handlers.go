@@ -345,6 +345,8 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_access")
 			return
 		}
+		// TODO(V4): replace this repair-style full-company refresh with a source-scoped
+		// shared triage effective-access writer in the same transaction as the source mutation.
 		s.refreshEffectiveAccessProjection(req.CompanyID, "shared_triage_access_updated")
 		actorUserID, actorLabel := notificationActorPayload(r)
 		event, projected := s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "access_grants": grants, "permissions": grants, "actor_user_id": actorUserID, "actor_display_name": actorLabel})

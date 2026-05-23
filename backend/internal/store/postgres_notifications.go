@@ -137,6 +137,51 @@ where event_id=$1::uuid`, eventID)
 	return nil
 }
 
+func (r *PostgresRepo) GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return NotificationDomainEventCheckpoint{}, false, ErrInvalid
+	}
+	var checkpoint NotificationDomainEventCheckpoint
+	err := r.db.QueryRowContext(context.Background(), `
+select company_id::text, checkpoint_timestamp, checkpoint_event_id::text
+from notification_domain_event_projection_checkpoints
+where company_id=$1::uuid`, companyID).Scan(&checkpoint.CompanyID, &checkpoint.CreatedTimestamp, &checkpoint.EventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return NotificationDomainEventCheckpoint{}, false, nil
+	}
+	if err != nil {
+		if isPostgresUndefinedTable(err, "notification_domain_event_projection_checkpoints") {
+			return NotificationDomainEventCheckpoint{}, false, nil
+		}
+		return NotificationDomainEventCheckpoint{}, false, err
+	}
+	return checkpoint, true, nil
+}
+
+func (r *PostgresRepo) SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error {
+	checkpoint.CompanyID = strings.TrimSpace(checkpoint.CompanyID)
+	checkpoint.EventID = strings.TrimSpace(checkpoint.EventID)
+	if checkpoint.CompanyID == "" {
+		return ErrInvalid
+	}
+	_, err := r.db.ExecContext(context.Background(), `
+insert into notification_domain_event_projection_checkpoints (
+  company_id, checkpoint_timestamp, checkpoint_event_id, updated_timestamp
+) values ($1::uuid, $2, nullif($3, '')::uuid, now())
+on conflict (company_id) do update set
+  checkpoint_timestamp=excluded.checkpoint_timestamp,
+  checkpoint_event_id=excluded.checkpoint_event_id,
+  updated_timestamp=now()
+where excluded.checkpoint_timestamp > notification_domain_event_projection_checkpoints.checkpoint_timestamp
+   or (
+     excluded.checkpoint_timestamp = notification_domain_event_projection_checkpoints.checkpoint_timestamp
+     and excluded.checkpoint_event_id::text > notification_domain_event_projection_checkpoints.checkpoint_event_id::text
+   )`,
+		checkpoint.CompanyID, checkpoint.CreatedTimestamp, checkpoint.EventID)
+	return err
+}
+
 func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notification, error) {
 	var item domain.Notification
 	var companyID sql.NullString
@@ -271,17 +316,16 @@ insert into notifications (
   source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, created_timestamp
 ) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, now())
 on conflict (recipient_user_id, source_event_id, notification_type, entity_type, entity_id)
-do update set
-  surface=excluded.surface,
-  role=excluded.role,
-  logic_gate_id=excluded.logic_gate_id,
-  node_id=excluded.node_id
+do nothing
 returning `+notificationSelectColumns,
 			newUUIDv7String(), candidate.CompanyID, candidate.RecipientUserID, candidate.ActorUserID,
 			candidate.Type, candidate.SourceEventID, candidate.EntityType, candidate.EntityID,
 			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID,
 		))
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
 			return nil, err
 		}
 		created = append(created, item)
