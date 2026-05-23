@@ -1,9 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const worktreeVersion = process.cwd().match(/version-number(\d+)/)?.[1] ?? "";
+
 // Dev proxy keeps frontend API calls aligned with backend routes during local development.
 export default defineConfig({
   plugins: [react()],
+  define: {
+    "import.meta.env.VITE_WORKTREE_VERSION": JSON.stringify(worktreeVersion),
+  },
   server: {
     proxy: {
       "/v1": {

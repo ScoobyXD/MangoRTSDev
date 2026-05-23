@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveCompanyID } from "../auth/currentCompany";
+import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
@@ -1092,6 +1093,11 @@ export function AppSidebar({
           />
         </React.Suspense>
       </section>
+      {WORKTREE_VERSION && (
+        <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
+          v{WORKTREE_VERSION}
+        </div>
+      )}
       {sharedContextMenu && (() => {
         const contextFolder = sharedContextMenu.folder;
         const contextFolderHasChildren = !!contextFolder && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === contextFolder.folder_id);
@@ -2275,6 +2281,21 @@ const appSidebarExplorerFallbackStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   background: "transparent",
+};
+
+const appSidebarVersionStyle: React.CSSProperties = {
+  position: "sticky",
+  bottom: 0,
+  alignSelf: "flex-end",
+  marginTop: "auto",
+  padding: "2px 4px 0",
+  color: "rgba(15, 23, 42, 0.46)",
+  background: "linear-gradient(180deg, rgba(242, 244, 248, 0), rgba(242, 244, 248, 0.92) 42%, rgba(242, 244, 248, 0.98))",
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  letterSpacing: 0,
+  pointerEvents: "none",
 };
 
 const sharedInboxEmailModalBackdropStyle: React.CSSProperties = {
