@@ -620,7 +620,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           }
           await acceptInvitation(token, displayName);
           await onAuthenticated();
-          onNavigate("/");
+          onNavigate("/home");
         } catch (inviteError) {
           console.error("Invite acceptance failed", inviteError);
           setError(formatAuthError(inviteError, "Invite acceptance failed"));

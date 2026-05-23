@@ -290,8 +290,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     appTaskbarStorageScope(me?.user.user_id || me?.user.email || "local", activeCompanyID)
   ), [activeCompanyID, me?.user.email, me?.user.user_id]);
   const loaded = useMemo(() => loadViews(), []);
+  const initialActiveTabId = useMemo(() => {
+    if (!initialPage || overrideContent) return loaded.activeId;
+    return loaded.tabs.find((tab) => pageForTab(tab) === initialPage)?.id ?? loaded.activeId;
+  }, [initialPage, loaded.activeId, loaded.tabs, overrideContent]);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
-  const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
+  const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
   const [homeViewID, setHomeViewID] = useState<HomeSidebarView>("my-triage");
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
