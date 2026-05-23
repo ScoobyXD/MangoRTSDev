@@ -16,8 +16,8 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeDragItemsFromExplorerRows, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setKanbanNodeEntityDragData, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, myNodeTileIconStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxPanelTitleStyle, nodeInboxRailHeaderStyle, nodeInboxRailSectionStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -2059,15 +2059,9 @@ export function MyLogicGateTile({
 export function NodeInboxRail({
   loading,
   nodeByID,
-  allRows,
   myNodeGroups,
   selectedRowIDs,
-  expandedRowIDs,
-  search,
   getNodeDragIDs,
-  onSearchChange,
-  onToggleFolder,
-  onSelectRow,
   onSelectNode,
   onOpenNode,
   onOpenNodeBulkMenu,
@@ -2090,6 +2084,16 @@ export function NodeInboxRail({
   onCreateNode: () => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
+  const myNodeIDs = useMemo(() => new Set(myNodeGroups.flatMap((group) => group.nodes.map((node) => node.node_id))), [myNodeGroups]);
+  const otherNodes = useMemo(() => (
+    Array.from(nodeByID.values())
+      .filter((node) => !myNodeIDs.has(node.node_id))
+      .sort((a, b) => (
+        nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
+        || a.node_id.localeCompare(b.node_id)
+      ))
+  ), [myNodeIDs, nodeByID]);
+  const otherNodeOrderedRowIDs = useMemo(() => otherNodes.map((node) => nodeTreeID(node.node_id)), [otherNodes]);
   const railSplit = useRailTopResize(HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -2102,24 +2106,24 @@ export function NodeInboxRail({
 
   return (
     <>
-    <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
-      <section style={logicGateRailSectionStyle} onContextMenu={openCreateNodeMenu}>
-        <div style={logicGateRailHeaderStyle}>
-          <h2 style={panelTitleStyle}>My Nodes</h2>
-          {loading && <span style={mutedSmallStyle}>Loading</span>}
+    <aside ref={railSplit.railRef} style={nodeInboxRailStyle(railSplit.topHeight)}>
+      <section style={nodeInboxRailSectionStyle} onContextMenu={openCreateNodeMenu}>
+        <div style={nodeInboxRailHeaderStyle}>
+          <h2 style={nodeInboxPanelTitleStyle}>My Nodes</h2>
+          {loading && <span style={nodeInboxMutedSmallStyle}>Loading</span>}
         </div>
-        <div className="mango-home-scroll" style={myLogicGatesListStyle}>
+        <div className="mango-home-scroll" style={nodeInboxListStyle}>
           {myNodeGroups.length === 0 && !loading ? (
-            <div style={emptySmallStyle}>No assigned nodes</div>
+            <div style={nodeInboxEmptyStyle}>No assigned nodes</div>
           ) : (
             myNodeGroups.map((group) => (
-              <div key={group.key} style={myLogicGateGroupStyle}>
-                <div style={myLogicGateFolderLabelStyle}>
+              <div key={group.key} style={nodeInboxGroupStyle}>
+                <div style={nodeInboxFolderLabelStyle}>
                   <ExplorerRowIcon kind="folder" />
-                  <span>{group.label}</span>
-                  <span>{group.nodes.length}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
+                  <span style={nodeInboxGroupCountStyle}>{group.nodes.length}</span>
                 </div>
-                <div style={myLogicGateGridStyle}>
+                <div style={nodeInboxGridStyle}>
                   {group.nodes.map((node) => (
                     <MyNodeTile
                       key={node.node_id}
@@ -2143,70 +2147,32 @@ export function NodeInboxRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
-      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={openCreateNodeMenu}>
-        <div style={logicGateRailHeaderStyle}>
-          <h2 style={panelTitleStyle}>All Nodes</h2>
-          {loading && <span style={mutedSmallStyle}>Loading</span>}
+      <section style={nodeInboxRailSectionStyle} onContextMenu={openCreateNodeMenu}>
+        <div style={nodeInboxRailHeaderStyle}>
+          <h2 style={nodeInboxPanelTitleStyle}>Others</h2>
+          {loading && <span style={nodeInboxMutedSmallStyle}>Loading</span>}
         </div>
-        <input
-          style={inputStyle}
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search Nodes"
-        />
-        <div className="mango-home-scroll" style={allLogicGateRowsStyle}>
-          {allRows.length === 0 && !loading ? (
-            <div style={emptySmallStyle}>No nodes</div>
-          ) : allRows.map((row) => {
-            const selected = selectedRowIDs.has(row.id);
-            const isFolder = row.kind === "folder";
-            const nodeID = row.nodeID ?? "";
-            const node = nodeID ? nodeByID.get(nodeID) : undefined;
-            return (
-              <div
-                key={row.id}
-                draggable
-                style={logicGateTreeRowStyle(row.depth, selected, row.kind === "node")}
-                onClick={(event) => onSelectRow(row, event)}
-                onDoubleClick={(event) => {
-                  if (row.kind !== "node" || !node) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onOpenNode(node);
-                }}
-                onContextMenu={(event) => {
-                  if (row.kind !== "node" || !node) return;
-                  onOpenNodeBulkMenu(node.node_id, event);
-                }}
-                onDragStart={(event) => {
-                  const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
-                  if (!payload) return;
-                  event.dataTransfer.effectAllowed = row.kind === "folder" ? "copyMove" : "copy";
-                  event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
-                  setKanbanNodeEntityDragData(event.dataTransfer, nodeDragItemsFromExplorerRows(payload, allRows, nodeByID));
-                  event.dataTransfer.setData("text/plain", row.label);
-                }}
-              >
-                {isFolder ? (
-                  <button
-                    type="button"
-                    draggable={false}
-                    style={logicGateDisclosureStyle}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleFolder(row.id);
-                    }}
-                  >
-                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(15, 23, 42, 0.62)" />
-                  </button>
-                ) : (
-                  <span style={{ width: 18, flexShrink: 0 }} />
-                )}
-                <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
-                <span style={logicGateTreeRowTextStyle}>{node ? nodeTitle(node) : row.label}</span>
-              </div>
-            );
-          })}
+        <div className="mango-home-scroll" style={nodeInboxListStyle}>
+          {otherNodes.length === 0 && !loading ? (
+            <div style={nodeInboxEmptyStyle}>No other nodes</div>
+          ) : (
+            <div style={nodeInboxGridStyle}>
+              {otherNodes.map((node) => (
+                <MyNodeTile
+                  key={node.node_id}
+                  node={node}
+                  selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
+                  orderedRowIDs={otherNodeOrderedRowIDs}
+                  nodeByID={nodeByID}
+                  getNodeDragIDs={getNodeDragIDs}
+                  onSelectNode={onSelectNode}
+                  onOpenNode={onOpenNode}
+                  onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                  onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </aside>
@@ -2255,7 +2221,7 @@ export function MyNodeTile({
     <button
       type="button"
       draggable
-      style={myLogicGateTileStyle(selected)}
+      style={nodeInboxTileStyle(selected)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
@@ -2278,8 +2244,8 @@ export function MyNodeTile({
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
       }}
     >
-      <span style={myNodeTileIconStyle}><ExplorerRowIcon kind="node" /></span>
-      <span style={myLogicGateTileTextStyle}>{nodeTitle(node)}</span>
+      <span style={nodeInboxTileIconStyle}><ExplorerRowIcon kind="node" /></span>
+      <span style={nodeInboxTileTextStyle}>{nodeTitle(node)}</span>
     </button>
   );
 }
