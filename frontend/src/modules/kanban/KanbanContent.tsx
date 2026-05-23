@@ -6,6 +6,7 @@ import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import {
+  assignNodeToLogicGateStatus,
   createKanbanBoard,
   getLogicGateArenaView,
   invalidateKanbanBoardListCache,
@@ -51,6 +52,7 @@ import {
   buildKanbanCardSelectionUpdate,
   clampColumnHeight,
   clampColumnWidth,
+  createClientUUIDv7,
   getKanbanBoardDisplayTitle,
   getKanbanConditionalColor,
   getDefaultKanbanYAxisSortDirection,
@@ -58,6 +60,7 @@ import {
   groupCardsByColumn,
   logicGateKanbanBoardID,
   logicGateIDFromKanbanBoardID,
+  nextCardPosition,
   normalizeKanbanColumnItemColor,
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
@@ -168,9 +171,39 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const columnsRef = useRef<KanbanColumn[]>([]);
   const cardsRef = useRef<KanbanCard[]>([]);
   const boardRefreshRequestRef = useRef(0);
+  const localBoardMutationSeqRef = useRef(0);
+  const pendingBoardMutationsRef = useRef(new Map<string, number>());
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+
+  const applyColumns = useCallback((next: React.SetStateAction<KanbanColumn[]>) => {
+    const resolved = typeof next === "function" ? next(columnsRef.current) : next;
+    columnsRef.current = resolved;
+    setColumns(resolved);
+  }, []);
+
+  const applyCards = useCallback((next: React.SetStateAction<KanbanCard[]>) => {
+    const resolved = typeof next === "function" ? next(cardsRef.current) : next;
+    cardsRef.current = resolved;
+    setCards(resolved);
+  }, []);
+
+  const beginLocalBoardMutation = useCallback((mutationBoardID = activeBoardIDRef.current, logicGateID = "") => {
+    const cleanBoardID = mutationBoardID.trim();
+    if (!cleanBoardID) return () => undefined;
+    localBoardMutationSeqRef.current += 1;
+    boardRefreshRequestRef.current += 1;
+    pendingBoardMutationsRef.current.set(cleanBoardID, (pendingBoardMutationsRef.current.get(cleanBoardID) ?? 0) + 1);
+    const cleanLogicGateID = logicGateID.trim() || logicGateIDFromKanbanBoardID(cleanBoardID);
+    if (cleanLogicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, cleanLogicGateID);
+    invalidateKanbanBoardContentsCache(apiBase, companyID, cleanBoardID);
+    return () => {
+      const current = pendingBoardMutationsRef.current.get(cleanBoardID) ?? 0;
+      if (current <= 1) pendingBoardMutationsRef.current.delete(cleanBoardID);
+      else pendingBoardMutationsRef.current.set(cleanBoardID, current - 1);
+    };
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     let cancelled = false;
@@ -418,18 +451,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const loadLogicGateArenaView = useCallback((logicGateID: string, expectedBoardID: string) => {
     if (!logicGateID || !expectedBoardID) return;
+    const mutationSeqAtStart = localBoardMutationSeqRef.current;
+    if ((pendingBoardMutationsRef.current.get(expectedBoardID) ?? 0) > 0) return;
     setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, expectedBoardID));
     void getLogicGateArenaView(apiBase, companyID, logicGateID)
       .then((view) => {
         if (activeBoardIDRef.current !== expectedBoardID) return;
+        if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
         const logicGateLabel = humanLabelOrFallback(view.logic_gate?.header, "Logic Gate");
         const board = { ...view.board, logic_gate_id: view.board.logic_gate_id ?? logicGateID, title: logicGateLabel };
         upsertBoardInList(board);
         setActiveLogicGateLabel(logicGateLabel);
         const nextColumns = sortColumns(view.columns ?? []);
         const nextCards = view.cards ?? [];
-        setColumns(nextColumns);
-        setCards(nextCards);
+        applyColumns(nextColumns);
+        applyCards(nextCards);
         primeKanbanBoardContentsCache(apiBase, companyID, board.board_id, { columns: nextColumns, cards: nextCards });
         setError("");
         setLoading(false);
@@ -439,7 +475,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setError(formatKanbanLoadError(err, "Logic gate arena API unavailable"));
         setLoading(false);
       });
-  }, [apiBase, companyID, upsertBoardInList]);
+  }, [apiBase, applyCards, applyColumns, companyID, upsertBoardInList]);
 
   useEffect(() => {
     if (!arenaMode) return;
@@ -584,12 +620,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const refreshBoard = useCallback(async (requestedBoardIDOverride?: string) => {
     const requestID = boardRefreshRequestRef.current + 1;
     boardRefreshRequestRef.current = requestID;
+    const mutationSeqAtStart = localBoardMutationSeqRef.current;
     const requestedBoardID = requestedBoardIDOverride?.trim() || boardID;
+    if ((pendingBoardMutationsRef.current.get(requestedBoardID) ?? 0) > 0) {
+      setLoading(false);
+      return;
+    }
     setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, requestedBoardID));
     setError("");
     if (!logicGateIDFromKanbanBoardID(requestedBoardID) && !boardsRef.current.some((board) => board.board_id === requestedBoardID)) {
-      setColumns([]);
-      setCards([]);
+      applyColumns([]);
+      applyCards([]);
       setLoading(false);
       return;
     }
@@ -598,15 +639,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       // column through the cards API instead of loading company-scale boards.
       const { columns: nextColumns, cards: nextCards } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500);
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
-      setColumns(sortColumns(nextColumns));
-      setCards(nextCards);
+      if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
+      applyColumns(sortColumns(nextColumns));
+      applyCards(nextCards);
     } catch {
       if (boardRefreshRequestRef.current !== requestID) return;
       setError("Kanban board API unavailable");
     } finally {
       if (boardRefreshRequestRef.current === requestID) setLoading(false);
     }
-  }, [apiBase, boardID, companyID]);
+  }, [apiBase, applyCards, applyColumns, boardID, companyID]);
 
   useEffect(() => {
     refreshBoard();
@@ -1063,28 +1105,34 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const reorderCards = useCallback(async (cardIDs: string[], columnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before") => {
     setDragOverCard(null);
     setError("");
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
+    let shouldRefresh = false;
     try {
       const result = await reorderKanbanCardsCommand({
         context: kanbanCommandContext,
-        cards,
+        cards: cardsRef.current,
         cardIDs,
         columnID,
         targetCardID,
         placement,
         onOptimisticCards: (optimisticCards) => {
-          setCards(optimisticCards);
+          applyCards(optimisticCards);
           const movedIDs = new Set(cardIDs);
           syncNodeStatusesFromCards(optimisticCards.filter((card) => movedIDs.has(card.card_id)));
         },
       });
       const byID = new Map(result.persistedCards.map((card) => [card.card_id, card]));
-      setCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
+      applyCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
       syncNodeStatusesFromCards(result.persistedCards);
     } catch {
       setError("Card reorder failed");
-      refreshBoard();
+      shouldRefresh = true;
+    } finally {
+      endMutation();
     }
-  }, [cards, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
   const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
     const clickedCard = cards.find((card) => card.card_id === cardID);
@@ -1243,64 +1291,103 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [deleteCardConfirmation, deleteNodeConfirmation, requestCardDelete, selectedCardIDs]);
 
   const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[]) => {
+    setError("");
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
+    let shouldRefresh = false;
     try {
       const result = await addExplorerNodesToKanbanColumnCommand({
         context: kanbanCommandContext,
-        cards,
+        cards: cardsRef.current,
         columnID,
         items,
         onOptimisticCards: (optimisticCards, nodeIDs) => {
-          setCards((previous) => [...previous.filter((card) => !nodeIDs.has(card.node_id)), ...optimisticCards]);
+          applyCards((previous) => [...previous.filter((card) => !nodeIDs.has(card.node_id)), ...optimisticCards]);
           syncNodeStatusesFromCards(optimisticCards);
         },
       });
       if (result.savedCards.length === 0) return;
-      setCards((previous) => [...previous.filter((card) => !result.optimisticCardIDs.has(card.card_id) && !result.nodeIDs.has(card.node_id)), ...result.savedCards]);
+      applyCards((previous) => [...previous.filter((card) => !result.optimisticCardIDs.has(card.card_id) && !result.nodeIDs.has(card.node_id)), ...result.savedCards]);
       syncNodeStatusesFromCards(result.savedCards);
     } catch {
       setError("Drop failed");
-      refreshBoard();
+      shouldRefresh = true;
+    } finally {
+      endMutation();
     }
-  }, [cards, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
   const createNodeInColumn = useCallback(async (columnID: string) => {
     setError("");
+    const logicGateID = logicGateIDFromKanbanBoardID(boardID);
+    if (!logicGateID) {
+      setError("Select a Logic Gate board first");
+      return;
+    }
+    const nodeID = createClientUUIDv7();
+    const title = "new node";
+    const timestamp = new Date().toISOString();
+    const position = nextCardPosition(cardsRef.current, columnID);
+    const optimisticNode: NodeRecord = {
+      company_id: companyID,
+      node_id: nodeID,
+      title,
+      logic_gate_ids: [logicGateID],
+      created_timestamp: timestamp,
+    };
+    const optimisticCard: KanbanCard = {
+      company_id: companyID,
+      board_id: boardID,
+      card_id: `pending-node-${nodeID}`,
+      column_id: columnID,
+      node_id: nodeID,
+      logic_gate_id: logicGateID,
+      node_title: title,
+      description_snapshot: "",
+      is_issue: false,
+      position,
+      created_timestamp: timestamp,
+      updated_timestamp: timestamp,
+    };
+    const endMutation = beginLocalBoardMutation(boardID, logicGateID);
+    let shouldRefresh = false;
+    upsertNodeRelationshipGraphNode(apiBase, companyID, optimisticNode);
+    applyCards((previous) => [...previous.filter((card) => card.node_id !== nodeID), optimisticCard]);
+    syncNodeStatusesFromCards([optimisticCard]);
+    setSelectedCardIDs(new Set([optimisticCard.card_id]));
+    setSelectionAnchorCardID(optimisticCard.card_id);
+    setHighlightedEntity({ nodeID });
     try {
-      if (!logicGateIDFromKanbanBoardID(boardID)) {
-        setError("Select a Logic Gate board first");
-        return;
-      }
-      const node = await requestJSON<NodeRecord>("/v1/nodes", {
-        method: "POST",
-        json: {
-          company_id: companyID,
-          title: "new node",
-        },
-      });
-      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      const label = getNodeTitle(node) || node.node_id;
-      const result = await addExplorerNodesToKanbanColumnCommand({
-        context: kanbanCommandContext,
-        cards,
+      const result = await assignNodeToLogicGateStatus({
+        apiBase,
+        companyID,
+        logicGateID,
+        nodeID,
         columnID,
-        items: [{ nodeID: node.node_id, label }],
-        onOptimisticCards: (optimisticCards, nodeIDs) => {
-          setCards((previous) => [...previous.filter((card) => !nodeIDs.has(card.node_id)), ...optimisticCards]);
-          syncNodeStatusesFromCards(optimisticCards);
-        },
+        nodeTitle: title,
+        createNodeTitle: title,
+        position,
       });
-      const createdCard = result.savedCards[0];
-      if (!createdCard) return;
-      setCards((previous) => [...previous.filter((card) => !result.optimisticCardIDs.has(card.card_id) && !result.nodeIDs.has(card.node_id)), ...result.savedCards]);
-      syncNodeStatusesFromCards(result.savedCards);
-      setSelectedCardIDs(new Set([createdCard.card_id]));
-      setSelectionAnchorCardID(createdCard.card_id);
-      setHighlightedEntity({ nodeID: createdCard.node_id });
+      upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
+      applyCards((previous) => [...previous.filter((card) => card.card_id !== optimisticCard.card_id && card.node_id !== nodeID), result.card]);
+      syncNodeStatusesFromCards([result.card]);
+      setSelectedCardIDs(new Set([result.card.card_id]));
+      setSelectionAnchorCardID(result.card.card_id);
+      setHighlightedEntity({ nodeID: result.card.node_id });
     } catch {
       setError("Node create failed");
-      refreshBoard();
+      removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
+      applyCards((previous) => previous.filter((card) => card.card_id !== optimisticCard.card_id && card.node_id !== nodeID));
+      setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((cardID) => cardID !== optimisticCard.card_id)));
+      setSelectionAnchorCardID((current) => (current === optimisticCard.card_id ? "" : current));
+      setHighlightedEntity((current) => (current?.nodeID === nodeID ? null : current));
+      shouldRefresh = true;
+    } finally {
+      endMutation();
     }
-  }, [apiBase, boardID, cards, companyID, kanbanCommandContext, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
+    if (shouldRefresh) void refreshBoard(boardID);
+  }, [apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, refreshBoard, syncNodeStatusesFromCards]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();

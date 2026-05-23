@@ -92,6 +92,10 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "node_id_required")
 		return
 	}
+	if !isCanonicalUUID(nodeID) {
+		writeError(w, http.StatusBadRequest, "invalid_node_id")
+		return
+	}
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
 		return
 	}
@@ -241,6 +245,12 @@ func parseLogicGateWorkAssignmentCreateFields(w http.ResponseWriter, fields map[
 		return false
 	} else if set && nodeTitle != nil {
 		input.NodeTitle = *nodeTitle
+	}
+	if createNodeTitle, set, ok := parseOptionalStringField(fields, "create_node_title"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_create_node_title")
+		return false
+	} else if set && createNodeTitle != nil {
+		input.CreateNodeTitle = *createNodeTitle
 	}
 	if description, set, ok := parseOptionalStringField(fields, "description_snapshot"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_description_snapshot")

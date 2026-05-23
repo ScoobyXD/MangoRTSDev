@@ -782,14 +782,26 @@ order by kc.position asc, kc.created_timestamp asc, kc.column_id asc`, input.Com
 
 	var canonicalNodeTitle string
 	var previousAssignee sql.NullString
+	var createdNode domain.Node
 	if err := tx.QueryRowContext(ctx, `
 select title, assignee_user_id::text
 from nodes
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &previousAssignee); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return LogicGateNodeAssignmentResult{}, ErrNotFound
+			if input.CreateNodeTitle == "" {
+				return LogicGateNodeAssignmentResult{}, ErrNotFound
+			}
+			createdNode, err = r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+			if err != nil {
+				return LogicGateNodeAssignmentResult{}, err
+			}
+			canonicalNodeTitle = createdNode.Title
+			if createdNode.AssigneeUserID != nil {
+				previousAssignee = sql.NullString{String: *createdNode.AssigneeUserID, Valid: true}
+			}
+		} else {
+			return LogicGateNodeAssignmentResult{}, err
 		}
-		return LogicGateNodeAssignmentResult{}, err
 	}
 	previousAssignment, previousAssignmentErr := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")
 	hadPreviousAssignment := previousAssignmentErr == nil
@@ -962,7 +974,12 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID, status, 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
-	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentSavedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
+	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
+	if createdNode.CompanyID != "" {
+		eventInputs = append([]DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(createdNode, meta)}, eventInputs...)
+	}
+	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

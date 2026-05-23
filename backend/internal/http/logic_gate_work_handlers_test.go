@@ -129,6 +129,40 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("POST assignment = %+v, want pending mutable node", postResult.Assignment)
 	}
 
+	clientGeneratedNodeID := "019e476d-ee56-7aaa-aaaa-aaaaaaaaaaaa"
+	createNodePayload := map[string]any{
+		"company_id":        companyID,
+		"node_id":           clientGeneratedNodeID,
+		"create_node_title": "Created from Kanban",
+		"node_title":        "Created from Kanban",
+		"status":            "done",
+		"position":          40,
+	}
+	createNodeReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes", createNodePayload, editor, companyID)
+	createNodeRecord := httptest.NewRecorder()
+	handler.ServeHTTP(createNodeRecord, createNodeReq)
+	if createNodeRecord.Code != http.StatusCreated {
+		t.Fatalf("editor POST create-node status = %d body=%s, want 201", createNodeRecord.Code, createNodeRecord.Body.String())
+	}
+	createNodeResult := decodeLogicGateWorkMutationPayloadForTest(t, createNodeRecord)
+	if createNodeResult.Node.NodeID != clientGeneratedNodeID || createNodeResult.Node.Title != "Created from Kanban" {
+		t.Fatalf("created node = %+v, want client-generated node", createNodeResult.Node)
+	}
+	if createNodeResult.Card.NodeID != clientGeneratedNodeID || createNodeResult.Assignment.StatusKey != store.LogicGateWorkStatusDone {
+		t.Fatalf("created assignment/card = %+v / %+v, want done client-generated node", createNodeResult.Assignment, createNodeResult.Card)
+	}
+	afterCreate := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
+	createdVisible := false
+	for _, assignment := range afterCreate.Assignments {
+		if assignment.Assignment.NodeID == clientGeneratedNodeID {
+			createdVisible = true
+			break
+		}
+	}
+	if !createdVisible {
+		t.Fatalf("created client-generated node missing from v2 work response: %+v", afterCreate.Assignments)
+	}
+
 	putPayload := map[string]any{
 		"company_id": companyID,
 		"status":     "done",

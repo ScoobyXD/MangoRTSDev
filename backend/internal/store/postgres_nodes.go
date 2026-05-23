@@ -275,6 +275,11 @@ func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title,
 }
 
 func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx, companyID, title, assigneeUserID string) (domain.Node, error) {
+	return r.createNodeWithAssigneeIDTx(ctx, tx, companyID, "", title, assigneeUserID)
+}
+
+func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+	nodeID = strings.TrimSpace(nodeID)
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	var assignee postgresNodeAssigneeReadModel
 	if assigneeUserID != "" {
@@ -285,7 +290,10 @@ func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx,
 		}
 		assigneeUserID = assignee.UserID
 	}
-	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
+	if nodeID == "" {
+		nodeID = newUUIDv7String()
+	}
+	item := domain.Node{CompanyID: companyID, NodeID: nodeID, Title: title}
 	if err := tx.QueryRowContext(ctx,
 		`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
 		 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
