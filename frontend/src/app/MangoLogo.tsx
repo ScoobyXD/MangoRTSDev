@@ -8,7 +8,7 @@ export const MangoLogoMark: React.FC<MangoLogoMarkProps> = ({ size = 28 }) => {
   const gradientID = `mango-gradient-${useId().replace(/:/g, "")}`;
   const clipID = `mango-clip-${useId().replace(/:/g, "")}`;
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 64 64" style={{ display: "block", flex: "0 0 auto" }}>
+    <svg aria-hidden="true" width={size} height={size} viewBox="-2 -2 68 68" style={{ display: "block", flex: "0 0 auto", overflow: "visible" }}>
       <defs>
         <linearGradient id={gradientID} x1="11" y1="13" x2="52" y2="49" gradientUnits="userSpaceOnUse">
           <stop stopColor="#fbb152" />

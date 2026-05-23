@@ -1635,12 +1635,12 @@ const appSidebarStyle: React.CSSProperties = {
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
-  minHeight: 38,
+  minHeight: 42,
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 8,
-  padding: "2px 6px 4px",
+  padding: "5px 6px 6px",
   color: "#111827",
   minWidth: 0,
 };
