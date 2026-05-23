@@ -12,6 +12,18 @@ const HOME_BLACK = "#000000";
 const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_CARD_BORDER = "rgba(15, 23, 42, 0.14)";
 const HOME_TASKBAR_TILE_GRAY_BORDER = "rgba(100, 116, 139, 0.26)";
+const HOME_KEY_COLUMN_RADIUS = 16;
+const HOME_KEY_ELEVATED_RADIUS = 11;
+const HOME_KEY_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)";
+const HOME_KEY_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
+const HOME_KEY_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
+const HOME_KEY_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
+const HOME_KEY_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
+const HOME_KEY_RAISED_SHADOW = "10px 10px 22px rgba(174, 174, 192, 0.32), -8px -8px 18px rgba(255, 255, 255, 0.96), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
+const HOME_KEY_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7px 16px rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(148, 163, 184, 0.14)";
+const HOME_KEY_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const HOME_KEY_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
+const HOME_KEY_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
   const trimmed = color.trim();
@@ -82,8 +94,7 @@ export const workspaceStyle: React.CSSProperties = {
   gap: 10,
   padding: 10,
   overflow: "auto",
-  background:
-    "radial-gradient(circle at 38% 18%, rgba(125, 211, 252, 0.22), transparent 30%), radial-gradient(circle at 70% 82%, rgba(167, 139, 250, 0.18), transparent 34%), linear-gradient(135deg, #f5f8fc 0%, #edf2f7 46%, #e8f5f7 100%)",
+  background: "#ffffff",
 };
 
 export const columnResizeHandleStyle: React.CSSProperties = {
@@ -313,21 +324,15 @@ export const sharedInboxCreateButtonStyle: React.CSSProperties = {
 };
 
 export const panelStyle: React.CSSProperties = {
-  position: "relative",
-  isolation: "isolate",
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "auto",
   gap: 10,
-  padding: 14,
-  border: "1px solid rgba(255, 255, 255, 0.52)",
-  background:
-    "radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.88), transparent 28%), radial-gradient(circle at 92% 86%, rgba(45, 212, 191, 0.34), transparent 32%), radial-gradient(circle at 68% 100%, rgba(129, 140, 248, 0.25), transparent 34%), linear-gradient(135deg, rgba(255, 255, 255, 0.64), rgba(226, 244, 248, 0.36) 46%, rgba(240, 236, 255, 0.34))",
-  backdropFilter: "blur(24px) saturate(1.55)",
-  WebkitBackdropFilter: "blur(24px) saturate(1.55)",
-  borderRadius: 18,
-  boxShadow:
-    "inset 1px 1px 0 rgba(255, 255, 255, 0.76), inset -18px -22px 42px rgba(148, 163, 184, 0.12), 0 22px 54px rgba(15, 23, 42, 0.14)",
+  padding: 10,
+  border: "none",
+  background: HOME_KEY_PANEL_BACKGROUND,
+  borderRadius: HOME_KEY_COLUMN_RADIUS,
+  boxShadow: HOME_KEY_PANEL_SHADOW,
   overflow: "hidden",
 };
 
@@ -335,7 +340,7 @@ export function mailViewerPanelStyle(attached: boolean): React.CSSProperties {
   return {
     ...panelStyle,
     marginLeft: attached ? -HOME_COLUMN_RESIZER_WIDTH : 0,
-    borderRadius: attached ? "0 18px 18px 0" : 18,
+    borderRadius: attached ? `0 ${HOME_KEY_COLUMN_RADIUS}px ${HOME_KEY_COLUMN_RADIUS}px 0` : HOME_KEY_COLUMN_RADIUS,
   };
 }
 
@@ -345,12 +350,11 @@ export function mailPanelStyle(attached: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateRows: "auto minmax(0, 1fr)",
     gap: 12,
-    padding: 12,
+    padding: 10,
     border: "none",
-    background: "#edf2f7",
-    borderRadius: attached ? "18px 0 0 18px" : 18,
-    boxShadow:
-      "10px 10px 22px rgba(166, 180, 200, 0.42), -10px -10px 22px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.62)",
+    background: HOME_KEY_PANEL_BACKGROUND,
+    borderRadius: attached ? `${HOME_KEY_COLUMN_RADIUS}px 0 0 ${HOME_KEY_COLUMN_RADIUS}px` : HOME_KEY_COLUMN_RADIUS,
+    boxShadow: HOME_KEY_PANEL_SHADOW,
     overflow: "hidden",
   };
 }
@@ -1124,27 +1128,27 @@ export const primaryButtonStyle: React.CSSProperties = {
 };
 
 export const mailPanelSmallButtonStyle: React.CSSProperties = {
-  minHeight: 30,
-  border: "none",
-  borderRadius: 10,
-  background: "#edf2f7",
-  color: "#1f2937",
+  minHeight: 34,
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: HOME_KEY_SURFACE,
+  color: "#111111",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
   fontWeight: 650,
   padding: "0 10px",
-  boxShadow:
-    "5px 5px 11px rgba(166, 180, 200, 0.5), -5px -5px 11px rgba(255, 255, 255, 0.92)",
+  boxShadow: HOME_KEY_SHADOW,
+  letterSpacing: 0,
+  transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
 };
 
 export const mailPanelPrimaryButtonStyle: React.CSSProperties = {
   ...mailPanelSmallButtonStyle,
-  minHeight: 34,
-  color: "#172033",
-  background: "linear-gradient(145deg, #f5f9fd, #dfe7f1)",
-  boxShadow:
-    "7px 7px 15px rgba(157, 171, 191, 0.52), -7px -7px 15px rgba(255, 255, 255, 0.94), inset 1px 1px 0 rgba(255, 255, 255, 0.8)",
+  minHeight: 38,
+  border: "1px solid transparent",
+  background: `${HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`,
+  boxShadow: `${HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`,
 };
 
 export const dangerButtonStyle: React.CSSProperties = {
@@ -1165,16 +1169,23 @@ export const inputStyle: React.CSSProperties = {
 
 export const mailPanelInputStyle: React.CSSProperties = {
   ...inputStyle,
-  border: "none",
-  borderRadius: 12,
-  background: "#edf2f7",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: HOME_KEY_SURFACE,
   color: "#111827",
-  boxShadow:
-    "inset 5px 5px 10px rgba(166, 180, 200, 0.45), inset -5px -5px 10px rgba(255, 255, 255, 0.88)",
+  boxShadow: "inset 3px 3px 8px rgba(174, 174, 192, 0.18), inset -3px -3px 8px rgba(255, 255, 255, 0.82)",
 };
 
 export const textareaStyle: React.CSSProperties = {
   ...inputStyle,
+  height: "min(280px, 34vh)",
+  resize: "vertical",
+  padding: 9,
+  lineHeight: 1.45,
+};
+
+export const mailPanelTextareaStyle: React.CSSProperties = {
+  ...mailPanelInputStyle,
   height: "min(280px, 34vh)",
   resize: "vertical",
   padding: 9,
@@ -1251,6 +1262,7 @@ export const mailArchiveActionsStyle: React.CSSProperties = {
 export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperties {
   return {
     ...mailPanelSmallButtonStyle,
+    minHeight: 34,
     width: "100%",
     minWidth: 0,
     display: "flex",
@@ -1260,11 +1272,10 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     overflow: "hidden",
     whiteSpace: "nowrap",
     fontWeight: 700,
-    background: active ? "#e4ebf4" : mailPanelSmallButtonStyle.background,
-    color: active ? "#263449" : mailPanelSmallButtonStyle.color,
-    boxShadow: active
-      ? "inset 5px 5px 10px rgba(157, 171, 191, 0.5), inset -5px -5px 10px rgba(255, 255, 255, 0.86)"
-      : mailPanelSmallButtonStyle.boxShadow,
+    border: `1px solid ${active ? "transparent" : HOME_KEY_SOFT_BORDER}`,
+    background: active ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
+    color: "#111111",
+    boxShadow: active ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : HOME_KEY_SHADOW,
   };
 }
 
@@ -1283,13 +1294,13 @@ export const mailArchiveActionCountStyle: React.CSSProperties = {
   placeItems: "center",
   borderRadius: 9,
   padding: "0 5px",
-  background: "#dfe7f1",
-  color: "#475569",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+  background: "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)",
+  color: "#334155",
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
-  boxShadow:
-    "inset 2px 2px 4px rgba(157, 171, 191, 0.42), inset -2px -2px 4px rgba(255, 255, 255, 0.72)",
+  boxShadow: "2px 2px 5px rgba(174, 174, 192, 0.22), -2px -2px 5px rgba(255, 255, 255, 0.86)",
 };
 
 export const mailFiltersRowStyle: React.CSSProperties = {
@@ -1340,37 +1351,43 @@ export const loadingMoreStyle: React.CSSProperties = {
 };
 
 export function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
+  const framed = active;
   return {
     display: "grid",
     gap: 4,
     minHeight: 78,
-    border: "none",
-    borderRadius: 13,
-    background: active ? "#e1e8f2" : unread ? "linear-gradient(145deg, #f5f9fd, #e3ebf5)" : "#edf2f7",
+    border: `1px solid ${framed ? "transparent" : HOME_KEY_SOFT_BORDER}`,
+    borderRadius: HOME_KEY_ELEVATED_RADIUS,
+    background: framed ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
     cursor: "pointer",
     color: "#111827",
     font: "inherit",
     fontSize: 12,
-    fontWeight: unread ? 700 : 500,
+    fontWeight: unread ? 700 : 600,
     padding: 9,
     textAlign: "left",
     minWidth: 0,
-    boxShadow: active
-      ? "inset 5px 5px 11px rgba(157, 171, 191, 0.48), inset -5px -5px 11px rgba(255, 255, 255, 0.84)"
-      : "6px 6px 14px rgba(166, 180, 200, 0.42), -6px -6px 14px rgba(255, 255, 255, 0.88)",
+    boxShadow: framed ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
+    letterSpacing: 0,
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
   };
 }
 
 export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false): React.CSSProperties {
+  const framed = active;
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 98px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: "none",
-    borderRadius: 14,
-    background: pendingAutoArchive ? "#e1e6ee" : active ? "#e1e8f2" : unread ? "linear-gradient(145deg, #f7fbff, #e2eaf4)" : "#edf2f7",
+    border: `1px solid ${framed ? "transparent" : HOME_KEY_SOFT_BORDER}`,
+    borderRadius: HOME_KEY_ELEVATED_RADIUS,
+    background: pendingAutoArchive
+      ? "linear-gradient(145deg, #f2f3f6 0%, #e7e9ee 100%)"
+      : framed
+        ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
+        : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
     color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
     font: "inherit",
@@ -1378,12 +1395,13 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     padding: "10px 10px 9px",
     textAlign: "left",
     minWidth: 0,
-    boxShadow: active
-      ? "inset 6px 6px 12px rgba(157, 171, 191, 0.5), inset -6px -6px 12px rgba(255, 255, 255, 0.84)"
+    boxShadow: framed
+      ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
       : pendingAutoArchive
-        ? "inset 4px 4px 9px rgba(157, 171, 191, 0.42), inset -4px -4px 9px rgba(255, 255, 255, 0.7)"
-        : "7px 7px 15px rgba(166, 180, 200, 0.42), -7px -7px 15px rgba(255, 255, 255, 0.88)",
-    transition: "background 140ms ease, box-shadow 140ms ease, color 140ms ease",
+        ? "inset 0 0 0 1px rgba(148, 163, 184, 0.16)"
+        : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
+    letterSpacing: 0,
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
   };
 }
 
@@ -1458,11 +1476,10 @@ export function messageStarButtonStyle(active: boolean): React.CSSProperties {
     padding: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#334155" : "rgba(15, 23, 42, 0.45)",
-    background: active ? "#e4ebf4" : "#edf2f7",
-    boxShadow: active
-      ? "inset 3px 3px 6px rgba(157, 171, 191, 0.46), inset -3px -3px 6px rgba(255, 255, 255, 0.78)"
-      : "4px 4px 9px rgba(166, 180, 200, 0.44), -4px -4px 9px rgba(255, 255, 255, 0.88)",
+    color: active ? "#111111" : "rgba(15, 23, 42, 0.45)",
+    border: `1px solid ${active ? "transparent" : HOME_KEY_SOFT_BORDER}`,
+    background: active ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
+    boxShadow: active ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : "4px 4px 9px rgba(174, 174, 192, 0.24), -4px -4px 9px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
   };
 }
 
@@ -1517,11 +1534,10 @@ export const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
   height: "100%",
-  border: "1px solid rgba(255, 255, 255, 0.56)",
-  borderRadius: 14,
-  background: "rgba(255, 255, 255, 0.72)",
-  boxShadow:
-    "inset 1px 1px 0 rgba(255, 255, 255, 0.72), 0 14px 34px rgba(15, 23, 42, 0.10)",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: "#ffffff",
+  boxShadow: HOME_KEY_SHADOW,
 };
 
 export const composeStyle: React.CSSProperties = {
