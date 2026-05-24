@@ -124,7 +124,13 @@ func (s *Server) handleNotificationReadAll(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req struct {
-		CompanyID string `json:"company_id"`
+		CompanyID        string `json:"company_id"`
+		Type             string `json:"type"`
+		NotificationType string `json:"notification_type"`
+		Surface          string `json:"surface"`
+		Role             string `json:"role"`
+		LogicGateID      string `json:"logic_gate_id"`
+		NodeID           string `json:"node_id"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -132,7 +138,16 @@ func (s *Server) handleNotificationReadAll(w http.ResponseWriter, r *http.Reques
 	if req.CompanyID == "" {
 		req.CompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
 	}
-	count, err := s.repo.MarkAllNotificationsRead(actor.User.UserID, strings.TrimSpace(req.CompanyID))
+	notificationType := firstNonEmptyString(req.Type, req.NotificationType, r.URL.Query().Get("type"), r.URL.Query().Get("notification_type"))
+	count, err := s.repo.MarkNotificationsRead(store.NotificationMarkReadInput{
+		UserID:           actor.User.UserID,
+		CompanyID:        strings.TrimSpace(req.CompanyID),
+		NotificationType: strings.TrimSpace(notificationType),
+		Surface:          firstNonEmptyString(req.Surface, r.URL.Query().Get("surface")),
+		Role:             firstNonEmptyString(req.Role, r.URL.Query().Get("role")),
+		LogicGateID:      firstNonEmptyString(req.LogicGateID, r.URL.Query().Get("logic_gate_id")),
+		NodeID:           firstNonEmptyString(req.NodeID, r.URL.Query().Get("node_id")),
+	})
 	if errorsIsInvalid(err) {
 		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
 		return
@@ -311,7 +326,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	if companyID == "" || entityType == "" || entityID == "" || informationID == "" || !isMentionNotificationInformationType(infoType) {
 		return
 	}
-	mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(companyID, information)
+	mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDOccurrences(companyID, information)
 	if err != nil || len(mentionedUserIDs) == 0 {
 		return
 	}
@@ -336,10 +351,17 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 		return
 	}
 	events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
+	mentionOccurrenceByUserID := map[string]int{}
 	for _, userID := range mentionedUserIDs {
 		userID = strings.TrimSpace(userID)
 		if userID == "" {
 			continue
+		}
+		occurrenceIndex := mentionOccurrenceByUserID[userID]
+		mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
+		idempotencyKey := "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID
+		if occurrenceIndex > 0 {
+			idempotencyKey += ":" + strconv.Itoa(occurrenceIndex+1)
 		}
 		event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 			CompanyID:      companyID,
@@ -347,7 +369,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 			StreamID:       streamID,
 			Type:           eventType,
 			ActorUserID:    actorUserID,
-			IdempotencyKey: "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID,
+			IdempotencyKey: idempotencyKey,
 			Payload: map[string]any{
 				payloadResourceKey:   entityID,
 				"entity_type":        entityType,
@@ -376,6 +398,15 @@ func parseBoolQuery(raw string) bool {
 	default:
 		return false
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func errorsIsInvalid(err error) bool {

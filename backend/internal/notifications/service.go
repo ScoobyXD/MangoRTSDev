@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -406,6 +407,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 			if gate, err := s.Repo.GetLogicGate(event.CompanyID, event.EntityID); err == nil {
 				entityTitle = strings.TrimSpace(gate.Header)
 			}
+			if entityTitle == "" {
+				entityTitle = "a logic gate"
+			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeLogicGate, event.EntityID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
 				return notificationRecipientMeta{LogicGateID: event.EntityID}
 			}); err != nil {
@@ -425,6 +429,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 				break
 			}
 			entityTitle = strings.TrimSpace(node.Title)
+			if entityTitle == "" {
+				entityTitle = "a node"
+			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
 				return notificationRecipientMeta{NodeID: node.NodeID}
 			}); err != nil {
@@ -438,7 +445,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 			actorLabel = "Someone"
 		}
 		if entityTitle != "" {
-			title = actorLabel + " mentioned you on " + entityTitle
+			title = actorLabel + " " + entityTitle
 		} else {
 			title = actorLabel + " mentioned you"
 		}
@@ -635,31 +642,51 @@ func (s *Service) notificationEffectiveUserSet(companyID, resourceType, resource
 }
 
 func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, error) {
+	occurrences, err := s.ResolveMentionedUserIDOccurrences(companyID, text)
+	if err != nil {
+		return nil, err
+	}
+	mentioned := make([]string, 0, len(occurrences))
+	seen := map[string]struct{}{}
+	for _, userID := range occurrences {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		mentioned = append(mentioned, userID)
+	}
+	return mentioned, nil
+}
+
+func (s *Service) ResolveMentionedUserIDOccurrences(companyID, text string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	text = strings.TrimSpace(text)
 	if companyID == "" || text == "" || !strings.Contains(text, "@") {
 		return []string{}, nil
 	}
 	mentioned := make([]string, 0)
-	seen := map[string]struct{}{}
+	attributeCountsByUserID := map[string]int{}
 	addMentionedUserID := func(userID string) {
 		userID = strings.TrimSpace(userID)
 		if userID == "" {
 			return
 		}
-		if _, ok := seen[userID]; ok {
-			return
-		}
-		seen[userID] = struct{}{}
 		mentioned = append(mentioned, userID)
 	}
 	for _, match := range mentionUserIDAttributePattern.FindAllStringSubmatch(text, -1) {
+		userID := ""
 		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
-			addMentionedUserID(match[1])
-			continue
+			userID = strings.TrimSpace(match[1])
+		} else if len(match) > 2 {
+			userID = strings.TrimSpace(match[2])
 		}
-		if len(match) > 2 {
-			addMentionedUserID(match[2])
+		if userID != "" {
+			addMentionedUserID(userID)
+			attributeCountsByUserID[userID]++
 		}
 	}
 
@@ -668,12 +695,12 @@ func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, err
 		return nil, err
 	}
 	for _, user := range users {
-		for _, alias := range mentionAliases(user) {
-			if alias == "" || !containsMentionAlias(text, alias) {
-				continue
-			}
-			addMentionedUserID(user.UserID)
-			break
+		userID := strings.TrimSpace(user.UserID)
+		if userID == "" || attributeCountsByUserID[userID] > 0 {
+			continue
+		}
+		for range mentionAliasOccurrenceStarts(text, mentionAliases(user)) {
+			addMentionedUserID(userID)
 		}
 	}
 	return mentioned, nil
@@ -708,6 +735,29 @@ func mentionAliases(user domain.CompanyUser) []string {
 func containsMentionAlias(text, alias string) bool {
 	pattern := `(?i)(^|[^A-Za-z0-9_@])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@])`
 	return regexp.MustCompile(pattern).FindStringIndex(text) != nil
+}
+
+func mentionAliasOccurrenceStarts(text string, aliases []string) []int {
+	starts := map[int]struct{}{}
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		pattern := `(?i)(^|[^A-Za-z0-9_@])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@])`
+		for _, match := range regexp.MustCompile(pattern).FindAllStringSubmatchIndex(text, -1) {
+			if len(match) < 4 || match[2] < 0 {
+				continue
+			}
+			starts[match[2]] = struct{}{}
+		}
+	}
+	out := make([]int, 0, len(starts))
+	for start := range starts {
+		out = append(out, start)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func (s *Service) logicGateRaciRecipientIDs(companyID, logicGateID string) ([]string, error) {

@@ -22,7 +22,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import {
   buildSharedInboxRows,
@@ -333,6 +333,21 @@ export function AppSidebar({
         ));
       });
   }, [companyID]);
+
+  const clearNotificationMenu = useCallback(() => {
+    const menu = notificationMenu;
+    if (!menu || menu.loading || menu.items.length === 0) return;
+    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    void markNotificationsRead({
+      companyID,
+      type: menu.type,
+      surface: menu.surface,
+      role: menu.role,
+    }).catch((error) => {
+      console.error("Failed to clear notifications", error);
+      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+    });
+  }, [companyID, notificationMenu]);
 
   const openNotificationTarget = useCallback((notification: NotificationItem) => {
     const notificationID = notification.notification_id.trim();
@@ -1171,7 +1186,17 @@ export function AppSidebar({
       {notificationMenu && (
         <FrameRightClickMenu x={notificationMenu.x} y={notificationMenu.y} onClose={() => setNotificationMenu(null)}>
           <div style={appSidebarNotificationMenuStyle}>
-            <div style={appSidebarNotificationMenuHeaderStyle}>{notificationMenu.title}</div>
+            <div style={appSidebarNotificationMenuHeaderStyle}>
+              <span>{notificationMenu.title}</span>
+              <button
+                type="button"
+                style={appSidebarNotificationMenuClearButtonStyle}
+                disabled={notificationMenu.loading || notificationMenu.items.length === 0}
+                onClick={clearNotificationMenu}
+              >
+                Clear
+              </button>
+            </div>
             {notificationMenu.loading ? (
               <div style={appSidebarNotificationMenuEmptyStyle}>Loading</div>
             ) : notificationMenu.error ? (
@@ -1185,7 +1210,7 @@ export function AppSidebar({
                 style={appSidebarNotificationMenuItemStyle}
                 onClick={() => openNotificationTarget(notification)}
               >
-                <span style={appSidebarNotificationMenuTitleStyle}>{notification.title}</span>
+                <SidebarNotificationTitle notification={notification} />
                 {notification.body_preview && <span style={appSidebarNotificationMenuBodyStyle}>{notification.body_preview}</span>}
                 <span style={appSidebarNotificationMenuMetaStyle}>{formatSidebarNotificationTimestamp(notification.created_timestamp)}</span>
               </button>
@@ -1285,6 +1310,21 @@ function formatSidebarNotificationTimestamp(value: string): string {
   if (deltaMs < 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / 60_000))}m`;
   if (deltaMs < 24 * 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / (60 * 60_000)))}h`;
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
+}
+
+function SidebarNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {
+  const showEntityIcon = notification.type === "mention.created"
+    && (notification.entity_type === "node" || notification.entity_type === "logic_gate");
+  return (
+    <span style={appSidebarNotificationMenuTitleStyle}>
+      {showEntityIcon && (
+        <span style={appSidebarNotificationMenuTitleIconStyle}>
+          <ExplorerRowIcon kind={notification.entity_type === "node" ? "node" : "logic_gate"} />
+        </span>
+      )}
+      <span style={appSidebarNotificationMenuTitleTextStyle}>{notification.title}</span>
+    </span>
+  );
 }
 
 function AppSidebarButton({
@@ -2134,12 +2174,30 @@ const appSidebarNotificationMenuStyle: React.CSSProperties = {
 };
 
 const appSidebarNotificationMenuHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
   padding: "5px 12px 8px",
   color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   fontWeight: 800,
   textTransform: "uppercase",
   letterSpacing: 0,
+};
+
+const appSidebarNotificationMenuClearButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(100, 116, 139, 0.24)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  lineHeight: 1,
+  padding: "4px 7px",
+  textTransform: "none",
 };
 
 const appSidebarNotificationMenuItemStyle: React.CSSProperties = {
@@ -2157,11 +2215,27 @@ const appSidebarNotificationMenuItemStyle: React.CSSProperties = {
 
 const appSidebarNotificationMenuTitleStyle: React.CSSProperties = {
   minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  overflow: "hidden",
+  fontSize: 12,
+  fontWeight: 750,
+};
+
+const appSidebarNotificationMenuTitleIconStyle: React.CSSProperties = {
+  width: 15,
+  height: 15,
+  flex: "0 0 auto",
+  display: "grid",
+  placeItems: "center",
+};
+
+const appSidebarNotificationMenuTitleTextStyle: React.CSSProperties = {
+  minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  fontSize: 12,
-  fontWeight: 750,
 };
 
 const appSidebarNotificationMenuBodyStyle: React.CSSProperties = {

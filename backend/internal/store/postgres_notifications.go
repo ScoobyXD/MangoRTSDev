@@ -373,10 +373,15 @@ returning `+notificationSelectColumns, userID, notificationID, read))
 	return item, err
 }
 
-func (r *PostgresRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
-	userID = strings.TrimSpace(userID)
-	companyID = strings.TrimSpace(companyID)
-	if userID == "" {
+func (r *PostgresRepo) MarkNotificationsRead(input NotificationMarkReadInput) (int, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
+	input.Surface = strings.TrimSpace(input.Surface)
+	input.Role = strings.TrimSpace(input.Role)
+	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
+	if input.UserID == "" {
 		return 0, ErrInvalid
 	}
 	result, err := r.db.Exec(`
@@ -384,7 +389,20 @@ update notifications
 set read_timestamp=coalesce(read_timestamp, now())
 where recipient_user_id=$1::uuid
   and read_timestamp is null
-  and ($2 = '' or company_id = nullif($2, '')::uuid)`+notificationRecipientVisibilityWhereSQL, userID, companyID)
+  and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and ($3 = '' or notification_type = $3)
+  and ($4 = '' or surface = $4)
+  and ($5 = '' or role = $5)
+  and ($6 = '' or logic_gate_id = $6)
+  and ($7 = '' or node_id = $7)`+notificationRecipientVisibilityWhereSQL,
+		input.UserID,
+		input.CompanyID,
+		input.NotificationType,
+		input.Surface,
+		input.Role,
+		input.LogicGateID,
+		input.NodeID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -393,4 +411,8 @@ where recipient_user_id=$1::uuid
 		return 0, err
 	}
 	return int(affected), nil
+}
+
+func (r *PostgresRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
+	return r.MarkNotificationsRead(NotificationMarkReadInput{UserID: userID, CompanyID: companyID})
 }

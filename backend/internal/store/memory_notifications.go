@@ -384,10 +384,37 @@ func (r *MemoryRepo) MarkNotificationRead(userID, notificationID string, read bo
 	return cloneNotification(item), nil
 }
 
-func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
-	userID = strings.TrimSpace(userID)
-	companyID = strings.TrimSpace(companyID)
-	if userID == "" {
+func notificationMatchesMarkReadInput(item domain.Notification, input NotificationMarkReadInput) bool {
+	if input.CompanyID != "" && item.CompanyID != input.CompanyID {
+		return false
+	}
+	if input.NotificationType != "" && item.Type != input.NotificationType {
+		return false
+	}
+	if input.Surface != "" && item.Surface != input.Surface {
+		return false
+	}
+	if input.Role != "" && item.Role != input.Role {
+		return false
+	}
+	if input.LogicGateID != "" && item.LogicGateID != input.LogicGateID {
+		return false
+	}
+	if input.NodeID != "" && item.NodeID != input.NodeID {
+		return false
+	}
+	return true
+}
+
+func (r *MemoryRepo) MarkNotificationsRead(input NotificationMarkReadInput) (int, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
+	input.Surface = strings.TrimSpace(input.Surface)
+	input.Role = strings.TrimSpace(input.Role)
+	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
+	if input.UserID == "" {
 		return 0, ErrInvalid
 	}
 
@@ -397,13 +424,13 @@ func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, er
 	now := time.Now().UTC()
 	count := 0
 	for id, item := range r.notifications {
-		if item.RecipientUserID != userID || item.ReadTimestamp != nil {
+		if item.RecipientUserID != input.UserID || item.ReadTimestamp != nil {
 			continue
 		}
-		if companyID != "" && item.CompanyID != companyID {
+		if !notificationMatchesMarkReadInput(item, input) {
 			continue
 		}
-		if !r.notificationVisibleToUserLocked(item, userID) {
+		if !r.notificationVisibleToUserLocked(item, input.UserID) {
 			continue
 		}
 		item.ReadTimestamp = &now
@@ -411,4 +438,8 @@ func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, er
 		count++
 	}
 	return count, nil
+}
+
+func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
+	return r.MarkNotificationsRead(NotificationMarkReadInput{UserID: userID, CompanyID: companyID})
 }
