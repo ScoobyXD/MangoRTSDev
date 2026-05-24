@@ -5,7 +5,8 @@ import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, ne
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { filterNodeGraphToStructure } from "./nodeRelationshipStructure";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand, deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
+import { deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDeleteConfirmationState, type NodeMapNodeContextMenuState, type NodeMapRelationshipContextMenuState, type NodeMapRelationshipRole } from "./NodeMapContextMenus";
@@ -26,7 +27,7 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 
-type NodeMapEntityBatchResponse = {
+type NodeWorkspaceEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
   nodes?: NodeRecord[];
   relationships?: NodeRelationship[];
@@ -812,7 +813,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     })));
   };
 
-  const applyCreatedNodeBatchSideEffects = (response: NodeMapEntityBatchResponse, createdNodes: NodeRecord[], createdRelationships: NodeRelationship[]) => {
+  const applyCreatedNodeBatchSideEffects = (response: NodeWorkspaceEntityBatchResponse, createdNodes: NodeRecord[], createdRelationships: NodeRelationship[]) => {
     for (const node of createdNodes) upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     for (const folderItem of response.folder_items ?? []) upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
     rememberPersistedNodeMapPositions(response.node_map_positions);
@@ -835,12 +836,12 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       nodeHeight: NODE_H,
     });
     try {
-      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<NodeWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,
         items: [{
-          client_id: createMapEntityBatchClientID("node"),
+          client_id: createWorkspaceEntityBatchClientID("node"),
           title: value,
           x: position.x,
           y: position.y,
@@ -889,8 +890,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         nodeWidth: NODE_W,
         nodeHeight: NODE_H,
       });
-      const clientID = createMapEntityBatchClientID("linked-node");
-      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+      const clientID = createWorkspaceEntityBatchClientID("linked-node");
+      const response = await createWorkspaceEntityBatchCommand<NodeWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,
@@ -1005,7 +1006,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     const clientIDByOldID = new Map<string, string>();
     const createdPositions: Record<string, NodePosition> = {};
     const batchItems = payload.nodes.map((copied, index) => {
-      const clientID = createMapEntityBatchClientID("paste-node", index);
+      const clientID = createWorkspaceEntityBatchClientID("paste-node", index);
       clientIDByOldID.set(copied.oldID, clientID);
       return {
         client_id: clientID,
@@ -1029,7 +1030,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       .filter((relationship): relationship is { client_id_a: string; client_id_b: string; a_position: string; b_position: string } => !!relationship);
     setError("");
     try {
-      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<NodeWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,

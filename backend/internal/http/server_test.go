@@ -2535,7 +2535,7 @@ func TestWorkspaceSnapshotCompanyExplorerSubtreeErrorsAndDoesNotSeedRows(t *test
 		t.Fatalf("GET subtree read created rows: before_folders=%d after_folders=%d after_items=%d", len(beforeFolders), len(afterFolders), len(afterItems))
 	}
 }
-func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
+func TestWorkspaceEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2553,11 +2553,11 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 			{"client_id_a":"copied-a","client_id_b":"copied-b","a_position":"Peer","b_position":"Peer"}
 		]
 	}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		t.Fatalf("POST workspace/entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
 	var payload struct {
@@ -2585,7 +2585,7 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 		} `json:"folder_items"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode map entity batch response: %v", err)
+		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
 	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 || len(payload.FolderItems) != 2 {
 		t.Fatalf("unexpected batch response counts: mappings=%d nodes=%d relationships=%d positions=%d folder_items=%d", len(payload.EntityMappings), len(payload.Nodes), len(payload.Relationships), len(payload.NodeMapPositions), len(payload.FolderItems))
@@ -2600,7 +2600,7 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 	}
 }
 
-func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
+func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2635,13 +2635,13 @@ func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 			"b_position":  "Child",
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = requestWithActorForTest(req, creator, companyID)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		t.Fatalf("POST workspace/entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
 	var payload struct {
@@ -2652,7 +2652,7 @@ func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 		} `json:"relationships"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode map entity batch response: %v", err)
+		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
 	if len(payload.Nodes) != 1 || len(payload.Relationships) != 1 {
 		t.Fatalf("batch response counts: nodes=%d relationships=%d, want 1 each", len(payload.Nodes), len(payload.Relationships))
@@ -2673,7 +2673,7 @@ func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 	}
 }
 
-func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *testing.T) {
+func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2695,11 +2695,11 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 		"items":[{"client_id":"new-gate","header":"New gate","x":480,"y":360,"position":4242}],
 		"relationships":[{"entity_id_a":"` + source.LogicGateID + `","client_id_b":"new-gate","a_position":"Input","b_position":"Output"}]
 	}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		t.Fatalf("POST workspace/entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
 	var payload struct {
@@ -2724,7 +2724,7 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 		} `json:"logic_gate_map_positions"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode map entity batch response: %v", err)
+		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
 	if len(payload.LogicGates) != 1 || len(payload.LogicGateRelationships) != 1 || len(payload.FolderItems) != 1 || len(payload.LogicGateMapPositions) != 1 {
 		t.Fatalf("unexpected logic batch response counts: gates=%d relationships=%d folder_items=%d positions=%d", len(payload.LogicGates), len(payload.LogicGateRelationships), len(payload.FolderItems), len(payload.LogicGateMapPositions))
@@ -2774,7 +2774,7 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	}
 }
 
-func TestMapEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) {
+func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2800,20 +2800,20 @@ func TestMapEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) {
 			"y":         240,
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = requestWithActorForTest(req, creator, companyID)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		t.Fatalf("POST workspace/entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
 	var payload struct {
 		LogicGates []domain.LogicGate `json:"logic_gates"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode map entity batch response: %v", err)
+		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
 	if len(payload.LogicGates) != 1 {
 		t.Fatalf("logic gates = %d, want 1", len(payload.LogicGates))

@@ -206,13 +206,22 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 		t.Fatalf("disabled map-layout status = %d body=%s", mapRec.Code, mapRec.Body.String())
 	}
 
-	batchReq := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", strings.NewReader(`{"company_id":"`+companyID+`","entity_kind":"node","items":[]}`))
+	legacyBatchReq := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", strings.NewReader(`{"company_id":"`+companyID+`","entity_kind":"node","items":[]}`))
+	legacyBatchReq.Header.Set("Content-Type", "application/json")
+	legacyBatchReq = requestWithLogicGateWorkActorForTest(legacyBatchReq, viewer, companyID)
+	legacyBatchRec := httptest.NewRecorder()
+	handler.ServeHTTP(legacyBatchRec, legacyBatchReq)
+	if legacyBatchRec.Code != http.StatusNotFound || !strings.Contains(legacyBatchRec.Body.String(), "legacy_map_routes_disabled") {
+		t.Fatalf("disabled map-entity-batches status = %d body=%s", legacyBatchRec.Code, legacyBatchRec.Body.String())
+	}
+
+	batchReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", strings.NewReader(`{"company_id":"`+companyID+`","entity_kind":"node","items":[]}`))
 	batchReq.Header.Set("Content-Type", "application/json")
 	batchReq = requestWithLogicGateWorkActorForTest(batchReq, viewer, companyID)
 	batchRec := httptest.NewRecorder()
 	handler.ServeHTTP(batchRec, batchReq)
-	if batchRec.Code != http.StatusBadRequest || !strings.Contains(batchRec.Body.String(), "invalid_map_entity_batch") {
-		t.Fatalf("map-entity-batches command status = %d body=%s", batchRec.Code, batchRec.Body.String())
+	if batchRec.Code != http.StatusBadRequest || !strings.Contains(batchRec.Body.String(), "invalid_workspace_entity_batch") {
+		t.Fatalf("workspace/entity-batches command status = %d body=%s", batchRec.Code, batchRec.Body.String())
 	}
 
 	fullReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full", nil)

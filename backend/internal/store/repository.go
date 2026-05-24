@@ -36,6 +36,7 @@ type Repository interface {
 	WorkItemReadRepository
 	CompanyExplorerRepository
 	MapLayoutRepository
+	WorkspaceEntityCommandRepository
 	KanbanRepository
 	NotificationRepository
 	DomainEventRepository
@@ -220,7 +221,10 @@ type MapLayoutRepository interface {
 	ListLogicGateMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateMapPosition, error)
 	ListLogicGateMapPositionsWindow(query LogicGateMapWindowQuery) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
-	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
+}
+
+type WorkspaceEntityCommandRepository interface {
+	CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error)
 }
 
 type KanbanRepository interface {
@@ -282,9 +286,9 @@ type DeleteCompanyUserResult struct {
 	DeleteExternalIdentity bool               `json:"delete_external_identity"`
 }
 
-const MapEntityBatchMaxItems = 200
+const WorkspaceEntityBatchMaxItems = 200
 
-const MapEntityBatchMaxRelationships = 500
+const WorkspaceEntityBatchMaxRelationships = 500
 
 const CompanyExplorerFolderItemBatchMaxItems = 200
 
@@ -353,7 +357,7 @@ func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
 	return query
 }
 
-type MapEntityBatchItemInput struct {
+type WorkspaceEntityBatchItemInput struct {
 	ClientID string
 	Title    string
 	X        float64
@@ -361,7 +365,7 @@ type MapEntityBatchItemInput struct {
 	Position int
 }
 
-type MapEntityBatchRelationshipInput struct {
+type WorkspaceEntityBatchRelationshipInput struct {
 	EntityIDA string
 	EntityIDB string
 	ClientIDA string
@@ -370,32 +374,32 @@ type MapEntityBatchRelationshipInput struct {
 	BPosition string
 }
 
-type MapEntityBatchInput struct {
+type WorkspaceEntityBatchInput struct {
 	CompanyID                string
 	EntityKind               string
 	FolderID                 string
 	CreatorUserID            string
 	CreatorLogicGateRaciRole string
-	Items                    []MapEntityBatchItemInput
-	Relationships            []MapEntityBatchRelationshipInput
+	Items                    []WorkspaceEntityBatchItemInput
+	Relationships            []WorkspaceEntityBatchRelationshipInput
 }
 
-type MapEntityBatchEntityMapping struct {
+type WorkspaceEntityBatchEntityMapping struct {
 	ClientID string `json:"client_id"`
 	EntityID string `json:"entity_id"`
 }
 
-type MapEntityBatchResult struct {
-	CompanyID              string                             `json:"company_id"`
-	EntityKind             string                             `json:"entity_kind"`
-	EntityMappings         []MapEntityBatchEntityMapping      `json:"entity_mappings"`
-	Nodes                  []domain.Node                      `json:"nodes,omitempty"`
-	LogicGates             []domain.LogicGate                 `json:"logic_gates,omitempty"`
-	Relationships          []domain.NodeRelationship          `json:"relationships,omitempty"`
-	LogicGateRelationships []domain.LogicGateRelationship     `json:"logic_gate_relationships,omitempty"`
-	FolderItems            []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
-	NodeMapPositions       []domain.NodeMapPosition           `json:"node_map_positions,omitempty"`
-	LogicGateMapPositions  []domain.LogicGateMapPosition      `json:"logic_gate_map_positions,omitempty"`
+type WorkspaceEntityBatchResult struct {
+	CompanyID              string                              `json:"company_id"`
+	EntityKind             string                              `json:"entity_kind"`
+	EntityMappings         []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
+	Nodes                  []domain.Node                       `json:"nodes,omitempty"`
+	LogicGates             []domain.LogicGate                  `json:"logic_gates,omitempty"`
+	Relationships          []domain.NodeRelationship           `json:"relationships,omitempty"`
+	LogicGateRelationships []domain.LogicGateRelationship      `json:"logic_gate_relationships,omitempty"`
+	FolderItems            []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
+	NodeMapPositions       []domain.NodeMapPosition            `json:"node_map_positions,omitempty"`
+	LogicGateMapPositions  []domain.LogicGateMapPosition       `json:"logic_gate_map_positions,omitempty"`
 }
 type NodeMapWindowBounds struct {
 	MinX float64 `json:"min_x"`

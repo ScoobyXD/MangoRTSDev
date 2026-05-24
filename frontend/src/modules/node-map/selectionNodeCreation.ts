@@ -2,7 +2,8 @@ import { readAuthConfig } from "../../auth/cognitoAuth";
 import { createRequestJSON } from "../api/requestJSON";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand, type NodeMapCommandRequest } from "./nodeMapCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
+import type { NodeMapCommandRequest } from "./nodeMapCommands";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph";
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { buildLinkedNodePayloadFromSourceSide } from "./relationshipProjection";
@@ -103,12 +104,12 @@ export async function createNodeFromSelectionTitle(args: {
   if (args.relationshipKind && !sourceNodeID) throw new Error("selection_source_node_required");
 
   const position = readOpenSelectionNodePosition(apiBase, companyID, sourceNodeID, args.relationshipKind);
-  const clientID = createMapEntityBatchClientID("selection-node");
+  const clientID = createWorkspaceEntityBatchClientID("selection-node");
   const relationshipPayload = sourceNodeID && args.relationshipKind
     ? buildLinkedNodePayloadFromSourceSide(relationshipDirectionForSelectionKind(args.relationshipKind))
     : null;
   const folderID = args.folderID?.trim() || await resolveActiveNodesFolderID(apiBase, companyID);
-  const response = await createMapEntityBatchCommand<TextSelectionNodeCreateResponse>({
+  const response = await createWorkspaceEntityBatchCommand<TextSelectionNodeCreateResponse>({
     companyID,
     entityKind: "node",
     folderID,

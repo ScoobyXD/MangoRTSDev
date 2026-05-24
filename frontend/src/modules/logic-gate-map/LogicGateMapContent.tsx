@@ -6,7 +6,7 @@ import { getLogicGateRelationshipGraphSnapshot, hasLogicGateRelationshipGraphSna
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { primeLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
@@ -23,7 +23,7 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 
-type LogicGateMapEntityBatchResponse = {
+type LogicGateWorkspaceEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
   logic_gates?: LogicGateRecord[];
   logic_gate_relationships?: LogicGateRelationship[];
@@ -749,7 +749,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     })));
   };
 
-  const applyCreatedLogicGateBatchSideEffects = (response: LogicGateMapEntityBatchResponse, createdRecords: LogicGateRecord[], createdRelationships: LogicGateRelationship[]) => {
+  const applyCreatedLogicGateBatchSideEffects = (response: LogicGateWorkspaceEntityBatchResponse, createdRecords: LogicGateRecord[], createdRelationships: LogicGateRelationship[]) => {
     for (const record of createdRecords) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(record));
     for (const folderItem of response.folder_items ?? []) upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, folderItem);
     rememberPersistedLogicGateMapPositions(response.logic_gate_map_positions);
@@ -772,12 +772,12 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       nodeHeight: NODE_H,
     });
     try {
-      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<LogicGateWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,
         items: [{
-          client_id: createMapEntityBatchClientID("logic-gate"),
+          client_id: createWorkspaceEntityBatchClientID("logic-gate"),
           title: value,
           x: position.x,
           y: position.y,
@@ -830,8 +830,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         nodeWidth: NODE_W,
         nodeHeight: NODE_H,
       });
-      const clientID = createMapEntityBatchClientID("linked-logic-gate");
-      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+      const clientID = createWorkspaceEntityBatchClientID("linked-logic-gate");
+      const response = await createWorkspaceEntityBatchCommand<LogicGateWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,
@@ -957,7 +957,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const clientIDByOldID = new Map<string, string>();
     const createdPositions: Record<string, NodePosition> = {};
     const batchItems = payload.nodes.map((copied, index) => {
-      const clientID = createMapEntityBatchClientID("paste-logic-gate", index);
+      const clientID = createWorkspaceEntityBatchClientID("paste-logic-gate", index);
       clientIDByOldID.set(copied.oldID, clientID);
       return {
         client_id: clientID,
@@ -981,7 +981,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       .filter((relationship): relationship is { client_id_a: string; client_id_b: string; a_position: string; b_position: string } => !!relationship);
     setError("");
     try {
-      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<LogicGateWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,

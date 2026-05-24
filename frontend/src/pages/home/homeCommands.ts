@@ -44,7 +44,7 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../../modules/node-map/nodeMapCommands.js";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../../modules/workspace/workspaceEntityCommands.js";
 import {
   cleanIDList,
   collectSharedInboxSubtreeIDs,
@@ -134,7 +134,7 @@ export type HomeCreateLogicGateCommandResult = {
   folderItems: CompanyExplorerFolderItem[];
 };
 
-type HomeMapEntityBatchResponse = {
+type HomeWorkspaceEntityBatchResponse = {
   nodes?: NodeRecord[];
   logic_gates?: LogicGateRecord[];
   folder_items?: CompanyExplorerFolderItem[];
@@ -325,11 +325,11 @@ export async function createHomeNodeCommand(args: {
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeCreateNodeCommandResult> {
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
-  const response = await createMapEntityBatchCommand<HomeMapEntityBatchResponse>({
+  const response = await createWorkspaceEntityBatchCommand<HomeWorkspaceEntityBatchResponse>({
     companyID: args.companyID,
     entityKind: "node",
     items: [{
-      client_id: createMapEntityBatchClientID("home-node"),
+      client_id: createWorkspaceEntityBatchClientID("home-node"),
       title: args.title?.trim() || "new node",
       x: 120,
       y: 120,
@@ -349,12 +349,12 @@ export async function createHomeLogicGateCommand(args: {
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeCreateLogicGateCommandResult> {
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
-  const response = await createMapEntityBatchCommand<HomeMapEntityBatchResponse>({
+  const response = await createWorkspaceEntityBatchCommand<HomeWorkspaceEntityBatchResponse>({
     companyID: args.companyID,
     entityKind: "logic_gate",
     creatorLogicGateRaciRole: args.creatorRaciRole,
     items: [{
-      client_id: createMapEntityBatchClientID("home-logic-gate"),
+      client_id: createWorkspaceEntityBatchClientID("home-logic-gate"),
       title: args.title?.trim() || "new logic gate",
       x: 120,
       y: 120,
