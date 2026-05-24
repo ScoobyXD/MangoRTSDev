@@ -2810,13 +2810,31 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) 
 	}
 
 	var payload struct {
-		LogicGates []domain.LogicGate `json:"logic_gates"`
+		LogicGates  []domain.LogicGate                 `json:"logic_gates"`
+		FolderItems []domain.CompanyExplorerFolderItem `json:"folder_items"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
 	if len(payload.LogicGates) != 1 {
 		t.Fatalf("logic gates = %d, want 1", len(payload.LogicGates))
+	}
+	if len(payload.FolderItems) != 1 || payload.FolderItems[0].ItemType != "logic_gate" || payload.FolderItems[0].ItemID != payload.LogicGates[0].LogicGateID {
+		t.Fatalf("logic gate folder items = %+v, want active Logic Gate placement", payload.FolderItems)
+	}
+	logicFolders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders logic_gate error = %v", err)
+	}
+	activeFolderID := ""
+	for _, folder := range logicFolders {
+		if folder.SystemKey != nil && *folder.SystemKey == store.CompanyExplorerSystemActiveLogicGatesKey {
+			activeFolderID = folder.FolderID
+			break
+		}
+	}
+	if activeFolderID == "" || payload.FolderItems[0].FolderID != activeFolderID {
+		t.Fatalf("logic gate folder item folder_id = %q, want active Logic Gates folder %q", payload.FolderItems[0].FolderID, activeFolderID)
 	}
 	assignments := payload.LogicGates[0].RaciAssignments
 	if len(assignments) != 1 || assignments[0].Role != domain.LogicGateRaciRoleResponsible || assignments[0].UserID != creator.UserID {

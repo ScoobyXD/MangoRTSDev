@@ -545,16 +545,18 @@ func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing
 				systemKeys[*folder.SystemKey] = true
 			}
 		}
-		if !systemKeys[CompanyExplorerSystemActiveNodesKey] || !systemKeys[CompanyExplorerSystemHistoryKey] {
-			t.Fatalf("system folder keys = %+v, want active and history", systemKeys)
-		}
-
 		logicRootID := ""
 		logicChildren := map[string]bool{}
 		for _, folder := range logicFolders {
+			if folder.SystemKey != nil {
+				systemKeys[*folder.SystemKey] = true
+			}
 			if folder.Name == "Logic Gates" && folder.ParentFolderID == nil {
 				logicRootID = folder.FolderID
 			}
+		}
+		if !systemKeys[CompanyExplorerSystemActiveNodesKey] || !systemKeys[CompanyExplorerSystemActiveLogicGatesKey] || !systemKeys[CompanyExplorerSystemHistoryKey] {
+			t.Fatalf("system folder keys = %+v, want active nodes, active logic gates, and history", systemKeys)
 		}
 		for _, folder := range logicFolders {
 			if folder.ParentFolderID != nil && *folder.ParentFolderID == logicRootID {

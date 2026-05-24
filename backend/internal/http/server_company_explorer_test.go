@@ -234,6 +234,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		Folders []struct {
 			FolderID       string  `json:"folder_id"`
 			ParentFolderID *string `json:"parent_folder_id"`
+			SystemKey      *string `json:"system_key"`
 		} `json:"folders"`
 		FolderItems []struct {
 			FolderID string `json:"folder_id"`
@@ -243,17 +244,24 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 12 || len(snapshot.FolderItems) != 3 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 12/3", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 13 || len(snapshot.FolderItems) != 3 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 13/3", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
+	foundActiveLogicGates := false
 	for _, folder := range snapshot.Folders {
 		if folder.FolderID == childID && folder.ParentFolderID != nil && *folder.ParentFolderID == siblingID {
 			foundChild = true
 		}
+		if folder.SystemKey != nil && *folder.SystemKey == store.CompanyExplorerSystemActiveLogicGatesKey {
+			foundActiveLogicGates = true
+		}
 	}
 	if !foundChild {
 		t.Fatalf("snapshot did not preserve moved child folder parent")
+	}
+	if !foundActiveLogicGates {
+		t.Fatalf("snapshot did not include Active Logic Gates system folder")
 	}
 }
 
@@ -352,7 +360,7 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	if logicRootID == "" || len(childNames) != 5 || !childNames["Product"] || !childNames["Design"] || !childNames["Production"] || !childNames["Supply Chain"] || !childNames["QA"] {
 		t.Fatalf("default logic gate folders = root:%q children:%v", logicRootID, childNames)
 	}
-	if len(systemNames) != 2 || !systemNames["Active Nodes"] || !systemNames["History"] || systemFolderID == "" {
+	if len(systemNames) != 3 || !systemNames["Active Nodes"] || !systemNames["Active Logic Gates"] || !systemNames["History"] || systemFolderID == "" {
 		t.Fatalf("system folders = id:%q names:%v", systemFolderID, systemNames)
 	}
 
@@ -372,15 +380,15 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	foldersAfterDelete := listFolders()
 	systemCount := 0
 	for _, folder := range foldersAfterDelete {
-		if folder.FolderKind == "logic_gate" {
+		if folder.FolderKind == "logic_gate" && folder.SystemKey == nil {
 			t.Fatalf("logic gate default folder was recreated after delete: %+v", folder)
 		}
 		if folder.SystemKey != nil {
 			systemCount++
 		}
 	}
-	if systemCount != 2 {
-		t.Fatalf("system folder count after default delete = %d, want 2", systemCount)
+	if systemCount != 3 {
+		t.Fatalf("system folder count after default delete = %d, want 3", systemCount)
 	}
 }
 

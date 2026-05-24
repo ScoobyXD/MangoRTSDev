@@ -102,6 +102,7 @@ export type ExplorerCreationTargets = {
 export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
 export const EXPLORER_SYSTEM_KANBAN_FOLDER_ID = "system-folder-kanban-boards";
 export const EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID = "system-folder-active-nodes";
+export const EXPLORER_SYSTEM_ACTIVE_LOGIC_GATES_FOLDER_ID = "system-folder-active-logic-gates";
 export const EXPLORER_SYSTEM_HISTORY_FOLDER_ID = "system-folder-history";
 export const EXPLORER_SYSTEM_FOLDER_COLOR = "rgb(71, 85, 105)";
 export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
@@ -109,7 +110,7 @@ export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
 
 export function isExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "active_nodes" || value === "history";
+  return value === "active_nodes" || value === "active_logic_gates" || value === "history";
 }
 
 export function formatExplorerFolderLabel(name: string): string {

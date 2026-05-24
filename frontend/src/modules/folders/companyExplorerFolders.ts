@@ -3,7 +3,7 @@ import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 
 export type CompanyExplorerFolderKind = "node" | "logic_gate";
 export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
-export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "history";
+export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "active_logic_gates" | "history";
 
 export type CompanyExplorerFolder = {
   company_id: string;
@@ -36,7 +36,7 @@ export function isCompanyExplorerItemType(value: unknown): value is CompanyExplo
 }
 
 export function isCompanyExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "active_nodes" || value === "history";
+  return value === "active_nodes" || value === "active_logic_gates" || value === "history";
 }
 
 export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {

@@ -202,9 +202,9 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 			if _, err := tx.ExecContext(ctx,
 				`insert into company_explorer_folders
 				 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-				 values ($1, $2, null, 'node', $3, $4, $5, now(), now())
+				 values ($1, $2, null, $3, $4, $5, $6, now(), now())
 				 on conflict (company_id, system_key) where system_key is not null do nothing`,
-				companyID, newUUIDv7String(), seed.Key, seed.Name, seed.Position,
+				companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
 			); err != nil {
 				return err
 			}
@@ -282,9 +282,9 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 	if _, err := tx.ExecContext(ctx,
 		`insert into company_explorer_folders
 		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, null, 'node', $3, $4, $5, now(), now())
+		 values ($1, $2, null, $3, $4, $5, $6, now(), now())
 		 on conflict (company_id, system_key) where system_key is not null do nothing`,
-		companyID, newUUIDv7String(), seed.Key, seed.Name, seed.Position,
+		companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
 	); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}

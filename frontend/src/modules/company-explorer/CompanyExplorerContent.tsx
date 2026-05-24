@@ -667,12 +667,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (!created) throw new Error("logic_gate_batch_create_missing_gate");
       const logicGate = toLogicGateCanvasRecord(created);
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
+      const createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
       dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
       upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
-      if (!parentFolderID && position && position > 0) {
+      if (!createdFolderID && position && position > 0) {
         setRootRowOrder((previous) => ({ ...previous, [`logic-gate-${logicGate.logic_gate_id}`]: position }));
       }
-      expandCreatedItemTarget(parentFolderID);
+      expandCreatedItemTarget(createdFolderID);
       lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);

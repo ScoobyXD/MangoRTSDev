@@ -11,6 +11,7 @@ const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
 const companyExplorerDefaultCommunicationsFolderSeedKey = "communications_v1"
 const companyExplorerSystemFolderSeedKey = "system_folders_v1"
 const CompanyExplorerSystemActiveNodesKey = "active_nodes"
+const CompanyExplorerSystemActiveLogicGatesKey = "active_logic_gates"
 const CompanyExplorerSystemHistoryKey = "history"
 
 var companyExplorerDefaultLogicGateChildFolderNames = []string{
@@ -75,14 +76,16 @@ var companyExplorerDefaultCommunicationsFolderTree = []companyExplorerDefaultFol
 }
 
 type companyExplorerSystemFolderDefinition struct {
-	Key      string
-	Name     string
-	Position int
+	Key        string
+	FolderKind string
+	Name       string
+	Position   int
 }
 
 var companyExplorerSystemFolderSeeds = []companyExplorerSystemFolderDefinition{
-	{Key: CompanyExplorerSystemActiveNodesKey, Name: "Active Nodes", Position: 200},
-	{Key: CompanyExplorerSystemHistoryKey, Name: "History", Position: 300},
+	{Key: CompanyExplorerSystemActiveNodesKey, FolderKind: "node", Name: "Active Nodes", Position: 200},
+	{Key: CompanyExplorerSystemActiveLogicGatesKey, FolderKind: "logic_gate", Name: "Active Logic Gates", Position: 200},
+	{Key: CompanyExplorerSystemHistoryKey, FolderKind: "node", Name: "History", Position: 300},
 }
 
 func companyExplorerSystemFolderDefinitionForKey(systemKey string) (companyExplorerSystemFolderDefinition, bool) {
@@ -145,7 +148,7 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 			r.folders[key(companyID, folderID)] = domain.CompanyExplorerFolder{
 				CompanyID:        companyID,
 				FolderID:         folderID,
-				FolderKind:       "node",
+				FolderKind:       seed.FolderKind,
 				SystemKey:        &systemKey,
 				Name:             seed.Name,
 				Position:         seed.Position,
@@ -211,7 +214,7 @@ func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKe
 	folder := domain.CompanyExplorerFolder{
 		CompanyID:        companyID,
 		FolderID:         newUUIDv7String(),
-		FolderKind:       "node",
+		FolderKind:       seed.FolderKind,
 		SystemKey:        &systemKeyValue,
 		Name:             seed.Name,
 		Position:         seed.Position,
@@ -229,6 +232,14 @@ func (r *MemoryRepo) assignNodeToActiveNodesFolderLocked(companyID, nodeID strin
 	}
 	item, _, err := r.assignCompanyExplorerFolderItemLocked(companyID, activeFolder.FolderID, "node", nodeID, position)
 	return item, err
+}
+
+func (r *MemoryRepo) activeLogicGatesFolderLocked(companyID string) (domain.CompanyExplorerFolder, error) {
+	activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(companyID, CompanyExplorerSystemActiveLogicGatesKey)
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	return activeFolder, nil
 }
 
 func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
