@@ -81,6 +81,9 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
   access_level=excluded.access_level`, input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
 					return MapEntityBatchResult{}, err
 				}
+				if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+					return MapEntityBatchResult{}, err
+				}
 			}
 			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
@@ -122,9 +125,53 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
   access_level=excluded.access_level`, input.CompanyID, created.LogicGateID, input.CreatorUserID); err != nil {
 				return MapEntityBatchResult{}, err
 			}
+			if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
 		}
 		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
 			return MapEntityBatchResult{}, err
+		}
+		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
+			assignment := domain.LogicGateRaciAssignment{
+				CompanyID:   input.CompanyID,
+				LogicGateID: created.LogicGateID,
+				Role:        input.CreatorLogicGateRaciRole,
+				UserID:      input.CreatorUserID,
+			}
+			if err := tx.QueryRowContext(ctx, `
+insert into logic_gate_raci_assignments
+  (company_id, logic_gate_id, role, user_id, created_timestamp)
+values ($1, $2, $3, $4, now())
+on conflict (company_id, logic_gate_id, role, user_id) do update set
+  created_timestamp=logic_gate_raci_assignments.created_timestamp
+returning company_id, logic_gate_id, role::text, user_id::text, created_timestamp`,
+				input.CompanyID,
+				created.LogicGateID,
+				input.CreatorLogicGateRaciRole,
+				input.CreatorUserID,
+			).Scan(
+				&assignment.CompanyID,
+				&assignment.LogicGateID,
+				&assignment.Role,
+				&assignment.UserID,
+				&assignment.CreatedTimestamp,
+			); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if creatorAssignee.Name != nil {
+				assignment.UserDisplayName = strings.TrimSpace(*creatorAssignee.Name)
+			}
+			if creatorAssignee.Email != nil {
+				assignment.UserEmail = strings.TrimSpace(*creatorAssignee.Email)
+			}
+			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
+			if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, input.CompanyID, created.LogicGateID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
+				return MapEntityBatchResult{}, err
+			}
 		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID

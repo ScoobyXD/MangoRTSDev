@@ -15,6 +15,7 @@ import {
   getHomeGridTemplateColumns,
   getHomeViewLabel,
   inboxLogicGateLabel,
+  isWorkspacePanelHomeViewID,
   logicGateTitle,
   missingLogicGateRecordIDs,
   getInboxMatrixGridTemplateColumns,
@@ -99,6 +100,10 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(getHomeViewLabel("r-inbox", shared), "R Nodes");
   assert.equal(mailboxForHomeView("aci-inbox"), "all");
   assert.equal(mailboxForHomeView("my-triage"), "primary");
+  assert.equal(isWorkspacePanelHomeViewID("my-triage"), true);
+  assert.equal(isWorkspacePanelHomeViewID("shared-root"), true);
+  assert.equal(isWorkspacePanelHomeViewID("shared:shared-a"), true);
+  assert.equal(isWorkspacePanelHomeViewID("aci-inbox"), true);
 });
 
 test("mailbox count helper reads provider folder totals for triage tabs", () => {

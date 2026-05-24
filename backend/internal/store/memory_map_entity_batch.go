@@ -101,6 +101,9 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 					CreatedTimestamp: now,
 				}
 				r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeNode, created.NodeID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
+				if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+					return MapEntityBatchResult{}, err
+				}
 			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
@@ -137,8 +140,35 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 				CreatedTimestamp: now,
 			}
 			r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeLogicGate, created.LogicGateID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
+			if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
 		}
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
+		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
+			user, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID)
+			if !ok {
+				return MapEntityBatchResult{}, ErrAssigneeNotInCompany
+			}
+			assignment := domain.LogicGateRaciAssignment{
+				CompanyID:        input.CompanyID,
+				LogicGateID:      created.LogicGateID,
+				Role:             input.CreatorLogicGateRaciRole,
+				UserID:           input.CreatorUserID,
+				UserDisplayName:  strings.TrimSpace(user.DisplayName),
+				UserEmail:        strings.TrimSpace(user.Email),
+				CreatedTimestamp: now,
+			}
+			r.logicGateRaci[key(input.CompanyID, created.LogicGateID)] = []domain.LogicGateRaciAssignment{assignment}
+			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
+			if err := r.recomputeLogicGateRaciEffectiveAccessLocked(input.CompanyID, created.LogicGateID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			r.rebuildWorkItemInboxEntriesForLogicGateLocked(input.CompanyID, created.LogicGateID)
+		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})

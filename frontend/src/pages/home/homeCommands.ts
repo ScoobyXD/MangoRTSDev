@@ -16,7 +16,7 @@ import {
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
 import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../modules/api/requestJSON.js";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import type {
   CompanyUser,
   CommunicationsSharedInbox,
@@ -345,12 +345,14 @@ export async function createHomeLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
   title?: string;
+  creatorRaciRole?: LogicGateRaciRole;
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeCreateLogicGateCommandResult> {
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
   const response = await createMapEntityBatchCommand<HomeMapEntityBatchResponse>({
     companyID: args.companyID,
     entityKind: "logic_gate",
+    creatorLogicGateRaciRole: args.creatorRaciRole,
     items: [{
       client_id: createMapEntityBatchClientID("home-logic-gate"),
       title: args.title?.trim() || "new logic gate",

@@ -211,8 +211,8 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 	batchReq = requestWithLogicGateWorkActorForTest(batchReq, viewer, companyID)
 	batchRec := httptest.NewRecorder()
 	handler.ServeHTTP(batchRec, batchReq)
-	if batchRec.Code != http.StatusNotFound || !strings.Contains(batchRec.Body.String(), "legacy_map_routes_disabled") {
-		t.Fatalf("disabled map-entity-batches status = %d body=%s", batchRec.Code, batchRec.Body.String())
+	if batchRec.Code != http.StatusBadRequest || !strings.Contains(batchRec.Body.String(), "invalid_map_entity_batch") {
+		t.Fatalf("map-entity-batches command status = %d body=%s", batchRec.Code, batchRec.Body.String())
 	}
 
 	fullReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full", nil)

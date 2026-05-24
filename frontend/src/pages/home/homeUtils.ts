@@ -930,7 +930,7 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
 }
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {
-  return viewID === "aci-inbox" || viewID === "r-inbox" || viewID === "my-nodes" || viewID === "my-logic-gates";
+  return isArchivableHomeViewID(viewID) || viewID === "aci-inbox" || viewID === "r-inbox" || viewID === "my-nodes" || viewID === "my-logic-gates";
 }
 
 export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {

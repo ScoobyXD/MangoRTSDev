@@ -28,28 +28,25 @@ type mapEntityBatchRelationshipRequest struct {
 }
 
 func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) {
-	if !s.legacyMapRoutesEnabled {
-		writeLegacyMapRoutesDisabled(w)
-		return
-	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 
 	var req struct {
-		CompanyID     string                              `json:"company_id"`
-		EntityKind    string                              `json:"entity_kind"`
-		FolderID      string                              `json:"folder_id"`
-		Items         []mapEntityBatchItemRequest         `json:"items"`
-		Relationships []mapEntityBatchRelationshipRequest `json:"relationships"`
+		CompanyID                string                              `json:"company_id"`
+		EntityKind               string                              `json:"entity_kind"`
+		FolderID                 string                              `json:"folder_id"`
+		CreatorLogicGateRaciRole string                              `json:"creator_logic_gate_raci_role"`
+		Items                    []mapEntityBatchItemRequest         `json:"items"`
+		Relationships            []mapEntityBatchRelationshipRequest `json:"relationships"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 
-	input, ok := buildMapEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.Items, req.Relationships)
+	input, ok := buildMapEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_map_entity_batch")
 		return
@@ -107,16 +104,28 @@ func buildMapEntityBatchInput(
 	companyID string,
 	entityKind string,
 	folderID string,
+	creatorLogicGateRaciRole string,
 	items []mapEntityBatchItemRequest,
 	relationships []mapEntityBatchRelationshipRequest,
 ) (store.MapEntityBatchInput, bool) {
 	input := store.MapEntityBatchInput{
-		CompanyID:  strings.TrimSpace(companyID),
-		EntityKind: strings.TrimSpace(entityKind),
-		FolderID:   strings.TrimSpace(folderID),
+		CompanyID:                strings.TrimSpace(companyID),
+		EntityKind:               strings.TrimSpace(entityKind),
+		FolderID:                 strings.TrimSpace(folderID),
+		CreatorLogicGateRaciRole: strings.TrimSpace(creatorLogicGateRaciRole),
 	}
 	if input.CompanyID == "" || (input.EntityKind != "node" && input.EntityKind != "logic_gate") {
 		return store.MapEntityBatchInput{}, false
+	}
+	if input.CreatorLogicGateRaciRole != "" {
+		if input.EntityKind != "logic_gate" {
+			return store.MapEntityBatchInput{}, false
+		}
+		role, ok := store.NormalizeLogicGateRaciRole(input.CreatorLogicGateRaciRole)
+		if !ok {
+			return store.MapEntityBatchInput{}, false
+		}
+		input.CreatorLogicGateRaciRole = role
 	}
 	if len(items) == 0 || len(items) > store.MapEntityBatchMaxItems || len(relationships) > store.MapEntityBatchMaxRelationships {
 		return store.MapEntityBatchInput{}, false

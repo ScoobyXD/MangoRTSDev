@@ -5,7 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateAssignmentCommandResult } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -191,6 +191,37 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   assert.deepEqual(updated.map((item) => item.node_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
+});
+
+test("Home logic gate creation sends creator RACI role through batch create", async () => {
+  const calls: Array<{ apiBase: string; path: string; body: Record<string, unknown> }> = [];
+  const result = await createHomeLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    creatorRaciRole: "responsible",
+    requestJSON: async <T>(_apiBase: string, path: string, init?: RequestInit): Promise<T> => {
+      calls.push({
+        apiBase: _apiBase,
+        path,
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return {
+        logic_gates: [{
+          company_id: "company-1",
+          logic_gate_id: "gate-1",
+          header: "new logic gate",
+          raci_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "responsible", user_id: "user-1", created_timestamp: timestamp }],
+          created_timestamp: timestamp,
+        }],
+        folder_items: [],
+      } as T;
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/v1/map-entity-batches");
+  assert.equal(calls[0].body.creator_logic_gate_raci_role, "responsible");
+  assert.equal(result.logicGate.raci_assignments?.[0]?.role, "responsible");
 });
 test("Home bulk node priority placement uses the work-item move command", async () => {
   const nodes = new Map([

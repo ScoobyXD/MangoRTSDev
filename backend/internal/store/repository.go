@@ -371,12 +371,13 @@ type MapEntityBatchRelationshipInput struct {
 }
 
 type MapEntityBatchInput struct {
-	CompanyID     string
-	EntityKind    string
-	FolderID      string
-	CreatorUserID string
-	Items         []MapEntityBatchItemInput
-	Relationships []MapEntityBatchRelationshipInput
+	CompanyID                string
+	EntityKind               string
+	FolderID                 string
+	CreatorUserID            string
+	CreatorLogicGateRaciRole string
+	Items                    []MapEntityBatchItemInput
+	Relationships            []MapEntityBatchRelationshipInput
 }
 
 type MapEntityBatchEntityMapping struct {
