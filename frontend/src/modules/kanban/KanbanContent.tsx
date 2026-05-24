@@ -36,7 +36,7 @@ import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls } from "./KanbanAr
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
 import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
-import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
+import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay, KanbanRenameNodeDialog } from "./KanbanOverlays";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
@@ -160,6 +160,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
+  const [renameNodeDraft, setRenameNodeDraft] = useState<{ nodeID: string; title: string } | null>(null);
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
@@ -1181,6 +1182,46 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs });
   }, [cards]);
 
+  const requestNodeRename = useCallback((card: KanbanCard) => {
+    setCardContextMenu(null);
+    setColumnContextMenu(null);
+    setRenameNodeDraft({ nodeID: card.node_id, title: card.node_title });
+  }, []);
+
+  const commitNodeRename = useCallback(async (nodeID: string, title: string) => {
+    const cleanTitle = title.trim();
+    if (!nodeID || !cleanTitle) {
+      setError("Node title is required");
+      return;
+    }
+    const currentTitle = cardsRef.current.find((card) => card.node_id === nodeID)?.node_title.trim() ?? "";
+    if (currentTitle === cleanTitle) {
+      setRenameNodeDraft(null);
+      return;
+    }
+    setError("");
+    try {
+      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
+        method: "PUT",
+        json: { company_id: companyID, title: cleanTitle },
+      });
+      const updatedTitle = getNodeTitle(updated) || cleanTitle;
+      invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+      applyCards((previous) => previous.map((card) => (card.node_id === nodeID ? { ...card, node_title: updatedTitle } : card)));
+      setNodeEditorOverlay((current) => (current?.nodeID === nodeID ? { ...current, nodeTitle: updatedTitle } : current));
+      if (highlightedEntity?.nodeID === nodeID) {
+        const selectedNodeIDs = Array.from(new Set(cardsRef.current
+          .filter((card) => selectedCardIDs.has(card.card_id))
+          .map((card) => card.node_id)));
+        publishKanbanSelectionToLinkedFrames(companyID, frameID, nodeID, updatedTitle, selectedNodeIDs.length > 0 ? selectedNodeIDs : [nodeID]);
+      }
+      setRenameNodeDraft(null);
+    } catch {
+      setError("Node rename failed");
+    }
+  }, [apiBase, applyCards, companyID, frameID, highlightedEntity?.nodeID, requestJSON, selectedCardIDs]);
+
   const removeCards = useCallback(async (cardIDs: string[]) => {
     const ids = new Set(cardIDs);
     if (ids.size === 0) return;
@@ -1683,10 +1724,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onRequestColumnDelete={requestColumnDelete}
         onPersistColumnItemColor={(columnID, color) => void persistColumnItemColor(columnID, color)}
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
+        onRenameNode={requestNodeRename}
         onRevertCardsToMyTriage={(cardIDs) => void revertCardsToMyTriage(cardIDs)}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
-      />      {nodeEditorOverlay && (
+      />
+      {nodeEditorOverlay && (
         <KanbanNodeEditorOverlay
           overlay={nodeEditorOverlay}
           ratio={nodeEditorOverlayRatio}
@@ -1698,7 +1741,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           onClose={() => setNodeEditorOverlay(null)}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
         />
-      )}      <KanbanDeleteConfirmations
+      )}
+      <KanbanRenameNodeDialog
+        draft={renameNodeDraft}
+        onSetTitle={(title) => setRenameNodeDraft((current) => (current ? { ...current, title } : current))}
+        onCommit={(nodeID, title) => void commitNodeRename(nodeID, title)}
+        onCancel={() => setRenameNodeDraft(null)}
+      />
+      <KanbanDeleteConfirmations
         deleteNodeConfirmation={deleteNodeConfirmation}
         deleteCardConfirmation={deleteCardConfirmation}
         deleteColumnConfirmation={deleteColumnConfirmation}
@@ -1717,6 +1767,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onCancelNodeDelete={() => setDeleteNodeConfirmation(null)}
         onCancelCardDelete={() => setDeleteCardConfirmation(null)}
         onCancelColumnDelete={() => setDeleteColumnConfirmation(null)}
-      />    </div>
+      />
+    </div>
   );
 };
