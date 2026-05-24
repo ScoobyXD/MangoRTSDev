@@ -25,6 +25,8 @@ const HOME_KEY_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7p
 const HOME_KEY_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
 const HOME_KEY_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const HOME_KEY_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
+const HOME_MAIL_UNREAD_EDGE = "#38bdf8";
+const HOME_MAIL_UNREAD_EDGE_FRAME = "linear-gradient(#38bdf8, #38bdf8)";
 const HOME_NODE_ICON_BLUE = "#19a8ff";
 const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
 const HOME_NODE_ICON_BLUE_BORDER = "rgba(25, 168, 255, 0.68)";
@@ -1574,18 +1576,21 @@ export function messageRowStyle(active: boolean, unread: boolean, hovered = fals
 
 export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false): React.CSSProperties {
   const framed = active || hovered;
+  const outlined = framed || unread;
+  const frameBackground = unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
+  const borderColor = pendingAutoArchive && unread ? HOME_MAIL_UNREAD_EDGE : outlined ? "transparent" : HOME_KEY_SOFT_BORDER;
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 98px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${framed ? "transparent" : HOME_KEY_SOFT_BORDER}`,
+    border: `1px solid ${borderColor}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
     background: pendingAutoArchive
       ? "linear-gradient(145deg, #f2f3f6 0%, #e7e9ee 100%)"
-      : framed
-        ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
+      : outlined
+        ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${frameBackground} border-box`
         : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
     color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
@@ -1611,7 +1616,7 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : unread ? "#38bdf8" : "rgba(100, 116, 139, 0.22)",
+    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : unread ? HOME_MAIL_UNREAD_EDGE : "rgba(100, 116, 139, 0.22)",
     boxShadow: active
       ? "0 0 0 4px rgba(92, 238, 255, 0.18), 0 0 13px rgba(183, 124, 255, 0.34), 2px 2px 5px rgba(157, 171, 191, 0.5)"
       : unread
