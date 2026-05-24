@@ -64,8 +64,8 @@ const TIMELINE_VISUAL_STEP_MINUTES = 15;
 const COMPACT_HEADER_HEIGHT = 22;
 const EXPANDED_TRACK_HEIGHT = 88;
 const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
-const TIMELINE_NODE_ACCENT = "rgb(71, 85, 105)";
-const TIMELINE_LOGIC_GATE_ACCENT = "rgb(71, 85, 105)";
+const TIMELINE_NODE_ACCENT = "#19a8ff";
+const TIMELINE_LOGIC_GATE_ACCENT = "#19f07a";
 const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
 const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
@@ -699,18 +699,11 @@ function timelineItemStyle(
   _compact: boolean,
   readOnly: boolean,
 ): React.CSSProperties {
-  const accent = completed ? "#475569" : timelineKindAccent(kind);
-  const nodeBackground = completed
-    ? "#f1f5f9"
-    : kind === "logic_gate"
-      ? "rgba(100, 116, 139, 0.18)"
-      : "rgba(71, 85, 105, 0.18)";
-  const selectionShadow = kind === "logic_gate" ? "rgba(100, 116, 139, 0.32)" : "rgba(71, 85, 105, 0.32)";
-  const itemShadow = completed
-    ? "inset 0 0 0 1px rgba(100, 116, 139, 0.18)"
-    : selected
-      ? `inset 0 0 0 2px ${selectionShadow}`
-      : "inset 0 1px 0 rgba(255, 255, 255, 0.62)";
+  const accent = timelineKindAccent(kind);
+  const selectionShadow = kind === "logic_gate" ? "rgba(25, 240, 122, 0.32)" : "rgba(25, 168, 255, 0.32)";
+  const itemShadow = selected
+    ? `inset 0 0 0 2px ${selectionShadow}`
+    : "inset 0 1px 0 rgba(255, 255, 255, 0.62)";
   return {
     position: "absolute",
     left,
@@ -722,7 +715,7 @@ function timelineItemStyle(
     gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
     border: `1px solid ${accent}`,
     borderRadius: 0,
-    background: nodeBackground,
+    background: "#ffffff",
     color: "#0f172a",
     boxShadow: itemShadow,
     cursor: readOnly ? "default" : "grab",
@@ -733,8 +726,8 @@ function timelineItemStyle(
   };
 }
 
-function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntityKind, completed: boolean): React.CSSProperties {
-  const accent = completed ? "#475569" : timelineKindAccent(kind);
+function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntityKind, _completed: boolean): React.CSSProperties {
+  const accent = timelineKindAccent(kind);
   return {
     position: "absolute",
     top: 0,
