@@ -10,7 +10,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-e
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
@@ -287,6 +287,12 @@ type InboxNodeDropInput = {
   nodeIDs: string[];
   priority: InboxPriority;
   status?: ResponsibleInboxStatus;
+};
+
+type InboxCellCreateInput = {
+  priority: InboxPriority;
+  status?: ResponsibleInboxStatus;
+  creatorRaciRole: LogicGateRaciRole;
 };
 
 type InboxGroupResizeState = {
@@ -1805,16 +1811,16 @@ export function LogicGateRail({
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
-  onCreateLogicGate: (options?: { assignCurrentUser?: boolean }) => void;
+  onCreateLogicGate: (options?: { creatorRaciRole?: LogicGateRaciRole }) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
-  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; assignCurrentUser: boolean } | null>(null);
-  const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, assignCurrentUser: boolean) => {
+  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; creatorRaciRole?: LogicGateRaciRole } | null>(null);
+  const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, creatorRaciRole?: LogicGateRaciRole) => {
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
-    setCreateContextMenu({ x: event.clientX, y: event.clientY, assignCurrentUser });
+    setCreateContextMenu({ x: event.clientX, y: event.clientY, creatorRaciRole });
   }, []);
 
   return (
@@ -1822,7 +1828,7 @@ export function LogicGateRail({
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section
         style={logicGateRailSectionStyle}
-        onContextMenu={(event) => openCreateLogicGateMenu(event, true)}
+        onContextMenu={(event) => openCreateLogicGateMenu(event, "responsible")}
         onDragOver={(event) => {
           if (!hasExplorerDrag(event.dataTransfer)) return;
           event.preventDefault();
@@ -1873,7 +1879,7 @@ export function LogicGateRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
-      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={(event) => openCreateLogicGateMenu(event, false)}>
+      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={(event) => openCreateLogicGateMenu(event)}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>All Logic Gates</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
@@ -1962,9 +1968,9 @@ export function LogicGateRail({
           type="button"
           style={sharedInboxContextMenuButtonStyle}
           onClick={() => {
-            const assignCurrentUser = createContextMenu.assignCurrentUser;
+            const creatorRaciRole = createContextMenu.creatorRaciRole;
             setCreateContextMenu(null);
-            onCreateLogicGate({ assignCurrentUser });
+            onCreateLogicGate({ creatorRaciRole });
           }}
         >
           Create Logic Gate
@@ -2483,6 +2489,8 @@ export function AciInboxMatrix({
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
   onCreateNodeInLogicGate,
+  onCreateLogicGateInCell,
+  onCreateNodeInCell,
   onDropNodes,
 }: {
   loading: boolean;
@@ -2505,6 +2513,8 @@ export function AciInboxMatrix({
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
   onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
+  onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
+  onCreateNodeInCell: (input: InboxCellCreateInput) => void;
   onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildAciInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
@@ -2513,6 +2523,7 @@ export function AciInboxMatrix({
   const [activeDropKey, setActiveDropKey] = useState("");
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
+  const [cellContextMenu, setCellContextMenu] = useState<(InboxCellCreateInput & { x: number; y: number }) | null>(null);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -2579,6 +2590,13 @@ export function AciInboxMatrix({
     }
     if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
+  const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setNotificationMenu(null);
+    setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
+  }, []);
 
   return (
     <>
@@ -2627,6 +2645,10 @@ export function AciInboxMatrix({
                       data-rail-right={columnIndex === ACI_COLUMNS.length - 1 ? undefined : "true"}
                       data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
                       style={cellStyle}
+                      onContextMenu={(event) => openCellCreateMenu(event, {
+                        priority: priority.value,
+                        creatorRaciRole: column.role,
+                      })}
                     >
                       {logicGateGroups.map((group) => {
                         const resizeKey = inboxGroupResizeKey(cellKey, group);
@@ -2651,6 +2673,7 @@ export function AciInboxMatrix({
                             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
                             onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, creatorRaciRole: column.role })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
                             onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
                             dropActive={activeDropKey === resizeKey}
@@ -2678,6 +2701,32 @@ export function AciInboxMatrix({
       </div>
     </section>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    {cellContextMenu && (
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateLogicGateInCell(input);
+          }}
+        >
+          Create Logic Gate
+        </button>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateNodeInCell(input);
+          }}
+        >
+          Create Note
+        </button>
+      </FrameRightClickMenu>
+    )}
     <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} />
     </>
   );
@@ -2704,6 +2753,8 @@ export function ResponsibleInboxMatrix({
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
   onCreateNodeInLogicGate,
+  onCreateLogicGateInCell,
+  onCreateNodeInCell,
   onDropNodes,
 }: {
   loading: boolean;
@@ -2726,6 +2777,8 @@ export function ResponsibleInboxMatrix({
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
   onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
+  onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
+  onCreateNodeInCell: (input: InboxCellCreateInput) => void;
   onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildResponsibleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
@@ -2734,6 +2787,7 @@ export function ResponsibleInboxMatrix({
   const [activeDropKey, setActiveDropKey] = useState("");
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
+  const [cellContextMenu, setCellContextMenu] = useState<(InboxCellCreateInput & { x: number; y: number }) | null>(null);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -2800,6 +2854,13 @@ export function ResponsibleInboxMatrix({
     }
     if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
+  const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setNotificationMenu(null);
+    setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
+  }, []);
 
   return (
     <>
@@ -2852,6 +2913,11 @@ export function ResponsibleInboxMatrix({
                       data-rail-right={columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? undefined : "true"}
                       data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
                       style={cellStyle}
+                      onContextMenu={(event) => openCellCreateMenu(event, {
+                        priority: priority.value,
+                        status: column.status,
+                        creatorRaciRole: "responsible",
+                      })}
                     >
                       {logicGateGroups.map((group) => {
                         const resizeKey = inboxGroupResizeKey(cellKey, group);
@@ -2875,6 +2941,7 @@ export function ResponsibleInboxMatrix({
                             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
                             onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole: "responsible" })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
                             onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
                             dropActive={activeDropKey === resizeKey}
@@ -2903,6 +2970,32 @@ export function ResponsibleInboxMatrix({
       </div>
     </section>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    {cellContextMenu && (
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateLogicGateInCell(input);
+          }}
+        >
+          Create Logic Gate
+        </button>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateNodeInCell(input);
+          }}
+        >
+          Create Note
+        </button>
+      </FrameRightClickMenu>
+    )}
     <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} />
     </>
   );
@@ -2926,6 +3019,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
+  onCreateLogicGate,
   onCreateNode,
   onDropNodes,
   dropActive = false,
@@ -2961,6 +3055,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt?: (logicGateID: string, x: number, y: number) => void;
+  onCreateLogicGate?: () => void;
   onCreateNode?: () => void;
   onDropNodes?: (nodeIDs: string[]) => void;
   dropActive?: boolean;
@@ -3136,6 +3231,18 @@ export function LogicGateInboxNodeGroupCard({
       )}
       {groupContextMenu && (
         <FrameRightClickMenu x={groupContextMenu.x} y={groupContextMenu.y} onClose={() => setGroupContextMenu(null)}>
+          {onCreateLogicGate && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              onClick={() => {
+                setGroupContextMenu(null);
+                onCreateLogicGate();
+              }}
+            >
+              Create Logic Gate
+            </button>
+          )}
           {onCreateNode && (
             <button
               type="button"
@@ -3145,7 +3252,7 @@ export function LogicGateInboxNodeGroupCard({
                 onCreateNode();
               }}
             >
-              Create node
+              Create Note
             </button>
           )}
           {onDropNodes && selectedNodeIDsForMenu.length > 0 && (

@@ -45,7 +45,7 @@ import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
@@ -1770,6 +1770,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
     }
   }, [apiBase, companyID]);
+  const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, folderItems: CompanyExplorerFolderItem[]) => {
+    setLogicGates((previous) => {
+      const next = previous.filter((item) => item.logic_gate_id !== logicGate.logic_gate_id);
+      return [...next, logicGate];
+    });
+    mergeCreatedFolderItems(folderItems);
+    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
+  }, [apiBase, companyID, mergeCreatedFolderItems]);
   const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: ResponsibleInboxStatus }) => {
     setBusy("create-node");
     setError("");
@@ -1801,30 +1809,61 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [apiBase, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
-  const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean } = {}) => {
+  const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean; creatorRaciRole?: LogicGateRaciRole; openArena?: boolean } = {}) => {
     setBusy("create-logic-gate");
     setError("");
     try {
-      const result = await createHomeLogicGateCommand({ apiBase, companyID });
-      let logicGate = result.logicGate;
-      if (options.assignCurrentUser && currentUserID) {
-        const assignments = await addLogicGateRaciAssignments(companyID, logicGate.logic_gate_id, [{ role: "responsible", user_id: currentUserID }]);
-        logicGate = { ...logicGate, raci_assignments: assignments };
+      const creatorRaciRole = options.creatorRaciRole ?? (options.assignCurrentUser ? "responsible" : undefined);
+      const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole });
+      const logicGate = result.logicGate;
+      mergeCreatedLogicGate(logicGate, result.folderItems);
+      setNotice(creatorRaciRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
+      if (options.openArena ?? true) {
+        openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
       }
-      setLogicGates((previous) => {
-        const next = previous.filter((item) => item.logic_gate_id !== logicGate.logic_gate_id);
-        return [...next, logicGate];
-      });
-      mergeCreatedFolderItems(result.folderItems);
-      upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
-      setNotice(options.assignCurrentUser && currentUserID ? "Logic Gate created and assigned to you." : "Logic Gate created.");
-      openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
+      return logicGate;
     } catch (createError) {
       setError(formatError(createError, "Failed to create Logic Gate"));
+      return null;
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, currentUserID, mergeCreatedFolderItems, openLogicGateArena]);
+  }, [apiBase, companyID, mergeCreatedLogicGate, openLogicGateArena]);
+  const createLogicGateInInboxCell = useCallback(async (input: { creatorRaciRole: LogicGateRaciRole }) => {
+    await createHomeLogicGate({ creatorRaciRole: input.creatorRaciRole, openArena: false });
+  }, [createHomeLogicGate]);
+  const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole: LogicGateRaciRole }) => {
+    setBusy("create-node");
+    setError("");
+    try {
+      const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole: input.creatorRaciRole });
+      const logicGate = logicGateResult.logicGate;
+      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
+
+      const nodeResult = await createHomeNodeCommand({ apiBase, companyID });
+      mergeCreatedFolderItems(nodeResult.folderItems);
+      mergeUpdatedNode(nodeResult.node);
+
+      const nodeMap = new Map(nodeByID);
+      nodeMap.set(nodeResult.node.node_id, nodeResult.node);
+      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+        apiBase,
+        companyID,
+        logicGateID: logicGate.logic_gate_id,
+        nodeIDs: [nodeResult.node.node_id],
+        priority: input.priority,
+        status: input.status,
+        nodeByID: nodeMap,
+        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+      });
+      for (const node of updatedNodes) mergeUpdatedNode(node);
+      setNotice("Note created in a new Logic Gate.");
+    } catch (createError) {
+      setError(formatError(createError, "Failed to create note in matrix cell"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2119,6 +2158,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
                   onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
                   onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
+                  onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
+                  onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
                   onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
                 />
               ) : (
@@ -2143,6 +2184,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
                   onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
                   onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
+                  onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
+                  onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
                   onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
                 />
               )}

@@ -2774,6 +2774,66 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	}
 }
 
+func TestMapEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-map-batch-logic-raci-test"
+	repo.EnsureCompany(companyID, "Map Batch Logic RACI Company")
+	creator, err := repo.UpsertAuthUser("map-batch-raci-creator", "raci-creator@example.com", "RACI Creator")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser creator error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("map-batch-raci-creator", companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership creator error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id":                   companyID,
+		"entity_kind":                  "logic_gate",
+		"creator_logic_gate_raci_role": "responsible",
+		"items": []map[string]any{{
+			"client_id": "created-gate",
+			"title":     "Created gate",
+			"x":         120,
+			"y":         240,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithActorForTest(req, creator, companyID)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var payload struct {
+		LogicGates []domain.LogicGate `json:"logic_gates"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode map entity batch response: %v", err)
+	}
+	if len(payload.LogicGates) != 1 {
+		t.Fatalf("logic gates = %d, want 1", len(payload.LogicGates))
+	}
+	assignments := payload.LogicGates[0].RaciAssignments
+	if len(assignments) != 1 || assignments[0].Role != domain.LogicGateRaciRoleResponsible || assignments[0].UserID != creator.UserID {
+		t.Fatalf("response RACI assignments = %+v, want responsible creator", assignments)
+	}
+	if assignments[0].UserDisplayName != "RACI Creator" || assignments[0].UserEmail != "raci-creator@example.com" {
+		t.Fatalf("response RACI user read model = %+v, want creator display fields", assignments[0])
+	}
+	stored, err := repo.GetLogicGate(companyID, payload.LogicGates[0].LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGate error = %v", err)
+	}
+	if len(stored.RaciAssignments) != 1 || stored.RaciAssignments[0].Role != domain.LogicGateRaciRoleResponsible || stored.RaciAssignments[0].UserID != creator.UserID {
+		t.Fatalf("stored RACI assignments = %+v, want responsible creator only", stored.RaciAssignments)
+	}
+}
+
 func TestSelectLogicGateArenaBoardFallsBackToAttachedBoard(t *testing.T) {
 	t.Parallel()
 
