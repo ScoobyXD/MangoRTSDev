@@ -1,0 +1,58 @@
+export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+export type WorkspaceEntityBatchKind = "node" | "logic_gate";
+export type WorkspaceEntityBatchCreatorLogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+
+export type WorkspaceEntityBatchItem = {
+  client_id: string;
+  title: string;
+  x: number;
+  y: number;
+  position?: number;
+};
+
+export type WorkspaceEntityBatchRelationship = {
+  entity_id_a?: string;
+  entity_id_b?: string;
+  client_id_a?: string;
+  client_id_b?: string;
+  a_position: string;
+  b_position: string;
+};
+
+export function createWorkspaceEntityBatchClientID(prefix: string, index = 0): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now().toString(36)}-${index}-${random}`;
+}
+
+export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
+  companyID: string;
+  entityKind: WorkspaceEntityBatchKind;
+  folderID?: string;
+  creatorLogicGateRaciRole?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
+  items: WorkspaceEntityBatchItem[];
+  relationships?: WorkspaceEntityBatchRelationship[];
+  requestJSON: WorkspaceEntityCommandRequest;
+}): Promise<TResponse> {
+  const body: {
+    company_id: string;
+    entity_kind: WorkspaceEntityBatchKind;
+    folder_id: string;
+    creator_logic_gate_raci_role?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
+    items: WorkspaceEntityBatchItem[];
+    relationships: WorkspaceEntityBatchRelationship[];
+  } = {
+    company_id: args.companyID,
+    entity_kind: args.entityKind,
+    folder_id: args.folderID ?? "",
+    items: args.items,
+    relationships: args.relationships ?? [],
+  };
+  if (args.entityKind === "logic_gate" && args.creatorLogicGateRaciRole) {
+    body.creator_logic_gate_raci_role = args.creatorLogicGateRaciRole;
+  }
+  return args.requestJSON<TResponse>("/v1/workspace/entity-batches", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

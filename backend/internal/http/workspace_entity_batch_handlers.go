@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-type mapEntityBatchItemRequest struct {
+type workspaceEntityBatchItemRequest struct {
 	ClientID string  `json:"client_id"`
 	Title    string  `json:"title"`
 	Header   string  `json:"header"`
@@ -18,7 +18,7 @@ type mapEntityBatchItemRequest struct {
 	Position int     `json:"position"`
 }
 
-type mapEntityBatchRelationshipRequest struct {
+type workspaceEntityBatchRelationshipRequest struct {
 	EntityIDA string `json:"entity_id_a"`
 	EntityIDB string `json:"entity_id_b"`
 	ClientIDA string `json:"client_id_a"`
@@ -28,27 +28,35 @@ type mapEntityBatchRelationshipRequest struct {
 }
 
 func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) {
+	if !s.legacyMapRoutesEnabled {
+		writeLegacyMapRoutesDisabled(w)
+		return
+	}
+	s.handleWorkspaceEntityBatches(w, r)
+}
+
+func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 
 	var req struct {
-		CompanyID                string                              `json:"company_id"`
-		EntityKind               string                              `json:"entity_kind"`
-		FolderID                 string                              `json:"folder_id"`
-		CreatorLogicGateRaciRole string                              `json:"creator_logic_gate_raci_role"`
-		Items                    []mapEntityBatchItemRequest         `json:"items"`
-		Relationships            []mapEntityBatchRelationshipRequest `json:"relationships"`
+		CompanyID                string                                    `json:"company_id"`
+		EntityKind               string                                    `json:"entity_kind"`
+		FolderID                 string                                    `json:"folder_id"`
+		CreatorLogicGateRaciRole string                                    `json:"creator_logic_gate_raci_role"`
+		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
+		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 
-	input, ok := buildMapEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
+	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_map_entity_batch")
+		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
 	}
 	if actor, ok := authenticatedActor(r); ok {
@@ -69,9 +77,9 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	result, err := s.repo.CreateMapEntityBatch(input)
+	result, err := s.repo.CreateWorkspaceEntityBatch(input)
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_map_entity_batch")
+		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
 	}
 	if errors.Is(err, store.ErrAssigneeNotInCompany) {
@@ -79,12 +87,12 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "map_entity_batch_reference_not_found")
+		writeError(w, http.StatusNotFound, "workspace_entity_batch_reference_not_found")
 		return
 	}
 	if err != nil {
 		log.Printf(
-			"failed to create map entity batch company_id=%s entity_kind=%s folder_id=%s items=%d relationships=%d: %v",
+			"failed to create workspace entity batch company_id=%s entity_kind=%s folder_id=%s items=%d relationships=%d: %v",
 			input.CompanyID,
 			input.EntityKind,
 			input.FolderID,
@@ -92,43 +100,43 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 			len(input.Relationships),
 			err,
 		)
-		writeError(w, http.StatusInternalServerError, "failed_to_create_map_entity_batch")
+		writeError(w, http.StatusInternalServerError, "failed_to_create_workspace_entity_batch")
 		return
 	}
 
-	publishMapEntityBatchEvents(s, result)
+	publishWorkspaceEntityBatchEvents(s, result)
 	writeJSON(w, http.StatusCreated, result)
 }
 
-func buildMapEntityBatchInput(
+func buildWorkspaceEntityBatchInput(
 	companyID string,
 	entityKind string,
 	folderID string,
 	creatorLogicGateRaciRole string,
-	items []mapEntityBatchItemRequest,
-	relationships []mapEntityBatchRelationshipRequest,
-) (store.MapEntityBatchInput, bool) {
-	input := store.MapEntityBatchInput{
+	items []workspaceEntityBatchItemRequest,
+	relationships []workspaceEntityBatchRelationshipRequest,
+) (store.WorkspaceEntityBatchInput, bool) {
+	input := store.WorkspaceEntityBatchInput{
 		CompanyID:                strings.TrimSpace(companyID),
 		EntityKind:               strings.TrimSpace(entityKind),
 		FolderID:                 strings.TrimSpace(folderID),
 		CreatorLogicGateRaciRole: strings.TrimSpace(creatorLogicGateRaciRole),
 	}
 	if input.CompanyID == "" || (input.EntityKind != "node" && input.EntityKind != "logic_gate") {
-		return store.MapEntityBatchInput{}, false
+		return store.WorkspaceEntityBatchInput{}, false
 	}
 	if input.CreatorLogicGateRaciRole != "" {
 		if input.EntityKind != "logic_gate" {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		role, ok := store.NormalizeLogicGateRaciRole(input.CreatorLogicGateRaciRole)
 		if !ok {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		input.CreatorLogicGateRaciRole = role
 	}
-	if len(items) == 0 || len(items) > store.MapEntityBatchMaxItems || len(relationships) > store.MapEntityBatchMaxRelationships {
-		return store.MapEntityBatchInput{}, false
+	if len(items) == 0 || len(items) > store.WorkspaceEntityBatchMaxItems || len(relationships) > store.WorkspaceEntityBatchMaxRelationships {
+		return store.WorkspaceEntityBatchInput{}, false
 	}
 
 	clientIDs := make(map[string]struct{}, len(items))
@@ -139,13 +147,13 @@ func buildMapEntityBatchInput(
 			title = strings.TrimSpace(item.Header)
 		}
 		if clientID == "" || title == "" || !validMapLayoutCoordinate(item.X) || !validMapLayoutCoordinate(item.Y) {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		if _, exists := clientIDs[clientID]; exists {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		clientIDs[clientID] = struct{}{}
-		input.Items = append(input.Items, store.MapEntityBatchItemInput{
+		input.Items = append(input.Items, store.WorkspaceEntityBatchItemInput{
 			ClientID: clientID,
 			Title:    title,
 			X:        item.X,
@@ -155,7 +163,7 @@ func buildMapEntityBatchInput(
 	}
 
 	for _, relationship := range relationships {
-		item := store.MapEntityBatchRelationshipInput{
+		item := store.WorkspaceEntityBatchRelationshipInput{
 			EntityIDA: strings.TrimSpace(relationship.EntityIDA),
 			EntityIDB: strings.TrimSpace(relationship.EntityIDB),
 			ClientIDA: strings.TrimSpace(relationship.ClientIDA),
@@ -164,30 +172,30 @@ func buildMapEntityBatchInput(
 			BPosition: strings.TrimSpace(relationship.BPosition),
 		}
 		if (item.EntityIDA == "" && item.ClientIDA == "") || (item.EntityIDB == "" && item.ClientIDB == "") {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		if item.ClientIDA != "" {
 			if _, exists := clientIDs[item.ClientIDA]; !exists {
-				return store.MapEntityBatchInput{}, false
+				return store.WorkspaceEntityBatchInput{}, false
 			}
 		}
 		if item.ClientIDB != "" {
 			if _, exists := clientIDs[item.ClientIDB]; !exists {
-				return store.MapEntityBatchInput{}, false
+				return store.WorkspaceEntityBatchInput{}, false
 			}
 		}
 		if item.EntityIDA != "" && item.EntityIDA == item.EntityIDB {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		if item.ClientIDA != "" && item.ClientIDA == item.ClientIDB {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		if input.EntityKind == "node" {
 			if !isLegalNodeRelationshipPositionPair(item.APosition, item.BPosition) {
-				return store.MapEntityBatchInput{}, false
+				return store.WorkspaceEntityBatchInput{}, false
 			}
 		} else if !isLegalLogicGateRelationshipPositionPair(item.APosition, item.BPosition) {
-			return store.MapEntityBatchInput{}, false
+			return store.WorkspaceEntityBatchInput{}, false
 		}
 		input.Relationships = append(input.Relationships, item)
 	}
@@ -195,7 +203,7 @@ func buildMapEntityBatchInput(
 	return input, true
 }
 
-func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
+func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult) {
 	inputs := make([]store.DomainEventInput, 0,
 		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships)+2,
 	)
@@ -244,7 +252,7 @@ func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
 	}
 	events, err := s.repo.AppendDomainEvents(inputs)
 	if err != nil {
-		log.Printf("failed to append map entity workspace domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
+		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
 	s.publishCommittedWorkspaceEvents(events)

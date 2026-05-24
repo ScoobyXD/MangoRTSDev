@@ -8,18 +8,18 @@ import (
 	"strings"
 )
 
-func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error) {
+func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return MapEntityBatchResult{}, err
+		return WorkspaceEntityBatchResult{}, err
 	}
 	defer tx.Rollback()
 
-	result := MapEntityBatchResult{
+	result := WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
 		EntityKind:     input.EntityKind,
-		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
+		EntityMappings: make([]WorkspaceEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
@@ -27,7 +27,7 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 	if input.CreatorUserID != "" {
 		creatorAssignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
 		if err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		input.CreatorUserID = creatorAssignee.UserID
 	}
@@ -37,7 +37,7 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 	if input.EntityKind == "node" {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		targetFolderID = activeFolder.FolderID
 		targetFolderKind = activeFolder.FolderKind
@@ -49,9 +49,9 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 			input.CompanyID, input.FolderID,
 		).Scan(&targetFolderKind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return MapEntityBatchResult{}, ErrNotFound
+				return WorkspaceEntityBatchResult{}, ErrNotFound
 			}
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 	}
 
@@ -69,7 +69,7 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 				 returning company_id, node_id, title, created_timestamp`,
 				created.CompanyID, created.NodeID, created.Title, input.CreatorUserID,
 			).Scan(&created.CompanyID, &created.NodeID, &created.Title, &created.CreatedTimestamp); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {
 				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
@@ -79,16 +79,16 @@ insert into resource_access_grants
 values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
 on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
   access_level=excluded.access_level`, input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
-					return MapEntityBatchResult{}, err
+					return WorkspaceEntityBatchResult{}, err
 				}
 				if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
-					return MapEntityBatchResult{}, err
+					return WorkspaceEntityBatchResult{}, err
 				}
 			}
 			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
 			clientToEntityID[item.ClientID] = created.NodeID
-			result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
+			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
 
 			var position domain.NodeMapPosition
 			if err := tx.QueryRowContext(ctx,
@@ -97,7 +97,7 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 				 returning company_id, node_id, x, y, updated_timestamp`,
 				input.CompanyID, created.NodeID, item.X, item.Y,
 			).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			result.NodeMapPositions = append(result.NodeMapPositions, position)
 			continue
@@ -114,7 +114,7 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 			 returning company_id, logic_gate_id, header, created_timestamp`,
 			created.CompanyID, created.LogicGateID, created.Header,
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		if input.CreatorUserID != "" {
 			if _, err := tx.ExecContext(ctx, `
@@ -123,14 +123,14 @@ insert into resource_access_grants
 values ($1::uuid, 'logic_gate', $2::uuid, 'user', $3::uuid, 'admin', now())
 on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
   access_level=excluded.access_level`, input.CompanyID, created.LogicGateID, input.CreatorUserID); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 		}
 		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
 			assignment := domain.LogicGateRaciAssignment{
@@ -157,7 +157,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&assignment.UserID,
 				&assignment.CreatedTimestamp,
 			); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			if creatorAssignee.Name != nil {
 				assignment.UserDisplayName = strings.TrimSpace(*creatorAssignee.Name)
@@ -167,15 +167,15 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
 			if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, input.CompanyID, created.LogicGateID); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
-		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
+		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
 
 		var position domain.LogicGateMapPosition
 		if err := tx.QueryRowContext(ctx,
@@ -184,7 +184,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			 returning company_id, logic_gate_id, x, y, updated_timestamp`,
 			input.CompanyID, created.LogicGateID, item.X, item.Y,
 		).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
@@ -192,7 +192,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 	if targetFolderID != "" {
 		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, targetFolderKind, targetFolderID)
 		if err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		for index, mapping := range result.EntityMappings {
 			itemPosition := position
@@ -215,7 +215,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&item.CreatedTimestamp,
 				&item.UpdatedTimestamp,
 			); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			if itemPosition >= position {
 				position = itemPosition + 1000
@@ -227,9 +227,9 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 	}
 
 	for _, relationship := range input.Relationships {
-		entityIDA, entityIDB, err := resolveMapEntityBatchRelationshipIDs(tx, ctx, input, clientToEntityID, relationship)
+		entityIDA, entityIDB, err := resolveWorkspaceEntityBatchRelationshipIDs(tx, ctx, input, clientToEntityID, relationship)
 		if err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		if input.EntityKind == "node" {
 			item := domain.NodeRelationship{
@@ -255,7 +255,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&item.BPosition,
 				&item.CreatedTimestamp,
 			); err != nil {
-				return MapEntityBatchResult{}, err
+				return WorkspaceEntityBatchResult{}, err
 			}
 			result.Relationships = append(result.Relationships, item)
 			continue
@@ -284,23 +284,23 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			&item.BPosition,
 			&item.CreatedTimestamp,
 		); err != nil {
-			return MapEntityBatchResult{}, err
+			return WorkspaceEntityBatchResult{}, err
 		}
 		result.LogicGateRelationships = append(result.LogicGateRelationships, item)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return MapEntityBatchResult{}, err
+		return WorkspaceEntityBatchResult{}, err
 	}
 	return result, nil
 }
 
-func resolveMapEntityBatchRelationshipIDs(tx *sql.Tx, ctx context.Context, input MapEntityBatchInput, clientToEntityID map[string]string, relationship MapEntityBatchRelationshipInput) (string, string, error) {
-	entityIDA, err := resolveMapEntityBatchRelationshipID(tx, ctx, input, clientToEntityID, relationship.EntityIDA, relationship.ClientIDA)
+func resolveWorkspaceEntityBatchRelationshipIDs(tx *sql.Tx, ctx context.Context, input WorkspaceEntityBatchInput, clientToEntityID map[string]string, relationship WorkspaceEntityBatchRelationshipInput) (string, string, error) {
+	entityIDA, err := resolveWorkspaceEntityBatchRelationshipID(tx, ctx, input, clientToEntityID, relationship.EntityIDA, relationship.ClientIDA)
 	if err != nil {
 		return "", "", err
 	}
-	entityIDB, err := resolveMapEntityBatchRelationshipID(tx, ctx, input, clientToEntityID, relationship.EntityIDB, relationship.ClientIDB)
+	entityIDB, err := resolveWorkspaceEntityBatchRelationshipID(tx, ctx, input, clientToEntityID, relationship.EntityIDB, relationship.ClientIDB)
 	if err != nil {
 		return "", "", err
 	}
@@ -310,7 +310,7 @@ func resolveMapEntityBatchRelationshipIDs(tx *sql.Tx, ctx context.Context, input
 	return entityIDA, entityIDB, nil
 }
 
-func resolveMapEntityBatchRelationshipID(tx *sql.Tx, ctx context.Context, input MapEntityBatchInput, clientToEntityID map[string]string, entityID, clientID string) (string, error) {
+func resolveWorkspaceEntityBatchRelationshipID(tx *sql.Tx, ctx context.Context, input WorkspaceEntityBatchInput, clientToEntityID map[string]string, entityID, clientID string) (string, error) {
 	if entityID == "" {
 		resolved := clientToEntityID[clientID]
 		if resolved == "" {

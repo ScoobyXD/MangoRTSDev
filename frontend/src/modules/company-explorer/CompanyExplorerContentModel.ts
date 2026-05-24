@@ -31,7 +31,7 @@ export type CompanyExplorerFolderItemsBatchResponse = {
   folder_items?: CompanyExplorerFolderItem[];
 };
 
-export type CompanyExplorerMapEntityBatchResponse = {
+export type CompanyExplorerWorkspaceEntityBatchResponse = {
   nodes?: NodeRecord[];
   logic_gates?: LogicGateApiRecord[];
   folder_items?: CompanyExplorerFolderItem[];

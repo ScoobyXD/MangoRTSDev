@@ -219,7 +219,7 @@ test("Home logic gate creation sends creator RACI role through batch create", as
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].path, "/v1/map-entity-batches");
+  assert.equal(calls[0].path, "/v1/workspace/entity-batches");
   assert.equal(calls[0].body.creator_logic_gate_raci_role, "responsible");
   assert.equal(result.logicGate.raci_assignments?.[0]?.role, "responsible");
 });

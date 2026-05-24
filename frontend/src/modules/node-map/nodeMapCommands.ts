@@ -2,65 +2,8 @@ import { summarizeRelationshipDeleteResults, type RelationshipDeleteSummary } fr
 
 export type NodeMapCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
-export type MapEntityBatchKind = "node" | "logic_gate";
-export type MapEntityBatchCreatorLogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
-
-export type MapEntityBatchItem = {
-  client_id: string;
-  title: string;
-  x: number;
-  y: number;
-  position?: number;
-};
-
-export type MapEntityBatchRelationship = {
-  entity_id_a?: string;
-  entity_id_b?: string;
-  client_id_a?: string;
-  client_id_b?: string;
-  a_position: string;
-  b_position: string;
-};
-
 export function normalizeNodeMapRelationshipIDs(relationshipIDs: string[]): string[] {
   return Array.from(new Set(relationshipIDs.map((relationshipID) => relationshipID.trim()).filter(Boolean)));
-}
-
-export function createMapEntityBatchClientID(prefix: string, index = 0): string {
-  const random = Math.random().toString(36).slice(2, 10);
-  return `${prefix}-${Date.now().toString(36)}-${index}-${random}`;
-}
-
-export async function createMapEntityBatchCommand<TResponse>(args: {
-  companyID: string;
-  entityKind: MapEntityBatchKind;
-  folderID?: string;
-  creatorLogicGateRaciRole?: MapEntityBatchCreatorLogicGateRaciRole;
-  items: MapEntityBatchItem[];
-  relationships?: MapEntityBatchRelationship[];
-  requestJSON: NodeMapCommandRequest;
-}): Promise<TResponse> {
-  const body: {
-    company_id: string;
-    entity_kind: MapEntityBatchKind;
-    folder_id: string;
-    creator_logic_gate_raci_role?: MapEntityBatchCreatorLogicGateRaciRole;
-    items: MapEntityBatchItem[];
-    relationships: MapEntityBatchRelationship[];
-  } = {
-    company_id: args.companyID,
-    entity_kind: args.entityKind,
-    folder_id: args.folderID ?? "",
-    items: args.items,
-    relationships: args.relationships ?? [],
-  };
-  if (args.entityKind === "logic_gate" && args.creatorLogicGateRaciRole) {
-    body.creator_logic_gate_raci_role = args.creatorLogicGateRaciRole;
-  }
-  return args.requestJSON<TResponse>("/v1/map-entity-batches", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
 }
 
 export async function deleteNodeMapRelationshipsCommand(args: {

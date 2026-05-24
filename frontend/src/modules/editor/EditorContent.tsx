@@ -16,7 +16,7 @@ import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED,
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
@@ -883,10 +883,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       nodeHeight: NODE_H,
     });
     const payload = buildLinkedNodePayloadFromSourceSide(direction);
-    const clientID = createMapEntityBatchClientID(`editor-${kind}-node`);
+    const clientID = createWorkspaceEntityBatchClientID(`editor-${kind}-node`);
     setError("");
     try {
-      const response = await createMapEntityBatchCommand<EditorNodeBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<EditorNodeBatchResponse>({
         companyID,
         entityKind: "node",
         items: [{
@@ -939,8 +939,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       nodeWidth: NODE_W,
       nodeHeight: NODE_H,
     });
-    const clientID = createMapEntityBatchClientID("editor-image-node");
-    const response = await createMapEntityBatchCommand<EditorNodeBatchResponse>({
+    const clientID = createWorkspaceEntityBatchClientID("editor-image-node");
+    const response = await createWorkspaceEntityBatchCommand<EditorNodeBatchResponse>({
       companyID,
       entityKind: "node",
       items: [{

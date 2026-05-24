@@ -11,7 +11,7 @@ import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntit
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
@@ -58,7 +58,7 @@ import {
   type CompanyExplorerDeleteBatchResponse,
   type CompanyExplorerFolderItemAssignment,
   type CompanyExplorerFolderItemsBatchResponse,
-  type CompanyExplorerMapEntityBatchResponse,
+  type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
   createCompanyExplorerStoreState,
@@ -619,12 +619,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
     try {
-      const response = await createMapEntityBatchCommand<CompanyExplorerMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
         folderID: parentFolderID,
         items: [{
-          client_id: createMapEntityBatchClientID("explorer-node"),
+          client_id: createWorkspaceEntityBatchClientID("explorer-node"),
           title: "new node",
           x: 120,
           y: 120,
@@ -650,12 +650,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
     try {
-      const response = await createMapEntityBatchCommand<CompanyExplorerMapEntityBatchResponse>({
+      const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
         folderID: parentFolderID,
         items: [{
-          client_id: createMapEntityBatchClientID("explorer-logic-gate"),
+          client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
           title: "new logic gate",
           x: 120,
           y: 120,
