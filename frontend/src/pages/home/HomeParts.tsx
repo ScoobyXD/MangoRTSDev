@@ -16,8 +16,8 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -2989,11 +2989,10 @@ export function LogicGateInboxNodeGroupCard({
     : collapsed
       ? { ...logicGateInboxGroupStyle, aspectRatio: "auto", gridTemplateRows: "44px" }
       : logicGateInboxGroupStyle;
-  const columnTint = groupColor ? homeColorWithAlpha(groupColor, 0.08) : undefined;
   const groupStyle = {
     ...groupStyleBase,
-    border: selectedLogicGate ? `1px solid ${HOME_CYAN}` : dropActive ? `1px solid ${HOME_CYAN}` : groupColor ? `1px solid ${groupColor}` : groupStyleBase.border,
-    background: columnTint ?? groupStyleBase.background,
+    border: selectedLogicGate || dropActive ? `1px solid ${HOME_CYAN}` : groupStyleBase.border,
+    background: groupStyleBase.background,
     boxShadow: selectedLogicGate
       ? `0 0 0 2px ${homeColorWithAlpha(HOME_CYAN, 0.16)} inset`
       : dropActive
@@ -3192,7 +3191,6 @@ export function LogicGateInboxNodeGroupCard({
 
 export function LogicGateInboxNodeRow({
   node,
-  depth = 0,
   selected,
   orderedRowIDs,
   nodeByID,
@@ -3222,12 +3220,15 @@ export function LogicGateInboxNodeRow({
   notificationRole?: NotificationRaciRole;
 }) {
   const nodeID = node.node_id;
+  const [hovered, setHovered] = useState(false);
   return (
     <div
       role="button"
       tabIndex={0}
       draggable
-      style={logicGateInboxNodeRowStyle(selected, depth, hasUnreadNotification)}
+      style={logicGateInboxNodeRowStyle(selected, hovered, hasUnreadNotification)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
@@ -3258,7 +3259,7 @@ export function LogicGateInboxNodeRow({
           {formatInboxNotificationCount(notificationCount)}
         </span>
       )}
-      {onRemovePlacement ? (
+      {onRemovePlacement && (
         <button
           type="button"
           aria-label={`Remove ${nodeTitle(node)} from ACIO nodes`}
@@ -3271,8 +3272,6 @@ export function LogicGateInboxNodeRow({
         >
           x
         </button>
-      ) : (
-        <span style={logicGateInboxNodeStatusStyle(node.status)}>{responsibleStatusLetter(node.status)}</span>
       )}
     </div>
   );
