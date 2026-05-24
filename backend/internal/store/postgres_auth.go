@@ -363,6 +363,9 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 	if _, err = tx.Exec(`delete from resource_access_grants where company_id = $1 and principal_type = 'user' and principal_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return DeleteCompanyUserResult{}, err
 	}
+	if _, err = tx.Exec(`delete from resource_raci_assignments where company_id = $1 and subject_type = 'user' and subject_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+		return DeleteCompanyUserResult{}, err
+	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1 and user_id = $2`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}

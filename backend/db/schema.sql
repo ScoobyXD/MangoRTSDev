@@ -293,6 +293,27 @@ create index if not exists idx_logic_gate_raci_user_role_gate
 create index if not exists idx_logic_gate_raci_gate_role_user
   on logic_gate_raci_assignments(company_id, logic_gate_id, role, user_id);
 
+create table if not exists resource_raci_assignments (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  role text not null,
+  subject_type text not null,
+  subject_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
+  constraint resource_raci_assignments_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
+  constraint resource_raci_assignments_subject_type_chk check (subject_type in ('user', 'group')),
+  primary key (company_id, resource_type, resource_id, role, subject_type, subject_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create index if not exists idx_resource_raci_assignments_subject_role_resource
+  on resource_raci_assignments(company_id, subject_type, subject_id, role, resource_type, resource_id);
+
+create index if not exists idx_resource_raci_assignments_resource_role_subject
+  on resource_raci_assignments(company_id, resource_type, resource_id, role, subject_type, subject_id);
+
 create table if not exists entity_access_permissions (
   company_id uuid not null,
   entity_type text not null,

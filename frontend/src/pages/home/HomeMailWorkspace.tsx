@@ -133,6 +133,7 @@ export function HomeMailWorkspace({
   onOpenNewCompose,
   onOpenPendingMailbox,
   onOpenReply,
+  onOpenSentMailbox,
   onOpenStarredMailbox,
   onSearchDraftChange,
   onSelectMessage,
@@ -168,7 +169,7 @@ export function HomeMailWorkspace({
   selectedMessage: EmailMessage | null;
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
-  sharedInboxSettings?: { onOpen: () => void };
+  sharedInboxSettings?: { onOpen: () => void; onOpenRaci?: () => void };
   unassignedSharedInbox?: { folderName: string; message?: string; onAssignEmail?: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
@@ -187,6 +188,7 @@ export function HomeMailWorkspace({
   onOpenNewCompose: () => void;
   onOpenPendingMailbox: () => void;
   onOpenReply: () => void;
+  onOpenSentMailbox: () => void;
   onOpenStarredMailbox: () => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
@@ -210,7 +212,12 @@ export function HomeMailWorkspace({
               <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {unassignedSharedInbox.folderName}
               </h2>
-              {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
+              {sharedInboxSettings && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
+                  {sharedInboxSettings.onOpenRaci && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenRaci}>RACI</button>}
+                </div>
+              )}
             </div>
           </div>
           <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
@@ -240,7 +247,12 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
+                  {sharedInboxSettings && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
+                      {sharedInboxSettings.onOpenRaci && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenRaci}>RACI</button>}
+                    </div>
+                  )}
                 </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>
@@ -283,6 +295,16 @@ export function HomeMailWorkspace({
               </button>
               <button
                 type="button"
+                style={mailArchiveActionButtonStyle(mailbox === "sent")}
+                title="Sent"
+                onClick={() => {
+                  if (mailbox !== "sent") onOpenSentMailbox();
+                }}
+              >
+                Sent
+              </button>
+              <button
+                type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "archive")}
                 title={mailboxCounts.archive === undefined ? "Archived" : `Archived (${formatMailboxCount(mailboxCounts.archive)})`}
                 onClick={() => {
@@ -300,9 +322,15 @@ export function HomeMailWorkspace({
               >
                 All
               </button>
+              <button
+                type="button"
+                style={{ ...mailPanelPrimaryButtonStyle, minHeight: 34, width: "100%", minWidth: 0, padding: "0 8px" }}
+                onClick={onOpenNewCompose}
+              >
+                Compose
+              </button>
             </div>
           )}
-          {isArchivableListView && <button style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>}
           {!isArchivableListView && (
             <div style={accountRowStyle}>
               <span style={accountEmailStyle}>{accountEmail}</span>

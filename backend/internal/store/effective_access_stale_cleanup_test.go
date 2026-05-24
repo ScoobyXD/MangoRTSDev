@@ -114,9 +114,7 @@ func TestMemoryDeleteCompanyUserRemovesAllCompanyEffectiveAccessSources(t *testi
 	visibilitySourceID := logicGateAssignmentVisibilityEffectiveAccessSourceID(effectiveAccessSourceLogicGateRaci, raciSourceID, gate.LogicGateID, assignedNode.NodeID)
 	_ = visibilitySourceID
 	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, assignedNode.NodeID, EntityPermissionEdit, true)
-	sharedSourceID := sharedTriageRaciEffectiveAccessSourceID(folder.FolderID, domain.LogicGateRaciRoleConsulted, EntityPermissionSubjectUser, user.UserID)
-	_ = sharedSourceID
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
 	assertEffectiveAccess(t, repo, otherCompanyID, user.UserID, EntityTypeNode, otherNode.NodeID, EntityPermissionView, true)
 
 	result, err := repo.DeleteCompanyUser(companyID, user.UserID)

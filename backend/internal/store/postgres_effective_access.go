@@ -630,18 +630,6 @@ func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, 
 	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
-func recomputeSharedTriageRaciEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
-	companyID = cleanUUIDText(companyID)
-	folderID = cleanUUIDText(folderID)
-	if companyID == "" || folderID == "" {
-		return ErrInvalid
-	}
-	if _, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID); err != nil {
-		return err
-	}
-	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
-}
-
 func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
@@ -936,46 +924,6 @@ logic_gate_raci_facts as (
   from logic_gate_raci_assignments assignment
   where assignment.company_id=$1::uuid
 ),
-shared_raci_user_facts as (
-  select assignment.company_id,
-         assignment.user_id,
-         'shared_triage_folder'::text as resource_type,
-         shared.target_folder_id as resource_id,
-         'edit'::text as access_level,
-         'shared_triage_raci'::text as source_type,
-         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
-         assignment.created_timestamp as source_timestamp,
-         40 as source_rank,
-         2 as access_rank
-  from communications_shared_inbox_raci_assignments assignment
-  join shared_descendants shared
-    on shared.company_id=assignment.company_id
-   and shared.source_folder_id=assignment.folder_id
-  where assignment.company_id=$1::uuid
-),
-shared_raci_group_facts as (
-  select assignment.company_id,
-         member.user_id,
-         'shared_triage_folder'::text as resource_type,
-         shared.target_folder_id as resource_id,
-         'edit'::text as access_level,
-         'shared_triage_raci'::text as source_type,
-         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':group:' || assignment.group_id::text as source_id,
-         greatest(assignment.created_timestamp, member.updated_timestamp) as source_timestamp,
-         40 as source_rank,
-         2 as access_rank
-  from communications_shared_inbox_raci_group_assignments assignment
-  join shared_descendants shared
-    on shared.company_id=assignment.company_id
-   and shared.source_folder_id=assignment.folder_id
-  join group_descendants descendant
-    on descendant.company_id=assignment.company_id
-   and descendant.root_group_id=assignment.group_id
-  join company_user_group_members member
-    on member.company_id=assignment.company_id
-   and member.group_id=descendant.group_id
-  where assignment.company_id=$1::uuid
-),
 base_facts as (
   select * from legacy_facts
   union all
@@ -986,10 +934,6 @@ base_facts as (
   select * from node_assignee_facts
   union all
   select * from logic_gate_raci_facts
-  union all
-  select * from shared_raci_user_facts
-  union all
-  select * from shared_raci_group_facts
 ),
 logic_gate_assignment_visibility_facts as (
   select base.company_id,
@@ -1302,46 +1246,6 @@ logic_gate_raci_facts as (
   from logic_gate_raci_assignments assignment
   where assignment.company_id=$1::uuid
 ),
-shared_raci_user_facts as (
-  select assignment.company_id,
-         assignment.user_id,
-         'shared_triage_folder'::text as resource_type,
-         shared.target_folder_id as resource_id,
-         'edit'::text as access_level,
-         'shared_triage_raci'::text as source_type,
-         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
-         assignment.created_timestamp as source_timestamp,
-         40 as source_rank,
-         2 as access_rank
-  from communications_shared_inbox_raci_assignments assignment
-  join shared_descendants shared
-    on shared.company_id=assignment.company_id
-   and shared.source_folder_id=assignment.folder_id
-  where assignment.company_id=$1::uuid
-),
-shared_raci_group_facts as (
-  select assignment.company_id,
-         member.user_id,
-         'shared_triage_folder'::text as resource_type,
-         shared.target_folder_id as resource_id,
-         'edit'::text as access_level,
-         'shared_triage_raci'::text as source_type,
-         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':group:' || assignment.group_id::text as source_id,
-         greatest(assignment.created_timestamp, member.updated_timestamp) as source_timestamp,
-         40 as source_rank,
-         2 as access_rank
-  from communications_shared_inbox_raci_group_assignments assignment
-  join shared_descendants shared
-    on shared.company_id=assignment.company_id
-   and shared.source_folder_id=assignment.folder_id
-  join group_descendants descendant
-    on descendant.company_id=assignment.company_id
-   and descendant.root_group_id=assignment.group_id
-  join company_user_group_members member
-    on member.company_id=assignment.company_id
-   and member.group_id=descendant.group_id
-  where assignment.company_id=$1::uuid
-),
 base_facts as (
   select * from legacy_facts
   union all
@@ -1352,10 +1256,6 @@ base_facts as (
   select * from node_assignee_facts
   union all
   select * from logic_gate_raci_facts
-  union all
-  select * from shared_raci_user_facts
-  union all
-  select * from shared_raci_group_facts
 ),
 logic_gate_assignment_visibility_facts as (
   select base.company_id,

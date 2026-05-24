@@ -223,9 +223,10 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		if err != nil {
 			return err
 		}
-		return addEffectiveRecipients(store.EntityTypeSharedTriageFolder, folderID, func(userID string) notificationRecipientMeta {
-			return notificationMetaForSharedInboxRole(roles[strings.TrimSpace(userID)])
-		})
+		for userID, role := range roles {
+			addRecipient(userID, notificationMetaForSharedInboxRole(role))
+		}
+		return nil
 	}
 
 	title := "Mango notification"
