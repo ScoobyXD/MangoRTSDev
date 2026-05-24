@@ -29,7 +29,6 @@ const HOME_MAIL_UNREAD_EDGE = "#38bdf8";
 const HOME_MAIL_UNREAD_EDGE_FRAME = "linear-gradient(#38bdf8, #38bdf8)";
 const HOME_NODE_ICON_BLUE = "#19a8ff";
 const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
-const HOME_NODE_ICON_BLUE_BORDER = "rgba(25, 168, 255, 0.68)";
 const HOME_LOGIC_GATE_GREEN = "#19f07a";
 const HOME_LOGIC_GATE_GREEN_SOFT = "rgba(25, 240, 122, 0.12)";
 const HOME_LOGIC_GATE_GREEN_BORDER = "rgba(25, 240, 122, 0.72)";
@@ -892,7 +891,7 @@ export const logicGateInboxGroupStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gridTemplateRows: "44px minmax(0, 1fr)",
-  border: `1px solid ${HOME_LOGIC_GATE_GREEN_BORDER}`,
+  border: "1px solid rgba(148, 163, 184, 0.22)",
   borderRadius: 8,
   background: "#ffffff",
   overflow: "hidden",
@@ -1019,44 +1018,41 @@ export const logicGateInboxNodeListStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   alignContent: "start",
-  gap: 5,
+  gap: 3,
   overflowY: "auto",
   overflowX: "hidden",
-  padding: "8px 8px 12px",
+  padding: "6px 6px 12px",
   background: "linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%)",
   ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
 
-export function logicGateInboxNodeRowStyle(selected: boolean, depth = 0, hasUnreadNotification = false): React.CSSProperties {
-  const indentPx = 10 + Math.min(Math.max(0, Math.round(depth)), 8) * 14;
+export function logicGateInboxNodeRowStyle(selected: boolean, hovered = false, hasUnreadNotification = false): React.CSSProperties {
+  const framed = selected || hovered;
   return {
-    minHeight: 28,
+    minHeight: 24,
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: `${indentPx}px 16px minmax(0, 1fr) auto auto`,
+    gridTemplateColumns: "16px minmax(0, 1fr) auto auto",
     alignItems: "center",
-    gap: 5,
-    border: `1px solid ${selected ? HOME_NODE_ICON_BLUE : HOME_NODE_ICON_BLUE_BORDER}`,
+    gap: 4,
+    border: `1px solid ${framed ? HOME_NODE_ICON_BLUE : "transparent"}`,
     borderRadius: 6,
-    background: selected ? HOME_NODE_ICON_BLUE_SOFT : hasUnreadNotification ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
+    background: selected ? HOME_NODE_ICON_BLUE_SOFT : hovered ? "#f8fbff" : hasUnreadNotification ? "#fbfdff" : "rgba(255, 255, 255, 0.94)",
     color: "#111827",
     cursor: "grab",
-    padding: "4px 5px 4px 0",
+    padding: "3px 5px",
     boxShadow: selected
       ? `0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT} inset`
-      : hasUnreadNotification
-        ? "0 0 0 1px rgba(100, 116, 139, 0.16) inset"
-        : "0 1px 2px rgba(15, 23, 42, 0.04)",
+      : hovered
+        ? "0 1px 2px rgba(15, 23, 42, 0.04)"
+        : "none",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
   };
 }
 
 export const logicGateInboxNodeGuideStyle: React.CSSProperties = {
-  width: 10,
-  height: "100%",
-  borderLeft: "1px solid rgba(15, 23, 42, 0.18)",
-  borderBottom: "1px solid rgba(15, 23, 42, 0.18)",
-  justifySelf: "end",
+  display: "none",
 };
 
 export const logicGateInboxNodeIconStyle: React.CSSProperties = {
