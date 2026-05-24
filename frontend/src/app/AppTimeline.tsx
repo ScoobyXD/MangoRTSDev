@@ -69,7 +69,6 @@ const TIMELINE_LOGIC_GATE_ACCENT = "#19f07a";
 const TIMELINE_ITEM_BORDER_WIDTH = 1.5;
 const TIMELINE_ITEM_EDGE_WIDTH = 2;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
-const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -307,7 +306,7 @@ export const AppTimeline: React.FC<AppTimelineProps> = ({
                         style={timelineItemHandleStyle("left", item.kind, item.completed)}
                         onPointerDown={(event) => startInteraction(event, item, "start")}
                       />
-                      <TimelineItemMain item={item} compact={compact} />
+                      <TimelineItemMain item={item} compact={compact} width={width} />
                       <label
                         title={item.completed ? "Mark incomplete" : "Mark complete"}
                         aria-label={item.completed ? "Mark incomplete" : "Mark complete"}
@@ -397,7 +396,7 @@ function TimelineHistoryDay({
                     onOpenEntity({ kind: item.kind, id: item.entityID, label: item.label });
                   }}
                 >
-                  <TimelineItemMain item={item} compact={false} />
+                  <TimelineItemMain item={item} compact={false} width={width} />
                   <HistoryCompletedIcon completed={item.completed} />
                 </div>
               );
@@ -409,15 +408,15 @@ function TimelineHistoryDay({
   );
 }
 
-function TimelineItemMain({ item, compact }: { item: AppTimelineItem; compact: boolean }) {
+function TimelineItemMain({ item, compact, width }: { item: AppTimelineItem; compact: boolean; width: number }) {
   return (
-    <span style={timelineItemMainStyle(compact)}>
-      <span style={timelineItemTopRowStyle}>
-        <span style={timelineItemIconStyle(compact)}><ExplorerRowIcon kind={item.kind === "node" ? "node" : "logic_gate"} /></span>
-        <span style={timelineItemTextStyle(compact, item.completed)}>{item.label}</span>
+    <span style={timelineItemMainStyle(compact, width)}>
+      <span style={timelineItemTopRowStyle(width)}>
+        <span style={timelineItemIconStyle(width)}><ExplorerRowIcon kind={item.kind === "node" ? "node" : "logic_gate"} /></span>
+        <span style={timelineItemTextStyle(width, item.completed)}>{item.label}</span>
       </span>
-      <span style={timelineItemBottomRowStyle(compact, item.completed)}>
-        {formatTimelineTimeRange(item.startMinute, item.endMinute)}
+      <span style={timelineItemBottomRowStyle(width, item.completed)}>
+        {formatTimelineAdaptiveTimeRange(item.startMinute, item.endMinute, width)}
       </span>
     </span>
   );
@@ -510,6 +509,27 @@ function buildTimelineTicks(startMinute: number, endMinute: number, contentWidth
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function formatTimelineAdaptiveTimeRange(startMinute: number, endMinute: number, width: number): string {
+  if (width >= 118) return formatTimelineTimeRange(startMinute, endMinute);
+  const start = timelineTimeParts(startMinute);
+  const end = timelineTimeParts(endMinute);
+  const startClock = `${start.hour}:${String(start.minute).padStart(2, "0")}`;
+  const endClock = `${end.hour}:${String(end.minute).padStart(2, "0")}`;
+  if (width >= 76) return start.suffix === end.suffix ? `${startClock}-${endClock} ${end.suffix}` : `${startClock}${start.suffix}-${endClock}${end.suffix}`;
+  if (width >= 44) return `${startClock}-${endClock}`;
+  return `${start.hour}-${end.hour}`;
+}
+
+function timelineTimeParts(minute: number): { hour: number; minute: number; suffix: "AM" | "PM" } {
+  const clean = Math.max(0, Math.min(23 * 60 + 45, Math.round(minute)));
+  const hours24 = Math.floor(clean / 60);
+  return {
+    hour: hours24 % 12 || 12,
+    minute: clean % 60,
+    suffix: hours24 >= 12 ? "PM" : "AM",
+  };
 }
 
 function timelineKindAccent(kind: AppTimelineEntityKind): string {
@@ -713,7 +733,7 @@ function timelineItemStyle(
     height: "100%",
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
+    gridTemplateColumns: "minmax(0, 1fr)",
     border: `${TIMELINE_ITEM_BORDER_WIDTH}px solid ${accent}`,
     borderRadius: 0,
     background: "#ffffff",
@@ -741,59 +761,62 @@ function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntity
   };
 }
 
-function timelineItemMainStyle(compact: boolean): React.CSSProperties {
+function timelineItemMainStyle(_compact: boolean, width: number): React.CSSProperties {
+  const rightPadding = width >= 82 ? TIMELINE_ITEM_CHECKBOX_WIDTH - 2 : width >= 54 ? 12 : 3;
+  const leftPadding = TIMELINE_ITEM_EDGE_WIDTH + (width >= 56 ? 5 : 3);
   return {
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: "30px 12px",
+    gridTemplateRows: width >= 56 ? "28px 12px" : "24px 11px",
     alignContent: "start",
     gap: 0,
-    padding: compact
-      ? `2px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 5}px`
-      : `2px 4px 3px ${TIMELINE_ITEM_EDGE_WIDTH + 5}px`,
+    padding: `2px ${rightPadding}px 3px ${leftPadding}px`,
     boxSizing: "border-box",
   };
 }
 
-const timelineItemTopRowStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 5,
-};
-
-function timelineItemIconStyle(_compact: boolean): React.CSSProperties {
+function timelineItemTopRowStyle(width: number): React.CSSProperties {
   return {
-    width: 22,
-    height: 22,
-    display: "grid",
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: width >= 70 ? 5 : 3,
+  };
+}
+
+function timelineItemIconStyle(width: number): React.CSSProperties {
+  const size = width >= 74 ? 22 : width >= 46 ? 16 : 0;
+  return {
+    display: size > 0 ? "grid" : "none",
+    width: size,
+    height: size,
     placeItems: "center",
     flex: "0 0 auto",
   };
 }
 
-function timelineItemTextStyle(_compact: boolean, completed: boolean): React.CSSProperties {
+function timelineItemTextStyle(width: number, completed: boolean): React.CSSProperties {
   return {
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    fontSize: 12,
+    fontSize: width >= 74 ? 12 : width >= 46 ? 10.5 : 9,
     fontWeight: 900,
-    lineHeight: "22px",
+    lineHeight: width >= 56 ? "22px" : "18px",
     textDecoration: completed ? "line-through" : "none",
     color: completed ? "#334155" : "#0f172a",
   };
 }
 
-function timelineItemBottomRowStyle(_compact: boolean, completed: boolean): React.CSSProperties {
+function timelineItemBottomRowStyle(width: number, completed: boolean): React.CSSProperties {
   return {
     minWidth: 0,
     display: "block",
     color: completed ? "#334155" : "#475569",
-    fontSize: 9.5,
+    fontSize: width >= 74 ? 9.5 : width >= 46 ? 8.5 : 7.5,
     fontWeight: 900,
-    lineHeight: "11px",
+    lineHeight: width >= 46 ? "11px" : "10px",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -801,13 +824,20 @@ function timelineItemBottomRowStyle(_compact: boolean, completed: boolean): Reac
 }
 
 function timelineCheckboxWrapStyle(compact: boolean, width: number): React.CSSProperties {
-  const visible = !compact || width >= 34;
+  const visible = !compact || width >= 42;
+  const small = width < 66;
   return {
+    position: "absolute",
+    right: TIMELINE_ITEM_EDGE_WIDTH + 3,
+    top: "50%",
+    transform: `translateY(-50%) scale(${small ? 0.82 : 1})`,
+    transformOrigin: "center",
+    zIndex: 3,
     display: visible ? "grid" : "none",
     placeItems: "center",
     minWidth: 0,
-    width: TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH,
-    paddingRight: TIMELINE_ITEM_EDGE_WIDTH,
+    width: TIMELINE_ITEM_CHECKBOX_WIDTH,
+    height: TIMELINE_ITEM_CHECKBOX_WIDTH,
     boxSizing: "border-box",
     cursor: "pointer",
   };
@@ -823,6 +853,10 @@ const timelineCheckboxStyle: React.CSSProperties = {
 
 function timelineHistoryCheckStyle(completed: boolean): React.CSSProperties {
   return {
+    position: "absolute",
+    right: 5,
+    top: "50%",
+    transform: "translateY(-50%)",
     display: "grid",
     placeItems: "center",
     color: completed ? "#475569" : "transparent",
