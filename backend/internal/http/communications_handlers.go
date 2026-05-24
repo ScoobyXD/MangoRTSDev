@@ -213,7 +213,7 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, page)
 	case http.MethodPost:
-		connection, ok := s.requireConnectedEmail(w, r)
+		connection, ok := s.requireCommunicationsSendConnection(w, r)
 		if !ok {
 			return
 		}
@@ -247,7 +247,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
-		connection, ok := s.requireConnectedEmail(w, r)
+		connection, ok := s.requireCommunicationsSendConnection(w, r)
 		if !ok {
 			return
 		}
@@ -548,6 +548,21 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 		return domain.UserEmailConnection{}, false
 	}
 	return connection, true
+}
+
+func (s *Server) requireCommunicationsSendConnection(w http.ResponseWriter, r *http.Request) (domain.UserEmailConnection, bool) {
+	if !s.nylasConfig.IsConfigured() || s.nylasClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
+		return domain.UserEmailConnection{}, false
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return domain.UserEmailConnection{}, false
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	return s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
 }
 
 func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, sharedInboxID, sharedInboxAccessLevel string) (domain.UserEmailConnection, bool) {

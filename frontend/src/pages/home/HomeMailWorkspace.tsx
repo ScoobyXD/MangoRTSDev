@@ -210,7 +210,7 @@ export function HomeMailWorkspace({
               <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {unassignedSharedInbox.folderName}
               </h2>
-              {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
+              {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
             </div>
           </div>
           <div className="mango-home-scroll" ref={messageListRef} style={{ ...messageListStyle, alignContent: "center" }}>
@@ -240,7 +240,7 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI assignments</button>}
+                  {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
                 </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>

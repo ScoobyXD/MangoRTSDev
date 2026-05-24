@@ -315,7 +315,15 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			return
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		if !requireCompanyManager(w, r, req.CompanyID) {
+		actor, hasActor, ok := sharedInboxActorForCompany(w, r, req.CompanyID)
+		if !ok {
+			return
+		}
+		if !hasActor {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionAdmin) {
 			return
 		}
 		grants, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{

@@ -461,6 +461,30 @@ test("Home compose command validates and normalizes send payloads", async () => 
     body: "Body",
     reply_to_message_id: "message-1",
   }]);
+  await sendHomeMailComposeCommand({
+    companyID: " company-1 ",
+    sharedInboxID: " shared-1 ",
+    compose: {
+      to: "customer@example.test",
+      cc: "",
+      bcc: "",
+      subject: " Shared ",
+      body: " Reply ",
+      replyToMessageID: "",
+    },
+    connectedAccountEmail: "support@example.test",
+    sendEmail,
+  });
+  assert.deepEqual(sentInputs[1], {
+    to: [{ email: "customer@example.test" }],
+    cc: [],
+    bcc: [],
+    subject: "Shared",
+    body: "Reply",
+    reply_to_message_id: undefined,
+    company_id: "company-1",
+    shared_inbox_id: "shared-1",
+  });
   await assert.rejects(
     () => sendHomeMailComposeCommand({ compose: { to: "", cc: "", bcc: "", subject: "", body: "Body", replyToMessageID: "" }, sendEmail }),
     /Add at least one recipient\./,

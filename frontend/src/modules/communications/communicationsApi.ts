@@ -174,6 +174,8 @@ export type SendEmailInput = {
   subject: string;
   body: string;
   reply_to_message_id?: string;
+  company_id?: string;
+  shared_inbox_id?: string;
 };
 
 type CacheEntry<T> = {
@@ -271,7 +273,7 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
-      messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID), { value: cloneMessage(message), fetchedAt: Date.now() });
+      messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID, params.sharedInboxID), { value: cloneMessage(message), fetchedAt: Date.now() });
     }
   }
   return cloneMessagePage(normalized);
@@ -360,9 +362,11 @@ export async function deleteEmailMessage(messageID: string, sharedInboxID?: stri
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
-  const payload = await apiFetchJSON<{ message: EmailMessage }>("/v1/communications/messages/send", {
+  const { company_id: companyID, shared_inbox_id: sharedInboxID, ...messageInput } = input;
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/send${query}`, {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify(messageInput),
   });
   primeMessageCaches(payload.message);
   clearMessagePageCache();

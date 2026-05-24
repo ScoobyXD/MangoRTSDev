@@ -15,6 +15,7 @@ import {
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   removeLogicGateRaciAssignments,
+  sendEmail,
   unarchiveEmailMessage,
   updateCommunicationsSharedInbox,
   updateCommunicationsSharedInboxRaciAssignments,
@@ -217,6 +218,42 @@ test("archive helpers call mailbox action endpoints", async () => {
       { path: "/v1/communications/messages/msg%201/unarchive", method: "POST" },
       { path: "/v1/communications/messages/msg%202/archive?company_id=company-1&shared_inbox_id=shared-1", method: "POST" },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("sendEmail scopes shared inbox sends through query params", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({ message: message("sent-1", { subject: "Hello" }) });
+  };
+  try {
+    const sent = await sendEmail({
+      to: [{ email: "customer@example.test" }],
+      subject: "Hello",
+      body: "Body",
+      company_id: " company-1 ",
+      shared_inbox_id: " shared-1 ",
+    });
+    assert.equal(sent.id, "sent-1");
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/messages/send?company_id=company-1&shared_inbox_id=shared-1",
+      method: "POST",
+      body: {
+        to: [{ email: "customer@example.test" }],
+        subject: "Hello",
+        body: "Body",
+      },
+    }]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
