@@ -2099,14 +2099,15 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 250, 255, 0.74) 44%, rgba(247, 241, 255, 0.76))"
     : "linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(236, 251, 255, 0.58) 45%, rgba(247, 240, 255, 0.62))";
   return {
-    width: "100%",
+    width: "calc(100% - 10px)",
     minHeight: 28,
     display: "grid",
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
+    margin: "0 5px",
     border: `1px solid ${framed ? "transparent" : "transparent"}`,
-    borderRadius: 7,
+    borderRadius: 10,
     background: framed ? `${frameBackground} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : "transparent",
     color: "#334155",
     cursor: "pointer",

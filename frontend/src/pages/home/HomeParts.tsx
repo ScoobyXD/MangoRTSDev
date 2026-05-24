@@ -17,7 +17,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -2735,10 +2735,10 @@ export function AciInboxMatrix({
                 className="mango-inbox-matrix-cell"
                 data-rail-right={columnIndex === ACI_COLUMNS.length - 1 ? undefined : "true"}
                 data-rail-bottom="true"
-                style={logicGateRaciColumnHeaderStyle}
+                style={logicGateRaciColumnHeaderStyle(column.role)}
               >
-                <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
-                <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+                <strong style={logicGateRaciColumnLetterStyle(column.role)}>{column.letter}</strong>
+                <span style={logicGateRaciColumnLabelStyle(column.role)}>{column.label}</span>
               </div>
             ))}
             {INBOX_PRIORITIES.map((priority, priorityIndex) => (
@@ -2747,7 +2747,7 @@ export function AciInboxMatrix({
                   className="mango-inbox-matrix-cell"
                   data-rail-right="true"
                   data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
-                  style={logicGateRaciPriorityHeaderStyle}
+                  style={logicGateRaciPriorityHeaderStyle(priority.value)}
                 >
                   {priority.label}
                 </div>
@@ -3005,28 +3005,25 @@ export function ResponsibleInboxMatrix({
         <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
           <div style={inboxMatrixGridStyle(RESPONSIBLE_STATUS_COLUMNS.length)}>
             <div className="mango-inbox-matrix-cell" data-rail-right="true" data-rail-bottom="true" style={logicGateRaciCornerStyle} />
-            {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => {
-              const statusColor = responsibleStatusColor(column.status);
-              return (
+            {RESPONSIBLE_STATUS_COLUMNS.map((column, columnIndex) => (
                 <div
                   key={column.status}
                   className="mango-inbox-matrix-cell"
                   data-rail-right={columnIndex === RESPONSIBLE_STATUS_COLUMNS.length - 1 ? undefined : "true"}
                   data-rail-bottom="true"
-                  style={logicGateRaciColumnHeaderStyle}
+                  style={logicGateRaciColumnHeaderStyle(column.status)}
                 >
-                  <strong style={{ ...logicGateRaciColumnLetterStyle, borderColor: statusColor, background: homeColorWithAlpha(statusColor, 0.12), color: statusColor }}>{column.letter}</strong>
-                  <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+                  <strong style={logicGateRaciColumnLetterStyle(column.status)}>{column.letter}</strong>
+                  <span style={logicGateRaciColumnLabelStyle(column.status)}>{column.label}</span>
                 </div>
-              );
-            })}
+            ))}
             {INBOX_PRIORITIES.map((priority, priorityIndex) => (
               <React.Fragment key={priority.value}>
                 <div
                   className="mango-inbox-matrix-cell"
                   data-rail-right="true"
                   data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
-                  style={logicGateRaciPriorityHeaderStyle}
+                  style={logicGateRaciPriorityHeaderStyle(priority.value)}
                 >
                   {priority.label}
                 </div>
@@ -3307,12 +3304,13 @@ export function LogicGateInboxNodeGroupCard({
             {formatInboxNotificationCount(notificationCount)}
           </button>
         )}
+        <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
         {onToggleCollapsed && (
           <button
             type="button"
             title={collapsed ? "Expand node list" : "Collapse node list"}
             aria-label={collapsed ? "Expand node list" : "Collapse node list"}
-            style={{ ...logicGateInboxGroupCountStyle, minWidth: 18, cursor: "pointer" }}
+            style={logicGateInboxGroupDisclosureStyle}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -3320,10 +3318,9 @@ export function LogicGateInboxNodeGroupCard({
             }}
             onDoubleClick={(event) => event.stopPropagation()}
           >
-            {collapsed ? "+" : "-"}
+            <ExplorerDisclosureIcon open={!collapsed} color="currentColor" />
           </button>
         )}
-        <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
       </div>
       {!collapsed && <div className="kanban-board-scroll" style={nodeListStyle}>
         {nodeRows.map((row) => {
