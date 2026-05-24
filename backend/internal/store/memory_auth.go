@@ -251,6 +251,15 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		r.effectiveAccess = effectiveAccessSnapshot
 		return domain.CompanyMembership{}, err
 	}
+	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForUserLocked(companyID, user.UserID); err != nil {
+		if hadExistingMembership {
+			r.memberships[membershipKeyValue] = existingMembership
+		} else {
+			delete(r.memberships, membershipKeyValue)
+		}
+		r.effectiveAccess = effectiveAccessSnapshot
+		return domain.CompanyMembership{}, err
+	}
 	return membership, nil
 }
 

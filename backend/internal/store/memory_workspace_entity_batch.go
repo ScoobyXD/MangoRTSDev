@@ -89,6 +89,15 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				created.AssigneeUserID = &input.CreatorUserID
 			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
+			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
 			if input.CreatorUserID != "" {
 				permission := domain.EntityPermission{
 					CompanyID:        input.CompanyID,
@@ -104,6 +113,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
 					return WorkspaceEntityBatchResult{}, err
 				}
+				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
 			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
@@ -145,6 +155,12 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			}
 		}
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
+		if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
 		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
 			user, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID)
 			if !ok {
@@ -168,6 +184,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				return WorkspaceEntityBatchResult{}, err
 			}
 			r.rebuildWorkItemInboxEntriesForLogicGateLocked(input.CompanyID, created.LogicGateID)
+		}
+		if input.CreatorUserID != "" {
+			created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)
 		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID

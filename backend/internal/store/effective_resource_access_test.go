@@ -211,6 +211,18 @@ func TestMemoryEffectiveAccessLogicGateAssignedNodeContextualVisibility(t *testi
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("Set node no_access: %v", err)
+	}
 
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
@@ -279,8 +291,12 @@ func TestMemoryEffectiveAccessSourceSpecificReprojection(t *testing.T) {
 		CompanyID:  companyID,
 		EntityType: EntityTypeLogicGate,
 		EntityID:   gate.LogicGateID,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: directUser.UserID, AccessLevel: EntityPermissionNoAccess},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: contextOnlyUser.UserID, AccessLevel: EntityPermissionNoAccess},
+		},
 	}); err != nil {
-		t.Fatalf("clear gate permissions: %v", err)
+		t.Fatalf("deny gate permissions: %v", err)
 	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)

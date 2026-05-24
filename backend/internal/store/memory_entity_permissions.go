@@ -373,6 +373,13 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			r.effectiveAccess = effectiveAccessSnapshot
 			return nil, err
 		}
+		if entityType == EntityTypeNode || entityType == EntityTypeLogicGate {
+			if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, entityType, targetEntityID); err != nil {
+				r.entityPermissions = permissionsSnapshot
+				r.effectiveAccess = effectiveAccessSnapshot
+				return nil, err
+			}
+		}
 	}
 	if entityType == EntityTypeLogicGate {
 		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{entityID}, nil); err != nil {

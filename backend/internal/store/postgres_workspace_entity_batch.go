@@ -85,6 +85,18 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 					return WorkspaceEntityBatchResult{}, err
 				}
 			}
+			if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if input.CreatorUserID != "" {
+				created.EffectiveAccess = EntityPermissionAdmin
+			}
 			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
 			clientToEntityID[item.ClientID] = created.NodeID
@@ -172,6 +184,15 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
+		}
+		if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+		if input.CreatorUserID != "" {
+			created.EffectiveAccess = EntityPermissionAdmin
 		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID

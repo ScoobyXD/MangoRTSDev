@@ -11,6 +11,8 @@ import { buildNodeTitleCommentSegments, type NodeInlineCommentDraft, type NodeIn
 
 type NodeMapNodeCardProps = {
   node: NodeRecord;
+  canEdit: boolean;
+  editableNodeIDs: Set<string>;
   position: NodePosition;
   size: { w: number; h: number };
   selectedNodeID: string;
@@ -65,6 +67,8 @@ type NodeMapNodeCardProps = {
 
 export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   node,
+  canEdit,
+  editableNodeIDs,
   position,
   size,
   selectedNodeID,
@@ -226,7 +230,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         boxShadow: isSelected ? "0 0 0 3px rgba(100,116,139,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
         userSelect: "none",
         color: nodeCardText,
-        cursor: isEditingTitle ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
+        cursor: isEditingTitle && canEdit ? "text" : canEdit ? (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab") : "default",
         zIndex: isPrimary ? 5 : 4,
         overflow: "visible",
       }}
@@ -271,9 +275,10 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
         const nextSelection = resolveNodeMapDragStartSelection({ selectedNodeIDs, selectedNodeID, nodeID: node.node_id });
-        const nextIDs = nextSelection.dragNodeIDs;
+        const nextIDs = nextSelection.dragNodeIDs.filter((id) => editableNodeIDs.has(id));
         onSetSelectedNodeID(nextSelection.selectedNodeID);
         onSetSelectedNodeIDs(nextSelection.selectedNodeIDs);
+        if (!canEdit || nextIDs.length === 0) return;
 
         const offsets: Record<string, { x: number; y: number }> = {};
         for (const id of nextIDs) {
@@ -304,7 +309,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
       >
         {/* Latency-obsession alignment: keep node-card render minimal.
             We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-        {isEditingTitle ? (
+        {isEditingTitle && canEdit ? (
           <div
             ref={editingNodeTitleElementRef}
             contentEditable
@@ -400,7 +405,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         <div style={{ position: "absolute", top: 6, left: 6, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92 }} />
       )}
 
-      {([
+      {canEdit && ([
         ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],
         ["right", { right: -12, top: "50%", transform: "translate(50%, -50%)", flexDirection: "column" }],
         ["top", { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" }],
@@ -488,7 +493,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
           </div>
         );
       })}
-      {[
+      {canEdit && [
         { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
         { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
         { key: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: { left: -6, bottom: -6, width: 12, height: 12 } },

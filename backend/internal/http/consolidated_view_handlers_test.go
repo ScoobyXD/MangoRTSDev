@@ -66,6 +66,29 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions node: %v", err)
 	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: store.EntityPermissionAdmin},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions logic gate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   hiddenNode.NodeID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden node: %v", err)
+	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
@@ -256,6 +279,16 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   hiddenGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden logic gate: %v", err)
 	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)

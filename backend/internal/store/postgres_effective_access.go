@@ -478,6 +478,122 @@ order by user_id::text asc`, companyID, resourceType, resourceID)
 	return scanEffectiveResourceAccessRows(rows)
 }
 
+func recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) error {
+	companyID = cleanUUIDText(companyID)
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	if companyID == "" || resourceID == "" || !typeOK {
+		return ErrInvalid
+	}
+	facts, err := queryCompanyMemberDefaultEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceCompanyDefault, facts)
+}
+
+func queryCompanyMemberDefaultEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
+	rows, err := tx.QueryContext(ctx, `
+with resource_input as (
+  select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
+  where $2::text in ('node', 'logic_gate')
+),
+existing_resource as (
+  select resource_input.*
+  from resource_input
+  join nodes node
+    on node.company_id=resource_input.company_id
+   and node.node_id=resource_input.resource_id
+  where resource_input.resource_type='node'
+  union all
+  select resource_input.*
+  from resource_input
+  join logic_gates gate
+    on gate.company_id=resource_input.company_id
+   and gate.logic_gate_id=resource_input.resource_id
+  where resource_input.resource_type='logic_gate'
+)
+select existing_resource.company_id::text,
+       membership.user_id::text,
+       existing_resource.resource_type,
+       existing_resource.resource_id::text,
+       'edit'::text as access_level,
+       'company_member_default'::text as source_type,
+       'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id
+from existing_resource
+join company_memberships membership
+  on membership.company_id=existing_resource.company_id
+where not exists (
+  select 1
+  from resource_access_grants grant_row
+  where grant_row.company_id=existing_resource.company_id
+    and grant_row.resource_type=existing_resource.resource_type
+    and grant_row.resource_id=existing_resource.resource_id
+)
+order by membership.user_id::text asc`, companyID, resourceType, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEffectiveResourceAccessRows(rows)
+}
+
+func recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx context.Context, tx *sql.Tx, companyID, userID string) error {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return ErrInvalid
+	}
+	facts, err := queryCompanyMemberDefaultEffectiveAccessFactsForUserTx(ctx, tx, companyID, userID)
+	if err != nil {
+		return err
+	}
+	return replaceEffectiveFactsForSourceTx(ctx, tx, companyID, effectiveAccessSourceCompanyDefault, companyMemberDefaultEffectiveAccessSourceID(companyID, userID), facts)
+}
+
+func queryCompanyMemberDefaultEffectiveAccessFactsForUserTx(ctx context.Context, tx effectiveAccessQueryer, companyID, userID string) ([]domain.EffectiveResourceAccess, error) {
+	rows, err := tx.QueryContext(ctx, `
+with membership as (
+  select company_id, user_id
+  from company_memberships
+  where company_id=$1::uuid
+    and user_id=$2::uuid
+),
+resources as (
+  select node.company_id, 'node'::text as resource_type, node.node_id as resource_id
+  from nodes node
+  where node.company_id=$1::uuid
+  union all
+  select gate.company_id, 'logic_gate'::text, gate.logic_gate_id
+  from logic_gates gate
+  where gate.company_id=$1::uuid
+)
+select resources.company_id::text,
+       membership.user_id::text,
+       resources.resource_type,
+       resources.resource_id::text,
+       'edit'::text as access_level,
+       'company_member_default'::text as source_type,
+       'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id
+from membership
+join resources
+  on resources.company_id=membership.company_id
+where not exists (
+  select 1
+  from resource_access_grants grant_row
+  where grant_row.company_id=resources.company_id
+    and grant_row.resource_type=resources.resource_type
+    and grant_row.resource_id=resources.resource_id
+)
+order by resources.resource_type asc,
+         resources.resource_id::text asc`, companyID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEffectiveResourceAccessRows(rows)
+}
+
 func scanEffectiveResourceAccessRows(rows *sql.Rows) ([]domain.EffectiveResourceAccess, error) {
 	facts := []domain.EffectiveResourceAccess{}
 	for rows.Next() {
@@ -1134,6 +1250,27 @@ company_admin_facts as (
   from company_admin_users admin_user
   cross join resources resource
 ),
+company_member_default_facts as (
+  select resource.company_id,
+         membership.user_id,
+         resource.resource_type,
+         resource.resource_id,
+         'edit'::text as access_level,
+         'company_member_default'::text as source_type,
+         'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+         2 as access_rank
+  from resources resource
+  join company_memberships membership
+    on membership.company_id=resource.company_id
+  where resource.resource_type in ('node', 'logic_gate')
+    and not exists (
+      select 1
+      from resource_access_grants grant_row
+      where grant_row.company_id=resource.company_id
+        and grant_row.resource_type=resource.resource_type
+        and grant_row.resource_id=resource.resource_id
+    )
+),
 node_assignee_facts as (
   select node.company_id,
          node.assignee_user_id as user_id,
@@ -1200,6 +1337,8 @@ shared_raci_group_facts as (
 ),
 base_facts as (
   select * from legacy_facts
+  union all
+  select * from company_member_default_facts
   union all
   select * from company_admin_facts
   union all
@@ -1354,6 +1493,66 @@ order by access.resource_id::text`, companyID, userID, resourceType, accessLevel
 			return nil, err
 		}
 		out[resourceID] = true
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepo) effectiveAccessLevelsForUser(ctx context.Context, companyID, userID, resourceType string, resourceIDs []string) (map[string]string, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	if companyID == "" || userID == "" || !typeOK {
+		return nil, ErrInvalid
+	}
+	cleanIDs := make([]string, 0, len(resourceIDs))
+	seen := map[string]bool{}
+	for _, rawID := range resourceIDs {
+		resourceID := cleanUUIDText(rawID)
+		if resourceID == "" || seen[resourceID] {
+			continue
+		}
+		seen[resourceID] = true
+		cleanIDs = append(cleanIDs, resourceID)
+	}
+	if len(cleanIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+with input as (
+  select distinct raw.resource_id::uuid as resource_id
+  from unnest($4::text[]) as raw(resource_id)
+),
+ranked_access as (
+  select access.resource_id::text as resource_id,
+         access.access_level,
+         row_number() over (
+           partition by access.resource_id
+           order by mangorts_access_level_rank(access.access_level) desc,
+                    access.source_type asc,
+                    access.source_id asc
+         ) as rn
+  from effective_resource_access access
+  join input
+    on input.resource_id=access.resource_id
+  where access.company_id=$1::uuid
+    and access.user_id=$2::uuid
+    and access.resource_type=$3
+)
+select resource_id, access_level
+from ranked_access
+where rn=1`, companyID, userID, resourceType, cleanIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var resourceID string
+		var accessLevel string
+		if err := rows.Scan(&resourceID, &accessLevel); err != nil {
+			return nil, err
+		}
+		out[resourceID] = accessLevel
 	}
 	return out, rows.Err()
 }

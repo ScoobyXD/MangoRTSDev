@@ -20,6 +20,7 @@ func TestMemoryNodeAssigneeScopedEffectiveAccessCreateUpdateClear(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee: %v", err)
 	}
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, node.NodeID, second.UserID, EntityPermissionNoAccess)
 	assertEffectiveAccess(t, repo, companyID, first.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
 	assertEffectiveAccess(t, repo, companyID, second.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
 
@@ -67,6 +68,7 @@ func TestMemoryNodeAssigneeScopedRemovalPreservesOtherSourceAccess(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee: %v", err)
 	}
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, node.NodeID, second.UserID, EntityPermissionNoAccess)
 	now := time.Now().UTC()
 	otherSourceID := effectiveAccessSourceID(EntityTypeNode, node.NodeID, EntityPermissionSubjectUser, first.UserID)
 	repo.effectiveAccess[effectiveAccessKey(companyID, first.UserID, EntityTypeNode, node.NodeID, "direct_user_grant", otherSourceID)] = domain.EffectiveResourceAccess{
@@ -131,6 +133,7 @@ func TestMemoryNodeAssigneeEffectiveAccessFailureRollsBackSourceMutation(t *test
 		if err != nil {
 			t.Fatalf("CreateNodeWithAssignee setup: %v", err)
 		}
+		mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, node.NodeID, second.UserID, EntityPermissionNoAccess)
 		repo.effectiveAccessErr = errEffective
 
 		_, err = repo.UpdateNode(UpdateNodeInput{

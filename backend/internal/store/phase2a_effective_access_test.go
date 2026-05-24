@@ -61,7 +61,8 @@ func TestMemorySetEntityPermissionsScopedDirectGrantReplacementAndRevocation(t *
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
 	}
-	assertEffectiveAccess(t, repo, companyID, second.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
+	assertEffectiveAccess(t, repo, companyID, first.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, second.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
 }
 
 func TestMemorySetEntityPermissionsNoAccessAndDirectPrecedence(t *testing.T) {
@@ -178,7 +179,8 @@ func TestMemoryCompanyAndDevAdminScopedProjection(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("demote company admin: %v", err)
 	}
-	assertEffectiveAccess(t, repo, companyID, admin.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
+	assertEffectiveAccess(t, repo, companyID, admin.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, admin.UserID, EntityTypeNode, node.NodeID, EntityPermissionAdmin, false)
 
 	if _, err := repo.AddCompanyMembership(devAdmin.CognitoSubject, devAdminCompanyID, domain.RoleDevAdmin); err != nil {
 		t.Fatalf("promote dev admin: %v", err)

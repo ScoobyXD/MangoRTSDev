@@ -69,7 +69,7 @@ func TestNodeAssigneeHandlersMaintainEffectiveAccessWithoutFullRebuild(t *testin
 	if repo.rebuildCalls != 0 {
 		t.Fatalf("node reassign called full-company rebuild %d times, want 0", repo.rebuildCalls)
 	}
-	assertHTTPNodeAssigneeEffectiveAccess(t, backing, companyID, creator.UserID, created.NodeID, store.EntityPermissionView, false)
+	assertHTTPNodeAssigneeEffectiveAccess(t, backing, companyID, creator.UserID, created.NodeID, store.EntityPermissionEdit, true)
 	assertHTTPNodeAssigneeEffectiveAccess(t, backing, companyID, nextAssignee.UserID, created.NodeID, store.EntityPermissionEdit, true)
 
 	clearBody, _ := json.Marshal(map[string]any{
@@ -87,7 +87,7 @@ func TestNodeAssigneeHandlersMaintainEffectiveAccessWithoutFullRebuild(t *testin
 	if repo.rebuildCalls != 0 {
 		t.Fatalf("node clear called full-company rebuild %d times, want 0", repo.rebuildCalls)
 	}
-	assertHTTPNodeAssigneeEffectiveAccess(t, backing, companyID, nextAssignee.UserID, created.NodeID, store.EntityPermissionView, false)
+	assertHTTPNodeAssigneeEffectiveAccess(t, backing, companyID, nextAssignee.UserID, created.NodeID, store.EntityPermissionEdit, true)
 }
 
 func TestNodeGETVisibilityUsesAssigneeDerivedEffectiveAccess(t *testing.T) {
@@ -104,6 +104,30 @@ func TestNodeGETVisibilityUsesAssigneeDerivedEffectiveAccess(t *testing.T) {
 	hidden, err := repo.CreateNode(companyID, "Hidden unassigned node")
 	if err != nil {
 		t.Fatalf("CreateNode hidden: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   visible.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions visible assigned node: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   hidden.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden node: %v", err)
 	}
 
 	handler := NewServer(repo).Routes()
