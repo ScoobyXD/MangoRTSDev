@@ -15,7 +15,7 @@ import { fetchNotifications, markNotificationRead, type NotificationItem, type N
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
-import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
+import type { AciInboxRole, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
@@ -63,9 +63,10 @@ function openHomePinContextMenu(
   setMenu({ x: event.clientX, y: event.clientY, ...target, id });
 }
 
-function HomePinContextMenu({ menu, onClose }: {
+function HomePinContextMenu({ menu, onClose, onDelete }: {
   menu: HomePinContextMenuState | null;
   onClose: () => void;
+  onDelete?: (target: HomePinContextMenuState) => void;
 }) {
   if (!menu) return null;
   return (
@@ -80,11 +81,23 @@ function HomePinContextMenu({ menu, onClose }: {
       >
         Pin {menu.kind === "logic_gate" ? "Logic Gate" : "Node"}
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            onDelete(menu);
+            onClose();
+          }}
+        >
+          Delete
+        </button>
+      )}
     </FrameRightClickMenu>
   );
 }
 
-export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate }: {
+export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate, onRequestDelete }: {
   menu: { x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null;
   companyUsers: CompanyUser[];
   logicGates: LogicGateRecord[];
@@ -93,6 +106,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
   onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => void;
   onApplyLogicGateRaci: (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => void;
   onAddNodesToLogicGate: (nodeIDs: string[], logicGateID: string) => void;
+  onRequestDelete: (kind: "node" | "logic_gate", ids: string[]) => void;
 }) {
   const [assignee, setAssignee] = useState("__no_change__");
   const [priority, setPriority] = useState("__no_change__");
@@ -274,6 +288,17 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
         )}
         <button type="submit" disabled={busy || (menu.kind === "logic_gate" && !raciUserID)} style={actionButtonStyle}>
           {busy ? "Applying" : "Apply"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          style={{ ...actionButtonStyle, color: "#8b123f", background: "#fff7fb", borderColor: "rgba(139, 18, 63, 0.34)" }}
+          onClick={() => {
+            if (busy) return;
+            onRequestDelete(menu.kind, menu.ids);
+          }}
+        >
+          Delete
         </button>
       </form>
     </FrameRightClickMenu>
@@ -1790,6 +1815,7 @@ export function LogicGateRail({
   onRemoveShortcut,
   onConvertMessages,
   onCreateLogicGate,
+  onRequestDeleteLogicGate,
 }: {
   loading: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
@@ -1812,6 +1838,7 @@ export function LogicGateRail({
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
   onCreateLogicGate: (options?: { creatorRaciRole?: LogicGateRaciRole }) => void;
+  onRequestDeleteLogicGate: (logicGateID: string) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
@@ -1961,7 +1988,13 @@ export function LogicGateRail({
         </div>
       </section>
     </aside>
-    <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    <HomePinContextMenu
+      menu={pinContextMenu}
+      onClose={() => setPinContextMenu(null)}
+      onDelete={(target) => {
+        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id);
+      }}
+    />
     {createContextMenu && (
       <FrameRightClickMenu x={createContextMenu.x} y={createContextMenu.y} onClose={() => setCreateContextMenu(null)}>
         <button
@@ -2488,6 +2521,7 @@ export function AciInboxMatrix({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
+  onRequestDeleteLogicGate,
   onCreateNodeInLogicGate,
   onCreateLogicGateInCell,
   onCreateNodeInCell,
@@ -2512,6 +2546,7 @@ export function AciInboxMatrix({
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
+  onRequestDeleteLogicGate: (logicGateID: string) => void;
   onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
   onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
   onCreateNodeInCell: (input: InboxCellCreateInput) => void;
@@ -2673,6 +2708,7 @@ export function AciInboxMatrix({
                             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
                             onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onRequestDeleteLogicGate={onRequestDeleteLogicGate}
                             onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, creatorRaciRole: column.role })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
                             onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
@@ -2752,6 +2788,7 @@ export function ResponsibleInboxMatrix({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
+  onRequestDeleteLogicGate,
   onCreateNodeInLogicGate,
   onCreateLogicGateInCell,
   onCreateNodeInCell,
@@ -2776,6 +2813,7 @@ export function ResponsibleInboxMatrix({
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
+  onRequestDeleteLogicGate: (logicGateID: string) => void;
   onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
   onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
   onCreateNodeInCell: (input: InboxCellCreateInput) => void;
@@ -2941,6 +2979,7 @@ export function ResponsibleInboxMatrix({
                             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
                             onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onRequestDeleteLogicGate={onRequestDeleteLogicGate}
                             onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole: "responsible" })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
                             onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
@@ -3019,6 +3058,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onOpenLogicGateBulkMenuAt,
+  onRequestDeleteLogicGate,
   onCreateLogicGate,
   onCreateNode,
   onDropNodes,
@@ -3055,6 +3095,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt?: (logicGateID: string, x: number, y: number) => void;
+  onRequestDeleteLogicGate?: (logicGateID: string) => void;
   onCreateLogicGate?: () => void;
   onCreateNode?: () => void;
   onDropNodes?: (nodeIDs: string[]) => void;
@@ -3290,6 +3331,18 @@ export function LogicGateInboxNodeGroupCard({
           >
             Pin Logic Gate
           </button>
+          {onRequestDeleteLogicGate && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              onClick={() => {
+                setGroupContextMenu(null);
+                onRequestDeleteLogicGate(group.logicGateID);
+              }}
+            >
+              Delete
+            </button>
+          )}
         </FrameRightClickMenu>
       )}
     </div>
@@ -3458,6 +3511,46 @@ export function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCanc
         </div>
         <div style={deleteModalDetailStyle}>
           This deletes the selected email{count === 1 ? "" : "s"} from your mailbox immediately.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {busy ? "Deleting" : "Yes"}
+          </button>
+          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            No
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DeleteHomeEntitiesConfirmationModal({ targets, busy, onConfirm, onCancel }: {
+  targets: HomeEntityDeleteTarget[];
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const count = targets.length;
+  const logicGateCount = targets.filter((target) => target.kind === "logic_gate").length;
+  const nodeCount = targets.filter((target) => target.kind === "node").length;
+  const targetList = targets.slice(0, 5).map((target) => target.label || target.id);
+  if (targets.length > targetList.length) targetList.push(`${targets.length - targetList.length} more`);
+  const description = [
+    nodeCount ? `${nodeCount} node${nodeCount === 1 ? "" : "s"}` : "",
+    logicGateCount ? `${logicGateCount} Logic Gate${logicGateCount === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" and ");
+  return (
+    <div style={deleteModalBackdropStyle}>
+      <div style={deleteModalStyle}>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>
+          {count === 1 ? `Are you sure you want to delete ${targetList[0]}?` : `Are you sure you want to delete these ${count} items?`}
+        </div>
+        <div style={deleteModalDetailStyle}>
+          This deletes {description || "the selected items"} immediately.
+        </div>
+        <div style={deleteModalDetailStyle}>
+          Selected: {targetList.join(", ")}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
