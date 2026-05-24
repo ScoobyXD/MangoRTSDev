@@ -891,11 +891,11 @@ export const logicGateInboxGroupStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gridTemplateRows: "44px minmax(0, 1fr)",
-  border: "1px solid rgba(148, 163, 184, 0.22)",
+  border: "1px solid rgba(255, 255, 255, 0.86)",
   borderRadius: 8,
   background: "#ffffff",
   overflow: "hidden",
-  boxShadow: "0 10px 22px rgba(15, 23, 42, 0.09), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
+  boxShadow: "8px 8px 18px rgba(174, 174, 192, 0.24), -6px -6px 14px rgba(255, 255, 255, 0.94), inset 1px 1px 0 rgba(255, 255, 255, 0.94)",
 };
 
 export const logicGateInboxGroupResizeHandleStyle: React.CSSProperties = {
@@ -920,9 +920,7 @@ export const logicGateInboxGroupResizeGripStyle: React.CSSProperties = {
   background: "rgba(15, 23, 42, 0.34)",
 };
 
-export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: string): React.CSSProperties {
-  const tint = color ? homeColorWithAlpha(color, 0.13) : "rgba(248, 250, 252, 0.92)";
-  const strongerTint = color ? homeColorWithAlpha(color, 0.20) : "#ffffff";
+export function logicGateInboxGroupHeaderStyle(interactive: boolean, _color?: string): React.CSSProperties {
   return {
     width: "100%",
     minHeight: 44,
@@ -931,8 +929,8 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: str
     alignItems: "center",
     gap: 6,
     border: "none",
-    borderBottom: `1px solid rgba(15, 23, 42, 0.10)`,
-    background: `linear-gradient(180deg, ${strongerTint} 0%, ${tint} 100%)`,
+    borderBottom: "none",
+    background: "#ffffff",
     color: "#111827",
     cursor: interactive ? "pointer" : "default",
     padding: "0 9px",
@@ -1022,7 +1020,7 @@ export const logicGateInboxNodeListStyle: React.CSSProperties = {
   overflowY: "auto",
   overflowX: "hidden",
   padding: "6px 6px 12px",
-  background: "linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%)",
+  background: "#ffffff",
   ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
   ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };

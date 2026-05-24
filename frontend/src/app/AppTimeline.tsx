@@ -66,7 +66,8 @@ const EXPANDED_TRACK_HEIGHT = 88;
 const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
 const TIMELINE_NODE_ACCENT = "#19a8ff";
 const TIMELINE_LOGIC_GATE_ACCENT = "#19f07a";
-const TIMELINE_ITEM_EDGE_WIDTH = 3.5;
+const TIMELINE_ITEM_BORDER_WIDTH = 1.5;
+const TIMELINE_ITEM_EDGE_WIDTH = 2;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
 const TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH = TIMELINE_ITEM_CHECKBOX_WIDTH + TIMELINE_ITEM_EDGE_WIDTH;
 
@@ -713,7 +714,7 @@ function timelineItemStyle(
     minWidth: 0,
     display: "grid",
     gridTemplateColumns: readOnly ? `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_WIDTH}px` : `minmax(0, 1fr) ${TIMELINE_ITEM_CHECKBOX_COLUMN_WIDTH}px`,
-    border: `1px solid ${accent}`,
+    border: `${TIMELINE_ITEM_BORDER_WIDTH}px solid ${accent}`,
     borderRadius: 0,
     background: "#ffffff",
     color: "#0f172a",
