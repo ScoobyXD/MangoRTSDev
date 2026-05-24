@@ -135,13 +135,11 @@ insert into effective_resource_access (
   updated_timestamp
 )
 values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, now(), now())
-on conflict (company_id, user_id, resource_type, resource_id, source_type, source_id)
+on conflict (company_id, user_id, resource_type, resource_id)
 	do update set
-	  access_level=case
-	    when mangorts_access_level_rank(effective_resource_access.access_level) >= mangorts_access_level_rank(excluded.access_level)
-	      then effective_resource_access.access_level
-	    else excluded.access_level
-	  end,
+	  access_level=excluded.access_level,
+	  source_type=excluded.source_type,
+	  source_id=excluded.source_id,
 	  updated_timestamp=now()`,
 			fact.CompanyID,
 			fact.UserID,
@@ -226,24 +224,7 @@ func recomputeDirectGrantEffectiveAccessForResourceTx(ctx context.Context, tx *s
 	if companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
-	facts, err := queryDirectGrantEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
-	if err != nil {
-		return err
-	}
-	userFacts := make([]domain.EffectiveResourceAccess, 0, len(facts))
-	groupFacts := make([]domain.EffectiveResourceAccess, 0, len(facts))
-	for _, fact := range facts {
-		switch fact.SourceType {
-		case effectiveAccessSourceDirectUserGrant:
-			userFacts = append(userFacts, fact)
-		case effectiveAccessSourceDirectGroupGrant:
-			groupFacts = append(groupFacts, fact)
-		}
-	}
-	if err := replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceDirectUserGrant, userFacts); err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceDirectGroupGrant, groupFacts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func queryDirectGrantEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
@@ -348,7 +329,6 @@ select company_id::text,
        source_id
 from ranked_legacy_facts
 where rn=1
-  and access_rank > 0
 order by user_id::text asc, source_type asc, source_id asc`, companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
@@ -362,17 +342,35 @@ func recomputeCompanyAdminEffectiveAccessForUserTx(ctx context.Context, tx *sql.
 	if userID == "" {
 		return ErrInvalid
 	}
-	if _, err := tx.ExecContext(ctx, `
-delete from effective_resource_access
-where user_id=$1::uuid
-  and source_type=$2`, userID, effectiveAccessSourceCompanyAdmin); err != nil {
-		return err
-	}
-	facts, err := queryCompanyAdminEffectiveAccessFactsForUserTx(ctx, tx, userID)
+	rows, err := tx.QueryContext(ctx, `
+select company_id::text
+from companies
+order by company_id::text`)
 	if err != nil {
 		return err
 	}
-	return insertEffectiveFactsTx(ctx, tx, facts)
+	companyIDs := []string{}
+	for rows.Next() {
+		var companyID string
+		if err := rows.Scan(&companyID); err != nil {
+			rows.Close()
+			return err
+		}
+		companyIDs = append(companyIDs, companyID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, companyID := range companyIDs {
+		if err := rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func queryCompanyAdminEffectiveAccessFactsForUserTx(ctx context.Context, tx effectiveAccessQueryer, userID string) ([]domain.EffectiveResourceAccess, error) {
@@ -437,11 +435,7 @@ func recomputeCompanyAdminEffectiveAccessForResourceTx(ctx context.Context, tx *
 	if companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
-	facts, err := queryCompanyAdminEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
-	if err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceCompanyAdmin, facts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func queryCompanyAdminEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
@@ -485,11 +479,7 @@ func recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx context.Conte
 	if companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
-	facts, err := queryCompanyMemberDefaultEffectiveAccessFactsForResourceTx(ctx, tx, companyID, resourceType, resourceID)
-	if err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, resourceType, resourceID, effectiveAccessSourceCompanyDefault, facts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func queryCompanyMemberDefaultEffectiveAccessFactsForResourceTx(ctx context.Context, tx effectiveAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EffectiveResourceAccess, error) {
@@ -544,11 +534,7 @@ func recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx context.Context, 
 	if companyID == "" || userID == "" {
 		return ErrInvalid
 	}
-	facts, err := queryCompanyMemberDefaultEffectiveAccessFactsForUserTx(ctx, tx, companyID, userID)
-	if err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForSourceTx(ctx, tx, companyID, effectiveAccessSourceCompanyDefault, companyMemberDefaultEffectiveAccessSourceID(companyID, userID), facts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func queryCompanyMemberDefaultEffectiveAccessFactsForUserTx(ctx context.Context, tx effectiveAccessQueryer, companyID, userID string) ([]domain.EffectiveResourceAccess, error) {
@@ -623,44 +609,7 @@ func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, com
 	if companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
-	rows, err := tx.QueryContext(ctx, `
-select node.company_id::text,
-       node.assignee_user_id::text,
-       node.node_id::text
-from nodes node
-join company_memberships membership
-  on membership.company_id=node.company_id
- and membership.user_id=node.assignee_user_id
-where node.company_id=$1::uuid
-  and node.node_id=$2::uuid
-  and node.assignee_user_id is not null`, companyID, nodeID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	facts := []domain.EffectiveResourceAccess{}
-	for rows.Next() {
-		var factCompanyID string
-		var userID string
-		var factNodeID string
-		if err := rows.Scan(&factCompanyID, &userID, &factNodeID); err != nil {
-			return err
-		}
-		facts = append(facts, domain.EffectiveResourceAccess{
-			CompanyID:    factCompanyID,
-			UserID:       userID,
-			ResourceType: EntityTypeNode,
-			ResourceID:   factNodeID,
-			AccessLevel:  EntityPermissionEdit,
-			SourceType:   effectiveAccessSourceNodeAssignee,
-			SourceID:     nodeAssigneeEffectiveAccessSourceID(factNodeID, userID),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, facts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
@@ -669,43 +618,7 @@ func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, co
 	if companyID == "" || logicGateID == "" {
 		return ErrInvalid
 	}
-	rows, err := tx.QueryContext(ctx, `
-select assignment.company_id::text,
-       assignment.user_id::text,
-       assignment.logic_gate_id::text,
-       assignment.role
-from logic_gate_raci_assignments assignment
-where assignment.company_id=$1::uuid
-  and assignment.logic_gate_id=$2::uuid
-order by assignment.role asc, assignment.user_id::text asc`, companyID, logicGateID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	facts := []domain.EffectiveResourceAccess{}
-	for rows.Next() {
-		var factCompanyID string
-		var userID string
-		var factLogicGateID string
-		var role string
-		if err := rows.Scan(&factCompanyID, &userID, &factLogicGateID, &role); err != nil {
-			return err
-		}
-		facts = append(facts, domain.EffectiveResourceAccess{
-			CompanyID:    factCompanyID,
-			UserID:       userID,
-			ResourceType: EntityTypeLogicGate,
-			ResourceID:   factLogicGateID,
-			AccessLevel:  EntityPermissionEdit,
-			SourceType:   effectiveAccessSourceLogicGateRaci,
-			SourceID:     logicGateRaciEffectiveAccessSourceID(factLogicGateID, role, userID),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID, effectiveAccessSourceLogicGateRaci, facts)
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
 }
 
 func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
@@ -714,25 +627,124 @@ func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, 
 	if companyID == "" || folderID == "" {
 		return ErrInvalid
 	}
-	rows, err := tx.QueryContext(ctx, `
-with recursive ancestry(folder_id, parent_folder_id, path) as (
-  select folder.folder_id,
-         folder.parent_folder_id,
-         array[folder.folder_id]
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func recomputeSharedTriageRaciEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return ErrInvalid
+	}
+	if _, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID); err != nil {
+		return err
+	}
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return ErrInvalid
+	}
+	if _, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID); err != nil {
+		return err
+	}
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" || ctx == nil || tx == nil {
+		return ErrInvalid
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
+		return err
+	}
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs, nodeIDs []string) error {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	_, _ = logicGateIDs, nodeIDs
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
+}
+
+func cleanUUIDTextSlice(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = cleanUUIDText(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func rebuildEffectiveResourceAccessForCompanyTx(ctx context.Context, tx effectiveAccessExecer, companyID string) error {
+	companyID = cleanUUIDText(companyID)
+	if ctx == nil || tx == nil || companyID == "" {
+		return ErrInvalid
+	}
+	if _, err := tx.ExecContext(ctx, `delete from effective_resource_access where company_id=$1::uuid`, companyID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+with recursive resources as (
+  select company_id, 'node'::text as resource_type, node_id as resource_id
+  from nodes
+  where company_id=$1::uuid
+  union all
+  select company_id, 'logic_gate'::text, logic_gate_id
+  from logic_gates
+  where company_id=$1::uuid
+  union all
+  select company_id, 'shared_triage_folder'::text, folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid
+    and folder_kind='communications'
+),
+shared_descendants as (
+  select folder.company_id,
+         folder.folder_id as source_folder_id,
+         folder.folder_id as target_folder_id,
+         0 as depth,
+         array[folder.folder_id] as path
   from company_explorer_folders folder
   where folder.company_id=$1::uuid
-    and folder.folder_id=$2::uuid
     and folder.folder_kind='communications'
   union all
-  select parent.folder_id,
-         parent.parent_folder_id,
-         ancestry.path || parent.folder_id
-  from company_explorer_folders parent
-  join ancestry
-    on ancestry.parent_folder_id=parent.folder_id
-  where parent.company_id=$1::uuid
-    and parent.folder_kind='communications'
-    and not parent.folder_id = any(ancestry.path)
+  select parent.company_id,
+         parent.source_folder_id,
+         child.folder_id,
+         parent.depth + 1,
+         parent.path || child.folder_id
+  from shared_descendants parent
+  join company_explorer_folders child
+    on child.company_id=parent.company_id
+   and child.folder_kind='communications'
+   and child.parent_folder_id=parent.target_folder_id
+  where not child.folder_id = any(parent.path)
 ),
 group_descendants as (
   select user_group.company_id,
@@ -752,27 +764,210 @@ group_descendants as (
    and child.parent_group_id=parent.group_id
   where not child.group_id = any(parent.path)
 ),
-facts as (
-  select assignment.company_id::text as company_id,
-         assignment.user_id::text as user_id,
-         assignment.folder_id::text as source_folder_id,
-         assignment.role,
-         'user'::text as subject_type,
-         assignment.user_id::text as subject_id
-  from communications_shared_inbox_raci_assignments assignment
-  join ancestry
-    on ancestry.folder_id=assignment.folder_id
-  where assignment.company_id=$1::uuid
+legacy_grant_scope as (
+  select grant_row.company_id,
+         grant_row.resource_type,
+         grant_row.resource_id as source_resource_id,
+         grant_row.resource_id as resource_id,
+         grant_row.principal_type,
+         grant_row.principal_id,
+         lower(btrim(grant_row.access_level)) as access_level,
+         grant_row.created_timestamp as source_timestamp,
+         0 as depth
+  from resource_access_grants grant_row
+  join resources resource
+    on resource.company_id=grant_row.company_id
+   and resource.resource_type=grant_row.resource_type
+   and resource.resource_id=grant_row.resource_id
+  where grant_row.company_id=$1::uuid
+    and grant_row.resource_type in ('node', 'logic_gate')
   union all
-  select assignment.company_id::text,
-         member.user_id::text,
-         assignment.folder_id::text,
-         assignment.role,
-         'group'::text,
-         assignment.group_id::text
+  select grant_row.company_id,
+         grant_row.resource_type,
+         grant_row.resource_id,
+         shared.target_folder_id,
+         grant_row.principal_type,
+         grant_row.principal_id,
+         lower(btrim(grant_row.access_level)),
+         grant_row.created_timestamp,
+         shared.depth
+  from resource_access_grants grant_row
+  join shared_descendants shared
+    on shared.company_id=grant_row.company_id
+   and shared.source_folder_id=grant_row.resource_id
+  where grant_row.company_id=$1::uuid
+    and grant_row.resource_type='shared_triage_folder'
+),
+legacy_candidates as (
+  select scope.company_id,
+         scope.principal_id as user_id,
+         scope.resource_type,
+         scope.resource_id,
+         scope.access_level,
+         'direct_user_grant'::text as source_type,
+         scope.resource_type || ':' || scope.source_resource_id::text || ':user:' || scope.principal_id::text as source_id,
+         scope.source_timestamp,
+         60 as source_rank,
+         scope.depth,
+         2 as subject_rank,
+         mangorts_access_level_rank(scope.access_level) as access_rank
+  from legacy_grant_scope scope
+  join company_memberships membership
+    on membership.company_id=scope.company_id
+   and membership.user_id=scope.principal_id
+  where scope.principal_type='user'
+  union all
+  select scope.company_id,
+         member.user_id,
+         scope.resource_type,
+         scope.resource_id,
+         scope.access_level,
+         'direct_group_grant'::text,
+         scope.resource_type || ':' || scope.source_resource_id::text || ':group:' || scope.principal_id::text,
+         greatest(scope.source_timestamp, member.updated_timestamp),
+         30,
+         scope.depth,
+         1,
+         mangorts_access_level_rank(scope.access_level)
+  from legacy_grant_scope scope
+  join group_descendants descendant
+    on descendant.company_id=scope.company_id
+   and descendant.root_group_id=scope.principal_id
+  join company_user_group_members member
+    on member.company_id=scope.company_id
+   and member.group_id=descendant.group_id
+  where scope.principal_type='group'
+),
+ranked_legacy_facts as (
+  select legacy_candidates.*,
+         row_number() over (
+           partition by company_id, user_id, resource_type, resource_id
+           order by depth asc, source_timestamp desc, subject_rank desc, access_rank desc, source_type asc, source_id asc
+         ) as rn
+  from legacy_candidates
+),
+legacy_facts as (
+  select company_id, user_id, resource_type, resource_id, access_level, source_type, source_id, source_timestamp, source_rank, access_rank
+  from ranked_legacy_facts
+  where rn=1
+),
+company_admin_users as (
+  select user_id, source_id, source_timestamp
+  from (
+    select membership.user_id,
+           'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+           membership.updated_timestamp as source_timestamp,
+           row_number() over (
+             partition by membership.user_id
+             order by case when membership.company_id=$1::uuid then 0 else 1 end, membership.company_id::text
+           ) as rn
+    from company_memberships membership
+    where membership.role='dev_admin'
+       or (membership.company_id=$1::uuid and membership.role='company_admin')
+  ) ranked
+  where rn=1
+),
+company_admin_facts as (
+  select $1::uuid as company_id,
+         admin_user.user_id,
+         resource.resource_type,
+         resource.resource_id,
+         'admin'::text as access_level,
+         'company_admin'::text as source_type,
+         admin_user.source_id,
+         admin_user.source_timestamp,
+         90 as source_rank,
+         3 as access_rank
+  from company_admin_users admin_user
+  cross join resources resource
+),
+company_member_default_facts as (
+  select resource.company_id,
+         membership.user_id,
+         resource.resource_type,
+         resource.resource_id,
+         'edit'::text as access_level,
+         'company_member_default'::text as source_type,
+         'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+         membership.updated_timestamp as source_timestamp,
+         10 as source_rank,
+         2 as access_rank
+  from resources resource
+  join company_memberships membership
+    on membership.company_id=resource.company_id
+  where resource.resource_type in ('node', 'logic_gate')
+    and not exists (
+      select 1
+      from resource_access_grants grant_row
+      where grant_row.company_id=resource.company_id
+        and grant_row.resource_type=resource.resource_type
+        and grant_row.resource_id=resource.resource_id
+    )
+),
+node_assignee_facts as (
+  select node.company_id,
+         node.assignee_user_id as user_id,
+         'node'::text as resource_type,
+         node.node_id as resource_id,
+         'edit'::text as access_level,
+         'node_assignee'::text as source_type,
+         'node:' || node.node_id::text || ':assignee:' || node.assignee_user_id::text as source_id,
+         now() as source_timestamp,
+         65 as source_rank,
+         2 as access_rank
+  from nodes node
+  join company_memberships membership
+    on membership.company_id=node.company_id
+   and membership.user_id=node.assignee_user_id
+  where node.company_id=$1::uuid
+    and node.assignee_user_id is not null
+),
+logic_gate_raci_facts as (
+  select assignment.company_id,
+         assignment.user_id,
+         'logic_gate'::text as resource_type,
+         assignment.logic_gate_id as resource_id,
+         'edit'::text as access_level,
+         'logic_gate_raci'::text as source_type,
+         'logic_gate:' || assignment.logic_gate_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
+         assignment.created_timestamp as source_timestamp,
+         70 as source_rank,
+         2 as access_rank
+  from logic_gate_raci_assignments assignment
+  where assignment.company_id=$1::uuid
+),
+shared_raci_user_facts as (
+  select assignment.company_id,
+         assignment.user_id,
+         'shared_triage_folder'::text as resource_type,
+         shared.target_folder_id as resource_id,
+         'edit'::text as access_level,
+         'shared_triage_raci'::text as source_type,
+         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
+         assignment.created_timestamp as source_timestamp,
+         40 as source_rank,
+         2 as access_rank
+  from communications_shared_inbox_raci_assignments assignment
+  join shared_descendants shared
+    on shared.company_id=assignment.company_id
+   and shared.source_folder_id=assignment.folder_id
+  where assignment.company_id=$1::uuid
+),
+shared_raci_group_facts as (
+  select assignment.company_id,
+         member.user_id,
+         'shared_triage_folder'::text as resource_type,
+         shared.target_folder_id as resource_id,
+         'edit'::text as access_level,
+         'shared_triage_raci'::text as source_type,
+         'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':group:' || assignment.group_id::text as source_id,
+         greatest(assignment.created_timestamp, member.updated_timestamp) as source_timestamp,
+         40 as source_rank,
+         2 as access_rank
   from communications_shared_inbox_raci_group_assignments assignment
-  join ancestry
-    on ancestry.folder_id=assignment.folder_id
+  join shared_descendants shared
+    on shared.company_id=assignment.company_id
+   and shared.source_folder_id=assignment.folder_id
   join group_descendants descendant
     on descendant.company_id=assignment.company_id
    and descendant.root_group_id=assignment.group_id
@@ -780,288 +975,82 @@ facts as (
     on member.company_id=assignment.company_id
    and member.group_id=descendant.group_id
   where assignment.company_id=$1::uuid
+),
+base_facts as (
+  select * from legacy_facts
+  union all
+  select * from company_member_default_facts
+  union all
+  select * from company_admin_facts
+  union all
+  select * from node_assignee_facts
+  union all
+  select * from logic_gate_raci_facts
+  union all
+  select * from shared_raci_user_facts
+  union all
+  select * from shared_raci_group_facts
+),
+logic_gate_assignment_visibility_facts as (
+  select base.company_id,
+         base.user_id,
+         'node'::text as resource_type,
+         assignment.node_id as resource_id,
+         base.access_level,
+         'logic_gate_assignment_visibility'::text as source_type,
+         base.source_type || ':' || base.source_id || ':logic_gate:' || assignment.logic_gate_id::text || ':node:' || assignment.node_id::text as source_id,
+         greatest(base.source_timestamp, assignment.updated_timestamp) as source_timestamp,
+         80 as source_rank,
+         base.access_rank
+  from base_facts base
+  join node_logic_gate_assignments assignment
+    on assignment.company_id=base.company_id
+   and assignment.logic_gate_id=base.resource_id
+  where base.resource_type='logic_gate'
+),
+all_facts as (
+  select * from base_facts
+  union all
+  select * from logic_gate_assignment_visibility_facts
+),
+ranked_all_facts as (
+  select all_facts.*,
+         row_number() over (
+           partition by company_id, user_id, resource_type, resource_id
+           order by source_timestamp desc, source_rank desc, access_rank desc, source_type asc, source_id asc
+         ) as rn
+  from all_facts
+  where access_level in ('no_access', 'view', 'edit', 'admin')
+)
+insert into effective_resource_access (
+  company_id,
+  user_id,
+  resource_type,
+  resource_id,
+  access_level,
+  source_type,
+  source_id,
+  created_timestamp,
+  updated_timestamp
 )
 select company_id,
        user_id,
-       source_folder_id,
-       role,
-       subject_type,
-       subject_id
-from facts
-order by source_folder_id asc, role asc, subject_type asc, subject_id asc, user_id asc`, companyID, folderID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	facts := []domain.EffectiveResourceAccess{}
-	for rows.Next() {
-		var factCompanyID string
-		var userID string
-		var sourceFolderID string
-		var role string
-		var subjectType string
-		var subjectID string
-		if err := rows.Scan(&factCompanyID, &userID, &sourceFolderID, &role, &subjectType, &subjectID); err != nil {
-			return err
-		}
-		facts = append(facts, domain.EffectiveResourceAccess{
-			CompanyID:    factCompanyID,
-			UserID:       userID,
-			ResourceType: EntityTypeSharedTriageFolder,
-			ResourceID:   folderID,
-			AccessLevel:  EntityPermissionEdit,
-			SourceType:   effectiveAccessSourceSharedTriageRaci,
-			SourceID:     sharedTriageRaciEffectiveAccessSourceID(sourceFolderID, role, subjectType, subjectID),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID, effectiveAccessSourceSharedTriageRaci, facts)
-}
-
-func recomputeSharedTriageRaciEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
-	targetIDs, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID)
-	if err != nil {
-		return err
-	}
-	for _, targetID := range targetIDs {
-		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, targetID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
-	targetIDs, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID)
-	if err != nil {
-		return err
-	}
-	for _, targetID := range targetIDs {
-		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, targetID); err != nil {
-			return err
-		}
-		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, targetID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
-	companyID = cleanUUIDText(companyID)
-	logicGateID = cleanUUIDText(logicGateID)
-	if companyID == "" || logicGateID == "" || ctx == nil || tx == nil {
-		return ErrInvalid
-	}
-	rows, err := tx.QueryContext(ctx, `
-select distinct node_id::text
-from node_logic_gate_assignments
-where company_id=$1::uuid
-  and logic_gate_id=$2::uuid
-order by node_id::text`, companyID, logicGateID)
-	if err != nil {
-		return err
-	}
-	affectedNodeIDs := []string{}
-	for rows.Next() {
-		var nodeID string
-		if err := rows.Scan(&nodeID); err != nil {
-			rows.Close()
-			return err
-		}
-		affectedNodeIDs = append(affectedNodeIDs, nodeID)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_logic_gate_assignments
-where company_id=$1::uuid
-  and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
-		return err
-	}
-	return recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, nil, affectedNodeIDs)
-}
-
-func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs, nodeIDs []string) error {
-	companyID = cleanUUIDText(companyID)
-	if companyID == "" {
-		return ErrInvalid
-	}
-	logicGateIDs = cleanUUIDTextSlice(logicGateIDs)
-	nodeIDs = cleanUUIDTextSlice(nodeIDs)
-	rows, err := tx.QueryContext(ctx, `
-select distinct assignment.node_id::text
-from node_logic_gate_assignments assignment
-where assignment.company_id=$1::uuid
-  and (cardinality($2::text[]) = 0 or assignment.logic_gate_id::text = any($2::text[]))
-  and (cardinality($3::text[]) = 0 or assignment.node_id::text = any($3::text[]))
-order by assignment.node_id::text`, companyID, logicGateIDs, nodeIDs)
-	if err != nil {
-		return err
-	}
-	targetNodes := map[string]bool{}
-	for rows.Next() {
-		var nodeID string
-		if err := rows.Scan(&nodeID); err != nil {
-			rows.Close()
-			return err
-		}
-		targetNodes[nodeID] = true
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, nodeID := range nodeIDs {
-		targetNodes[nodeID] = true
-	}
-	if len(targetNodes) == 0 {
-		return nil
-	}
-	targetNodeIDs := make([]string, 0, len(targetNodes))
-	for nodeID := range targetNodes {
-		targetNodeIDs = append(targetNodeIDs, nodeID)
-	}
-	sort.Strings(targetNodeIDs)
-
-	factRows, err := tx.QueryContext(ctx, `
-with target_nodes as (
-  select distinct raw.node_id
-  from unnest($2::text[]) as raw(node_id)
-)
-select access.company_id::text,
-       access.user_id::text,
-       assignment.node_id::text,
-       assignment.logic_gate_id::text,
-       access.source_type,
-       access.source_id
-from target_nodes target
-join node_logic_gate_assignments assignment
-  on assignment.company_id=$1::uuid
- and assignment.node_id::text=target.node_id
-join effective_resource_access access
-  on access.company_id=assignment.company_id
- and access.resource_type='logic_gate'
- and access.resource_id=assignment.logic_gate_id
- and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
-order by assignment.node_id::text, access.user_id::text, access.source_type, access.source_id`, companyID, targetNodeIDs, EntityPermissionView)
-	if err != nil {
-		return err
-	}
-	defer factRows.Close()
-	factsByNode := map[string][]domain.EffectiveResourceAccess{}
-	for factRows.Next() {
-		var factCompanyID string
-		var userID string
-		var nodeID string
-		var logicGateID string
-		var sourceType string
-		var sourceID string
-		if err := factRows.Scan(&factCompanyID, &userID, &nodeID, &logicGateID, &sourceType, &sourceID); err != nil {
-			return err
-		}
-		factsByNode[nodeID] = append(factsByNode[nodeID], domain.EffectiveResourceAccess{
-			CompanyID:    factCompanyID,
-			UserID:       userID,
-			ResourceType: EntityTypeNode,
-			ResourceID:   nodeID,
-			AccessLevel:  EntityPermissionView,
-			SourceType:   effectiveAccessSourceGateVisibility,
-			SourceID:     logicGateAssignmentVisibilityEffectiveAccessSourceID(sourceType, sourceID, logicGateID, nodeID),
-		})
-	}
-	if err := factRows.Err(); err != nil {
-		return err
-	}
-	for _, nodeID := range targetNodeIDs {
-		if err := replaceEffectiveFactsForResourceSourceTx(ctx, tx, companyID, EntityTypeNode, nodeID, effectiveAccessSourceGateVisibility, factsByNode[nodeID]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx *sql.Tx, companyID string) error {
-	companyID = cleanUUIDText(companyID)
-	if companyID == "" {
-		return ErrInvalid
-	}
-	rows, err := tx.QueryContext(ctx, `
-select resource_type, resource_id::text
-from (
-  select 'node'::text as resource_type, node_id as resource_id
-  from nodes
-  where company_id=$1::uuid
-  union all
-  select 'logic_gate'::text, logic_gate_id
-  from logic_gates
-  where company_id=$1::uuid
-  union all
-  select 'shared_triage_folder'::text, folder_id
-  from company_explorer_folders
-  where company_id=$1::uuid
-    and folder_kind='communications'
-) resource
-order by resource_type asc, resource_id::text asc`, companyID)
-	if err != nil {
-		return err
-	}
-	resources := []effectiveAccessResource{}
-	for rows.Next() {
-		var resource effectiveAccessResource
-		if err := rows.Scan(&resource.resourceType, &resource.resourceID); err != nil {
-			rows.Close()
-			return err
-		}
-		resources = append(resources, resource)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, resource := range resources {
-		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, resource.resourceType, resource.resourceID); err != nil {
-			return err
-		}
-	}
-	for _, resource := range resources {
-		if resource.resourceType != EntityTypeSharedTriageFolder {
-			continue
-		}
-		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, resource.resourceID); err != nil {
-			return err
-		}
-	}
-	return recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, nil, nil)
-}
-
-func cleanUUIDTextSlice(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := map[string]bool{}
-	for _, value := range values {
-		value = cleanUUIDText(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
+       resource_type,
+       resource_id,
+       access_level,
+       source_type,
+       source_id,
+       now(),
+       now()
+from ranked_all_facts
+where rn=1
+on conflict (company_id, user_id, resource_type, resource_id)
+do update set
+  access_level=excluded.access_level,
+  source_type=excluded.source_type,
+  source_id=excluded.source_id,
+  updated_timestamp=now()`, companyID)
+	return err
 }
 
 func (r *PostgresRepo) RebuildEffectiveResourceAccessForCompany(companyID string) error {
@@ -1149,6 +1138,7 @@ legacy_grant_scope as (
          grant_row.principal_type,
          grant_row.principal_id,
          lower(btrim(grant_row.access_level)) as access_level,
+         grant_row.created_timestamp as source_timestamp,
          0 as depth
   from resource_access_grants grant_row
   join resources resource
@@ -1165,6 +1155,7 @@ legacy_grant_scope as (
          grant_row.principal_type,
          grant_row.principal_id,
          lower(btrim(grant_row.access_level)),
+         grant_row.created_timestamp,
          shared.depth
   from resource_access_grants grant_row
   join shared_descendants shared
@@ -1181,6 +1172,8 @@ legacy_candidates as (
          scope.access_level,
          'direct_user_grant'::text as source_type,
          scope.resource_type || ':' || scope.source_resource_id::text || ':user:' || scope.principal_id::text as source_id,
+         scope.source_timestamp,
+         60 as source_rank,
          scope.depth,
          2 as subject_rank,
          mangorts_access_level_rank(scope.access_level) as access_rank
@@ -1197,6 +1190,8 @@ legacy_candidates as (
          scope.access_level,
          'direct_group_grant'::text,
          scope.resource_type || ':' || scope.source_resource_id::text || ':group:' || scope.principal_id::text,
+         greatest(scope.source_timestamp, member.updated_timestamp),
+         30,
          scope.depth,
          1,
          mangorts_access_level_rank(scope.access_level)
@@ -1213,21 +1208,21 @@ ranked_legacy_facts as (
   select legacy_candidates.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by depth asc, subject_rank desc, access_rank desc, source_type asc, source_id asc
+           order by depth asc, source_timestamp desc, subject_rank desc, access_rank desc, source_type asc, source_id asc
          ) as rn
   from legacy_candidates
 ),
 legacy_facts as (
-  select company_id, user_id, resource_type, resource_id, access_level, source_type, source_id, access_rank
+  select company_id, user_id, resource_type, resource_id, access_level, source_type, source_id, source_timestamp, source_rank, access_rank
   from ranked_legacy_facts
   where rn=1
-    and access_rank > 0
 ),
 company_admin_users as (
-  select user_id, source_id
+  select user_id, source_id, source_timestamp
   from (
     select membership.user_id,
            'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+           membership.updated_timestamp as source_timestamp,
            row_number() over (
              partition by membership.user_id
              order by case when membership.company_id=$1::uuid then 0 else 1 end, membership.company_id::text
@@ -1246,6 +1241,8 @@ company_admin_facts as (
          'admin'::text as access_level,
          'company_admin'::text as source_type,
          admin_user.source_id,
+         admin_user.source_timestamp,
+         90 as source_rank,
          3 as access_rank
   from company_admin_users admin_user
   cross join resources resource
@@ -1258,6 +1255,8 @@ company_member_default_facts as (
          'edit'::text as access_level,
          'company_member_default'::text as source_type,
          'membership:' || membership.company_id::text || ':' || membership.user_id::text as source_id,
+         membership.updated_timestamp as source_timestamp,
+         10 as source_rank,
          2 as access_rank
   from resources resource
   join company_memberships membership
@@ -1279,6 +1278,8 @@ node_assignee_facts as (
          'edit'::text as access_level,
          'node_assignee'::text as source_type,
          'node:' || node.node_id::text || ':assignee:' || node.assignee_user_id::text as source_id,
+         now() as source_timestamp,
+         65 as source_rank,
          2 as access_rank
   from nodes node
   join company_memberships membership
@@ -1295,6 +1296,8 @@ logic_gate_raci_facts as (
          'edit'::text as access_level,
          'logic_gate_raci'::text as source_type,
          'logic_gate:' || assignment.logic_gate_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
+         assignment.created_timestamp as source_timestamp,
+         70 as source_rank,
          2 as access_rank
   from logic_gate_raci_assignments assignment
   where assignment.company_id=$1::uuid
@@ -1307,6 +1310,8 @@ shared_raci_user_facts as (
          'edit'::text as access_level,
          'shared_triage_raci'::text as source_type,
          'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
+         assignment.created_timestamp as source_timestamp,
+         40 as source_rank,
          2 as access_rank
   from communications_shared_inbox_raci_assignments assignment
   join shared_descendants shared
@@ -1322,6 +1327,8 @@ shared_raci_group_facts as (
          'edit'::text as access_level,
          'shared_triage_raci'::text as source_type,
          'folder:' || assignment.folder_id::text || ':role:' || assignment.role || ':group:' || assignment.group_id::text as source_id,
+         greatest(assignment.created_timestamp, member.updated_timestamp) as source_timestamp,
+         40 as source_rank,
          2 as access_rank
   from communications_shared_inbox_raci_group_assignments assignment
   join shared_descendants shared
@@ -1355,16 +1362,17 @@ logic_gate_assignment_visibility_facts as (
          base.user_id,
          'node'::text as resource_type,
          assignment.node_id as resource_id,
-         'view'::text as access_level,
+         base.access_level,
          'logic_gate_assignment_visibility'::text as source_type,
          base.source_type || ':' || base.source_id || ':logic_gate:' || assignment.logic_gate_id::text || ':node:' || assignment.node_id::text as source_id,
-         1 as access_rank
+         greatest(base.source_timestamp, assignment.updated_timestamp) as source_timestamp,
+         80 as source_rank,
+         base.access_rank
   from base_facts base
   join node_logic_gate_assignments assignment
     on assignment.company_id=base.company_id
    and assignment.logic_gate_id=base.resource_id
   where base.resource_type='logic_gate'
-    and base.access_rank >= 1
 ),
 all_facts as (
   select * from base_facts
@@ -1374,12 +1382,11 @@ all_facts as (
 ranked_all_facts as (
   select all_facts.*,
          row_number() over (
-           partition by company_id, user_id, resource_type, resource_id, source_type, source_id
-           order by access_rank desc
+           partition by company_id, user_id, resource_type, resource_id
+           order by source_timestamp desc, source_rank desc, access_rank desc, source_type asc, source_id asc
          ) as rn
   from all_facts
-  where access_rank > 0
-    and access_level in ('view', 'edit', 'admin')
+  where access_level in ('no_access', 'view', 'edit', 'admin')
 )
 insert into effective_resource_access (
   company_id,
@@ -1403,13 +1410,11 @@ select company_id,
        now()
 from ranked_all_facts
 where rn=1
-on conflict (company_id, user_id, resource_type, resource_id, source_type, source_id)
+on conflict (company_id, user_id, resource_type, resource_id)
 do update set
-  access_level=case
-    when mangorts_access_level_rank(effective_resource_access.access_level) >= mangorts_access_level_rank(excluded.access_level)
-      then effective_resource_access.access_level
-    else excluded.access_level
-  end,
+  access_level=excluded.access_level,
+  source_type=excluded.source_type,
+  source_id=excluded.source_id,
   updated_timestamp=now()`, companyID); err != nil {
 		return err
 	}

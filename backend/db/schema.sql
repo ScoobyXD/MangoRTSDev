@@ -347,10 +347,10 @@ create table if not exists effective_resource_access (
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint effective_resource_access_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
-  constraint effective_resource_access_access_level_chk check (access_level in ('view', 'edit', 'admin')),
+  constraint effective_resource_access_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   constraint effective_resource_access_source_type_nonblank_chk check (btrim(source_type) <> ''),
   constraint effective_resource_access_source_id_nonblank_chk check (btrim(source_id) <> ''),
-  primary key (company_id, user_id, resource_type, resource_id, source_type, source_id),
+  primary key (company_id, user_id, resource_type, resource_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );

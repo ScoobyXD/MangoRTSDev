@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"testing"
@@ -36,8 +35,8 @@ func TestMemoryEffectiveAccessWriterSourceReplacementDeletesStaleAndWritesNew(t 
 	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, sourceType, sourceID)]; ok {
 		t.Fatalf("stale source fact for original node was not deleted")
 	}
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_group_grant", otherSourceID)]; !ok {
-		t.Fatalf("other source fact for same user/resource was deleted")
+	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_group_grant", otherSourceID)]; ok {
+		t.Fatalf("same user/resource retained a second source row")
 	}
 	next := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nextNodeID, sourceType, sourceID)]
 	if next.AccessLevel != EntityPermissionAdmin {
@@ -56,7 +55,10 @@ func TestMemoryEffectiveAccessWriterSourceDeletionPreservesOtherSources(t *testi
 
 	repo.mu.Lock()
 	addEffectiveAccessFact(repo.effectiveAccess, now, effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionEdit, effectiveAccessSourceNodeAssignee, sourceID))
-	addEffectiveAccessFact(repo.effectiveAccess, now, effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionView, "direct_user_grant", otherSourceID))
+	directFact := effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionView, "direct_user_grant", otherSourceID)
+	directFact.CreatedTimestamp = now.Add(time.Second)
+	directFact.UpdatedTimestamp = now.Add(time.Second)
+	addEffectiveAccessFact(repo.effectiveAccess, now, directFact)
 	err := repo.deleteEffectiveFactsForSourceLocked(companyID, effectiveAccessSourceNodeAssignee, sourceID)
 	repo.mu.Unlock()
 	if err != nil {
@@ -65,11 +67,9 @@ func TestMemoryEffectiveAccessWriterSourceDeletionPreservesOtherSources(t *testi
 
 	assertEffectiveAccess(t, repo, companyID, userID, EntityTypeNode, nodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, userID, EntityTypeNode, nodeID, EntityPermissionEdit, false)
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, sourceID)]; ok {
-		t.Fatalf("deleted source fact is still present")
-	}
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_user_grant", otherSourceID)]; !ok {
-		t.Fatalf("other source fact was deleted")
+	fact, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_user_grant", otherSourceID)]
+	if !ok || fact.SourceType != "direct_user_grant" {
+		t.Fatalf("current direct source row = %+v present %v, want retained", fact, ok)
 	}
 }
 
@@ -88,7 +88,10 @@ func TestMemoryEffectiveAccessWriterResourceSourceReplacementIsResourceScoped(t 
 	repo.mu.Lock()
 	addEffectiveAccessFact(repo.effectiveAccess, now, effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionEdit, effectiveAccessSourceNodeAssignee, sourceID))
 	addEffectiveAccessFact(repo.effectiveAccess, now, effectiveAccessWriterFact(companyID, userID, EntityTypeNode, otherNodeID, EntityPermissionEdit, effectiveAccessSourceNodeAssignee, otherResourceSourceID))
-	addEffectiveAccessFact(repo.effectiveAccess, now, effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionView, "direct_user_grant", otherFamilySourceID))
+	directFact := effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionView, "direct_user_grant", otherFamilySourceID)
+	directFact.CreatedTimestamp = now.Add(time.Second)
+	directFact.UpdatedTimestamp = now.Add(time.Second)
+	addEffectiveAccessFact(repo.effectiveAccess, now, directFact)
 	err := repo.replaceEffectiveFactsForResourceSourceLocked(companyID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, []domain.EffectiveResourceAccess{
 		effectiveAccessWriterFact(companyID, "33333333-3333-4333-8333-333333333425", EntityTypeNode, nodeID, EntityPermissionEdit, effectiveAccessSourceNodeAssignee, nextSourceID),
 	})
@@ -97,18 +100,16 @@ func TestMemoryEffectiveAccessWriterResourceSourceReplacementIsResourceScoped(t 
 		t.Fatalf("replaceEffectiveFactsForResourceSourceLocked: %v", err)
 	}
 
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, effectiveAccessSourceNodeAssignee, sourceID)]; ok {
-		t.Fatalf("stale resource/source-family fact was not deleted")
-	}
 	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, otherNodeID, effectiveAccessSourceNodeAssignee, otherResourceSourceID)]; !ok {
 		t.Fatalf("same source family on a different resource was deleted")
 	}
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_user_grant", otherFamilySourceID)]; !ok {
-		t.Fatalf("different source family on same resource was deleted")
+	fact, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, "direct_user_grant", otherFamilySourceID)]
+	if !ok || fact.SourceType != "direct_user_grant" {
+		t.Fatalf("different source family on same resource = %+v present %v, want retained current row", fact, ok)
 	}
 }
 
-func TestMemoryEffectiveAccessWriterInvalidFactsFailWithoutMutation(t *testing.T) {
+func TestMemoryEffectiveAccessWriterNoAccessFactsAreValid(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "33333333-3333-4333-8333-333333333431"
 	userID := "33333333-3333-4333-8333-333333333432"
@@ -123,11 +124,12 @@ func TestMemoryEffectiveAccessWriterInvalidFactsFailWithoutMutation(t *testing.T
 		effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionNoAccess, sourceType, sourceID),
 	})
 	repo.mu.Unlock()
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("replaceEffectiveFactsForSourceLocked err = %v, want ErrInvalid", err)
+	if err != nil {
+		t.Fatalf("replaceEffectiveFactsForSourceLocked: %v", err)
 	}
-	if _, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, sourceType, sourceID)]; !ok {
-		t.Fatalf("existing fact was deleted even though replacement facts were invalid")
+	fact := repo.effectiveAccess[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, sourceType, sourceID)]
+	if fact.AccessLevel != EntityPermissionNoAccess {
+		t.Fatalf("replacement access level = %q, want no_access", fact.AccessLevel)
 	}
 }
 
@@ -158,11 +160,11 @@ func TestPostgresEffectiveAccessWriterSourceReplacementUsesScopedDeleteAndKeyCon
 		t.Fatalf("source delete args = %#v, want company/source type/source id", got)
 	}
 	insertSQL := normalizeEffectiveAccessSQLForTest(execer.calls[1].query)
-	if !strings.Contains(insertSQL, "on conflict (company_id, user_id, resource_type, resource_id, source_type, source_id)") {
-		t.Fatalf("insert SQL = %q, want effective-access key conflict", insertSQL)
+	if !strings.Contains(insertSQL, "on conflict (company_id, user_id, resource_type, resource_id)") {
+		t.Fatalf("insert SQL = %q, want one-row effective-access key conflict", insertSQL)
 	}
-	if !strings.Contains(insertSQL, "mangorts_access_level_rank") {
-		t.Fatalf("insert SQL = %q, want strongest-level conflict handling", insertSQL)
+	if !strings.Contains(insertSQL, "access_level=excluded.access_level") || !strings.Contains(insertSQL, "source_type=excluded.source_type") {
+		t.Fatalf("insert SQL = %q, want last-writer replacement", insertSQL)
 	}
 }
 
@@ -206,7 +208,7 @@ func TestPostgresEffectiveAccessWriterDeleteHelpersAreScoped(t *testing.T) {
 	}
 }
 
-func TestPostgresEffectiveAccessWriterInvalidFactsFailBeforeMutation(t *testing.T) {
+func TestPostgresEffectiveAccessWriterNoAccessFactsAreValid(t *testing.T) {
 	execer := &fakeEffectiveAccessExecer{}
 	companyID := "33333333-3333-4333-8333-333333333521"
 	userID := "33333333-3333-4333-8333-333333333522"
@@ -217,11 +219,11 @@ func TestPostgresEffectiveAccessWriterInvalidFactsFailBeforeMutation(t *testing.
 	err := replaceEffectiveFactsForSourceTx(context.Background(), execer, companyID, sourceType, sourceID, []domain.EffectiveResourceAccess{
 		effectiveAccessWriterFact(companyID, userID, EntityTypeNode, nodeID, EntityPermissionNoAccess, sourceType, sourceID),
 	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("replaceEffectiveFactsForSourceTx err = %v, want ErrInvalid", err)
+	if err != nil {
+		t.Fatalf("replaceEffectiveFactsForSourceTx: %v", err)
 	}
-	if len(execer.calls) != 0 {
-		t.Fatalf("ExecContext calls = %d, want no mutation before invalid fact failure", len(execer.calls))
+	if len(execer.calls) != 2 {
+		t.Fatalf("ExecContext calls = %d, want delete and insert", len(execer.calls))
 	}
 }
 
