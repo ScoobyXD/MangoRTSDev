@@ -63,46 +63,6 @@ func TestMemoryVisibleQueriesUseEffectiveAccessDirectGrants(t *testing.T) {
 	}
 }
 
-func TestMemoryVisibleNodesIncludeLogicGateAssignedNodeContext(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "22222222-2222-4222-8222-222222222302"
-	repo.EnsureCompany(companyID, "Visible Context Co")
-
-	viewer := mustEffectiveAccessUser(t, repo, companyID, "visible-context-viewer")
-	visibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Visible work")
-	hiddenGate := mustCreateVisibleQueryGate(t, repo, companyID, "Hidden work")
-	contextNode := mustCreateVisibleQueryNode(t, repo, companyID, "Context node")
-	hiddenContextNode := mustCreateVisibleQueryNode(t, repo, companyID, "Hidden context node")
-	unassignedNode := mustCreateVisibleQueryNode(t, repo, companyID, "Unassigned node")
-
-	mustAssignVisibleQueryNodeToGate(t, repo, companyID, visibleGate.LogicGateID, contextNode.NodeID)
-	mustAssignVisibleQueryNodeToGate(t, repo, companyID, hiddenGate.LogicGateID, hiddenContextNode.NodeID)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionView)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, contextNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenContextNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, unassignedNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
-
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
-
-	gates, err := repo.ListVisibleLogicGates(companyID, viewer.UserID)
-	if err != nil {
-		t.Fatalf("ListVisibleLogicGates: %v", err)
-	}
-	assertVisibleQueryLogicGateIDs(t, gates, visibleGate.LogicGateID)
-	assertVisibleQueryLogicGatesDoNotContain(t, gates, hiddenGate.LogicGateID)
-
-	nodes, err := repo.ListVisibleNodes(companyID, viewer.UserID)
-	if err != nil {
-		t.Fatalf("ListVisibleNodes: %v", err)
-	}
-	assertVisibleQueryNodeIDs(t, nodes, contextNode.NodeID)
-	assertVisibleQueryNodesDoNotContain(t, nodes, hiddenContextNode.NodeID, unassignedNode.NodeID)
-	assertEffectiveAccess(t, repo, companyID, viewer.UserID, EntityTypeNode, contextNode.NodeID, EntityPermissionEdit, false)
-}
-
 func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222303"

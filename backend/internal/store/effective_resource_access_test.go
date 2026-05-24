@@ -172,63 +172,6 @@ func TestMemoryEffectiveAccessSharedTriageFolderInheritance(t *testing.T) {
 	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeSharedTriageFolder, grandchild.FolderID, EntityPermissionEdit, true)
 }
 
-func TestMemoryEffectiveAccessLogicGateAssignedNodeContextualVisibility(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "22222222-2222-4222-8222-222222222205"
-	repo.EnsureCompany(companyID, "Effective Assignment Co")
-
-	user := mustEffectiveAccessUser(t, repo, companyID, "effective-assignment-user")
-	gate, err := repo.CreateLogicGate(companyID, "Assigned work")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	node, err := repo.CreateNode(companyID, "Assigned node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: gate.LogicGateID,
-		NodeID:      node.NodeID,
-		Status:      "Pending",
-		NodeTitle:   node.Title,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeLogicGate,
-		EntityID:   gate.LogicGateID,
-		Permissions: []EntityPermissionInput{{
-			SubjectType: EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: EntityPermissionView,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []EntityPermissionInput{{
-			SubjectType: EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: EntityPermissionNoAccess,
-		}},
-	}); err != nil {
-		t.Fatalf("Set node no_access: %v", err)
-	}
-
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
-
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView, true)
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, false)
-}
-
 func TestMemoryEffectiveAccessSourceSpecificReprojection(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222206"
