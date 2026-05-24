@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ type fakeNylasClient struct {
 	update            NylasMessageUpdate
 	lastQuery         NylasMessageQuery
 	lastFolderGrantID string
+	lastSendGrantID   string
 	folderCalls       int
 	messageCalls      int
 	detailCalls       int
@@ -84,7 +86,8 @@ func (f *fakeNylasClient) DeleteMessage(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (f *fakeNylasClient) SendMessage(_ context.Context, _ string, request NylasSendMessageRequest) (NylasMessage, error) {
+func (f *fakeNylasClient) SendMessage(_ context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
+	f.lastSendGrantID = grantID
 	f.sent = request
 	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
 }
@@ -400,6 +403,98 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodGet, path, "", token, http.StatusOK)
 	if nylas.lastFolderGrantID != "grant-shared" {
 		t.Fatalf("folder grant = %q, want shared inbox grant", nylas.lastFolderGrantID)
+	}
+}
+
+func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-send"
+	repo.EnsureCompany(companyID, "Shared Send Company")
+	actor, err := repo.UpsertAuthUser("shared-send-actor", "actor@example.com", "Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	sharedUser, err := repo.UpsertAuthUser("shared-send-account", "support@example.com", "Support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(sharedUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       sharedUser.UserID,
+		Provider:     "google",
+		AccountEmail: sharedUser.Email,
+		GrantID:      "grant-support",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, sharedUser.Email); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   actor.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatal(err)
+	}
+
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+	path := "/v1/communications/messages/send?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	body := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body"}`
+	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusForbidden)
+	if nylas.lastSendGrantID != "" {
+		t.Fatalf("send grant after view-only request = %q, want none", nylas.lastSendGrantID)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   actor.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatal(err)
+	}
+
+	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusCreated)
+	if nylas.lastSendGrantID != "grant-support" {
+		t.Fatalf("send grant = %q, want shared inbox grant", nylas.lastSendGrantID)
+	}
+	if nylas.sent.To[0].Email != "customer@example.com" || nylas.sent.Subject != "Shared hello" {
+		t.Fatalf("sent = %+v, want shared inbox send payload", nylas.sent)
 	}
 }
 

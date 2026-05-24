@@ -228,6 +228,8 @@ export async function updateHomeMailMessageCommand(args: {
 
 export async function sendHomeMailComposeCommand(args: {
   compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "replyToMessageID">;
+  companyID?: string;
+  sharedInboxID?: string;
   connectedAccountEmail?: string;
   sendEmail?: HomeSendEmail;
 }): Promise<HomeSendMailCommandResult> {
@@ -250,6 +252,12 @@ export async function sendHomeMailComposeCommand(args: {
     body,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };
+  const cleanCompanyID = args.companyID?.trim() ?? "";
+  const cleanSharedInboxID = args.sharedInboxID?.trim() ?? "";
+  if (cleanCompanyID && cleanSharedInboxID) {
+    input.company_id = cleanCompanyID;
+    input.shared_inbox_id = cleanSharedInboxID;
+  }
   const cleanConnectedAccountEmail = args.connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sentToConnectedAccount = !!cleanConnectedAccountEmail && [...to, ...cc, ...bcc].some((address) => (
     address.email.trim().toLowerCase() === cleanConnectedAccountEmail
