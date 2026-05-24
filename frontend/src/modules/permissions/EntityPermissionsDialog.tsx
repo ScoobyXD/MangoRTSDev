@@ -242,9 +242,9 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
-      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>{"Clear grants"}</button>
+      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!readOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
       {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
-      <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
+      <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
         <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
       )}
@@ -286,14 +286,6 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         )}
         {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
       </div>
-<<<<<<< HEAD
-      <div style={permissionFooterStyle}>
-        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!readOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
-        {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
-        <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
-      </div>
-=======
->>>>>>> codex/ui-changes0000207
     </div>
   );
 };
