@@ -762,15 +762,14 @@ function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntity
 }
 
 function timelineItemMainStyle(_compact: boolean, width: number): React.CSSProperties {
-  const rightPadding = width >= 82 ? TIMELINE_ITEM_CHECKBOX_WIDTH - 2 : width >= 54 ? 12 : 3;
-  const leftPadding = TIMELINE_ITEM_EDGE_WIDTH + (width >= 56 ? 5 : 3);
+  const { left, right } = timelineItemContentInsets(width);
   return {
     minWidth: 0,
-    display: "grid",
-    gridTemplateRows: width >= 56 ? "28px 12px" : "24px 11px",
-    alignContent: "start",
-    gap: 0,
-    padding: `2px ${rightPadding}px 3px ${leftPadding}px`,
+    position: "relative",
+    display: "block",
+    width: "100%",
+    height: "100%",
+    padding: `2px ${right}px 3px ${left}px`,
     boxSizing: "border-box",
   };
 }
@@ -810,7 +809,12 @@ function timelineItemTextStyle(width: number, completed: boolean): React.CSSProp
 }
 
 function timelineItemBottomRowStyle(width: number, completed: boolean): React.CSSProperties {
+  const { left, right } = timelineItemContentInsets(width);
   return {
+    position: "absolute",
+    left,
+    right,
+    bottom: width >= 46 ? 4 : 3,
     minWidth: 0,
     display: "block",
     color: completed ? "#334155" : "#475569",
@@ -820,6 +824,13 @@ function timelineItemBottomRowStyle(width: number, completed: boolean): React.CS
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  };
+}
+
+function timelineItemContentInsets(width: number): { left: number; right: number } {
+  return {
+    left: TIMELINE_ITEM_EDGE_WIDTH + (width >= 56 ? 5 : 3),
+    right: width >= 82 ? TIMELINE_ITEM_CHECKBOX_WIDTH - 2 : width >= 54 ? 12 : 3,
   };
 }
 

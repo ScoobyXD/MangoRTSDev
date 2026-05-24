@@ -240,6 +240,16 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const dialogMode = variant === "dialog";
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
+  const actionButtons = (
+    <div style={permissionHeaderActionsStyle}>
+      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>{"Clear grants"}</button>
+      {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
+      <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
+      {onClose && (
+        <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
+      )}
+    </div>
+  );
 
   return (
     <div style={containerStyle}>
@@ -248,9 +258,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           <h2 style={permissionTitleStyle}>Permissions</h2>
           <div style={permissionMutedTextStyle}>{title}</div>
         </div>
-        {onClose && (
-          <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
-        )}
+        {actionButtons}
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         <div style={permissionInfoStyle}>
@@ -278,11 +286,14 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         )}
         {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
       </div>
+<<<<<<< HEAD
       <div style={permissionFooterStyle}>
         <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!readOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
         {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
         <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       </div>
+=======
+>>>>>>> codex/ui-changes0000207
     </div>
   );
 };
@@ -400,7 +411,7 @@ const permissionDialogStyle: React.CSSProperties = {
   color: "#111111",
   boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
   display: "grid",
-  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
+  gridTemplateRows: "auto auto minmax(0, 1fr)",
   gap: 10,
   padding: 12,
   boxSizing: "border-box",
@@ -415,7 +426,7 @@ const permissionEmbeddedStyle: React.CSSProperties = {
   background: "#ffffff",
   color: "#111111",
   display: "grid",
-  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
+  gridTemplateRows: "auto auto minmax(0, 1fr)",
   gap: 10,
   padding: 12,
   boxSizing: "border-box",
@@ -426,6 +437,14 @@ const permissionHeaderStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "start",
   gap: 10,
+};
+
+const permissionHeaderActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
 };
 
 const permissionTitleStyle: React.CSSProperties = {
@@ -504,13 +523,6 @@ const permissionSubheadStyle: React.CSSProperties = {
 const permissionErrorStyle: React.CSSProperties = {
   color: "#b00020",
   fontSize: 12,
-};
-
-const permissionFooterStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 8,
-  flexWrap: "wrap",
 };
 
 const permissionSecondaryButtonStyle: React.CSSProperties = {
