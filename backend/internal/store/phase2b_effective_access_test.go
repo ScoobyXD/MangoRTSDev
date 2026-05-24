@@ -71,7 +71,7 @@ func TestMemoryDerivedAccessSourcesDoNotCreateCompatibilityResourceGrants(t *tes
 	assertEffectiveAccess(t, repo, companyID, assignee.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
 }
 
-func TestMemorySharedInboxRaciUserGroupDescendantsAndRemoval(t *testing.T) {
+func TestMemorySharedInboxRaciIsNotificationOnlyForEffectiveAccess(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555502"
 	repo.EnsureCompany(companyID, "Phase 2B Shared RACI Co")
@@ -118,16 +118,17 @@ func TestMemorySharedInboxRaciUserGroupDescendantsAndRemoval(t *testing.T) {
 	}
 
 	for _, folderID := range []string{parent.FolderID, child.FolderID, grandchild.FolderID} {
-		assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
-		assertEffectiveAccess(t, repo, companyID, parentMember.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
-		assertEffectiveAccess(t, repo, companyID, childMember.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
+		assertNoEffectiveSourceRows(t, repo, companyID, EntityTypeSharedTriageFolder, folderID, effectiveAccessSourceSharedTriageRaci)
+		assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
+		assertEffectiveAccess(t, repo, companyID, parentMember.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
+		assertEffectiveAccess(t, repo, companyID, childMember.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 	}
 
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, nil); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers remove child: %v", err)
 	}
 	assertEffectiveAccess(t, repo, companyID, childMember.UserID, EntityTypeSharedTriageFolder, grandchild.FolderID, EntityPermissionView, false)
-	assertEffectiveAccess(t, repo, companyID, parentMember.UserID, EntityTypeSharedTriageFolder, grandchild.FolderID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, parentMember.UserID, EntityTypeSharedTriageFolder, grandchild.FolderID, EntityPermissionView, false)
 
 	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(SharedInboxRaciAssignmentUpdateInput{
 		CompanyID: companyID,
@@ -293,8 +294,8 @@ func TestMemoryGroupHierarchyUpdatesGroupDerivedEffectiveFacts(t *testing.T) {
 	}
 	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
-	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionEdit, true)
-	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
+	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
 
 	rootParent := ""
 	if _, err := repo.UpdateCompanyUserGroup(companyID, childGroup.GroupID, &rootParent, "", 0); err != nil {
@@ -302,7 +303,7 @@ func TestMemoryGroupHierarchyUpdatesGroupDerivedEffectiveFacts(t *testing.T) {
 	}
 	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
-	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
 	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
 
 	if err := repo.DeleteCompanyUserGroup(companyID, parentGroup.GroupID); err != nil {
@@ -388,7 +389,7 @@ func TestMemorySharedTriageFolderHierarchyCreateMoveDeleteMaintainsInheritedFact
 	}
 	for _, folderID := range []string{child.FolderID, grandchild.FolderID} {
 		assertEffectiveAccess(t, repo, companyID, oldGrantUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
-		assertEffectiveAccess(t, repo, companyID, oldRaciUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
+		assertEffectiveAccess(t, repo, companyID, oldRaciUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 		assertEffectiveAccess(t, repo, companyID, newGrantUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 	}
 
@@ -399,7 +400,7 @@ func TestMemorySharedTriageFolderHierarchyCreateMoveDeleteMaintainsInheritedFact
 		assertEffectiveAccess(t, repo, companyID, oldGrantUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 		assertEffectiveAccess(t, repo, companyID, oldRaciUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 		assertEffectiveAccess(t, repo, companyID, newGrantUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionAdmin, true)
-		assertEffectiveAccess(t, repo, companyID, newRaciUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionEdit, true)
+		assertEffectiveAccess(t, repo, companyID, newRaciUser.UserID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView, false)
 	}
 
 	if err := repo.DeleteCompanyExplorerFolder(companyID, child.FolderID); err != nil {

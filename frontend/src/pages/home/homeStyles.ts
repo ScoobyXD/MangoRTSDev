@@ -1448,9 +1448,10 @@ export const mailPanelSearchButtonStyle: React.CSSProperties = {
 
 export const mailArchiveActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 6,
+  gridTemplateColumns: "repeat(5, minmax(0, 1fr)) minmax(68px, 0.9fr)",
+  gap: 4,
   alignItems: "center",
+  minWidth: 0,
 };
 
 export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperties {

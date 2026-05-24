@@ -489,7 +489,7 @@ func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t 
 	}
 }
 
-func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T) {
+func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666651"
@@ -571,12 +571,12 @@ func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T)
 		}
 		byUser[item.RecipientUserID] = item
 	}
-	for _, user := range []domain.User{responsible, accountable, groupMember, viewer, blocked} {
+	for _, user := range []domain.User{responsible, accountable, groupMember, blocked} {
 		if _, ok := byUser[user.UserID]; !ok {
 			t.Fatalf("missing shared inbox notification for %s; got %+v", user.UserID, items)
 		}
 	}
-	for _, user := range []domain.User{actor} {
+	for _, user := range []domain.User{viewer, actor} {
 		if _, ok := byUser[user.UserID]; ok {
 			t.Fatalf("unexpected shared inbox notification for %s: %+v", user.UserID, byUser[user.UserID])
 		}
@@ -589,9 +589,6 @@ func TestProcessDomainEventSharedInboxRACIUsesFolderAccessAndRoles(t *testing.T)
 	}
 	if got := byUser[groupMember.UserID]; got.Role != domain.LogicGateRaciRoleConsulted {
 		t.Fatalf("group member role = %+v, want consulted", got)
-	}
-	if got := byUser[viewer.UserID]; got.Role != domain.NotificationRoleOther {
-		t.Fatalf("viewer role = %+v, want other", got)
 	}
 	if got := byUser[blocked.UserID]; got.Role != domain.LogicGateRaciRoleInformed {
 		t.Fatalf("blocked role = %+v, want informed", got)

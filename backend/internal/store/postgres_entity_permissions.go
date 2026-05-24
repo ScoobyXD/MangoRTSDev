@@ -320,6 +320,13 @@ where company_id=$1::uuid
   and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_raci_assignments
+where company_id=$1::uuid
+  and subject_type='group'
+  and subject_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+		return err
+	}
 	deleted, err := tx.ExecContext(ctx, `
 delete from company_user_groups
 where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
