@@ -37,6 +37,7 @@ export function KanbanContextMenus({
   onRequestColumnDelete,
   onPersistColumnItemColor,
   onToggleCardIssue,
+  onRenameNode,
   onRevertCardsToMyTriage,
   onRequestNodeDeleteFromCards,
   onRequestCardDelete,
@@ -54,6 +55,7 @@ export function KanbanContextMenus({
   onRequestColumnDelete: (columnID: string) => void;
   onPersistColumnItemColor: (columnID: string, color: string) => void;
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
+  onRenameNode: (card: KanbanCard) => void;
   onRevertCardsToMyTriage: (cardIDs: string[]) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
   onRequestCardDelete: (cardIDs: string[]) => void;
@@ -100,6 +102,9 @@ export function KanbanContextMenus({
           >
             Pin Node
           </button>
+          <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
+            Rename node
+          </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRevertCardsToMyTriage(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Revert back to Pending
           </button>
@@ -112,6 +117,72 @@ export function KanbanContextMenus({
         </FrameRightClickMenu>
       )}
     </>
+  );
+}
+
+export function KanbanRenameNodeDialog({
+  draft,
+  onSetTitle,
+  onCommit,
+  onCancel,
+}: {
+  draft: { nodeID: string; title: string } | null;
+  onSetTitle: (title: string) => void;
+  onCommit: (nodeID: string, title: string) => void;
+  onCancel: () => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (!draft) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, [draft?.nodeID]);
+
+  if (!draft) return null;
+
+  return (
+    <div style={modalBackdropStyle} onMouseDown={(event) => event.stopPropagation()}>
+      <div style={modalPanelStyle}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <label htmlFor="kanban-rename-node-input" style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
+            Rename node
+          </label>
+          <input
+            ref={inputRef}
+            id="kanban-rename-node-input"
+            value={draft.title}
+            onChange={(event) => onSetTitle(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onCommit(draft.nodeID, draft.title);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancel();
+              }
+            }}
+            style={{
+              height: 34,
+              border: "1px solid rgba(100,116,139,0.55)",
+              borderRadius: 6,
+              color: "#111827",
+              background: "#ffffff",
+              padding: "0 9px",
+              fontSize: 13,
+              outline: "none",
+            }}
+          />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" onClick={() => onCommit(draft.nodeID, draft.title)} style={yesButtonStyle}>Save</button>
+          <button type="button" onClick={onCancel} style={noButtonStyle}>Cancel</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
