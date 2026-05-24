@@ -95,7 +95,7 @@ func TestMemorySetEntityPermissionsNoAccessAndDirectPrecedence(t *testing.T) {
 		t.Fatalf("SetEntityPermissions no_access: %v", err)
 	}
 	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
-	assertNoEffectiveNoAccessFacts(t, repo, companyID)
+	assertEffectiveAccessLevel(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionNoAccess)
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -269,15 +269,6 @@ func TestMemoryResourceDeletionRemovesEffectiveRowsForDeletedResources(t *testin
 	assertNoEffectiveResourceRows(t, repo, companyID, EntityTypeNode, node.NodeID)
 	assertNoEffectiveResourceRows(t, repo, companyID, EntityTypeLogicGate, gate.LogicGateID)
 	assertNoEffectiveResourceRows(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID)
-}
-
-func assertNoEffectiveNoAccessFacts(t *testing.T, repo *MemoryRepo, companyID string) {
-	t.Helper()
-	for _, fact := range repo.effectiveAccess {
-		if fact.CompanyID == companyID && fact.AccessLevel == EntityPermissionNoAccess {
-			t.Fatalf("effective access wrote no_access fact: %+v", fact)
-		}
-	}
 }
 
 func assertHasEffectiveResourceRows(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) {

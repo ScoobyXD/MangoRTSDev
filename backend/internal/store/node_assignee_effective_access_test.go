@@ -2,10 +2,8 @@ package store
 
 import (
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"slices"
 	"testing"
-	"time"
 )
 
 func TestMemoryNodeAssigneeScopedEffectiveAccessCreateUpdateClear(t *testing.T) {
@@ -68,19 +66,16 @@ func TestMemoryNodeAssigneeScopedRemovalPreservesOtherSourceAccess(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee: %v", err)
 	}
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, node.NodeID, second.UserID, EntityPermissionNoAccess)
-	now := time.Now().UTC()
-	otherSourceID := effectiveAccessSourceID(EntityTypeNode, node.NodeID, EntityPermissionSubjectUser, first.UserID)
-	repo.effectiveAccess[effectiveAccessKey(companyID, first.UserID, EntityTypeNode, node.NodeID, "direct_user_grant", otherSourceID)] = domain.EffectiveResourceAccess{
-		CompanyID:        companyID,
-		UserID:           first.UserID,
-		ResourceType:     EntityTypeNode,
-		ResourceID:       node.NodeID,
-		AccessLevel:      EntityPermissionView,
-		SourceType:       "direct_user_grant",
-		SourceID:         otherSourceID,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: first.UserID, AccessLevel: EntityPermissionView},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: second.UserID, AccessLevel: EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions overlap: %v", err)
 	}
 
 	if _, err := repo.UpdateNode(UpdateNodeInput{

@@ -136,7 +136,7 @@ func entityPermissionKey(companyID, entityType, entityID, subjectType, subjectID
 }
 
 func effectiveAccessKey(companyID, userID, resourceType, resourceID, sourceType, sourceID string) string {
-	return companyID + ":" + userID + ":" + resourceType + ":" + resourceID + ":" + sourceType + ":" + sourceID
+	return companyID + ":" + userID + ":" + resourceType + ":" + resourceID
 }
 
 func triageItemKey(userID, messageID string) string {

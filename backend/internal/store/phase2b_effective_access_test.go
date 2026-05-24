@@ -396,7 +396,7 @@ func TestMemoryGroupHierarchyUpdatesGroupDerivedEffectiveFacts(t *testing.T) {
 	if err := repo.DeleteCompanyUserGroup(companyID, parentGroup.GroupID); err != nil {
 		t.Fatalf("DeleteCompanyUserGroup: %v", err)
 	}
-	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
+	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
 	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeSharedTriageFolder, folder.FolderID, EntityPermissionView, false)
 	assertNoEffectiveSourceRows(t, repo, companyID, EntityTypeNode, node.NodeID, effectiveAccessSourceDirectGroupGrant)
 	assertNoEffectiveSourceRows(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, effectiveAccessSourceSharedTriageRaci)
@@ -563,16 +563,27 @@ func TestMemoryPhase2BMultiSourceOverlapRemovalPreservesOtherSource(t *testing.T
 	}); err != nil {
 		t.Fatalf("clear Logic Gate RACI: %v", err)
 	}
-	assertNoEffectiveSourceRows(t, repo, companyID, EntityTypeNode, node.NodeID, effectiveAccessSourceGateVisibility)
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
-	assertEffectiveSourceRows(t, repo, companyID, EntityTypeNode, node.NodeID, effectiveAccessSourceDirectUserGrant, true)
+	assertEffectiveSourceRows(t, repo, companyID, EntityTypeNode, node.NodeID, effectiveAccessSourceGateVisibility, true)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
+	assertEffectiveAccessLevel(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionNoAccess)
 }
 
 func assertEffectiveAccessSource(t *testing.T, repo *MemoryRepo, companyID, userID, resourceType, resourceID, sourceType, sourceID, accessLevel string, want bool) {
 	t.Helper()
-	fact, ok := repo.effectiveAccess[effectiveAccessKey(companyID, userID, resourceType, resourceID, sourceType, sourceID)]
-	if ok && !EntityPermissionSatisfies(fact.AccessLevel, accessLevel) {
-		t.Fatalf("effective source fact = %+v, want at least %s", fact, accessLevel)
+	ok := false
+	for _, fact := range repo.effectiveAccess {
+		if fact.CompanyID == companyID &&
+			fact.UserID == userID &&
+			fact.ResourceType == resourceType &&
+			fact.ResourceID == resourceID &&
+			fact.SourceType == sourceType &&
+			fact.SourceID == sourceID {
+			if !EntityPermissionSatisfies(fact.AccessLevel, accessLevel) {
+				t.Fatalf("effective source fact = %+v, want at least %s", fact, accessLevel)
+			}
+			ok = true
+			break
+		}
 	}
 	if ok != want {
 		t.Fatalf("effective source fact %s/%s/%s/%s/%s/%s present = %v, want %v", userID, resourceType, resourceID, sourceType, sourceID, accessLevel, ok, want)

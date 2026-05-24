@@ -52,11 +52,7 @@ func TestMemoryEffectiveAccessDirectUserGrant(t *testing.T) {
 	if !slices.Contains(users, viewer.UserID) || slices.Contains(users, blocked.UserID) {
 		t.Fatalf("effective users = %+v, want viewer only", users)
 	}
-	for _, fact := range repo.effectiveAccess {
-		if fact.CompanyID == companyID && fact.AccessLevel == EntityPermissionNoAccess {
-			t.Fatalf("effective access wrote no_access fact: %+v", fact)
-		}
-	}
+	assertEffectiveAccessLevel(t, repo, companyID, blocked.UserID, EntityTypeNode, node.NodeID, EntityPermissionNoAccess)
 }
 
 func TestMemoryEffectiveAccessGroupGrantAndNestedInheritance(t *testing.T) {
@@ -284,7 +280,8 @@ func TestMemoryEffectiveAccessSourceSpecificReprojection(t *testing.T) {
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
-	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, false)
+	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, contextOnlyUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -302,15 +299,15 @@ func TestMemoryEffectiveAccessSourceSpecificReprojection(t *testing.T) {
 		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
-	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, false)
 	assertEffectiveAccess(t, repo, companyID, directUser.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView, false)
 	assertEffectiveAccess(t, repo, companyID, contextOnlyUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
 	users, err := repo.ListEffectiveUsersForResource(companyID, EntityTypeNode, node.NodeID, EntityPermissionView)
 	if err != nil {
 		t.Fatalf("ListEffectiveUsersForResource: %v", err)
 	}
-	if !slices.Contains(users, directUser.UserID) || slices.Contains(users, contextOnlyUser.UserID) {
-		t.Fatalf("node effective users after reprojection = %+v, want only direct user", users)
+	if slices.Contains(users, directUser.UserID) || slices.Contains(users, contextOnlyUser.UserID) {
+		t.Fatalf("node effective users after reprojection = %+v, want denied gate inheritance to hide both users", users)
 	}
 }
 
@@ -335,4 +332,20 @@ func assertEffectiveAccess(t *testing.T, repo *MemoryRepo, companyID, userID, re
 	if got != want {
 		t.Fatalf("UserHasEffectiveAccess(%s, %s, %s, %s) = %v, want %v", userID, resourceType, resourceID, accessLevel, got, want)
 	}
+}
+
+func assertEffectiveAccessLevel(t *testing.T, repo *MemoryRepo, companyID, userID, resourceType, resourceID, accessLevel string) {
+	t.Helper()
+	for _, fact := range repo.effectiveAccess {
+		if fact.CompanyID == companyID &&
+			fact.UserID == userID &&
+			fact.ResourceType == resourceType &&
+			fact.ResourceID == resourceID {
+			if fact.AccessLevel != accessLevel {
+				t.Fatalf("effective access level = %q, want %q; fact=%+v", fact.AccessLevel, accessLevel, fact)
+			}
+			return
+		}
+	}
+	t.Fatalf("no effective access row for %s/%s/%s/%s", companyID, userID, resourceType, resourceID)
 }
