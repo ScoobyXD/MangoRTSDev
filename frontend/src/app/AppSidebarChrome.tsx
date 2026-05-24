@@ -63,6 +63,9 @@ const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_ORANGE_ACCENT = "rgb(255, 136, 32)";
+const SIDEBAR_LOGIC_GATE_ICON_COLOR = "#19f07a";
+const SIDEBAR_PERSON_ICON_COLOR = "#8b5cf6";
+const SIDEBAR_MAP_ICON_COLOR = "#19a8ff";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
 const SIDEBAR_STATE_OPEN_BG = "rgba(15, 23, 42, 0.035)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
@@ -1055,7 +1058,7 @@ export function AppSidebar({
         <AppSidebarScopedExplorerSection
           label="Logic Gates by Function"
           open={logicGatesByFunctionOpen}
-          icon={<HeaderLogicGateArenaIcon />}
+          icon={<HeaderLogicGateArenaIcon color={SIDEBAR_LOGIC_GATE_ICON_COLOR} />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
           floating
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
@@ -1064,7 +1067,7 @@ export function AppSidebar({
         <AppSidebarScopedExplorerSection
           label="Logic Gates by Person"
           open={logicGatesByPersonOpen}
-          icon={<HeaderPersonIcon />}
+          icon={<HeaderPersonIcon color={SIDEBAR_PERSON_ICON_COLOR} />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
           floating
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
@@ -1073,7 +1076,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="Map"
           active={activePage === "map"}
-          icon={<HeaderMapIcon />}
+          icon={<HeaderMapIcon color={SIDEBAR_MAP_ICON_COLOR} />}
           elevated
           onPointerEnter={preloadDefaultDashboardModules}
           onFocus={preloadDefaultDashboardModules}
