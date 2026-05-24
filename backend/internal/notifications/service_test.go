@@ -451,7 +451,17 @@ func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t 
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+			Permission:  store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
 	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
@@ -860,7 +870,17 @@ func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
 		t.Fatalf("visible before revoke = %+v, want one", before)
 	}
 
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+			Permission:  store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
 	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {

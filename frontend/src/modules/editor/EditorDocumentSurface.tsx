@@ -7,6 +7,7 @@ import { EDITOR_DOCUMENT_LINE_HEIGHT } from "./useEditorPreferences";
 export type EditorDocumentSurfaceProps = {
   documentRef: React.RefObject<HTMLDivElement>;
   documentIsolation: EditorDocumentIsolationState;
+  editable: boolean;
   documentTopPx: number;
   documentFontSize: number;
   documentLineHeightPx: number;
@@ -39,6 +40,7 @@ export type EditorDocumentSurfaceProps = {
 export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   documentRef,
   documentIsolation,
+  editable,
   documentTopPx,
   documentFontSize,
   documentLineHeightPx,
@@ -66,7 +68,9 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onScroll,
   onWheel,
   onKeyDown,
-}) => (
+}) => {
+  const documentIsEditable = editable && documentIsolation.pointerEvents === "auto";
+  return (
   <>
     {showIndentGuides && (
       <div
@@ -114,24 +118,61 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       aria-label="Linked document editor"
       aria-multiline="true"
       aria-hidden={documentIsolation.ariaHidden}
-      tabIndex={documentIsolation.tabIndex}
-      contentEditable={documentIsolation.pointerEvents === "auto"}
+      aria-readonly={!documentIsEditable || undefined}
+      tabIndex={documentIsEditable ? documentIsolation.tabIndex : -1}
+      contentEditable={documentIsEditable}
       suppressContentEditableWarning
       spellCheck
-      onBeforeInput={onBeforeInput}
-      onPaste={onPaste}
+      onBeforeInput={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onBeforeInput(event);
+      }}
+      onPaste={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onPaste(event);
+      }}
       onCopy={onCopy}
-      onDrop={onDrop}
-      onInput={onInput}
+      onDrop={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onDrop(event);
+      }}
+      onInput={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onInput(event);
+      }}
       onSelect={onSelect}
       onClick={onClick}
-      onPointerDown={onPointerDown}
+      onPointerDown={(event) => {
+        if (!documentIsEditable) {
+          documentRef.current?.blur();
+          return;
+        }
+        onPointerDown(event);
+      }}
       onPointerMove={onPointerMove}
       onKeyUp={onKeyUp}
       onBlur={onBlur}
       onScroll={onScroll}
       onWheel={onWheel}
-      onKeyDown={onKeyDown}
+      onKeyDown={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onKeyDown(event);
+      }}
       style={{
         position: "absolute",
         top: documentTopPx,
@@ -157,8 +198,8 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
         tabSize: EDITOR_TAB_TEXT.length,
         letterSpacing: 0,
         fontVariantLigatures: "none",
-        caretColor,
-        cursor: "text",
+        caretColor: documentIsEditable ? caretColor : "transparent",
+        cursor: documentIsEditable ? "text" : "default",
         overflowY: "auto",
         overflowX: "hidden",
         scrollbarGutter: "stable",
@@ -167,4 +208,5 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       }}
     />
   </>
-);
+  );
+};

@@ -93,7 +93,8 @@ func TestLogicGateCreateProjectsCreatorAccessWithoutFullRebuild(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created gate: %v", err)
 	}
-	assertHTTPPhase2AEffectiveAccess(t, backing, companyID, creator.UserID, store.EntityTypeLogicGate, created.LogicGateID, store.EntityPermissionAdmin, true)
+	assertHTTPPhase2AEffectiveAccess(t, backing, companyID, creator.UserID, store.EntityTypeLogicGate, created.LogicGateID, store.EntityPermissionEdit, true)
+	assertHTTPPhase2AEffectiveAccess(t, backing, companyID, creator.UserID, store.EntityTypeLogicGate, created.LogicGateID, store.EntityPermissionAdmin, false)
 }
 
 func mustHTTPPhase2AUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, role string) domain.User {

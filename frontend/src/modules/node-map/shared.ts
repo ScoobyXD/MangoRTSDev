@@ -4,7 +4,16 @@ import React from "react";
 export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
 // Core node row payload returned by backend APIs and workspace snapshot cache.
-export type NodeRecord = {
+export type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
+
+export type ResourceAccessFields = {
+  effective_access_level?: ResourceAccessLevel | string | null;
+  can_view?: boolean;
+  can_edit?: boolean;
+  can_admin?: boolean;
+};
+
+export type NodeRecord = ResourceAccessFields & {
   company_id: string;
   node_id: string;
   title: string;
@@ -47,7 +56,7 @@ export type NodeInformation = {
 };
 
 // Combined node details payload consumed by Node Map + Editor + Explorer details panes.
-export type NodeDetails = {
+export type NodeDetails = ResourceAccessFields & {
   node: NodeRecord;
   information: NodeInformation[];
   relationships: NodeRelationship[];
@@ -118,6 +127,48 @@ export const panelResizeHandles: { key: string; edges: Partial<Record<PanelEdge,
 // Input sanitizer helpers used by forms and pointer math throughout node-map modules.
 export function trimOrEmpty(value: string): string {
   return value.trim();
+}
+
+export function accessLevelRank(accessLevel: string | null | undefined): number {
+  switch ((accessLevel ?? "").trim()) {
+    case "admin":
+      return 3;
+    case "edit":
+      return 2;
+    case "view":
+      return 1;
+    case "no_access":
+      return 0;
+    default:
+      return -1;
+  }
+}
+
+export function canViewResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
+  if (!resource) return true;
+  if (typeof resource.can_view === "boolean") return resource.can_view;
+  if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
+    return accessLevelRank(resource.effective_access_level) >= accessLevelRank("view");
+  }
+  return true;
+}
+
+export function canEditResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
+  if (!resource) return true;
+  if (typeof resource.can_edit === "boolean") return resource.can_edit;
+  if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
+    return accessLevelRank(resource.effective_access_level) >= accessLevelRank("edit");
+  }
+  return true;
+}
+
+export function canAdminResourceAccess(resource: ResourceAccessFields | null | undefined): boolean {
+  if (!resource) return true;
+  if (typeof resource.can_admin === "boolean") return resource.can_admin;
+  if (resource.effective_access_level !== undefined && resource.effective_access_level !== null) {
+    return accessLevelRank(resource.effective_access_level) >= accessLevelRank("admin");
+  }
+  return true;
 }
 
 export function clamp(value: number, minimum: number, maximum: number): number {

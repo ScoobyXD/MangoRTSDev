@@ -64,8 +64,8 @@ func TestMemoryEntityPermissionsIncludeDescendantGroupMembers(t *testing.T) {
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{CompanyID: companyID, EntityType: EntityTypeNode, EntityID: node.NodeID}); err != nil {
 		t.Fatalf("clear SetEntityPermissions: %v", err)
 	}
-	if allowed, err := repo.UserCanViewEntity(companyID, EntityTypeNode, node.NodeID, otherUser.UserID); err != nil || allowed {
-		t.Fatalf("other user allowed after clear = %v err = %v, want false", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, otherUser.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("other user edit allowed after clear = %v err = %v, want true", allowed, err)
 	}
 }
 
@@ -114,10 +114,13 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	for _, accessLevel := range []string{EntityPermissionView, EntityPermissionEdit, EntityPermissionAdmin} {
-		if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, accessLevel); err != nil || allowed {
-			t.Fatalf("viewer no-grant node %s allowed = %v err = %v, want false", accessLevel, allowed, err)
+	for _, accessLevel := range []string{EntityPermissionView, EntityPermissionEdit} {
+		if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, accessLevel); err != nil || !allowed {
+			t.Fatalf("viewer no-grant node %s allowed = %v err = %v, want true", accessLevel, allowed, err)
 		}
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, viewer.UserID, EntityPermissionAdmin); err != nil || allowed {
+		t.Fatalf("viewer no-grant node admin allowed = %v err = %v, want false", allowed, err)
 	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Open logic gate")
 	if err != nil {

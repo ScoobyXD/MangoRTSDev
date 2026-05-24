@@ -24,8 +24,10 @@ func TestMemoryVisibleQueriesUseEffectiveAccessDirectGrants(t *testing.T) {
 
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, editNode.NodeID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, editGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
@@ -76,6 +78,10 @@ func TestMemoryVisibleNodesIncludeLogicGateAssignedNodeContext(t *testing.T) {
 	mustAssignVisibleQueryNodeToGate(t, repo, companyID, visibleGate.LogicGateID, contextNode.NodeID)
 	mustAssignVisibleQueryNodeToGate(t, repo, companyID, hiddenGate.LogicGateID, hiddenContextNode.NodeID)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, contextNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenContextNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, unassignedNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
@@ -136,8 +142,10 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, viewNode.NodeID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, editNode.NodeID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, adminGate.LogicGateID, viewer.UserID, EntityPermissionAdmin)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
@@ -201,7 +209,9 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicFolder.FolderID, "logic_gate", hiddenGate.LogicGateID)
 
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedParent.FolderID, viewer.UserID, EntityPermissionView)
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")

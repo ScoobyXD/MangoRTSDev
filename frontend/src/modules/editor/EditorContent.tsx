@@ -5,6 +5,7 @@ import {
   NODE_H,
   NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX,
   NODE_W,
+  canEditResourceAccess,
   persistedMapPositionsToNodePositions,
   resolveOpenNodeMapPosition,
   type NodeDirection,
@@ -232,6 +233,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
+  const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(true);
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
@@ -486,9 +488,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [publishCollaborationEvent]);
 
   const scheduleCollaborativeDocumentSave = useCallback((nextText: string, immediate = false) => {
+    if (!linkedEntityCanEdit) return;
     scheduleDocumentSave(nextText, immediate);
     queueCollaborationDocumentUpdate(nextText, immediate);
-  }, [queueCollaborationDocumentUpdate, scheduleDocumentSave]);
+  }, [linkedEntityCanEdit, queueCollaborationDocumentUpdate, scheduleDocumentSave]);
 
   const flashCollaborationStatus = useCallback((message: string) => {
     setCollaborationStatus(message);
@@ -564,6 +567,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [applyRemoteCollaborationUpdate, flashCollaborationStatus, pendingSaveRef, saveInFlightRef]);
 
   const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
+    if (!linkedEntityCanEdit) return;
     const element = editorDocumentRef.current;
     if (!element) return;
     const range = getSelectionRangeInsideElement(element);
@@ -592,7 +596,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     recordEditorDocumentUndoChange(documentUndoHistoryRef.current, undoBefore, snapshotEditorElementForUndo(element), "format");
     scheduleCollaborativeDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
+  }, [linkedEntityCanEdit, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
 
   const updateSelectionFontSize = useCallback((nextFontSize: number) => {
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
@@ -736,6 +740,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, companyID]);
 
   const clearVisibleDocumentForSelection = useCallback(() => {
+    setLinkedEntityCanEdit(true);
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
@@ -819,6 +824,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
+    if (!linkedEntityCanEdit) return;
     if (!linkedNodeID || !value) return;
     setError("");
     try {
@@ -843,9 +849,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const createRelatedNode = useCallback(async (kind: EditorRelatedNodeCreationKind) => {
+    if (!linkedEntityCanEdit) return;
     if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
     const directionByKind: Record<EditorRelatedNodeCreationKind, NodeDirection> = {
       parent: "top",
@@ -914,9 +921,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_related_node");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string }) => {
+    if (!linkedEntityCanEdit) return;
     if (!companyID || linkedEntityKind !== "node") return;
     const title = input.title.trim() || "Image";
     const document = input.document.trim();
@@ -968,9 +976,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
+    if (!linkedEntityCanEdit) return;
     const cleanLogicGateID = logicGateID.trim();
     if (!companyID || !linkedNodeID || linkedEntityKind !== "node" || !cleanLogicGateID) return;
     const view = await getLogicGateArenaView(apiBase, companyID, cleanLogicGateID);
@@ -995,9 +1004,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     syncNodeAssignee(details.node.assignee_user_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, details.node);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, linkedNodeTitle, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, syncNodeAssignee]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
+    if (!linkedEntityCanEdit) return;
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     setError("");
     try {
@@ -1016,7 +1026,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON, syncNodeAssignee]);
 
   const commitNodePriorityDraft = useCallback((draft: string) => {
     const raw = draft.trim();
@@ -1064,6 +1074,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
   const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
+    if (!linkedEntityCanEdit) return;
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     setError("");
     try {
@@ -1083,7 +1094,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_raci");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const addLogicGateRaciUser = useCallback((role: LogicGateRaciRole, userID: string) => {
     const cleanUserID = userID.trim();
@@ -1116,6 +1127,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setIsEditingTitle(false);
     editingTitleDraftRef.current = "";
   }, [linkedNodeID]);
+
+  useEffect(() => {
+    if (linkedEntityCanEdit) return;
+    setIsEditingTitle(false);
+    pendingEditorFontSizeRef.current = null;
+    editorDocumentRef.current?.blur();
+    window.getSelection()?.removeAllRanges();
+  }, [linkedEntityCanEdit, linkedNodeID]);
 
   useEffect(() => {
     if (!isEditingTitle || !editingTitleRef.current) return;
@@ -1355,6 +1374,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const node = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!node) return;
+      setLinkedEntityCanEdit(canEditResourceAccess(node));
       const nextTitle = getNodeTitle(node);
       setLinkedNodeTitle((current) => {
         if (current === nextTitle) return current;
@@ -1377,6 +1397,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       const logicGate = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!logicGate) return;
+      setLinkedEntityCanEdit(canEditResourceAccess(logicGate));
       const nextTitle = getLogicGateTitle(logicGate);
       setLinkedNodeTitle((current) => {
         if (current === nextTitle) return current;
@@ -1391,6 +1412,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => {
     let cancelled = false;
     if (!linkedNodeID) {
+      setLinkedEntityCanEdit(true);
       setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
@@ -1437,6 +1459,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
           ]);
           if (cancelled) return;
+          setLinkedEntityCanEdit(canEditResourceAccess(details));
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           setNodeStatus("");
           setNodeStatusColor("");
@@ -1479,6 +1502,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
         if (cancelled) return;
+        setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedNodeTitle(getNodeTitle(details.node));
         setNodeStatus(details.node.status ?? "");
         setNodeStatusColor(details.node.status_color ?? "");
@@ -1640,7 +1664,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               setOutlineStyle(nextOutlineStyle);
               setActiveTab("outline-styles");
             }}
-            onCreateRelatedNode={linkedEntityKind === "node" ? createRelatedNode : undefined}
+            onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
             reserveHeaderOffset={!forcedEntityKind}
           />
           
@@ -1652,6 +1676,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeInfoPreview={linkedNodeInfoPreview}
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
+            canEdit={linkedEntityCanEdit}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
               statusColor: nodeStatusColor || "",
@@ -1733,6 +1758,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               entityID={linkedNodeID}
               title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
               variant="embedded"
+              readOnly={!linkedEntityCanEdit}
             />
           </div>
         )}
@@ -1741,6 +1767,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             apiBase={apiBase}
             companyID={companyID}
             nodeID={linkedNodeID}
+            canEdit={linkedEntityCanEdit}
             nodePriorityDraft={nodePriorityDraft}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
@@ -1772,6 +1799,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <EditorDocumentSurface
             documentRef={editorDocumentRef}
             documentIsolation={documentIsolation}
+            editable={linkedEntityCanEdit}
             documentTopPx={documentTopPx}
             documentFontSize={documentFontSize}
             documentLineHeightPx={documentLineHeightPx}
@@ -1788,7 +1816,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             {...documentSurfaceEventHandlers}
           />
         )}
-        {documentMentionMenu}
+        {linkedEntityCanEdit && documentMentionMenu}
         {emptyMessage && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
             {emptyMessage}

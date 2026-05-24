@@ -158,6 +158,9 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, item.LogicGateID, item.Header); err != nil {
 		return domain.LogicGate{}, err
 	}
+	if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
+		return domain.LogicGate{}, err
+	}
 	if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -277,7 +280,11 @@ func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateEffectiveAccessLevels(ctx, companyID, userID, items)
 }
 
 func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
@@ -389,7 +396,11 @@ func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID,
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateEffectiveAccessLevels(ctx, companyID, userID, items)
 }
 
 const postgresLogicGateMapWindowCTE = `
@@ -559,7 +570,26 @@ order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRaciAssignments(ctx, companyID, items)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateEffectiveAccessLevels(ctx, companyID, userID, items)
+}
+
+func (r *PostgresRepo) attachLogicGateEffectiveAccessLevels(ctx context.Context, companyID, userID string, items []domain.LogicGate) ([]domain.LogicGate, error) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.LogicGateID)
+	}
+	levels, err := r.effectiveAccessLevelsForUser(ctx, companyID, userID, EntityTypeLogicGate, ids)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].EffectiveAccess = levels[items[index].LogicGateID]
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error) {

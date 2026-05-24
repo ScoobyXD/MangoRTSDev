@@ -73,6 +73,16 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions visible gate: %v", err)
 	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   hiddenGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden gate: %v", err)
+	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}

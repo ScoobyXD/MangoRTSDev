@@ -23,6 +23,8 @@ type NodeMapContextMenusProps = {
   relationshipRoleColors: Record<NodeMapRelationshipRole, string>;
   selectedNodeIDs: Set<string>;
   selectedRelationshipIDs: Set<string>;
+  nodeContextMenuCanEdit: boolean;
+  relationshipContextMenuCanEdit: boolean;
   contextMenuButtonStyle: React.CSSProperties;
   contextMenuDangerButtonStyle: React.CSSProperties;
   selectionBoxActive: boolean;
@@ -58,6 +60,8 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
   relationshipRoleColors,
   selectedNodeIDs,
   selectedRelationshipIDs,
+  nodeContextMenuCanEdit,
+  relationshipContextMenuCanEdit,
   contextMenuButtonStyle,
   contextMenuDangerButtonStyle,
   selectionBoxActive,
@@ -225,25 +229,29 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
         <button style={contextMenuButtonStyle} onClick={() => onPinNode(nodeContextMenu.nodeID)}>
           Pin Node
         </button>
-        <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
-          Rename node
-        </button>
+        {nodeContextMenuCanEdit && (
+          <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
+            Rename node
+          </button>
+        )}
         <button style={contextMenuButtonStyle} onClick={() => onOpenPermissions(nodeContextMenu.nodeID)}>
           Permissions
         </button>
-        <button
-          style={contextMenuDangerButtonStyle}
-          onClick={() => {
-            const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
-            onRequestDeleteNodes(ids);
-          }}
-        >
-          Delete node
-        </button>
+        {nodeContextMenuCanEdit && (
+          <button
+            style={contextMenuDangerButtonStyle}
+            onClick={() => {
+              const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
+              onRequestDeleteNodes(ids);
+            }}
+          >
+            Delete node
+          </button>
+        )}
       </div>
     )}
 
-    {relationshipContextMenu && (
+    {relationshipContextMenu && relationshipContextMenuCanEdit && (
       <div
         style={{
           position: "absolute",

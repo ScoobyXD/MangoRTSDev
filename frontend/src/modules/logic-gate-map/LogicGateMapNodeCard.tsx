@@ -19,6 +19,8 @@ const AND_GATE_PATH = "M1 1H100A47 47 0 0 1 100 95H1Z";
 
 type LogicGateMapNodeCardProps = {
   node: NodeRecord;
+  canEdit: boolean;
+  editableNodeIDs: Set<string>;
   position: NodePosition;
   size: { w: number; h: number };
   selectedNodeID: string;
@@ -67,6 +69,8 @@ type LogicGateMapNodeCardProps = {
 
 export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   node,
+  canEdit,
+  editableNodeIDs,
   position,
   size,
   selectedNodeID,
@@ -128,7 +132,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         boxShadow: "none",
         userSelect: "none",
         color: nodeCardText,
-        cursor: isEditingTitle ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
+        cursor: isEditingTitle && canEdit ? "text" : canEdit ? (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab") : "default",
         zIndex: isPrimary ? 5 : 4,
         overflow: "visible",
       }}
@@ -173,9 +177,10 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
         const nextSelection = resolveNodeMapDragStartSelection({ selectedNodeIDs, selectedNodeID, nodeID: node.node_id });
-        const nextIDs = nextSelection.dragNodeIDs;
+        const nextIDs = nextSelection.dragNodeIDs.filter((id) => editableNodeIDs.has(id));
         onSetSelectedNodeID(nextSelection.selectedNodeID);
         onSetSelectedNodeIDs(nextSelection.selectedNodeIDs);
+        if (!canEdit || nextIDs.length === 0) return;
 
         const offsets: Record<string, { x: number; y: number }> = {};
         for (const id of nextIDs) {
@@ -231,7 +236,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
       >
         {/* Latency-obsession alignment: keep node-card render minimal.
             We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-        {isEditingTitle ? (
+        {isEditingTitle && canEdit ? (
           <div
             ref={editingNodeTitleElementRef}
             contentEditable
@@ -310,7 +315,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         <div style={{ position: "absolute", top: 8, left: 8, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92, zIndex: 2 }} />
       )}
 
-      {LOGIC_GATE_SIDE_CONTROLS.map(({ direction, style: sideStyle }) => {
+      {canEdit && LOGIC_GATE_SIDE_CONTROLS.map(({ direction, style: sideStyle }) => {
         const isDrafting = !!relationshipDraft;
         const isSource = relationshipDraft?.sourceNodeID === node.node_id && relationshipDraft.sourceSide === direction;
         const isLegalDraftTarget = !!relationshipDraft && relationshipDraft.sourceNodeID !== node.node_id && isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction);
@@ -399,7 +404,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
           </div>
         );
       })}
-      {[
+      {canEdit && [
         { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
         { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
         { key: "tr-curve", edges: { right: true, top: true }, cursor: "nesw-resize", style: { left: "calc(67.5% - 6px)", top: -6, width: 18, height: 14 } },

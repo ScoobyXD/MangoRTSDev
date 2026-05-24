@@ -52,6 +52,18 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions visible node: %v", err)
 	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   hiddenNode.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden node: %v", err)
+	}
 	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}

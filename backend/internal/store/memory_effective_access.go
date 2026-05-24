@@ -27,6 +27,7 @@ type legacyGrantEffectiveAccessCandidate struct {
 const (
 	effectiveAccessSourceDirectUserGrant  = "direct_user_grant"
 	effectiveAccessSourceDirectGroupGrant = "direct_group_grant"
+	effectiveAccessSourceCompanyDefault   = "company_member_default"
 	effectiveAccessSourceCompanyAdmin     = "company_admin"
 	effectiveAccessSourceNodeAssignee     = "node_assignee"
 	effectiveAccessSourceLogicGateRaci    = "logic_gate_raci"
@@ -46,6 +47,7 @@ func (r *MemoryRepo) RebuildEffectiveResourceAccessForCompany(companyID string) 
 	now := time.Now().UTC()
 	next := make(map[string]domain.EffectiveResourceAccess)
 	r.projectLegacyGrantEffectiveAccessLocked(companyID, next, now)
+	r.projectCompanyMemberDefaultEffectiveAccessLocked(companyID, next, now)
 	r.projectCompanyAdminEffectiveAccessLocked(companyID, next, now)
 	r.projectNodeAssigneeEffectiveAccessLocked(companyID, next, now)
 	r.projectLogicGateRaciEffectiveAccessLocked(companyID, next, now)
@@ -564,6 +566,75 @@ func (r *MemoryRepo) recomputeCompanyAdminEffectiveAccessForResourceLocked(compa
 	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, effectiveAccessSourceCompanyAdmin, facts)
 }
 
+func (r *MemoryRepo) recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
+	companyID = strings.TrimSpace(companyID)
+	resourceType, typeOK := NormalizeEntityType(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if companyID == "" || !typeOK || resourceID == "" {
+		return ErrInvalid
+	}
+	facts := []domain.EffectiveResourceAccess{}
+	if (resourceType == EntityTypeNode || resourceType == EntityTypeLogicGate) &&
+		r.entityExistsLocked(companyID, resourceType, resourceID) &&
+		!r.resourceHasDirectEntityPermissionsLocked(companyID, resourceType, resourceID) {
+		for _, membership := range r.memberships {
+			if membership.CompanyID != companyID {
+				continue
+			}
+			facts = append(facts, domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       membership.UserID,
+				ResourceType: resourceType,
+				ResourceID:   resourceID,
+				AccessLevel:  EntityPermissionEdit,
+				SourceType:   effectiveAccessSourceCompanyDefault,
+				SourceID:     companyMemberDefaultEffectiveAccessSourceID(companyID, membership.UserID),
+			})
+		}
+	}
+	return r.replaceEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, effectiveAccessSourceCompanyDefault, facts)
+}
+
+func (r *MemoryRepo) recomputeCompanyMemberDefaultEffectiveAccessForUserLocked(companyID, userID string) error {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return ErrInvalid
+	}
+	facts := []domain.EffectiveResourceAccess{}
+	if _, ok := r.memberships[membershipKey(companyID, userID)]; ok {
+		for _, node := range r.nodes {
+			if node.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeNode, node.NodeID) {
+				continue
+			}
+			facts = append(facts, domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       userID,
+				ResourceType: EntityTypeNode,
+				ResourceID:   node.NodeID,
+				AccessLevel:  EntityPermissionEdit,
+				SourceType:   effectiveAccessSourceCompanyDefault,
+				SourceID:     companyMemberDefaultEffectiveAccessSourceID(companyID, userID),
+			})
+		}
+		for _, gate := range r.logicGates {
+			if gate.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeLogicGate, gate.LogicGateID) {
+				continue
+			}
+			facts = append(facts, domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       userID,
+				ResourceType: EntityTypeLogicGate,
+				ResourceID:   gate.LogicGateID,
+				AccessLevel:  EntityPermissionEdit,
+				SourceType:   effectiveAccessSourceCompanyDefault,
+				SourceID:     companyMemberDefaultEffectiveAccessSourceID(companyID, userID),
+			})
+		}
+	}
+	return r.replaceEffectiveFactsForSourceLocked(companyID, effectiveAccessSourceCompanyDefault, companyMemberDefaultEffectiveAccessSourceID(companyID, userID), facts)
+}
+
 func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
@@ -697,6 +768,25 @@ func (r *MemoryRepo) userHasEffectiveAccessLocked(companyID, userID, resourceTyp
 	return false
 }
 
+func (r *MemoryRepo) effectiveAccessLevelForUserLocked(companyID, userID, resourceType, resourceID string) string {
+	bestLevel := ""
+	bestRank := 0
+	for _, access := range r.effectiveAccess {
+		if access.CompanyID != companyID ||
+			access.UserID != userID ||
+			access.ResourceType != resourceType ||
+			access.ResourceID != resourceID {
+			continue
+		}
+		rank := EntityPermissionRank(access.AccessLevel)
+		if rank > bestRank {
+			bestLevel = access.AccessLevel
+			bestRank = rank
+		}
+	}
+	return bestLevel
+}
+
 func (r *MemoryRepo) projectLegacyGrantEffectiveAccessLocked(companyID string, facts map[string]domain.EffectiveResourceAccess, now time.Time) {
 	bestByUserResource := map[string]legacyGrantEffectiveAccessCandidate{}
 	for _, permission := range r.entityPermissions {
@@ -785,6 +875,50 @@ func (r *MemoryRepo) projectLegacyGrantEffectiveAccessLocked(companyID string, f
 			SourceType:   candidate.sourceType,
 			SourceID:     candidate.sourceID,
 		})
+	}
+}
+
+func (r *MemoryRepo) projectCompanyMemberDefaultEffectiveAccessLocked(companyID string, facts map[string]domain.EffectiveResourceAccess, now time.Time) {
+	memberships := make([]domain.CompanyMembership, 0)
+	for _, membership := range r.memberships {
+		if membership.CompanyID == companyID {
+			memberships = append(memberships, membership)
+		}
+	}
+	if len(memberships) == 0 {
+		return
+	}
+	for _, node := range r.nodes {
+		if node.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeNode, node.NodeID) {
+			continue
+		}
+		for _, membership := range memberships {
+			addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       membership.UserID,
+				ResourceType: EntityTypeNode,
+				ResourceID:   node.NodeID,
+				AccessLevel:  EntityPermissionEdit,
+				SourceType:   effectiveAccessSourceCompanyDefault,
+				SourceID:     companyMemberDefaultEffectiveAccessSourceID(companyID, membership.UserID),
+			})
+		}
+	}
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeLogicGate, gate.LogicGateID) {
+			continue
+		}
+		for _, membership := range memberships {
+			addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
+				CompanyID:    companyID,
+				UserID:       membership.UserID,
+				ResourceType: EntityTypeLogicGate,
+				ResourceID:   gate.LogicGateID,
+				AccessLevel:  EntityPermissionEdit,
+				SourceType:   effectiveAccessSourceCompanyDefault,
+				SourceID:     companyMemberDefaultEffectiveAccessSourceID(companyID, membership.UserID),
+			})
+		}
 	}
 }
 
@@ -1174,6 +1308,17 @@ func (r *MemoryRepo) effectiveAccessCompanyResourcesLocked(companyID string) []e
 	return resources
 }
 
+func (r *MemoryRepo) resourceHasDirectEntityPermissionsLocked(companyID, resourceType, resourceID string) bool {
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID &&
+			permission.EntityType == resourceType &&
+			permission.EntityID == resourceID {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *MemoryRepo) effectiveAccessAllCompanyResourcesLocked() map[string][]effectiveAccessResource {
 	out := map[string][]effectiveAccessResource{}
 	for _, node := range r.nodes {
@@ -1256,6 +1401,10 @@ func nodeAssigneeEffectiveAccessSourceID(nodeID, userID string) string {
 
 func logicGateRaciEffectiveAccessSourceID(logicGateID, role, userID string) string {
 	return effectiveAccessSourceID("logic_gate", logicGateID, "role", role, EntityPermissionSubjectUser, userID)
+}
+
+func companyMemberDefaultEffectiveAccessSourceID(companyID, userID string) string {
+	return effectiveAccessSourceID("membership", companyID, userID)
 }
 
 func sharedTriageRaciEffectiveAccessSourceID(folderID, role, subjectType, subjectID string) string {

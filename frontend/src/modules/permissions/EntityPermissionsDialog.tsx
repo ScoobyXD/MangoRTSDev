@@ -46,6 +46,7 @@ type EntityPermissionsDialogProps = {
   title: string;
   onClose: () => void;
   onSaved?: () => void;
+  readOnly?: boolean;
 };
 
 type EntityPermissionsPanelProps = {
@@ -57,6 +58,7 @@ type EntityPermissionsPanelProps = {
   onClose?: () => void;
   onSaved?: () => void;
   variant?: "dialog" | "embedded";
+  readOnly?: boolean;
 };
 
 type PermissionPayload = {
@@ -80,6 +82,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   onClose,
   onSaved,
   variant = "dialog",
+  readOnly = false,
 }) => {
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
@@ -152,8 +155,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const usersByID = useMemo(() => new Map(users.map((user) => [user.user_id, user])), [users]);
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
   const assignmentCount = accessBySubject.size;
+  const controlsDisabled = busy || readOnly;
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
+    if (readOnly) return;
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
@@ -163,6 +168,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   };
 
   const save = async () => {
+    if (readOnly) return;
     setBusy(true);
     setError("");
     try {
@@ -190,7 +196,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       value={forcedAccessLevel || accessBySubject.get(key) || ""}
       onChange={(event) => setAccess(key, event.target.value as ResourceAccessLevel)}
       style={permissionSelectStyle}
-      disabled={busy || !!forcedAccessLevel}
+      disabled={controlsDisabled || !!forcedAccessLevel}
       aria-label="Access level"
     >
       {forcedAccessLevel
@@ -273,9 +279,9 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         {groups.length === 0 && users.length === 0 && <div style={permissionMutedTextStyle}>No company users found.</div>}
       </div>
       <div style={permissionFooterStyle}>
-        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { setSaved(false); setAccessBySubject(new Map()); }} disabled={busy}>{"Clear grants"}</button>
+        <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!readOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
         {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
-        <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
+        <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       </div>
     </div>
   );
@@ -294,6 +300,7 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
           onClose={props.onClose}
           onSaved={props.onSaved}
           variant="dialog"
+          readOnly={props.readOnly}
         />
       </div>
     </div>
@@ -347,6 +354,7 @@ function permissionSummaryText(saved: boolean, assignmentCount: number, entityTy
   if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
   if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access.`;
   if (entityType === "shared_triage_folder") return "No grants saved here. Parent Shared Triage grants can still apply; otherwise access is denied except for dev admins and company admins.";
+  if (entityType === "node" || entityType === "logic_gate") return "No explicit grants. Company users have edit access by default; dev admins and company admins keep admin access.";
   return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 

@@ -174,6 +174,7 @@ function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, inform
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
+  canEdit,
   nodePriorityDraft,
   assignedLogicGateIDs,
   apiBase,
@@ -324,6 +325,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLastAssignedLogicGateLabel("");
     setLogicGateAssignStatus("");
   }, [nodeID]);
+
+  useEffect(() => {
+    if (canEdit) return;
+    setLogicGateAssignerOpen(false);
+    setEmailPickerOpen(false);
+    setDropActive(false);
+    setDeleteTextBlockConfirmation(null);
+  }, [canEdit]);
 
   useEffect(() => {
     const nextRatio = readStoredTextChatSplitRatio(companyID, nodeID);
@@ -477,15 +486,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     if (!focusBlockIDRef.current) return;
+    if (!canEdit) {
+      focusBlockIDRef.current = "";
+      return;
+    }
     const blockID = focusBlockIDRef.current;
     focusBlockIDRef.current = "";
     window.requestAnimationFrame(() => {
       const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${blockID}"]`);
       focusContentEditableAtEnd(editor ?? null);
     });
-  }, [blocks.length]);
+  }, [blocks.length, canEdit]);
 
   const persistTextBlock = useCallback(async (blockID: string, content: EditorTextBlockContent) => {
+    if (!canEdit) return;
     if (!nodeID || !companyID) return;
     setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: true } : block));
     try {
@@ -509,18 +523,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: false } : block));
     }
-  }, [companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const flushTextBlockSave = useCallback((blockID: string) => {
+    if (!canEdit) return;
     const timer = saveTimersRef.current.get(blockID);
     if (timer !== undefined) {
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
     void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
-  }, [persistTextBlock]);
+  }, [canEdit, persistTextBlock]);
 
   const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
+    if (!canEdit) return;
     contentByBlockRef.current.set(blockID, content);
     const existingTimer = saveTimersRef.current.get(blockID);
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
@@ -529,9 +545,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
-  }, [persistTextBlock]);
+  }, [canEdit, persistTextBlock]);
 
   const createTextBlock = useCallback(() => {
+    if (!canEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "" };
@@ -549,15 +566,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ...current,
     ]);
     void persistTextBlock(blockID, initialContent);
-  }, [persistTextBlock]);
+  }, [canEdit, persistTextBlock]);
 
   useEffect(() => {
-    if (!projectionsLoaded || !nodeID || loadedTextBlockProjections.length > 0 || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
+    if (!canEdit || !projectionsLoaded || !nodeID || loadedTextBlockProjections.length > 0 || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
     autoCreatedTextBlockNodeIDsRef.current.add(nodeID);
     createTextBlock();
-  }, [blocks.length, createTextBlock, loadedTextBlockProjections.length, nodeID, projectionsLoaded]);
+  }, [blocks.length, canEdit, createTextBlock, loadedTextBlockProjections.length, nodeID, projectionsLoaded]);
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
+    if (!canEdit) return;
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
     const nextContent: EditorTextBlockContent = {
       title: patch.title ?? existing.title,
@@ -568,9 +586,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return { ...block, ...nextContent, updatedTimestamp: new Date().toISOString() };
     }));
     scheduleTextBlockSave(blockID, nextContent);
-  }, [scheduleTextBlockSave]);
+  }, [canEdit, scheduleTextBlockSave]);
 
   const renameTextBlock = useCallback((blockID: string) => {
+    if (!canEdit) return;
     const block = blocks.find((item) => item.id === blockID);
     const nextTitle = window.prompt("Rename title", block?.title || DEFAULT_TEXT_BLOCK_TITLE);
     if (nextTitle === null) return;
@@ -578,9 +597,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!title) return;
     updateTextBlockContent(blockID, { title });
     flushTextBlockSave(blockID);
-  }, [blocks, flushTextBlockSave, updateTextBlockContent]);
+  }, [blocks, canEdit, flushTextBlockSave, updateTextBlockContent]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
+    if (!canEdit) return;
     if (!nodeID || !companyID) return;
     const timer = saveTimersRef.current.get(blockID);
     if (timer !== undefined) {
@@ -645,9 +665,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
       onProjectionMutation();
     }
-  }, [chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const requestDeleteTextBlock = useCallback((blockID: string) => {
+    if (!canEdit) return;
     const block = blocks.find((item) => item.id === blockID);
     const chatCount = chatMessages.filter((message) => message.blockID === blockID).length;
     setDeleteTextBlockConfirmation({
@@ -655,9 +676,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       title: block?.title.trim() || DEFAULT_TEXT_BLOCK_TITLE,
       chatCount,
     });
-  }, [blocks, chatMessages]);
+  }, [blocks, canEdit, chatMessages]);
 
   const openSelectionChat = useCallback((selection: TextBlockSelectionDraft) => {
+    if (!canEdit) return;
     setFocusedTextBlockID("");
     setChatReplyTargets((current) => {
       if (!current[selection.blockID]) return current;
@@ -679,7 +701,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setActiveChatBlockID(selection.blockID);
-  }, []);
+  }, [canEdit]);
 
   const navigateToChatMessage = useCallback((blockID: string, messages: EditorTextBlockChatMessage[], messageID: string) => {
     const anchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, messageID);
@@ -701,6 +723,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   const submitChat = useCallback(async (blockID: string) => {
+    if (!canEdit) return;
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
     if (!message && attachments.length === 0) return;
@@ -773,9 +796,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
     }
-  }, [author.name, author.userID, chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [author.name, author.userID, canEdit, chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
+    if (!canEdit) return;
     const message = chatMessages.find((item) => item.id === messageID);
     if (!message || !nodeID || !companyID) return;
     if (!canDeleteEditorTextBlockChatMessage(message, author.userID)) {
@@ -800,9 +824,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_delete_chat_message");
       onProjectionMutation();
     }
-  }, [author.userID, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [author.userID, canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const addChatDraftAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
+    if (!canEdit) return;
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
     const existingBytes = (chatDraftAttachments[blockID] ?? []).reduce((total, attachment) => total + attachment.size, 0);
@@ -830,9 +855,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_read_attachment");
     }
-  }, [chatDraftAttachments, onError]);
+  }, [canEdit, chatDraftAttachments, onError]);
 
   const removeChatDraftAttachment = useCallback((blockID: string, attachmentID: string) => {
+    if (!canEdit) return;
     setChatDraftAttachments((current) => {
       const nextAttachments = (current[blockID] ?? []).filter((attachment) => attachment.id !== attachmentID);
       if (nextAttachments.length === 0) {
@@ -842,9 +868,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }
       return { ...current, [blockID]: nextAttachments };
     });
-  }, []);
+  }, [canEdit]);
 
   const addImageChatComment = useCallback((image: TextBlockImageDraft) => {
+    if (!canEdit) return;
     const attachment: EditorChatAttachment = {
       id: generateStableInformationID(),
       name: "selected-image.png",
@@ -876,9 +903,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ...current,
       [image.blockID]: [...(current[image.blockID] ?? []), attachment],
     }));
-  }, []);
+  }, [canEdit]);
 
   const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {
+    if (!canEdit) return;
     if (typeof document === "undefined") return;
     const sourceBlock = blocks.find((block) => block.id === image.blockID);
     const sourceTitle = sourceBlock?.title.trim() || "Image";
@@ -905,9 +933,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_create_image_node");
     }
-  }, [blocks, onCreateNodeFromImage, onError]);
+  }, [blocks, canEdit, onCreateNodeFromImage, onError]);
 
   const attachEmail = useCallback(async (email: ReturnType<typeof messageAttachmentPayload>) => {
+    if (!canEdit) return;
     if (attachedEmails.some((item) => item.messageID === email.messageID)) {
       setEmailPickerOpen(false);
       return;
@@ -939,9 +968,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_attach_email");
     }
-  }, [attachedEmails, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
+    if (!canEdit) return;
     const cleanLogicGateID = logicGate.logic_gate_id.trim();
     if (!cleanLogicGateID || assigningLogicGateID) return;
     if (nodePriorityUnassignedForLogicGate) {
@@ -974,17 +1004,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningLogicGateID("");
     }
-  }, [assigningLogicGateID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
+  }, [assigningLogicGateID, canEdit, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
+    if (!canEdit) return;
     const email = parseDraggedEmail(event.dataTransfer);
     if (!email) return;
     event.preventDefault();
     setDropActive(false);
     void attachEmail({ ...email, attachedTimestamp: new Date().toISOString() });
-  }, [attachEmail]);
+  }, [attachEmail, canEdit]);
 
   const startTextChatSplitResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!canEdit) return;
     event.preventDefault();
     event.stopPropagation();
     const previousColumn = event.currentTarget.previousElementSibling;
@@ -1019,7 +1051,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     ownerDocument.addEventListener("pointermove", onPointerMove);
     ownerDocument.addEventListener("pointerup", finish);
     ownerDocument.addEventListener("pointercancel", finish);
-  }, [companyID, nodeID]);
+  }, [canEdit, companyID, nodeID]);
 
   const chatMessagesByBlock = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
@@ -1045,7 +1077,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.requestAnimationFrame(() => {
         const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${block.id}"]`) ?? null;
         scrollNodeWorkspaceInformationIntoView(rootRef.current, block.id);
-        focusContentEditableAtEnd(editor);
+        if (canEdit) focusContentEditableAtEnd(editor);
       });
       return;
     }
@@ -1059,10 +1091,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       scrollNodeWorkspaceInformationIntoView(rootRef.current, message.blockID);
       scrollNodeWorkspaceInformationIntoView(rootRef.current, message.id);
     });
-  }, [blocks, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
 
   const renderTextChatSplitHandle = (enabled: boolean) => {
     if (compact) return null;
+    if (!canEdit) return <div aria-hidden="true" />;
     if (!enabled) return <div aria-hidden="true" />;
     return (
       <div
@@ -1175,25 +1208,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         <div aria-hidden="true" style={{ minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "2px 0 10px", background: "inherit" }}>
-          <button
-            type="button"
-            title="Add text box"
-            onClick={createTextBlock}
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 6,
-              border: `1px solid ${accent}`,
-              background: panelBackground,
-              color: accent,
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-              flex: "0 0 auto",
-            }}
-          >
-            <PlusIcon color={accent} />
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              title="Add text box"
+              onClick={createTextBlock}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 6,
+                border: `1px solid ${accent}`,
+                background: panelBackground,
+                color: accent,
+                display: "grid",
+                placeItems: "center",
+                cursor: "pointer",
+                flex: "0 0 auto",
+              }}
+            >
+              <PlusIcon color={accent} />
+            </button>
+          )}
           {unseenChanges.length > 0 && (
             <button
               type="button"
@@ -1217,53 +1252,57 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               Seen all
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setEmailPickerOpen(true)}
-            style={{
-              minHeight: 30,
-              borderRadius: 6,
-              border: `1px solid ${strokeColor}`,
-              background: panelBackground,
-              color: surfaceText,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "0 10px",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 800,
-              letterSpacing: 0,
-            }}
-          >
-            <MailIcon color={accent} />
-            Attach email
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setLogicGateAssignerOpen((open) => !open);
-              setLogicGateAssignStatus("");
-            }}
-            style={{
-              minHeight: 30,
-              borderRadius: 6,
-              border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
-              background: logicGateAssignerOpen ? "rgba(100,116,139,0.12)" : panelBackground,
-              color: surfaceText,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "0 10px",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 800,
-              letterSpacing: 0,
-            }}
-          >
-            <ExplorerRowIcon kind="logic_gate" />
-            Assign to Logic Gate
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setEmailPickerOpen(true)}
+              style={{
+                minHeight: 30,
+                borderRadius: 6,
+                border: `1px solid ${strokeColor}`,
+                background: panelBackground,
+                color: surfaceText,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "0 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: 0,
+              }}
+            >
+              <MailIcon color={accent} />
+              Attach email
+            </button>
+          )}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setLogicGateAssignerOpen((open) => !open);
+                setLogicGateAssignStatus("");
+              }}
+              style={{
+                minHeight: 30,
+                borderRadius: 6,
+                border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
+                background: logicGateAssignerOpen ? "rgba(100,116,139,0.12)" : panelBackground,
+                color: surfaceText,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "0 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: 0,
+              }}
+            >
+              <ExplorerRowIcon kind="logic_gate" />
+              Assign to Logic Gate
+            </button>
+          )}
           <div
             title={hasAssignedLogicGate ? `Successfully assigned to Logic Gate: ${assignedLogicGateLabel}` : "Assign to Logic Gate: None"}
             style={{
@@ -1291,7 +1330,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           <div style={{ minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
         )}
 
-        {logicGateAssignerOpen && (
+        {canEdit && logicGateAssignerOpen && (
           <>
             <div aria-hidden="true" />
             <div style={{ minWidth: 0, display: "grid", gap: 10, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 10, boxShadow: "0 10px 24px rgba(15,23,42,0.08)" }}>
@@ -1427,7 +1466,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
+                      disabled={!canEdit}
+                      readOnly={!canEdit}
                       onFocus={() => {
+                        if (!canEdit) return;
                         setFocusedTextBlockID(block.id);
                         setActiveChatBlockID("");
                       }}
@@ -1445,6 +1487,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         fontSize: 11,
                         fontWeight: 800,
                         letterSpacing: 0,
+                        caretColor: canEdit ? surfaceText : "transparent",
+                        cursor: canEdit ? "text" : "default",
                       }}
                     />
                     <div style={{ minWidth: 0, maxWidth: compact ? 210 : 380, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: "nowrap" }}>
@@ -1468,17 +1512,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     ) : (
                       <div aria-hidden="true" style={{ width: 26, height: 24 }} />
                     )}
-                    <TextBlockActionsMenu
-                      accent={accent}
-                      surfaceText={surfaceText}
-                      panelBackground={panelBackground}
-                      strokeColor={strokeColor}
-                      onRename={() => renameTextBlock(block.id)}
-                      onDelete={() => requestDeleteTextBlock(block.id)}
-                    />
+                    {canEdit ? (
+                      <TextBlockActionsMenu
+                        accent={accent}
+                        surfaceText={surfaceText}
+                        panelBackground={panelBackground}
+                        strokeColor={strokeColor}
+                        onRename={() => renameTextBlock(block.id)}
+                        onDelete={() => requestDeleteTextBlock(block.id)}
+                      />
+                    ) : (
+                      <div aria-hidden="true" style={{ width: 26, height: 24 }} />
+                    )}
                   </div>
                   <NodeTextBlockEditor
                     blockID={block.id}
+                    editable={canEdit}
                     nodeID={nodeID}
                     companyID={companyID}
                     currentUserID={author.userID || "local-user"}
@@ -1516,6 +1565,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 {compact && chatIsVisible && (
                   <ChatPane
                     blockID={block.id}
+                    editable={canEdit}
                     messages={messages}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
@@ -1549,6 +1599,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 chatIsVisible ? (
                   <ChatPane
                     blockID={block.id}
+                    editable={canEdit}
                     messages={messages}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
@@ -1583,47 +1634,49 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         <div />
         <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
-          <div
-            onDragEnter={() => setDropActive(true)}
-            onDragOver={(event) => {
-              if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
-            }}
-            onDragLeave={() => setDropActive(false)}
-            onDrop={onDropEmail}
-            style={{
-              minHeight: 58,
-              border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
-              borderRadius: 8,
-              background: dropActive ? "rgba(100,116,139,0.08)" : panelBackground,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              padding: "10px 12px",
-              color: surfaceText,
-              fontSize: 12,
-              fontWeight: 800,
-            }}
-          >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-              <MailIcon color={accent} />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Attach email</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setEmailPickerOpen(true)}
-              style={{ border: `1px solid ${accent}`, background: "#ffffff", color: accent, borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto" }}
+          {canEdit && (
+            <div
+              onDragEnter={() => setDropActive(true)}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
+              }}
+              onDragLeave={() => setDropActive(false)}
+              onDrop={onDropEmail}
+              style={{
+                minHeight: 58,
+                border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
+                borderRadius: 8,
+                background: dropActive ? "rgba(100,116,139,0.08)" : panelBackground,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "10px 12px",
+                color: surfaceText,
+                fontSize: 12,
+                fontWeight: 800,
+              }}
             >
-              Add email
-            </button>
-          </div>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <MailIcon color={accent} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Attach email</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setEmailPickerOpen(true)}
+                style={{ border: `1px solid ${accent}`, background: "#ffffff", color: accent, borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto" }}
+              >
+                Add email
+              </button>
+            </div>
+          )}
           <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onOpenEmail={setSelectedEmailID} />
         </div>
         {!compact && <div aria-hidden="true" />}
         {!compact && <div />}
       </div>
 
-      {emailPickerOpen && (
+      {canEdit && emailPickerOpen && (
         <EmailPickerModal
           accent={accent}
           surfaceText={surfaceText}
@@ -1643,7 +1696,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           onClose={() => setSelectedEmailID("")}
         />
       )}
-      {deleteTextBlockConfirmation && (
+      {canEdit && deleteTextBlockConfirmation && (
         <DeleteTextBlockConfirmationModal
           title={deleteTextBlockConfirmation.title}
           chatCount={deleteTextBlockConfirmation.chatCount}

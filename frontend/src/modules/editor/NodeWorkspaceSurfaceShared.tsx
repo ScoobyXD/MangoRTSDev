@@ -13,6 +13,7 @@ export type NodeWorkspaceSurfaceProps = {
   apiBase: string;
   companyID: string;
   nodeID: string;
+  canEdit: boolean;
   nodePriorityDraft: string;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];

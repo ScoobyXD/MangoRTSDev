@@ -74,6 +74,9 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 	if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, n.NodeID); err != nil {
 		return domain.Node{}, err
 	}
+	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
 		return domain.Node{}, err
 	}
@@ -280,7 +283,9 @@ func (r *MemoryRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node, 
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, r.withNodeReadModelLocked(node))
+		node = r.withNodeReadModelLocked(node)
+		node.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeNode, node.NodeID)
+		items = append(items, node)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
@@ -346,7 +351,9 @@ func (r *MemoryRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, r.withNodeReadModelLocked(node))
+		node = r.withNodeReadModelLocked(node)
+		node.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeNode, node.NodeID)
+		items = append(items, node)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {

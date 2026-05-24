@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
+import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, canEditResourceAccess, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
@@ -863,7 +863,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
 
   const createLinkedNode = async (sourceNodeID: string, direction: NodeDirection) => {
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
-    if (!sourceNode) return;
+    if (!sourceNode || !canEditResourceAccess(sourceNode)) return;
 
     const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
     const linkedNodeClearance = MINI_GRID * 4;
@@ -932,6 +932,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   };
 
   const updateNodeTitle = async (nodeID: string, nextTitle: string) => {
+    const node = nodes.find((item) => item.node_id === nodeID);
+    if (!node || !canEditResourceAccess(node)) return;
     const value = trimOrEmpty(nextTitle);
     if (!value) return;
     setError("");
@@ -952,6 +954,9 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
 
   const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
     if (!sourceNodeID || !targetNodeID || sourceNodeID === targetNodeID) return;
+    const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
+    const targetNode = nodes.find((node) => node.node_id === targetNodeID);
+    if (!sourceNode || !targetNode || !canEditResourceAccess(sourceNode) || !canEditResourceAccess(targetNode)) return;
     if (!isLegalRelationshipSidePair(sourceSide, targetSide)) {
       setError("illegal_relationship_pair");
       return;
@@ -1102,7 +1107,11 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
 
   // Delete-nodes action with selection/context cleanup and snapshot refresh.
   const deleteNodes = async (nodeIDs: string[]) => {
-    const unique = Array.from(new Set(nodeIDs.filter(Boolean)));
+    const unique = Array.from(new Set(nodeIDs.filter((nodeID) => {
+      if (!nodeID) return false;
+      const node = nodes.find((item) => item.node_id === nodeID);
+      return !!node && canEditResourceAccess(node);
+    })));
     if (unique.length === 0) return;
     setError("");
     try {
@@ -1136,7 +1145,13 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   };
 
   const deleteRelationships = async (relationshipIDs: string[]) => {
-    const unique = normalizeNodeMapRelationshipIDs(relationshipIDs);
+    const unique = normalizeNodeMapRelationshipIDs(relationshipIDs).filter((relationshipID) => {
+      const relationship = relationships.find((item) => item.node_relationship_id === relationshipID);
+      if (!relationship) return false;
+      const sourceNode = nodes.find((node) => node.node_id === relationship.node_id_a);
+      const targetNode = nodes.find((node) => node.node_id === relationship.node_id_b);
+      return !!sourceNode && !!targetNode && canEditResourceAccess(sourceNode) && canEditResourceAccess(targetNode);
+    });
     if (unique.length === 0) return;
     setError("");
     setStatusMessage(`Deleting ${unique.length} relationship line${unique.length === 1 ? "" : "s"}...`);
@@ -1184,15 +1199,31 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     }
   };
 
+  const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const editableNodeIDs = useMemo(() => new Set(nodes.filter(canEditResourceAccess).map((node) => node.node_id)), [nodes]);
+  const editableRelationshipIDs = useMemo(() => new Set(
+    relationships
+      .filter((relationship) => {
+        const sourceNode = nodeByID[relationship.node_id_a];
+        const targetNode = nodeByID[relationship.node_id_b];
+        return !!sourceNode && !!targetNode && canEditResourceAccess(sourceNode) && canEditResourceAccess(targetNode);
+      })
+      .map((relationship) => relationship.node_relationship_id),
+  ), [relationships, nodeByID]);
+  const selectedEditableNodeIDs = useMemo(() => new Set(Array.from(selectedNodeIDs).filter((nodeID) => editableNodeIDs.has(nodeID))), [editableNodeIDs, selectedNodeIDs]);
+  const selectedEditableRelationshipIDs = useMemo(() => new Set(Array.from(selectedRelationshipIDs).filter((relationshipID) => editableRelationshipIDs.has(relationshipID))), [editableRelationshipIDs, selectedRelationshipIDs]);
+  const selectedEditableNodeID = selectedNodeID && editableNodeIDs.has(selectedNodeID) ? selectedNodeID : "";
+  const nodeContextMenuCanEdit = !!nodeContextMenu && !!nodeByID[nodeContextMenu.nodeID] && canEditResourceAccess(nodeByID[nodeContextMenu.nodeID]);
+  const relationshipContextMenuCanEdit = !!relationshipContextMenu && editableRelationshipIDs.has(relationshipContextMenu.relationshipID);
+
   useNodeMapDeleteKeyboardControl({
     canvasActive,
-    selectedNodeID,
-    selectedNodeIDs,
-    selectedRelationshipIDs,
+    selectedNodeID: selectedEditableNodeID,
+    selectedNodeIDs: selectedEditableNodeIDs,
+    selectedRelationshipIDs: selectedEditableRelationshipIDs,
     setConfirmDelete,
   });
 
-  const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
   const activeRoleNodeID = useMemo(() => {
     if (selectedNodeIDs.size === 1) return Array.from(selectedNodeIDs)[0] ?? "";
     return selectedNodeID;
@@ -1349,6 +1380,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
 
   useEffect(() => {
     if (!editingNodeTitleNodeID || !editingNodeTitleElementRef.current) return;
+    const editingNode = nodeByID[editingNodeTitleNodeID];
+    if (!editingNode || !canEditResourceAccess(editingNode)) return;
     const element = editingNodeTitleElementRef.current;
     element.focus();
     const selection = window.getSelection();
@@ -1358,7 +1391,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
-  }, [editingNodeTitleNodeID]);
+  }, [editingNodeTitleNodeID, nodeByID]);
 
   const viewportHandlers = useNodeMapViewportHandlers({
     viewportRef,
@@ -1438,6 +1471,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             <NodeMapNodeCard
               key={node.node_id}
               node={node}
+              canEdit={canEditResourceAccess(node)}
+              editableNodeIDs={editableNodeIDs}
               position={nodePositions[node.node_id] ?? { x: 120, y: 120 }}
               size={nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H }}
               selectedNodeID={selectedNodeID}
@@ -1478,6 +1513,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               onUpdateNodeTitle={updateNodeTitle}
               onGetAnchorPoint={getAnchorPoint}
               onStartResize={(nodeID, pointerID, startMouseX, startMouseY, startX, startY, startW, startH, edges) => {
+                if (!editableNodeIDs.has(nodeID)) return;
                 setNodeResizeState({
                   nodeID,
                   pointerID,
@@ -1556,6 +1592,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           relationshipRoleColors={relationshipRoleColors}
           selectedNodeIDs={selectedNodeIDs}
           selectedRelationshipIDs={selectedRelationshipIDs}
+          nodeContextMenuCanEdit={nodeContextMenuCanEdit}
+          relationshipContextMenuCanEdit={relationshipContextMenuCanEdit}
           contextMenuButtonStyle={contextMenuButtonStyle}
           contextMenuDangerButtonStyle={contextMenuDangerButtonStyle}
           selectionBoxActive={selectionBox.active}
@@ -1585,6 +1623,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           }}
           onRenameNode={(nodeID) => {
             const current = nodes.find((node) => node.node_id === nodeID);
+            if (!current || !canEditResourceAccess(current)) {
+              setNodeContextMenu(null);
+              return;
+            }
             editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
             setEditingNodeTitleNodeID(nodeID);
             setNodeContextMenu(null);
@@ -1594,7 +1636,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             setNodeContextMenu(null);
           }}
           onRequestDeleteNodes={(nodeIDs) => {
-            setConfirmDelete({ nodeIDs, relationshipIDs: [] });
+            const editableIDs = nodeIDs.filter((nodeID) => editableNodeIDs.has(nodeID));
+            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [] });
             setNodeContextMenu(null);
           }}
           onDeleteRelationships={(relationshipIDs) => {
@@ -1602,8 +1645,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             setRelationshipContextMenu(null);
           }}
           onConfirmDelete={() => {
-            if (confirmDelete?.relationshipIDs.length) void deleteRelationships(confirmDelete.relationshipIDs);
-            if (confirmDelete?.nodeIDs.length) void deleteNodes(confirmDelete.nodeIDs);
+            const relationshipIDs = (confirmDelete?.relationshipIDs ?? []).filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
+            const nodeIDs = (confirmDelete?.nodeIDs ?? []).filter((nodeID) => editableNodeIDs.has(nodeID));
+            if (relationshipIDs.length) void deleteRelationships(relationshipIDs);
+            if (nodeIDs.length) void deleteNodes(nodeIDs);
             setConfirmDelete(null);
           }}
           onCancelDelete={() => setConfirmDelete(null)}
@@ -1618,6 +1663,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
               const current = nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID);
               return current ? getNodeTitle(current) : permissionsNodeID;
             })()}
+            readOnly={!canEditResourceAccess(nodes.find((node) => node.node_id === permissionsNodeID) ?? allNodes.find((node) => node.node_id === permissionsNodeID))}
             onClose={() => setPermissionsNodeID("")}
           />
         )}

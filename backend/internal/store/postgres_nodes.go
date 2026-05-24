@@ -312,6 +312,9 @@ func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.T
 	if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, companyID, item.NodeID); err != nil {
 		return domain.Node{}, err
 	}
+	if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeNode, item.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeNode, item.NodeID); err != nil {
 		return domain.Node{}, err
 	}
@@ -535,7 +538,7 @@ func (r *PostgresRepo) ListVisibleNodes(companyID, userID string) ([]domain.Node
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return items, nil
+	return r.attachNodeEffectiveAccessLevels(ctx, companyID, userID, items)
 }
 
 func (r *PostgresRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
@@ -648,6 +651,21 @@ func (r *PostgresRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, user
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	return r.attachNodeEffectiveAccessLevels(ctx, companyID, userID, items)
+}
+
+func (r *PostgresRepo) attachNodeEffectiveAccessLevels(ctx context.Context, companyID, userID string, items []domain.Node) ([]domain.Node, error) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.NodeID)
+	}
+	levels, err := r.effectiveAccessLevelsForUser(ctx, companyID, userID, EntityTypeNode, ids)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].EffectiveAccess = levels[items[index].NodeID]
 	}
 	return items, nil
 }

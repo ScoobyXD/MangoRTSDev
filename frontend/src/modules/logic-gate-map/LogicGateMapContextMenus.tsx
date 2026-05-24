@@ -23,6 +23,8 @@ type LogicGateMapContextMenusProps = {
   relationshipRoleColors: Record<LogicGateMapRelationshipRole, string>;
   selectedNodeIDs: Set<string>;
   selectedRelationshipIDs: Set<string>;
+  nodeContextMenuCanEdit: boolean;
+  relationshipContextMenuCanEdit: boolean;
   contextMenuButtonStyle: React.CSSProperties;
   contextMenuDangerButtonStyle: React.CSSProperties;
   selectionBoxActive: boolean;
@@ -58,6 +60,8 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
   relationshipRoleColors,
   selectedNodeIDs,
   selectedRelationshipIDs,
+  nodeContextMenuCanEdit,
+  relationshipContextMenuCanEdit,
   contextMenuButtonStyle,
   contextMenuDangerButtonStyle,
   selectionBoxActive,
@@ -224,25 +228,29 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
         <button style={contextMenuButtonStyle} onClick={() => onPinNode(nodeContextMenu.nodeID)}>
           Pin Logic Gate
         </button>
-        <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
-          Rename logic gate
-        </button>
+        {nodeContextMenuCanEdit && (
+          <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
+            Rename logic gate
+          </button>
+        )}
         <button style={contextMenuButtonStyle} onClick={() => onOpenPermissions(nodeContextMenu.nodeID)}>
           Permissions
         </button>
-        <button
-          style={contextMenuDangerButtonStyle}
-          onClick={() => {
-            const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
-            onRequestDeleteNodes(ids);
-          }}
-        >
-          Delete logic gate
-        </button>
+        {nodeContextMenuCanEdit && (
+          <button
+            style={contextMenuDangerButtonStyle}
+            onClick={() => {
+              const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
+              onRequestDeleteNodes(ids);
+            }}
+          >
+            Delete logic gate
+          </button>
+        )}
       </div>
     )}
 
-    {relationshipContextMenu && (
+    {relationshipContextMenu && relationshipContextMenuCanEdit && (
       <div
         style={{
           position: "absolute",

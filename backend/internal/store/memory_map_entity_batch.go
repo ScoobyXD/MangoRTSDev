@@ -89,18 +89,17 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 				created.AssigneeUserID = &input.CreatorUserID
 			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
+			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
 			if input.CreatorUserID != "" {
-				permission := domain.EntityPermission{
-					CompanyID:        input.CompanyID,
-					EntityType:       EntityTypeNode,
-					EntityID:         created.NodeID,
-					SubjectType:      EntityPermissionSubjectUser,
-					SubjectID:        input.CreatorUserID,
-					Permission:       EntityPermissionAdmin,
-					AccessLevel:      EntityPermissionAdmin,
-					CreatedTimestamp: now,
-				}
-				r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeNode, created.NodeID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
+				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
 			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
@@ -125,20 +124,16 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 			CreatedTimestamp: now,
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
-		if input.CreatorUserID != "" {
-			permission := domain.EntityPermission{
-				CompanyID:        input.CompanyID,
-				EntityType:       EntityTypeLogicGate,
-				EntityID:         created.LogicGateID,
-				SubjectType:      EntityPermissionSubjectUser,
-				SubjectID:        input.CreatorUserID,
-				Permission:       EntityPermissionAdmin,
-				AccessLevel:      EntityPermissionAdmin,
-				CreatedTimestamp: now,
-			}
-			r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeLogicGate, created.LogicGateID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
-		}
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
+		if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return MapEntityBatchResult{}, err
+		}
+		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return MapEntityBatchResult{}, err
+		}
+		if input.CreatorUserID != "" {
+			created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)
+		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})

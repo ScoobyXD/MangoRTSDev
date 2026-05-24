@@ -104,22 +104,6 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
 		return
 	}
-	if actor, ok := authenticatedActor(r); ok && actorRoleForCompany(actor, req.CompanyID) != "" && !actorCanManageCompany(actor, req.CompanyID) {
-		if _, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-			CompanyID:  req.CompanyID,
-			EntityType: store.EntityTypeLogicGate,
-			EntityID:   item.LogicGateID,
-			Permissions: []store.EntityPermissionInput{{
-				SubjectType: store.EntityPermissionSubjectUser,
-				SubjectID:   strings.TrimSpace(actor.User.UserID),
-				AccessLevel: store.EntityPermissionAdmin,
-				Permission:  store.EntityPermissionAdmin,
-			}},
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_grant_logic_gate_creator_access")
-			return
-		}
-	}
 	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	writeJSON(w, http.StatusCreated, item)
 }

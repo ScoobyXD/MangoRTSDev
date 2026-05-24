@@ -73,14 +73,18 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 			}
 			if input.CreatorUserID != "" {
 				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
-				if _, err := tx.ExecContext(ctx, `
-insert into resource_access_grants
-  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level=excluded.access_level`, input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
-					return MapEntityBatchResult{}, err
-				}
+			}
+			if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if input.CreatorUserID != "" {
+				created.EffectiveAccess = EntityPermissionEdit
 			}
 			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
@@ -113,18 +117,17 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
 			return MapEntityBatchResult{}, err
 		}
-		if input.CreatorUserID != "" {
-			if _, err := tx.ExecContext(ctx, `
-insert into resource_access_grants
-  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
-values ($1::uuid, 'logic_gate', $2::uuid, 'user', $3::uuid, 'admin', now())
-on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
-  access_level=excluded.access_level`, input.CompanyID, created.LogicGateID, input.CreatorUserID); err != nil {
-				return MapEntityBatchResult{}, err
-			}
-		}
 		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
 			return MapEntityBatchResult{}, err
+		}
+		if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return MapEntityBatchResult{}, err
+		}
+		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
+			return MapEntityBatchResult{}, err
+		}
+		if input.CreatorUserID != "" {
+			created.EffectiveAccess = EntityPermissionEdit
 		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID

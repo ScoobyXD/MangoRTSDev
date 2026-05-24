@@ -513,6 +513,18 @@ func TestMemoryPhase2BMultiSourceOverlapRemovalPreservesOtherSource(t *testing.T
 	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:  companyID,
+		EntityType: EntityTypeLogicGate,
+		EntityID:   gate.LogicGateID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("Set gate no_access: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
 		EntityType: EntityTypeNode,
 		EntityID:   node.NodeID,
 		Permissions: []EntityPermissionInput{{

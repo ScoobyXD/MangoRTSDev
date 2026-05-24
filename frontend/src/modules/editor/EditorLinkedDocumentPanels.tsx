@@ -10,6 +10,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeInfoPreview: string[];
   linkedNodeMetadataRows: Array<{ label: string; value: string }>;
   linkedNodeHistoryRows: string[];
+  canEdit: boolean;
   nodePresetFields: {
     status: string;
     statusColor: string;
@@ -129,6 +130,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeInfoPreview,
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
+  canEdit,
   nodePresetFields,
   logicGateRaciFields,
   companyUsers,
@@ -169,6 +171,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   }, [companyUsers, nodePresetFields?.assigneeDraft]);
 
   useEffect(() => {
+    if (canEdit) return;
+    setPriorityMenuOpen(false);
+    setAssigneeMenuOpen(false);
+    onSetIsEditingTitle(false);
+  }, [canEdit, onSetIsEditingTitle]);
+
+  useEffect(() => {
     if (!priorityMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       if (priorityMenuRef.current?.contains(event.target as Node)) return;
@@ -206,29 +215,35 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: titleTextColor, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: titleTextColor, cursor: canEdit ? "text" : "default", overflowWrap: "anywhere", wordBreak: "break-word" }}>
             <span>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
             <span
               ref={editingTitleRef}
-              contentEditable={isEditingTitle}
+              contentEditable={canEdit && isEditingTitle}
               suppressContentEditableWarning
               onClick={(event) => {
                 event.stopPropagation();
+                if (!canEdit) return;
                 if (!isEditingTitle) {
                   editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
                   onSetIsEditingTitle(true);
                 }
               }}
               onInput={(event) => {
+                if (!canEdit) return;
                 editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
               }}
               onBlur={() => {
-                if (!isEditingTitle) return;
+                if (!canEdit || !isEditingTitle) return;
                 const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                 void onUpdateTitle(latestTitle);
                 onSetIsEditingTitle(false);
               }}
               onKeyDown={(event) => {
+                if (!canEdit) {
+                  event.preventDefault();
+                  return;
+                }
                 if (event.key === "Enter") {
                   event.preventDefault();
                   const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
@@ -241,7 +256,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   onSetIsEditingTitle(false);
                 }
               }}
-              style={{ outline: "none", cursor: "text", caretColor: titleTextColor, overflowWrap: "anywhere", wordBreak: "break-word" }}
+              style={{ outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}
             >
               {linkedNodeTitle || "\u00A0"}
             </span>
@@ -291,8 +306,11 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   <input
                     id={assigneeListID}
                     value={nodePresetFields.assigneeDraft}
-                    onFocus={() => setAssigneeMenuOpen(true)}
+                    disabled={!canEdit}
+                    readOnly={!canEdit}
+                    onFocus={() => { if (canEdit) setAssigneeMenuOpen(true); }}
                     onChange={(event) => {
+                      if (!canEdit) return;
                       const next = event.target.value;
                       onSetNodeAssigneeDraft(next);
                       setAssigneeMenuOpen(true);
@@ -301,8 +319,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         setAssigneeMenuOpen(false);
                       }
                     }}
-                    onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
+                    onBlur={(event) => { if (canEdit) onCommitNodeAssigneeDraft(event.currentTarget.value); }}
                     onKeyDown={(event) => {
+                      if (!canEdit) {
+                        event.preventDefault();
+                        return;
+                      }
                       if (event.key === "Enter") {
                         if (assigneeMatches[0]) {
                           const label = companyUserOptionLabel(assigneeMatches[0]);
@@ -316,14 +338,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     placeholder="Unassigned"
                     aria-label="Person in charge"
                     aria-haspopup="listbox"
-                    aria-expanded={assigneeMenuOpen}
+                    aria-expanded={canEdit && assigneeMenuOpen}
                     aria-controls={`${assigneeListID}-options`}
-                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: `1px solid ${assigneeMenuOpen ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 500, padding: "3px 27px 3px 8px", outline: "none" }}
+                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: `1px solid ${assigneeMenuOpen ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 500, padding: "3px 27px 3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default" }}
                   />
                   <span aria-hidden="true" style={{ position: "absolute", right: 7, top: 5, color: accent, pointerEvents: "none" }}>
                     <PersonIcon color={accent} />
                   </span>
-                  {assigneeMenuOpen && (
+                  {canEdit && assigneeMenuOpen && (
                     <div
                       id={`${assigneeListID}-options`}
                       role="listbox"
@@ -369,26 +391,34 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
                     value={nodePresetFields.dueDateDraft}
-                    onChange={(event) => onSetNodeDueDateDraft(event.target.value)}
-                    onBlur={(event) => onCommitNodeDueDateDraft(event.currentTarget.value)}
+                    disabled={!canEdit}
+                    readOnly={!canEdit}
+                    onChange={(event) => { if (canEdit) onSetNodeDueDateDraft(event.target.value); }}
+                    onBlur={(event) => { if (canEdit) onCommitNodeDueDateDraft(event.currentTarget.value); }}
                     onKeyDown={(event) => {
+                      if (!canEdit) {
+                        event.preventDefault();
+                        return;
+                      }
                       if (event.key === "Enter") event.currentTarget.blur();
                     }}
                     placeholder="mm/dd/yyyy"
                     aria-label="Due date"
-                    style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
+                    style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none", caretColor: canEdit ? "auto" : "transparent", cursor: canEdit ? "text" : "default" }}
                   />
                   <button
                     type="button"
                     title="Choose due date"
+                    disabled={!canEdit}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => {
+                      if (!canEdit) return;
                       const picker = dueDatePickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
                       if (!picker) return;
                       if (picker.showPicker) picker.showPicker();
                       else picker.click();
                     }}
-                    style={{ width: 24, height: 24, border: `1px solid ${ruleColor}`, borderRadius: 5, background: panelBackground, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                    style={{ width: 24, height: 24, border: `1px solid ${ruleColor}`, borderRadius: 5, background: panelBackground, color: accent, display: "grid", placeItems: "center", cursor: canEdit ? "pointer" : "default", opacity: canEdit ? 1 : 0.46, padding: 0 }}
                   >
                     <CalendarIcon color={accent} />
                   </button>
@@ -396,8 +426,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     ref={dueDatePickerRef}
                     type="date"
                     tabIndex={-1}
+                    disabled={!canEdit}
                     value={dateInputValueFromDraft(nodePresetFields.dueDateDraft)}
                     onChange={(event) => {
+                      if (!canEdit) return;
                       const next = editorDateFromDateInput(event.currentTarget.value);
                       onSetNodeDueDateDraft(next);
                       onCommitNodeDueDateDraft(next);
@@ -414,9 +446,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     <button
                       type="button"
                       aria-haspopup="listbox"
-                      aria-expanded={priorityMenuOpen}
+                      aria-expanded={canEdit && priorityMenuOpen}
                       aria-invalid={priorityHasRequirementError}
-                      onClick={() => setPriorityMenuOpen((open) => !open)}
+                      disabled={!canEdit}
+                      onClick={() => {
+                        if (!canEdit) return;
+                        setPriorityMenuOpen((open) => !open);
+                      }}
                       style={{
                         width: "100%",
                         minHeight: 26,
@@ -432,7 +468,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         fontSize: 11.5,
                         fontWeight: 600,
                         padding: "3px 8px",
-                        cursor: "pointer",
+                        cursor: canEdit ? "pointer" : "default",
+                        opacity: canEdit ? 1 : 0.62,
                         textAlign: "left",
                         boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(100,116,139,0.18)" : "none",
                       }}
@@ -442,7 +479,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         {selectedPriority.value !== "0" ? <PriorityCheckIcon color={priorityHasRequirementError ? "#334155" : selectedPriority.color} /> : null}
                       </span>
                     </button>
-                    {priorityMenuOpen && (
+                    {canEdit && priorityMenuOpen && (
                       <div
                         role="listbox"
                         aria-label="Priority"
@@ -533,6 +570,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   accent={accent}
                   panelBackground={panelBackground}
                   ruleColor={ruleColor}
+                  canEdit={canEdit}
                   onAddUser={onAddLogicGateRaciUser}
                   onRemoveUser={onRemoveLogicGateRaciUser}
                 />
@@ -577,6 +615,7 @@ function LogicGateRaciRoleEditor({
   accent,
   panelBackground,
   ruleColor,
+  canEdit,
   onAddUser,
   onRemoveUser,
 }: {
@@ -587,6 +626,7 @@ function LogicGateRaciRoleEditor({
   accent: string;
   panelBackground: string;
   ruleColor: string;
+  canEdit: boolean;
   onAddUser: (role: LogicGateRaciRole, userID: string) => void;
   onRemoveUser: (role: LogicGateRaciRole, userID: string) => void;
 }) {
@@ -621,13 +661,21 @@ function LogicGateRaciRoleEditor({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (canEdit) return;
+    setOpen(false);
+    setDraft("");
+  }, [canEdit]);
+
   const addUser = (userID: string) => {
+    if (!canEdit) return;
     onAddUser(role, userID);
     setDraft("");
     setOpen(false);
   };
 
   const commitDraft = () => {
+    if (!canEdit) return;
     const selected = findCompanyUserByDraft(companyUsers, draft) ?? matches[0] ?? null;
     if (!selected || assignedIDs.has(selected.user_id)) return;
     addUser(selected.user_id);
@@ -643,17 +691,19 @@ function LogicGateRaciRoleEditor({
           <span
             key={`${assignment.role}:${assignment.user_id}`}
             title={assignment.user_email || assignment.user_id}
-            style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 16px", alignItems: "center", gap: 4, border: `1px solid ${ruleColor}`, borderRadius: 6, background: panelBackground, padding: "2px 3px 2px 6px", color: "inherit" }}
+            style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "minmax(0, 1fr) 16px" : "minmax(0, 1fr)", alignItems: "center", gap: 4, border: `1px solid ${ruleColor}`, borderRadius: 6, background: panelBackground, padding: canEdit ? "2px 3px 2px 6px" : "2px 6px", color: "inherit" }}
           >
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600 }}>{raciAssignmentLabel(assignment)}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${raciAssignmentLabel(assignment)} from ${label}`}
-              onClick={() => onRemoveUser(role, assignment.user_id)}
-              style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
-            >
-              x
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                aria-label={`Remove ${raciAssignmentLabel(assignment)} from ${label}`}
+                onClick={() => onRemoveUser(role, assignment.user_id)}
+                style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
+              >
+                x
+              </button>
+            )}
           </span>
         ))}
       </div>
@@ -661,8 +711,11 @@ function LogicGateRaciRoleEditor({
         <input
           id={inputID}
           value={draft}
-          onFocus={() => setOpen(true)}
+          disabled={!canEdit}
+          readOnly={!canEdit}
+          onFocus={() => { if (canEdit) setOpen(true); }}
           onChange={(event) => {
+            if (!canEdit) return;
             const next = event.currentTarget.value;
             setDraft(next);
             setOpen(true);
@@ -670,6 +723,10 @@ function LogicGateRaciRoleEditor({
             if (exact && !assignedIDs.has(exact.user_id) && companyUserOptionLabel(exact) === next) addUser(exact.user_id);
           }}
           onKeyDown={(event) => {
+            if (!canEdit) {
+              event.preventDefault();
+              return;
+            }
             if (event.key === "Enter") {
               event.preventDefault();
               commitDraft();
@@ -678,11 +735,11 @@ function LogicGateRaciRoleEditor({
           placeholder="Add person"
           aria-label={`Add ${label} person`}
           aria-haspopup="listbox"
-          aria-expanded={open}
+          aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 24, boxSizing: "border-box", border: `1px solid ${open ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11, fontWeight: 500, padding: "3px 8px", outline: "none" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 24, boxSizing: "border-box", border: `1px solid ${open ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11, fontWeight: 500, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default" }}
         />
-        {open && (
+        {canEdit && open && (
           <div
             id={`${inputID}-options`}
             role="listbox"

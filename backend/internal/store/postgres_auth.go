@@ -722,6 +722,9 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, user.UserID); err != nil {
 		return domain.Invitation{}, err
 	}
+	if err = recomputeCompanyMemberDefaultEffectiveAccessForUserTx(context.Background(), tx, invitation.CompanyID, user.UserID); err != nil {
+		return domain.Invitation{}, err
+	}
 
 	if err = activateCompanyExplorerFolderSharesSQL(context.Background(), tx, invitation.CompanyID, invitation.Email, user.UserID); err != nil {
 		return domain.Invitation{}, err

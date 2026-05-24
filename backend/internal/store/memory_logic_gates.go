@@ -101,6 +101,13 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
+	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
+		r.logicGates = logicGatesSnapshot
+		r.kanbanBoards = kanbanBoardsSnapshot
+		r.kanbanColumns = kanbanColumnsSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		return domain.LogicGate{}, err
+	}
 	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
 		r.logicGates = logicGatesSnapshot
 		r.kanbanBoards = kanbanBoardsSnapshot
@@ -164,7 +171,9 @@ func (r *MemoryRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.L
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, r.withLogicGateRaciLocked(gate))
+		gate = r.withLogicGateRaciLocked(gate)
+		gate.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID)
+		items = append(items, gate)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
@@ -230,7 +239,9 @@ func (r *MemoryRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, u
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, r.withLogicGateRaciLocked(gate))
+		gate = r.withLogicGateRaciLocked(gate)
+		gate.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID)
+		items = append(items, gate)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {

@@ -1,4 +1,4 @@
-import type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor } from "../node-map/shared.js";
+import type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor, ResourceAccessFields, ResourceAccessLevel } from "../node-map/shared.js";
 import {
   INFO_TYPES,
   MINI_GRID,
@@ -13,6 +13,10 @@ import {
   adaptivePlusGridWorldStep,
   buildPlusGridBackgroundStyle,
   clamp,
+  accessLevelRank,
+  canAdminResourceAccess,
+  canEditResourceAccess,
+  canViewResourceAccess,
   divider,
   changedPersistedMapPositions,
   oppositeSide,
@@ -39,6 +43,10 @@ export {
   adaptivePlusGridWorldStep,
   buildPlusGridBackgroundStyle,
   clamp,
+  accessLevelRank,
+  canAdminResourceAccess,
+  canEditResourceAccess,
+  canViewResourceAccess,
   divider,
   changedPersistedMapPositions,
   oppositeSide,
@@ -51,14 +59,14 @@ export {
   trimOrEmpty,
 };
 
-export type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor };
+export type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor, ResourceAccessFields, ResourceAccessLevel };
 
 export const LOGIC_GATE_MAP_STATE_KEY_PREFIX = "logic-gate-map-state-v1";
 export const LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "logic-gate-map-explorer-context-v1";
 
 // Logic Gate Map intentionally reuses the node-map canvas controls. The `node_*`
 // fields below are render-model aliases only; API calls still use logic_gate_* fields.
-export type NodeRecord = {
+export type NodeRecord = ResourceAccessFields & {
   company_id: string;
   logic_gate_id: string;
   header: string;
@@ -67,7 +75,7 @@ export type NodeRecord = {
   title: string;
 };
 
-export type LogicGateRecord = {
+export type LogicGateRecord = ResourceAccessFields & {
   company_id: string;
   logic_gate_id: string;
   header: string;
@@ -131,7 +139,7 @@ export type LogicGateInformation = {
   updated_timestamp: string;
 };
 
-export type NodeDetails = {
+export type NodeDetails = ResourceAccessFields & {
   logic_gate: LogicGateRecord;
   node: NodeRecord;
   information: NodeInformation[];
@@ -140,7 +148,7 @@ export type NodeDetails = {
   relationships_count?: number;
 };
 
-export type LogicGateDetails = {
+export type LogicGateDetails = ResourceAccessFields & {
   logic_gate: LogicGateRecord;
   information: LogicGateInformation[];
   relationships: LogicGateRelationship[];

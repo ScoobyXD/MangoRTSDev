@@ -472,6 +472,21 @@ returns boolean as $$
     when requested.required_rank = 0 then false
     when normalized_resource.resource_type not in ('node', 'logic_gate', 'shared_triage_folder') then false
     when (select allowed from role_admin_actor) then true
+    when normalized_resource.resource_type in ('node', 'logic_gate')
+      and requested.required_rank <= mangorts_access_level_rank('edit')
+      and exists (
+        select 1
+        from company_memberships membership
+        where membership.company_id = p_company_id
+          and membership.user_id = p_user_id
+      )
+      and not exists (
+        select 1
+        from resource_access_grants grant_row
+        where grant_row.company_id = p_company_id
+          and grant_row.resource_type = normalized_resource.resource_type
+          and grant_row.resource_id = p_resource_id
+      ) then true
     when exists (select 1 from effective_grant) then (select access_rank from effective_grant) >= requested.required_rank
     else false
   end

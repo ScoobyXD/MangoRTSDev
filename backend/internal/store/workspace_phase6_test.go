@@ -35,14 +35,35 @@ func TestPhase6WorkspaceEventAffectedUsersUseLogicGateEffectiveAccess(t *testing
 		CompanyID:  companyID,
 		EntityType: EntityTypeLogicGate,
 		EntityID:   logicGate.LogicGateID,
-		Permissions: []EntityPermissionInput{{
-			SubjectType: EntityPermissionSubjectUser,
-			SubjectID:   viewer.UserID,
-			AccessLevel: EntityPermissionView,
-			Permission:  EntityPermissionView,
-		}},
+		Permissions: []EntityPermissionInput{
+			{
+				SubjectType: EntityPermissionSubjectUser,
+				SubjectID:   viewer.UserID,
+				AccessLevel: EntityPermissionView,
+				Permission:  EntityPermissionView,
+			},
+			{
+				SubjectType: EntityPermissionSubjectUser,
+				SubjectID:   blocked.UserID,
+				AccessLevel: EntityPermissionNoAccess,
+				Permission:  EntityPermissionNoAccess,
+			},
+		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   blocked.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+			Permission:  EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("Set node permissions: %v", err)
 	}
 	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
@@ -87,12 +108,12 @@ func TestPhase6WorkspaceEventAffectedUsersUseLogicGateEffectiveAccess(t *testing
 	if !found || version != appended.Sequence {
 		t.Fatalf("viewer read version = %d found %t, want %d true", version, found, appended.Sequence)
 	}
-	_, found, err = repo.CurrentWorkspaceReadVersion(WorkspaceReadVersionQuery{CompanyID: companyID, UserID: blocked.UserID, Scope: "workspace-snapshot:full"})
+	blockedVersion, found, err := repo.CurrentWorkspaceReadVersion(WorkspaceReadVersionQuery{CompanyID: companyID, UserID: blocked.UserID, Scope: "workspace-snapshot:full"})
 	if err != nil {
 		t.Fatalf("CurrentWorkspaceReadVersion blocked: %v", err)
 	}
-	if found {
-		t.Fatalf("blocked user has user-scoped workspace read version")
+	if found && blockedVersion == appended.Sequence {
+		t.Fatalf("blocked user read version advanced to gated event sequence %d", blockedVersion)
 	}
 }
 

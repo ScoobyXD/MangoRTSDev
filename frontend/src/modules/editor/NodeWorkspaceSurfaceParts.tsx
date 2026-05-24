@@ -227,6 +227,7 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
 
 type NodeTextBlockEditorProps = {
   blockID: string;
+  editable: boolean;
   nodeID: string;
   companyID: string;
   currentUserID: string;
@@ -532,6 +533,7 @@ function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: H
 
 export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
+  editable,
   nodeID,
   companyID,
   currentUserID,
@@ -701,6 +703,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: (nextDocument, immediate = false) => {
+      if (!editable) return;
       lastAppliedDocumentRef.current = nextDocument;
       onDocumentChange(nextDocument);
       if (immediate) onDocumentFlush(nextDocument);
@@ -708,6 +711,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
     rememberCurrentDocumentScroll: () => undefined,
     flushPendingDocumentSave: (fallbackDocument) => {
+      if (!editable) return;
       const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
       lastAppliedDocumentRef.current = nextDocument;
       onDocumentFlush(nextDocument);
@@ -727,6 +731,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   };
 
   const readSelectionDraft = useCallback((): TextBlockSelectionDraft | null => {
+    if (!editable) return null;
     const editor = editorRef.current;
     const wrapper = wrapperRef.current;
     if (!editor || !wrapper) return null;
@@ -770,7 +775,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       x,
       y,
     };
-  }, [blockID]);
+  }, [blockID, editable]);
 
   const captureSelectionDraft = useCallback(() => {
     window.setTimeout(() => {
@@ -930,19 +935,52 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         role="textbox"
         aria-label="Node text block"
         aria-multiline="true"
-        contentEditable
+        aria-readonly={!editable || undefined}
+        tabIndex={editable ? undefined : -1}
+        contentEditable={editable}
         suppressContentEditableWarning
         spellCheck
-        onFocus={onFocus}
-        onBeforeInput={documentSurfaceHandlers.onBeforeInput}
-        onPaste={documentSurfaceHandlers.onPaste}
+        onFocus={() => {
+          if (editable) onFocus();
+        }}
+        onBeforeInput={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onBeforeInput(event);
+        }}
+        onPaste={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onPaste(event);
+        }}
         onCopy={documentSurfaceHandlers.onCopy}
-        onDrop={documentSurfaceHandlers.onDrop}
-        onInput={documentSurfaceHandlers.onInput}
+        onDrop={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onDrop(event);
+        }}
+        onInput={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onInput(event);
+        }}
         onSelect={documentSurfaceHandlers.onSelect}
         onClick={documentSurfaceHandlers.onClick}
         onPointerDown={(event) => {
           setSelectionDraft(null);
+          if (!editable) {
+            setImageDraft(null);
+            editorRef.current?.blur();
+            return;
+          }
           const frame = findEditorImageFrame(event.currentTarget, event.target);
           const wrapper = wrapperRef.current;
           setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper) : null);
@@ -951,13 +989,20 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         }}
         onPointerMove={documentSurfaceHandlers.onPointerMove}
         onKeyUp={(event) => {
+          if (!editable) return;
           documentSurfaceHandlers.onKeyUp(event);
           captureSelectionDraft();
         }}
         onBlur={handleBlur}
         onScroll={documentSurfaceHandlers.onScroll}
         onWheel={documentSurfaceHandlers.onWheel}
-        onKeyDown={documentSurfaceHandlers.onKeyDown}
+        onKeyDown={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onKeyDown(event);
+        }}
         style={{
           position: "relative",
           zIndex: 2,
@@ -966,7 +1011,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           height,
           minHeight: TEXT_BLOCK_MIN_HEIGHT,
           maxHeight: TEXT_BLOCK_MAX_HEIGHT,
-          resize: "vertical",
+          resize: editable ? "vertical" : "none",
           border: 0,
           outline: "none",
           padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
@@ -983,7 +1028,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           whiteSpace: "pre-wrap",
           overflowY: "auto",
           overflowX: "hidden",
-          cursor: "text",
+          caretColor: editable ? surfaceText : "transparent",
+          cursor: editable ? "text" : "default",
           ["--editor-document-scroll-accent" as string]: accent,
           ["--editor-document-scroll-track" as string]: scrollbarTrack,
         }}
@@ -1093,8 +1139,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           })}
         </div>
       )}
-      {documentMentionMenu}
-      {selectionDraft && (
+      {editable && documentMentionMenu}
+      {editable && selectionDraft && (
         <button
           type="button"
           title="Comment on selection"
@@ -1130,7 +1176,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           <ChatIcon color={accent} />
         </button>
       )}
-      {imageDraft && (
+      {editable && imageDraft && (
         <div
           role="toolbar"
           aria-label="Image actions"
@@ -1187,6 +1233,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
 type ChatPaneProps = {
   blockID: string;
+  editable: boolean;
   messages: EditorTextBlockChatMessage[];
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
@@ -1216,6 +1263,7 @@ type ChatPaneProps = {
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
+  editable,
   messages,
   selectionAnchor,
   draft,
@@ -1250,7 +1298,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const lineCount = Math.min(5, Math.max(1, draft.split(/\r\n|\r|\n/).length));
   const composerHeight = 34 + ((lineCount - 1) * 17);
-  const canSubmit = draft.trim().length > 0 || draftAttachments.length > 0;
+  const canSubmit = editable && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
@@ -1260,7 +1308,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     if (!activeMentionDraft) return [];
     return buildMentionOptions(companyUsers, activeMentionDraft.query, 8);
   }, [activeMentionDraft, companyUsers]);
-  const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
+  const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
 
   useEffect(() => {
     setHeight(readStoredChatPaneHeight(heightStorageKey));
@@ -1287,16 +1335,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [messages]);
 
   useEffect(() => {
+    if (!editable) return;
     if (!replyTargetID) return;
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [replyTargetID]);
+  }, [editable, replyTargetID]);
 
   useEffect(() => {
+    if (!editable) return;
     if (!active || replyTargetID) return;
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [active, replyTargetID, selectionAnchor?.quote]);
+  }, [active, editable, replyTargetID, selectionAnchor?.quote]);
 
   useEffect(() => {
     if (!activeMessageID) return;
@@ -1310,6 +1360,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const focusComposer = () => {
     onFocus();
+    if (!editable) return;
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
@@ -1319,6 +1370,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const replaceMentionDraft = (mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
+    if (!editable) return;
     const insert = `@${mentionUserDisplayName(user)} `;
     const nextDraft = `${draft.slice(0, mention.start)}${insert}${draft.slice(mention.end)}`;
     onDraftChange(nextDraft);
@@ -1333,6 +1385,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const handleReply = (messageID: string) => {
+    if (!editable) return;
     onActivateMessage(messageID);
     onReply(messageID);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
@@ -1348,6 +1401,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const attachTransferredImages = (dataTransfer: DataTransfer): boolean => {
+    if (!editable) return false;
     const files = imageFilesFromTransfer(dataTransfer);
     if (files.length === 0) return false;
     onAttachFiles(files);
@@ -1355,6 +1409,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!editable) return;
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
@@ -1405,6 +1460,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               depth={0}
               isLastSibling={false}
               currentUserID={currentUserID}
+              editable={editable}
               activeMessageID={activeMessageID}
               companyUsers={companyUsers}
               accent={accent}
@@ -1506,11 +1562,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               type="button"
               aria-label="Add attachment"
               title="Add attachment"
+              disabled={!editable}
               onClick={() => {
                 focusComposer();
                 fileInputRef.current?.click();
               }}
-              style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: "pointer" }}
+              style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46 }}
             >
               <PlusIcon color={accent} />
             </button>
@@ -1518,13 +1575,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               ref={textareaRef}
               value={draft}
               rows={lineCount}
+              disabled={!editable}
+              readOnly={!editable}
               placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
               onFocus={(event) => {
+                if (!editable) return;
                 onFocus();
                 setActiveMentionDraft(readActiveMentionDraft(draft, event.currentTarget.selectionStart));
               }}
-              onClick={() => refreshMentionDraft()}
-              onKeyUp={() => refreshMentionDraft()}
+              onClick={() => { if (editable) refreshMentionDraft(); }}
+              onKeyUp={() => { if (editable) refreshMentionDraft(); }}
               onBlur={() => {
                 if (mentionCloseTimerRef.current !== null) window.clearTimeout(mentionCloseTimerRef.current);
                 mentionCloseTimerRef.current = window.setTimeout(() => {
@@ -1533,20 +1593,34 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 }, 120);
               }}
               onPaste={(event) => {
+                if (!editable) {
+                  event.preventDefault();
+                  return;
+                }
                 if (attachTransferredImages(event.clipboardData)) event.preventDefault();
               }}
               onDragOver={(event) => {
+                if (!editable) return;
                 if (event.dataTransfer.types.includes("Files")) event.preventDefault();
               }}
               onDrop={(event) => {
+                if (!editable) {
+                  event.preventDefault();
+                  return;
+                }
                 if (attachTransferredImages(event.dataTransfer)) event.preventDefault();
               }}
               onChange={(event) => {
+                if (!editable) return;
                 const nextDraft = event.currentTarget.value;
                 onDraftChange(nextDraft);
                 setActiveMentionDraft(readActiveMentionDraft(nextDraft, event.currentTarget.selectionStart));
               }}
               onKeyDown={(event) => {
+                if (!editable) {
+                  event.preventDefault();
+                  return;
+                }
                 if (mentionMenuOpen && activeMentionDraft) {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
@@ -1579,7 +1653,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0 }}
+              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default" }}
             />
             <button
               type="button"
@@ -1596,6 +1670,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               type="file"
               multiple
               tabIndex={-1}
+              disabled={!editable}
               style={{ display: "none" }}
               onChange={(event) => {
                 if (event.currentTarget.files) onAttachFiles(event.currentTarget.files);
@@ -1609,7 +1684,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           aria-orientation="horizontal"
           title="Resize chat"
           onPointerDown={beginResize}
-          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
+          style={{ cursor: editable ? "ns-resize" : "default", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
         />
       </div>
       {previewAttachment && (
@@ -1629,6 +1704,7 @@ type ChatThreadItemProps = {
   depth: number;
   isLastSibling: boolean;
   currentUserID: string;
+  editable: boolean;
   activeMessageID: string;
   companyUsers: MentionableCompanyUser[];
   accent: string;
@@ -1662,13 +1738,13 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
   const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
   const isActive = activeMessageID === message.id;
-  const canDelete = canDeleteEditorTextBlockChatMessage(message, currentUserID);
+  const canDelete = editable && canDeleteEditorTextBlockChatMessage(message, currentUserID);
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
@@ -1743,10 +1819,12 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         {message.message && <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} />}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
-            <ChatIcon color={accent} />
-            Reply
-          </button>
+          {editable && (
+            <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
+              <ChatIcon color={accent} />
+              Reply
+            </button>
+          )}
           {canDelete && (
             <button
               type="button"
@@ -1784,6 +1862,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               depth={depth + 1}
               isLastSibling={childIndex === children.length - 1}
               currentUserID={currentUserID}
+              editable={editable}
               activeMessageID={activeMessageID}
               companyUsers={companyUsers}
               accent={accent}

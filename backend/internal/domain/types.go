@@ -207,6 +207,7 @@ type Node struct {
 	AssigneeName     *string   `json:"assignee_name,omitempty"`
 	AssigneeEmail    *string   `json:"assignee_email,omitempty"`
 	LogicGateIDs     []string  `json:"logic_gate_ids,omitempty"`
+	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
@@ -290,6 +291,7 @@ type LogicGate struct {
 	LogicGateID      string                    `json:"logic_gate_id"`
 	Header           string                    `json:"header"`
 	RaciAssignments  []LogicGateRaciAssignment `json:"raci_assignments"`
+	EffectiveAccess  string                    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`
 }
 
