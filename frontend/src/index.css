@@ -226,7 +226,7 @@ button, input, textarea, select {
 }
 
 /* Hover is visual-only; real selection stays click/key/API driven. */
-.company-explorer-row:hover {
+.company-explorer-row:hover .company-explorer-row-hit {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(230, 252, 255, 0.58) 46%, rgba(247, 239, 255, 0.66)) padding-box,
     linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86)) border-box !important;

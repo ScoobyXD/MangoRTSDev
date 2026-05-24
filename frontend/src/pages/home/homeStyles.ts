@@ -5,7 +5,6 @@ import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeU
 export const HOME_CYAN = "rgb(71, 85, 105)";
 const HOME_CYAN_FAINT = "rgba(71, 85, 105, 0.10)";
 const HOME_CYAN_SOFT = "rgba(71, 85, 105, 0.16)";
-const HOME_CYAN_HOVER = "rgba(71, 85, 105, 0.24)";
 const HOME_CYAN_MEDIUM = "rgba(71, 85, 105, 0.28)";
 const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
@@ -32,6 +31,112 @@ const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
 const HOME_LOGIC_GATE_GREEN = "#19f07a";
 const HOME_LOGIC_GATE_GREEN_SOFT = "rgba(25, 240, 122, 0.12)";
 const HOME_LOGIC_GATE_GREEN_BORDER = "rgba(25, 240, 122, 0.72)";
+
+type RaciHeaderPalette = {
+  surface: string;
+  edge: string;
+  letterBackground: string;
+  letterColor: string;
+  labelColor: string;
+  glow: string;
+};
+
+const DEFAULT_RACI_HEADER_PALETTE: RaciHeaderPalette = {
+  surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(241, 245, 249, 0.72))",
+  edge: "rgba(100, 116, 139, 0.26)",
+  letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(241,245,249,0.82))",
+  letterColor: "#334155",
+  labelColor: "#1f2937",
+  glow: "0 8px 18px rgba(15, 23, 42, 0.06)",
+};
+
+const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
+  accountable: {
+    surface: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(254, 249, 195, 0.72))",
+    edge: "rgba(225, 29, 72, 0.40)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 228, 230, 0.88) 52%, rgba(254, 249, 195, 0.76))",
+    letterColor: "#be123c",
+    labelColor: "#7f1d1d",
+    glow: "0 10px 24px rgba(225, 29, 72, 0.12)",
+  },
+  consulted: {
+    surface: "linear-gradient(135deg, rgba(255, 251, 235, 0.95), rgba(236, 253, 245, 0.70))",
+    edge: "rgba(217, 119, 6, 0.42)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(254, 243, 199, 0.90) 52%, rgba(220, 252, 231, 0.74))",
+    letterColor: "#b45309",
+    labelColor: "#713f12",
+    glow: "0 10px 24px rgba(217, 119, 6, 0.12)",
+  },
+  informed: {
+    surface: "linear-gradient(135deg, rgba(240, 249, 255, 0.95), rgba(245, 243, 255, 0.76))",
+    edge: "rgba(37, 99, 235, 0.38)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(219, 234, 254, 0.86) 52%, rgba(237, 233, 254, 0.78))",
+    letterColor: "#1d4ed8",
+    labelColor: "#312e81",
+    glow: "0 10px 24px rgba(37, 99, 235, 0.11)",
+  },
+  pending: {
+    surface: "linear-gradient(135deg, rgba(255, 247, 237, 0.95), rgba(252, 231, 243, 0.72))",
+    edge: "rgba(249, 115, 22, 0.42)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 237, 213, 0.90) 52%, rgba(252, 231, 243, 0.76))",
+    letterColor: "#c2410c",
+    labelColor: "#7c2d12",
+    glow: "0 10px 24px rgba(249, 115, 22, 0.12)",
+  },
+  in_progress: {
+    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(224, 242, 254, 0.72))",
+    edge: "rgba(13, 148, 136, 0.40)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(204, 251, 241, 0.88) 52%, rgba(224, 242, 254, 0.78))",
+    letterColor: "#0f766e",
+    labelColor: "#134e4a",
+    glow: "0 10px 24px rgba(13, 148, 136, 0.12)",
+  },
+  "priority-1": {
+    surface: "linear-gradient(135deg, rgba(254, 226, 226, 0.96), rgba(254, 249, 195, 0.76))",
+    edge: "rgba(220, 38, 38, 0.42)",
+    letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(254,226,226,0.86))",
+    letterColor: "#b91c1c",
+    labelColor: "#7f1d1d",
+    glow: "0 10px 22px rgba(220, 38, 38, 0.12)",
+  },
+  "priority-2": {
+    surface: "linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 240, 138, 0.68))",
+    edge: "rgba(234, 88, 12, 0.38)",
+    letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,237,213,0.86))",
+    letterColor: "#c2410c",
+    labelColor: "#7c2d12",
+    glow: "0 10px 22px rgba(234, 88, 12, 0.11)",
+  },
+  "priority-3": {
+    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(207, 250, 254, 0.70))",
+    edge: "rgba(5, 150, 105, 0.38)",
+    letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(209,250,229,0.86))",
+    letterColor: "#047857",
+    labelColor: "#064e3b",
+    glow: "0 10px 22px rgba(5, 150, 105, 0.11)",
+  },
+  "priority-4": {
+    surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(221, 214, 254, 0.70))",
+    edge: "rgba(79, 70, 229, 0.34)",
+    letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(219,234,254,0.86))",
+    letterColor: "#4338ca",
+    labelColor: "#312e81",
+    glow: "0 10px 22px rgba(79, 70, 229, 0.10)",
+  },
+  "priority-5": {
+    surface: "linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(233, 213, 255, 0.62))",
+    edge: "rgba(124, 58, 237, 0.30)",
+    letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(243,232,255,0.84))",
+    letterColor: "#6d28d9",
+    labelColor: "#4c1d95",
+    glow: "0 10px 22px rgba(124, 58, 237, 0.10)",
+  },
+};
+
+function raciHeaderPalette(tone?: string | number): RaciHeaderPalette {
+  const key = typeof tone === "number" ? `priority-${tone}` : tone?.trim();
+  return key ? (LOGIC_GATE_RACI_HEADER_PALETTES[key] ?? DEFAULT_RACI_HEADER_PALETTE) : DEFAULT_RACI_HEADER_PALETTE;
+}
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
   const trimmed = color.trim();
@@ -183,16 +288,21 @@ export const sharedInboxRowsStyle: React.CSSProperties = {
 };
 
 export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPlacement: "before" | "after" | "inside" | null, hovered = false): React.CSSProperties {
+  const framed = active || dropPlacement === "inside" || hovered;
+  const liquidSurface = active
+    ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.66) 46%, rgba(247, 240, 255, 0.74))"
+    : "linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(230, 252, 255, 0.58) 46%, rgba(247, 239, 255, 0.66))";
   return {
-    width: "100%",
+    width: "calc(100% - 10px)",
     minHeight: 30,
     display: "grid",
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : hovered ? HOME_CYAN_MEDIUM : "transparent"}`,
-    borderRadius: 6,
-    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" ? HOME_CYAN_FAINT : hovered ? HOME_CYAN_HOVER : "#ffffff",
+    margin: "0 5px",
+    border: "1px solid transparent",
+    borderRadius: 10,
+    background: framed ? `${liquidSurface} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : "#ffffff",
     color: "#111827",
     cursor: "pointer",
     font: "inherit",
@@ -205,7 +315,10 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
       ? `inset 0 2px 0 ${HOME_CYAN}`
       : dropPlacement === "after"
         ? `inset 0 -2px 0 ${HOME_CYAN}`
-        : undefined,
+        : framed
+          ? "0 0 0 1px rgba(120, 224, 255, 0.12), 0 0 12px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.82)"
+          : undefined,
+    transition: "background 120ms ease, box-shadow 140ms ease",
   };
 }
 
@@ -711,18 +824,25 @@ export const allLogicGateRowsStyle: React.CSSProperties = {
 };
 
 export function logicGateTreeRowStyle(depth: number, selected: boolean, isDropTarget: boolean): React.CSSProperties {
+  const framed = selected || isDropTarget;
   return {
+    width: "calc(100% - 10px)",
     minHeight: 29,
     display: "flex",
     alignItems: "center",
     gap: 6,
-    border: `1px solid ${selected ? HOME_CYAN_BORDER : "transparent"}`,
-    borderRadius: 6,
-    background: selected ? HOME_CYAN_SOFT : isDropTarget ? "#ffffff" : "transparent",
+    margin: "0 5px",
+    border: "1px solid transparent",
+    borderRadius: 10,
+    background: framed
+      ? "linear-gradient(135deg, rgba(255, 255, 255, 0.90), rgba(230, 252, 255, 0.60) 46%, rgba(247, 239, 255, 0.68)) padding-box, linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86)) border-box"
+      : "transparent",
     color: "#111827",
     cursor: "pointer",
     padding: `3px 7px 3px ${6 + depth * 14}px`,
     minWidth: 0,
+    boxShadow: framed ? "0 0 0 1px rgba(120, 224, 255, 0.12), 0 0 12px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.82)" : "none",
+    transition: "background 120ms ease, box-shadow 140ms ease",
   };
 }
 
@@ -783,15 +903,20 @@ export const logicGateRaciHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   gap: 8,
+  padding: "8px 10px",
+  border: "1px solid rgba(255, 255, 255, 0.70)",
+  borderRadius: 10,
+  background: "linear-gradient(90deg, rgba(255, 241, 242, 0.74), rgba(254, 249, 195, 0.52) 34%, rgba(236, 253, 245, 0.54) 66%, rgba(239, 246, 255, 0.70))",
+  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
 };
 
 export const logicGateRaciMetaStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  color: "rgba(15, 23, 42, 0.56)",
+  color: "#6d28d9",
   fontSize: 11,
-  fontWeight: 600,
+  fontWeight: 800,
   whiteSpace: "nowrap",
 };
 
@@ -819,53 +944,70 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
 export const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
-  background: "rgba(255, 255, 255, 0.34)",
+  background: "linear-gradient(135deg, rgba(255, 241, 242, 0.82), rgba(254, 249, 195, 0.58) 42%, rgba(224, 242, 254, 0.72))",
 };
 
-export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  background: "rgba(255, 255, 255, 0.38)",
-  padding: "0 12px",
-};
+export function logicGateRaciColumnHeaderStyle(tone?: string | number): React.CSSProperties {
+  const palette = raciHeaderPalette(tone);
+  return {
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: palette.surface,
+    padding: "0 12px",
+    boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.78), ${palette.glow}`,
+  };
+}
 
-export const logicGateRaciColumnLetterStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  display: "grid",
-  placeItems: "center",
-  border: `1px solid ${HOME_CYAN_BORDER}`,
-  borderRadius: 5,
-  background: HOME_CYAN_FAINT,
-  color: HOME_CYAN,
-  fontSize: 13,
-  fontWeight: 800,
-  flexShrink: 0,
-};
+export function logicGateRaciColumnLetterStyle(tone?: string | number): React.CSSProperties {
+  const palette = raciHeaderPalette(tone);
+  return {
+    width: 24,
+    height: 24,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${palette.edge}`,
+    borderRadius: 5,
+    background: palette.letterBackground,
+    color: palette.letterColor,
+    fontSize: 13,
+    fontWeight: 800,
+    flexShrink: 0,
+    boxShadow: "inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
+  };
+}
 
-export const logicGateRaciColumnLabelStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 12,
-  fontWeight: 700,
-};
+export function logicGateRaciColumnLabelStyle(tone?: string | number): React.CSSProperties {
+  const palette = raciHeaderPalette(tone);
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: palette.labelColor,
+    fontSize: 12,
+    fontWeight: 800,
+  };
+}
 
-export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignItems: "start",
-  background: "rgba(255, 255, 255, 0.34)",
-  color: "rgba(15, 23, 42, 0.62)",
-  fontSize: 11,
-  fontWeight: 700,
-  lineHeight: 1.2,
-  padding: "10px 8px 0 0",
-  textAlign: "right",
-};
+export function logicGateRaciPriorityHeaderStyle(priority?: number): React.CSSProperties {
+  const palette = raciHeaderPalette(priority);
+  return {
+    minWidth: 0,
+    display: "grid",
+    alignItems: "start",
+    justifyItems: "end",
+    background: palette.surface,
+    color: palette.labelColor,
+    fontSize: 11,
+    fontWeight: 800,
+    lineHeight: 1.2,
+    padding: "10px 8px 0 6px",
+    textAlign: "right",
+    boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.78), ${palette.glow}`,
+  };
+}
 
 export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties {
   return {
@@ -1008,6 +1150,20 @@ export const logicGateInboxGroupCountStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
+};
+
+export const logicGateInboxGroupDisclosureStyle: React.CSSProperties = {
+  width: 20,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  borderRadius: 0,
+  background: "transparent",
+  color: "rgba(15, 23, 42, 0.66)",
+  cursor: "pointer",
+  lineHeight: 1,
+  padding: 0,
 };
 
 export const logicGateInboxNodeListStyle: React.CSSProperties = {

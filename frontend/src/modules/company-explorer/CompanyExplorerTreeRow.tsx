@@ -132,16 +132,28 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const selectedFrameSurface = isDarkTheme
     ? "linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.78) 46%, rgba(58, 44, 92, 0.72))"
     : "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.64) 46%, rgba(247, 240, 255, 0.72))";
-  const rowBackground = isDropTarget
-    ? dropRowBackground
-    : isSelected
-      ? `${selectedFrameSurface} padding-box, ${rowFrameGradient} border-box`
-      : undefined;
+  const rowBackground = isDropTarget ? dropRowBackground : undefined;
   const rowBoxShadow = isDropTarget && dragOverPlacement
     ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
-    : isSelected
-      ? "0 0 0 1px rgba(120, 224, 255, 0.16), 0 0 14px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.82)"
-      : `inset 0 -1px 0 ${rowRuleColor}`;
+    : `inset 0 -1px 0 ${rowRuleColor}`;
+  const rowPillStyle: React.CSSProperties = {
+    minWidth: 0,
+    maxWidth: "100%",
+    width: renaming?.treeID === row.id ? "100%" : "fit-content",
+    minHeight: 24,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "2px 7px 2px 3px",
+    border: "1px solid transparent",
+    borderRadius: 10,
+    background: isSelected ? `${selectedFrameSurface} padding-box, ${rowFrameGradient} border-box` : "transparent",
+    boxShadow: isSelected
+      ? "0 0 0 1px rgba(120, 224, 255, 0.14), 0 0 13px rgba(183, 124, 255, 0.2), inset 1px 1px 0 rgba(255, 255, 255, 0.82)"
+      : "none",
+    overflow: "hidden",
+    transition: "background 120ms ease, box-shadow 140ms ease, transform 140ms ease",
+  };
 
   return (
     <div
@@ -276,9 +288,8 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         position: "relative",
         display: "flex",
         alignItems: "center",
-        gap: 6,
         minHeight: COMPANY_EXPLORER_TREE_ROW_HEIGHT,
-        padding: "4px 8px",
+        padding: "2px 8px",
         paddingLeft: TREE_BASE_LEFT_PX + row.depth * TREE_INDENT_PX,
         fontSize: 12,
         cursor: "default",
@@ -292,77 +303,79 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         transition: "background 120ms ease, box-shadow 140ms ease",
       }}
     >
-      {isFolder && !isSearchActive ? (
-        <button
-          draggable={false}
-          onMouseDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSetExpanded((previous) => {
-              const next = new Set(previous);
-              if (next.has(row.id)) next.delete(row.id);
-              else next.add(row.id);
-              return next;
-            });
-          }}
-          style={{ border: "none", background: "transparent", width: TREE_TOGGLE_SLOT_PX, height: 20, cursor: "pointer", color: folderToggleColor, display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
-        >
-          <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
-        </button>
-      ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
-      <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
-      {renaming?.treeID === row.id ? (
-        <input
-          ref={renameInputRef}
-          value={renaming.value}
-          onChange={(event) => onSetRenaming((current) => (current ? { ...current, value: event.target.value } : current))}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
+      <div className="company-explorer-row-hit" data-selected={isSelected ? "true" : undefined} style={rowPillStyle}>
+        {isFolder && !isSearchActive ? (
+          <button
+            draggable={false}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
               event.stopPropagation();
+              onSetExpanded((previous) => {
+                const next = new Set(previous);
+                if (next.has(row.id)) next.delete(row.id);
+                else next.add(row.id);
+                return next;
+              });
+            }}
+            style={{ border: "none", background: "transparent", width: TREE_TOGGLE_SLOT_PX, height: 20, cursor: "pointer", color: folderToggleColor, display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
+          >
+            <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
+          </button>
+        ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
+        <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
+        {renaming?.treeID === row.id ? (
+          <input
+            ref={renameInputRef}
+            value={renaming.value}
+            onChange={(event) => onSetRenaming((current) => (current ? { ...current, value: event.target.value } : current))}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                if (renaming) void onCommitRename({ ...renaming, value: event.currentTarget.value });
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                cancelRenameOnBlurRef.current = true;
+                onSetRenaming(null);
+              }
+            }}
+            onBlur={(event) => {
+              if (cancelRenameOnBlurRef.current) {
+                cancelRenameOnBlurRef.current = false;
+                return;
+              }
               if (renaming) void onCommitRename({ ...renaming, value: event.currentTarget.value });
-            }
-            if (event.key === "Escape") {
+            }}
+            style={{
+              minWidth: 0,
+              width: "100%",
+              border: `1px solid ${accent}`,
+              background: surfaceBackground,
+              color: surfaceText,
+              font: "inherit",
+              fontSize: 12,
+              padding: "1px 4px",
+              outline: "none",
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              cancelRenameOnBlurRef.current = true;
-              onSetRenaming(null);
-            }
-          }}
-          onBlur={(event) => {
-            if (cancelRenameOnBlurRef.current) {
-              cancelRenameOnBlurRef.current = false;
-              return;
-            }
-            if (renaming) void onCommitRename({ ...renaming, value: event.currentTarget.value });
-          }}
-          style={{
-            minWidth: 0,
-            width: "100%",
-            border: `1px solid ${accent}`,
-            background: surfaceBackground,
-            color: surfaceText,
-            font: "inherit",
-            fontSize: 12,
-            padding: "1px 4px",
-            outline: "none",
-          }}
-        />
-      ) : (
-        <span
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onStartRenamingRow(row);
-          }}
-          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
-        >
-          {row.label}
-        </span>
-      )}
+              onStartRenamingRow(row);
+            }}
+            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
+          >
+            {row.label}
+          </span>
+        )}
+      </div>
     </div>
   );
 };
