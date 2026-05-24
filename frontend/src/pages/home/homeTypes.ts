@@ -66,6 +66,14 @@ export type HomeViewID =
   | "my-logic-gates"
   | `shared:${string}`;
 
+export type HomeEntityDeleteKind = "node" | "logic_gate";
+
+export type HomeEntityDeleteTarget = {
+  kind: HomeEntityDeleteKind;
+  id: string;
+  label: string;
+};
+
 export type HomeColumnWidths = [number, number, number, number];
 
 export type NodeEditorOverlayState = {

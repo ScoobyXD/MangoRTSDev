@@ -52,7 +52,7 @@ import {
   nodeTitle,
   normalizeResponsibleInboxStatus,
 } from "./homeUtils.js";
-import type { ComposeState, HomeViewID, InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
+import type { ComposeState, HomeEntityDeleteKind, HomeViewID, InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
 
 export type HomeDropAssignNodeToLogicGateStatus = (
   args: Parameters<typeof defaultAssignNodeToLogicGateStatus>[0],
@@ -138,6 +138,16 @@ type HomeWorkspaceEntityBatchResponse = {
   nodes?: NodeRecord[];
   logic_gates?: LogicGateRecord[];
   folder_items?: CompanyExplorerFolderItem[];
+};
+
+type HomeDeleteEntityTarget = {
+  kind: HomeEntityDeleteKind;
+  id: string;
+};
+
+type HomeDeleteEntitiesResponse = {
+  status?: string;
+  targets?: HomeDeleteEntityTarget[];
 };
 
 function noopKanbanBoardContentsInvalidator(): void {}
@@ -364,6 +374,41 @@ export async function createHomeLogicGateCommand(args: {
   const logicGate = response.logic_gates?.[0];
   if (!logicGate) throw new Error("logic_gate_batch_create_missing_gate");
   return { logicGate, folderItems: response.folder_items ?? [] };
+}
+
+export async function deleteHomeEntitiesCommand(args: {
+  apiBase: string;
+  companyID: string;
+  targets: HomeDeleteEntityTarget[];
+  requestJSON?: HomeEntityCreateRequestJSON;
+}): Promise<HomeDeleteEntitiesResponse | null> {
+  const seen = new Set<string>();
+  const targets: HomeDeleteEntityTarget[] = [];
+  for (const target of args.targets) {
+    const id = target.id.trim();
+    if (!id || (target.kind !== "node" && target.kind !== "logic_gate")) continue;
+    const key = `${target.kind}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ kind: target.kind, id });
+  }
+  if (targets.length === 0) return null;
+
+  const requestJSON = args.requestJSON ?? defaultRequestJSON;
+  const response = await requestJSON<HomeDeleteEntitiesResponse>(args.apiBase, "/v1/company-explorer/delete-batch", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: args.companyID,
+      targets,
+    }),
+  });
+
+  for (const target of targets) {
+    if (target.kind === "logic_gate") {
+      dispatchKanbanBoardsUpdated({ companyID: args.companyID, deletedBoardID: logicGateKanbanBoardID(target.id) });
+    }
+  }
+  return response ?? { status: "ok", targets };
 }
 export async function applyBulkNodePatchCommand(args: {
   apiBase: string;

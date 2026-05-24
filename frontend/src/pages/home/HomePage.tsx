@@ -49,8 +49,8 @@ import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gat
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
-import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
-import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
+import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
@@ -62,13 +62,13 @@ import {
 } from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
+import { AciInboxMatrix, DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
-import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
+import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
 function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
@@ -116,6 +116,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [bulkEditMenu, setBulkEditMenu] = useState<{ x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[] } | null>(null);
+  const [entityDeleteConfirmation, setEntityDeleteConfirmation] = useState<{ targets: HomeEntityDeleteTarget[] } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -178,6 +179,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const unreadOnlyRef = useRef(false);
   const loadingMessagesRef = useRef(false);
   const loadingMoreMessagesRef = useRef(false);
+  const activeDeleteSelectionKindRef = useRef<"message" | HomeEntityDeleteKind | "">("");
   const messageListFilterKeyRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
   const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
@@ -1479,6 +1481,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       });
   }, [companyID, handleEmailAccessExpired, scheduleMessageListRefresh]);
   const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
+    activeDeleteSelectionKindRef.current = "message";
     const orderedIDs = messages.map((item) => item.id);
     const next = resolveExplorerClickSelection({
       orderedIDs,
@@ -1500,6 +1503,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }, [markMessageReadFromListSelection, messages, selectedMessageIDs, selectionAnchorMessageID]);
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();
+    activeDeleteSelectionKindRef.current = "message";
     const nextIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
     setSelectedMessageIDs(new Set(nextIDs));
     setSelectionAnchorMessageID(message.id);
@@ -1561,18 +1565,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
-      if (isEditableKeyboardTarget(event.target)) return;
-      const ids = getSelectedMessageIDsForAction();
-      if (ids.length === 0) return;
-      event.preventDefault();
-      requestDeleteMessages(ids);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, deleteConfirmation, getSelectedMessageIDsForAction, requestDeleteMessages]);
   const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
     setBusy("my-logic-gates");
     setError("");
@@ -1638,6 +1630,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
   }, [apiBase, companyID, logicGateByID]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
+    activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({
       orderedIDs,
       previousSelectedIDs: selectedLogicGateRowIDs,
@@ -1656,6 +1649,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     selectLogicGateTreeID(logicGateTreeID(logicGateID), myLogicGateOrderedRowIDs, event);
   }, [myLogicGateOrderedRowIDs, selectLogicGateTreeID]);
   const selectNodeTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
+    activeDeleteSelectionKindRef.current = "node";
     const next = resolveExplorerClickSelection({
       orderedIDs,
       previousSelectedIDs: selectedNodeRowIDs,
@@ -1867,6 +1861,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    activeDeleteSelectionKindRef.current = "node";
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID || !nodeByID.has(cleanNodeID)) return;
     const treeID = nodeTreeID(cleanNodeID);
@@ -1880,6 +1875,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBulkEditMenu({ x: event.clientX, y: event.clientY, kind: "node", ids });
   }, [nodeByID, selectedNodeRowIDs]);
   const openLogicGateBulkEditMenuAt = useCallback((logicGateID: string, x: number, y: number) => {
+    activeDeleteSelectionKindRef.current = "logic_gate";
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID || !logicGateByID.has(cleanLogicGateID)) return;
     const treeID = logicGateTreeID(cleanLogicGateID);
@@ -1949,6 +1945,123 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBulkEditMenu(null);
     }
   }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
+  const buildNodeDeleteTargets = useCallback((nodeIDs: string[]): HomeEntityDeleteTarget[] => (
+    cleanIDList(nodeIDs)
+      .filter((nodeID) => nodeByID.has(nodeID))
+      .map((nodeID) => ({ kind: "node" as const, id: nodeID, label: nodeTitle(nodeByID.get(nodeID)) }))
+  ), [nodeByID]);
+  const buildLogicGateDeleteTargets = useCallback((logicGateIDs: string[]): HomeEntityDeleteTarget[] => (
+    cleanIDList(logicGateIDs)
+      .filter((logicGateID) => logicGateByID.has(logicGateID))
+      .map((logicGateID) => ({ kind: "logic_gate" as const, id: logicGateID, label: logicGateTitle(logicGateByID.get(logicGateID)) }))
+  ), [logicGateByID]);
+  const getLogicGateDeleteTargetsForContext = useCallback((logicGateID: string): HomeEntityDeleteTarget[] => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return [];
+    const treeID = logicGateTreeID(cleanLogicGateID);
+    const ids = selectedLogicGateRowIDs.has(treeID)
+      ? cleanIDList(Array.from(selectedLogicGateRowIDs).map(logicGateIDFromTreeID)).filter((id) => logicGateByID.has(id))
+      : [cleanLogicGateID];
+    return buildLogicGateDeleteTargets(ids);
+  }, [buildLogicGateDeleteTargets, logicGateByID, selectedLogicGateRowIDs]);
+  const requestDeleteHomeEntities = useCallback((targets: HomeEntityDeleteTarget[]) => {
+    const seen = new Set<string>();
+    const normalizedTargets = targets.filter((target) => {
+      const id = target.id.trim();
+      if (!id) return false;
+      const key = `${target.kind}:${id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map((target) => ({ ...target, id: target.id.trim(), label: target.label.trim() || target.id.trim() }));
+    if (normalizedTargets.length === 0) return;
+    setBulkEditMenu(null);
+    setEntityDeleteConfirmation({ targets: normalizedTargets });
+  }, []);
+  const requestDeleteSelectedHomeEntities = useCallback(() => {
+    if (activeDeleteSelectionKindRef.current === "node") {
+      requestDeleteHomeEntities(buildNodeDeleteTargets(Array.from(selectedNodeRowIDs).map(nodeIDFromTreeID)));
+      return;
+    }
+    if (activeDeleteSelectionKindRef.current === "logic_gate") {
+      requestDeleteHomeEntities(buildLogicGateDeleteTargets(Array.from(selectedLogicGateRowIDs).map(logicGateIDFromTreeID)));
+    }
+  }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities, selectedLogicGateRowIDs, selectedNodeRowIDs]);
+  const requestDeleteLogicGateContext = useCallback((logicGateID: string) => {
+    activeDeleteSelectionKindRef.current = "logic_gate";
+    requestDeleteHomeEntities(getLogicGateDeleteTargetsForContext(logicGateID));
+  }, [getLogicGateDeleteTargetsForContext, requestDeleteHomeEntities]);
+  const requestDeleteBulkEditTargets = useCallback((kind: "node" | "logic_gate", ids: string[]) => {
+    activeDeleteSelectionKindRef.current = kind;
+    requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids));
+  }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities]);
+  const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]) => {
+    const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
+    const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
+    const logicGateIDSet = new Set(normalizedTargets.filter((target) => target.kind === "logic_gate").map((target) => target.id));
+    if (nodeIDSet.size === 0 && logicGateIDSet.size === 0) return;
+    setBusy("entity-delete");
+    setError("");
+    try {
+      await deleteHomeEntitiesCommand({ apiBase, companyID, targets: normalizedTargets });
+      setNodes((previous) => previous
+        .filter((node) => !nodeIDSet.has(node.node_id))
+        .map((node) => {
+          if (logicGateIDSet.size === 0) return node;
+          const nextLogicGateIDs = cleanIDList(node.logic_gate_ids ?? []).filter((logicGateID) => !logicGateIDSet.has(logicGateID));
+          return nextLogicGateIDs.length === (node.logic_gate_ids ?? []).length ? node : { ...node, logic_gate_ids: nextLogicGateIDs };
+        }));
+      setNodeRelationships((previous) => previous.filter((relationship) => !nodeIDSet.has(relationship.node_id_a) && !nodeIDSet.has(relationship.node_id_b)));
+      setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || !nodeIDSet.has(item.item_id)));
+      setLogicGates((previous) => previous.filter((logicGate) => !logicGateIDSet.has(logicGate.logic_gate_id)));
+      setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || !logicGateIDSet.has(item.item_id)));
+      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => !logicGateIDSet.has(shortcut.logic_gate_id)));
+      setSelectedNodeRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !nodeIDSet.has(nodeIDFromTreeID(treeID)))));
+      setSelectedLogicGateRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !logicGateIDSet.has(logicGateIDFromTreeID(treeID)))));
+      if (nodeSelectionAnchorID && nodeIDSet.has(nodeIDFromTreeID(nodeSelectionAnchorID))) setNodeSelectionAnchorID("");
+      if (logicGateSelectionAnchorID && logicGateIDSet.has(logicGateIDFromTreeID(logicGateSelectionAnchorID))) setLogicGateSelectionAnchorID("");
+      setNodeEditorOverlay((current) => current && nodeIDSet.has(current.nodeID) ? null : current);
+      for (const nodeID of nodeIDSet) {
+        invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+        removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
+      }
+      for (const logicGateID of logicGateIDSet) {
+        invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+        removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
+      }
+      for (const node of nodes) {
+        if (cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateIDSet.has(logicGateID))) {
+          invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+        }
+      }
+      setBulkEditMenu(null);
+      setEntityDeleteConfirmation(null);
+      const deletedCount = nodeIDSet.size + logicGateIDSet.size;
+      setNotice(deletedCount === 1 ? "Item deleted." : `${deletedCount} items deleted.`);
+    } catch (deleteError) {
+      setError(formatError(deleteError, "Failed to delete selected items"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
+      if (isEditableKeyboardTarget(event.target)) return;
+      if (activeDeleteSelectionKindRef.current === "node" || activeDeleteSelectionKindRef.current === "logic_gate") {
+        if (entityDeleteConfirmation) return;
+        event.preventDefault();
+        requestDeleteSelectedHomeEntities();
+        return;
+      }
+      const ids = getSelectedMessageIDsForAction();
+      if (ids.length === 0) return;
+      event.preventDefault();
+      requestDeleteMessages(ids);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, deleteConfirmation, entityDeleteConfirmation, getSelectedMessageIDsForAction, requestDeleteMessages, requestDeleteSelectedHomeEntities]);
   const applyBulkNodePatch = useCallback(async (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => {
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (ids.length === 0) return;
@@ -2157,6 +2270,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   onOpenNodeBulkMenu={openNodeBulkEditMenu}
                   onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
                   onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
+                  onRequestDeleteLogicGate={requestDeleteLogicGateContext}
                   onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
                   onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
                   onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
@@ -2183,6 +2297,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   onOpenNodeBulkMenu={openNodeBulkEditMenu}
                   onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
                   onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
+                  onRequestDeleteLogicGate={requestDeleteLogicGateContext}
                   onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
                   onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
                   onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
@@ -2310,7 +2425,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             onAddShortcuts={addShortcutsFromExplorerPayload}
             onRemoveShortcut={removeShortcut}
             onConvertMessages={convertMessagesToLogicGate}
-            onCreateLogicGate={(options) => { void createHomeLogicGate(options); }}
+            onCreateLogicGate={(options) => { void createHomeLogicGate({ ...options, openArena: false }); }}
+            onRequestDeleteLogicGate={requestDeleteLogicGateContext}
           />
           <HomeMailOverlays
             busy={busy}
@@ -2354,7 +2470,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         onApplyNodePatch={(nodeIDs, patch) => { void applyBulkNodePatch(nodeIDs, patch); }}
         onApplyLogicGateRaci={(logicGateIDs, role, userID, action) => { void applyBulkLogicGateRaci(logicGateIDs, role, userID, action); }}
         onAddNodesToLogicGate={(nodeIDs, logicGateID) => { void addNodesToLogicGate(nodeIDs, logicGateID); }}
+        onRequestDelete={requestDeleteBulkEditTargets}
       />
+      {entityDeleteConfirmation && (
+        <DeleteHomeEntitiesConfirmationModal
+          targets={entityDeleteConfirmation.targets}
+          busy={busy === "entity-delete"}
+          onCancel={() => setEntityDeleteConfirmation(null)}
+          onConfirm={() => { void deleteHomeEntities(entityDeleteConfirmation.targets); }}
+        />
+      )}
       {nodeEditorOverlay && (
         <NodeEditorPopup
           nodeID={nodeEditorOverlay.nodeID}

@@ -124,6 +124,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const isFolder = row.kind === "folder";
   const isOpen = expanded.has(row.id);
   const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
+  const suppressModifiedClickRef = React.useRef(false);
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
   const isDropTarget = dragOverTreeID === row.id;
@@ -147,7 +148,19 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
       className="company-explorer-row"
       data-company-explorer-row-id={row.id}
       draggable={!isSearchActive && !!rowDragPayload && renaming?.treeID !== row.id}
-      onClick={(event) => onSelectTreeRow(row, event)}
+      onMouseDown={(event) => {
+        if (event.button !== 0 || renaming?.treeID === row.id) return;
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+        suppressModifiedClickRef.current = true;
+        onSelectTreeRow(row, event, { selectionIntent: "navigate" });
+      }}
+      onClick={(event) => {
+        if (suppressModifiedClickRef.current) {
+          suppressModifiedClickRef.current = false;
+          return;
+        }
+        onSelectTreeRow(row, event);
+      }}
       onContextMenu={(event) => onOpenContextMenu(event, row)}
       onDragStart={(event) => {
         if (!rowDragPayload) {
