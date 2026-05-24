@@ -33,6 +33,13 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 		targetFolderID = activeFolder.FolderID
 		targetFolderKind = activeFolder.FolderKind
+	} else if input.FolderID == "" {
+		activeFolder, err := r.activeLogicGatesFolderLocked(input.CompanyID)
+		if err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+		targetFolderID = activeFolder.FolderID
+		targetFolderKind = activeFolder.FolderKind
 	} else if input.FolderID != "" {
 		folder, ok := r.folders[key(input.CompanyID, input.FolderID)]
 		if !ok {

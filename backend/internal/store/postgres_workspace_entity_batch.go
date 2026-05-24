@@ -41,6 +41,13 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		}
 		targetFolderID = activeFolder.FolderID
 		targetFolderKind = activeFolder.FolderKind
+	} else if input.FolderID == "" {
+		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
+		if err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+		targetFolderID = activeFolder.FolderID
+		targetFolderKind = activeFolder.FolderKind
 	} else if input.FolderID != "" {
 		if err := tx.QueryRowContext(ctx,
 			`select folder_kind
