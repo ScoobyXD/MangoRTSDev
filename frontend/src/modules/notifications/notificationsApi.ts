@@ -52,6 +52,15 @@ export type NotificationSummary = {
   updated_timestamp?: string;
 };
 
+export type NotificationClearInput = {
+  companyID?: string;
+  type?: string;
+  surface?: NotificationSurface;
+  role?: NotificationRaciRole | "";
+  logicGateID?: string;
+  nodeID?: string;
+};
+
 export function emptyNotificationSummary(companyID = ""): NotificationSummary {
   return {
     company_id: companyID,
@@ -95,6 +104,23 @@ export async function markNotificationRead(notificationID: string, read = true):
   });
   dispatchNotificationsUpdated(item.company_id);
   return normalizeNotification(item);
+}
+
+export async function markNotificationsRead(input: NotificationClearInput = {}): Promise<number> {
+  const payload = {
+    company_id: input.companyID?.trim() ?? "",
+    type: input.type?.trim() ?? "",
+    surface: input.surface?.trim() ?? "",
+    role: input.role?.trim() ?? "",
+    logic_gate_id: input.logicGateID?.trim() ?? "",
+    node_id: input.nodeID?.trim() ?? "",
+  };
+  const result = await apiFetchJSON<{ updated_count?: number }>("/v1/notifications/read-all", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  dispatchNotificationsUpdated(payload.company_id);
+  return normalizeCount(result.updated_count);
 }
 
 export function notificationStreamURL(): string {

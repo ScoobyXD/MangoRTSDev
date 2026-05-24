@@ -11,7 +11,7 @@ import { resolveExplorerClickSelection } from "../../modules/company-explorer/tr
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
+import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationClearInput, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
@@ -954,6 +954,7 @@ export function HomeSidebar({
   const openMentionNotifications = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    const companyID = getActiveCompanyID();
     const nextMenu: InboxNotificationMenuState = {
       x: event.clientX,
       y: event.clientY,
@@ -961,9 +962,10 @@ export function HomeSidebar({
       loading: true,
       error: "",
       items: [],
+      clearInput: { companyID, type: "mention.created" },
     };
     setMentionNotificationMenu(nextMenu);
-    fetchNotifications({ companyID: getActiveCompanyID(), type: "mention.created", unreadOnly: true, limit: 100 })
+    fetchNotifications({ companyID, type: "mention.created", unreadOnly: true, limit: 100 })
       .then((items) => {
         setMentionNotificationMenu((current) => (
           current?.x === nextMenu.x && current?.y === nextMenu.y
@@ -989,6 +991,15 @@ export function HomeSidebar({
     setMentionNotificationMenu(null);
     onOpenMentionNotification(notification);
   }, [onOpenMentionNotification]);
+
+  const clearMentionNotifications = useCallback((menu: InboxNotificationMenuState) => {
+    if (menu.loading || menu.items.length === 0) return;
+    setMentionNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    void markNotificationsRead(menu.clearInput ?? { companyID: getActiveCompanyID(), type: "mention.created" }).catch((error) => {
+      console.error("Failed to clear @ mention notifications", error);
+      setMentionNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+    });
+  }, []);
 
   const renderSharedRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
@@ -1272,7 +1283,7 @@ export function HomeSidebar({
           onSubmit={submitSharedEmailDialog}
         />
       )}
-      <InboxNotificationMenu menu={mentionNotificationMenu} onClose={() => setMentionNotificationMenu(null)} onOpen={openMentionNotificationTarget} />
+      <InboxNotificationMenu menu={mentionNotificationMenu} onClose={() => setMentionNotificationMenu(null)} onOpen={openMentionNotificationTarget} onClear={clearMentionNotifications} />
     </aside>
   );
 }
@@ -2363,6 +2374,7 @@ type InboxNotificationMenuState = {
   loading: boolean;
   error: string;
   items: NotificationItem[];
+  clearInput?: NotificationClearInput;
 };
 
 function inboxNotificationMatchesGroup(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): boolean {
@@ -2382,20 +2394,47 @@ function formatInboxNotificationTimestamp(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
 }
 
+function InboxNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {
+  const showEntityIcon = notification.type === "mention.created"
+    && (notification.entity_type === "node" || notification.entity_type === "logic_gate");
+  return (
+    <span style={inboxNotificationMenuTitleStyle}>
+      {showEntityIcon && (
+        <span style={inboxNotificationMenuTitleIconStyle}>
+          <ExplorerRowIcon kind={notification.entity_type === "node" ? "node" : "logic_gate"} />
+        </span>
+      )}
+      <span style={inboxNotificationMenuTitleTextStyle}>{notification.title}</span>
+    </span>
+  );
+}
+
 function InboxNotificationMenu({
   menu,
   onClose,
   onOpen,
+  onClear,
 }: {
   menu: InboxNotificationMenuState | null;
   onClose: () => void;
   onOpen: (notification: NotificationItem) => void;
+  onClear: (menu: InboxNotificationMenuState) => void;
 }) {
   if (!menu) return null;
   return (
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
       <div style={inboxNotificationMenuStyle}>
-        <div style={inboxNotificationMenuHeaderStyle}>{menu.title}</div>
+        <div style={inboxNotificationMenuHeaderStyle}>
+          <span>{menu.title}</span>
+          <button
+            type="button"
+            style={inboxNotificationMenuClearButtonStyle}
+            disabled={menu.loading || menu.items.length === 0}
+            onClick={() => onClear(menu)}
+          >
+            Clear
+          </button>
+        </div>
         {menu.loading ? (
           <div style={inboxNotificationMenuEmptyStyle}>Loading</div>
         ) : menu.error ? (
@@ -2409,7 +2448,7 @@ function InboxNotificationMenu({
             style={inboxNotificationMenuItemStyle}
             onClick={() => onOpen(notification)}
           >
-            <span style={inboxNotificationMenuTitleStyle}>{notification.title}</span>
+            <InboxNotificationTitle notification={notification} />
             {notification.body_preview && <span style={inboxNotificationMenuBodyStyle}>{notification.body_preview}</span>}
             <span style={inboxNotificationMenuMetaStyle}>{formatInboxNotificationTimestamp(notification.created_timestamp)}</span>
           </button>
@@ -2429,12 +2468,30 @@ const inboxNotificationMenuStyle: React.CSSProperties = {
 };
 
 const inboxNotificationMenuHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
   padding: "5px 12px 8px",
   color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   fontWeight: 800,
   textTransform: "uppercase",
   letterSpacing: 0,
+};
+
+const inboxNotificationMenuClearButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(100, 116, 139, 0.24)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  lineHeight: 1,
+  padding: "4px 7px",
+  textTransform: "none",
 };
 
 const inboxNotificationMenuItemStyle: React.CSSProperties = {
@@ -2452,11 +2509,27 @@ const inboxNotificationMenuItemStyle: React.CSSProperties = {
 
 const inboxNotificationMenuTitleStyle: React.CSSProperties = {
   minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  overflow: "hidden",
+  fontSize: 12,
+  fontWeight: 750,
+};
+
+const inboxNotificationMenuTitleIconStyle: React.CSSProperties = {
+  width: 15,
+  height: 15,
+  flex: "0 0 auto",
+  display: "grid",
+  placeItems: "center",
+};
+
+const inboxNotificationMenuTitleTextStyle: React.CSSProperties = {
+  minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  fontSize: 12,
-  fontWeight: 750,
 };
 
 const inboxNotificationMenuBodyStyle: React.CSSProperties = {
@@ -2625,6 +2698,15 @@ export function AciInboxMatrix({
     }
     if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
+  const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
+    const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
+    if (menu.loading || notificationIDs.length === 0) return;
+    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+      console.error("Failed to clear notifications", error);
+      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+    });
+  }, []);
   const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2763,8 +2845,8 @@ export function AciInboxMatrix({
         </button>
       </FrameRightClickMenu>
     )}
-    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} />
-    </>
+    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} onClear={clearGroupNotifications} />
+  </>
   );
 }
 
@@ -2892,6 +2974,15 @@ export function ResponsibleInboxMatrix({
     }
     if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
+  const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
+    const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
+    if (menu.loading || notificationIDs.length === 0) return;
+    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+      console.error("Failed to clear notifications", error);
+      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+    });
+  }, []);
   const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3035,8 +3126,8 @@ export function ResponsibleInboxMatrix({
         </button>
       </FrameRightClickMenu>
     )}
-    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} />
-    </>
+    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} onClear={clearGroupNotifications} />
+  </>
   );
 }
 

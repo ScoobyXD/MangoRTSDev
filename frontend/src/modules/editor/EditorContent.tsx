@@ -223,6 +223,11 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
   return type === EDITOR_TEXT_BLOCK_TYPE || type === EDITOR_TEXT_BLOCK_CHAT_TYPE || type === EDITOR_ATTACHED_EMAIL_TYPE;
 }
 
+function workspaceEventDataString(data: Record<string, unknown> | undefined, key: string): string {
+  const value = data?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -1214,6 +1219,49 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       },
     });
   }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID]);
+
+  useEffect(() => {
+    if (!companyID || linkedEntityKind !== "node" || !linkedNodeID) return;
+    let cancelled = false;
+    let refreshToken = 0;
+    const refreshNodeWorkspaceProjections = () => {
+      const token = ++refreshToken;
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      void Promise.all([
+        getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+        getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
+      ]).then(([projections, contentChanges]) => {
+        if (cancelled || token !== refreshToken) return;
+        setNodeWorkspaceProjections(projections);
+        setNodeWorkspaceLoadedNodeID(linkedNodeID);
+        setNodeContentChanges(contentChanges);
+        setNodeContentChangesLoadedNodeID(linkedNodeID);
+      }).catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
+      });
+    };
+
+    const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
+      onEvent(_event, context) {
+        const envelope = context.envelope;
+        if (envelope?.type !== "node_information_created") return;
+        if (workspaceEventDataString(envelope.data, "node_id") !== linkedNodeID) return;
+        refreshNodeWorkspaceProjections();
+      },
+      onReplayBoundary() {
+        refreshNodeWorkspaceProjections();
+      },
+      onGap(gap) {
+        if (gap.scopes.some((scope) => scope.kind === "workspace" || scope.nodeID === linkedNodeID)) {
+          refreshNodeWorkspaceProjections();
+        }
+      },
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     const intervalID = window.setInterval(() => {

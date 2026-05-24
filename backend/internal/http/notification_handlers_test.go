@@ -689,6 +689,160 @@ func TestNodeTextBoxMentionsNotifyNewUsersAcrossSameInformationID(t *testing.T) 
 	assertMentionCount(second, 1)
 }
 
+func TestNodeTextBoxRepeatedMentionOccurrenceCreatesOneAdditionalNotification(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "56565656-5656-4656-8656-565656565656"
+
+	author, err := repo.UpsertAuthUser("repeat-mention-author-subject", "repeat-author@example.com", "Repeat Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("repeat-mention-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	mentioned, err := repo.UpsertAuthUser("repeat-mentioned-subject", "repeat-mentioned@example.com", "Repeat Mention")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("repeat-mentioned-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Repeated mention box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
+
+	postTextBox := func(document string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    `<!-- mango-node-text-block-v1 -->{"title":"Plan","document":"<!-- mango-editor-html-v1 -->` + document + `"}`,
+			"information_id": "67676767-6767-4767-8767-676767676767",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+		req = requestWithActorForNotifications(req, author, companyID)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST node text box status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	postTextBox(`<span data-mango-mention=\"true\">@Repeat Mention</span> please review.`)
+	postTextBox(`<span data-mango-mention=\"true\">@Repeat Mention</span> and <span data-mango-mention=\"true\">@Repeat Mention</span> please review.`)
+	postTextBox(`<span data-mango-mention=\"true\">@Repeat Mention</span> and <span data-mango-mention=\"true\">@Repeat Mention</span> please review.`)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 2 {
+		t.Fatalf("notification count = %d, want 2: %+v", len(payload.Notifications), payload.Notifications)
+	}
+}
+
+func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "57575757-5757-4757-8757-575757575757"
+
+	user, err := repo.UpsertAuthUser("clear-type-subject", "clear-type@example.com", "Clear Type")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-type-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Clear notification node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
+	_, err = repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "11111111-1111-4111-8111-111111111111",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Someone Clear notification node",
+			BodyPreview:     "@Clear Type",
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "22222222-2222-4222-8222-222222222222",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Node updated",
+			BodyPreview:     "Fields changed",
+			Surface:         domain.NotificationSurfaceRInbox,
+			Role:            "responsible",
+			NodeID:          node.NodeID,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "type": domain.NotificationEventMentionCreated})
+	req := httptest.NewRequest(http.MethodPost, "/v1/notifications/read-all", bytes.NewReader(body))
+	req = requestWithActorForNotifications(req, user, companyID)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST read-all status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var clearPayload struct {
+		UpdatedCount int `json:"updated_count"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&clearPayload); err != nil {
+		t.Fatalf("decode read-all: %v", err)
+	}
+	if clearPayload.UpdatedCount != 1 {
+		t.Fatalf("updated_count = %d, want 1", clearPayload.UpdatedCount)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&unread_only=true", nil)
+	listReq = requestWithActorForNotifications(listReq, user, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listPayload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(listPayload.Notifications) != 1 || listPayload.Notifications[0].Type != domain.NotificationEventNodeFieldsChanged {
+		t.Fatalf("remaining unread notifications = %+v, want only node fields notification", listPayload.Notifications)
+	}
+}
+
 func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	t.Parallel()
 

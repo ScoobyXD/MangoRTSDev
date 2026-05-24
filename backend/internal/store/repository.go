@@ -266,6 +266,7 @@ type NotificationRepository interface {
 	GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error)
 	CountUnreadNotifications(userID, companyID string) (int, error)
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
+	MarkNotificationsRead(input NotificationMarkReadInput) (int, error)
 	MarkAllNotificationsRead(userID, companyID string) (int, error)
 }
 
@@ -780,6 +781,16 @@ type NotificationListInput struct {
 	NotificationType string
 	UnreadOnly       bool
 	Limit            int
+}
+
+type NotificationMarkReadInput struct {
+	UserID           string
+	CompanyID        string
+	NotificationType string
+	Surface          string
+	Role             string
+	LogicGateID      string
+	NodeID           string
 }
 
 type NotificationSummaryInput struct {
