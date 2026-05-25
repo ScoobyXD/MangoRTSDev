@@ -44,6 +44,12 @@ import { EditorTabBar } from "./EditorTabBar";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
 import {
+  EDITOR_NEU_ACTIVE_SURFACE,
+  EDITOR_NEU_PANEL_BACKGROUND,
+  EDITOR_NEU_SOFT_BORDER,
+  EDITOR_NEU_SURFACE,
+} from "./NodeWorkspaceSurfaceShared";
+import {
   deserializeEditorDocumentHTML,
   EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES,
   readEditorDocumentText,
@@ -1604,13 +1610,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
 
   const isDarkTheme = theme === "dark";
-  const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
+  const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
   const surfaceText = isDarkTheme ? "#f4f7fa" : "#111827";
-  const tabBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)";
-  const tabSelectedBackground = isDarkTheme ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)";
-  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.22)";
-  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(15,23,42,0.14)";
-  const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
+  const tabBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : EDITOR_NEU_SURFACE;
+  const tabSelectedBackground = isDarkTheme ? "rgba(255,255,255,0.14)" : EDITOR_NEU_ACTIVE_SURFACE;
+  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : EDITOR_NEU_SOFT_BORDER;
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(148, 163, 184, 0.18)";
+  const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : EDITOR_NEU_SURFACE;
   const scrollbarAccent = theme === "light" ? "rgb(71, 85, 105)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)";
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.2)";
@@ -1702,7 +1708,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       data-mango-linked-entity-id={linkedNodeID || undefined}
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
-      style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
+      style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text", boxShadow: isDarkTheme ? undefined : "inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255,255,255,0.82)" }}
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (

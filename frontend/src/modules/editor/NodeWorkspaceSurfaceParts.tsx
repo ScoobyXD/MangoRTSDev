@@ -18,6 +18,8 @@ import {
 } from "./editorImages";
 import {
   buildMentionOptions,
+  EDITOR_MENTION_BACKGROUND,
+  EDITOR_MENTION_COLOR,
   mentionUserDisplayName,
   mentionUserOptionLabel,
   readActiveMentionDraft,
@@ -50,6 +52,13 @@ import {
   PlusIcon,
   readStoredChatPaneHeight,
   storeChatPaneHeight,
+  EDITOR_NEU_ACTIVE_SURFACE,
+  EDITOR_NEU_EDGE_FRAME,
+  EDITOR_NEU_PANEL_BACKGROUND,
+  EDITOR_NEU_PANEL_SHADOW,
+  EDITOR_NEU_SHADOW,
+  EDITOR_NEU_SOFT_BORDER,
+  EDITOR_NEU_SURFACE,
   TEXT_BLOCK_BOTTOM_BUFFER_ROWS,
   TEXT_BLOCK_FONT_SIZE,
   TEXT_BLOCK_LINE_HEIGHT,
@@ -63,6 +72,7 @@ import {
   type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
   type TextBlockSelectionDraft,
+  userAccentForName,
   useCloseFloatingMenu,
 } from "./NodeWorkspaceSurfaceShared";
 type TimelineCellProps = {
@@ -847,7 +857,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         position: "relative",
         width: "100%",
         minWidth: 0,
-        background: "#ffffff",
+        border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+        borderRadius: 12,
+        background: EDITOR_NEU_ACTIVE_SURFACE,
+        boxShadow: "inset 3px 3px 10px rgba(174,174,192,0.12), inset -3px -3px 10px rgba(255,255,255,0.82)",
+        overflow: "hidden",
       }}
     >
       {showIndentGuides && (
@@ -905,9 +919,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 top: rect.top,
                 width: rect.width,
                 height: rect.height,
-                borderRadius: 3,
-                background: rect.active ? "rgba(100, 116, 139, 0.44)" : "rgba(100, 116, 139, 0.25)",
-                boxShadow: rect.active ? "0 0 0 1px rgba(100,116,139,0.72), 0 0 0 3px rgba(100,116,139,0.18)" : "none",
+                borderRadius: 6,
+                background: rect.active ? "linear-gradient(135deg, rgba(254, 202, 202, 0.58), rgba(254, 249, 195, 0.50))" : "linear-gradient(135deg, rgba(254, 202, 202, 0.34), rgba(254, 249, 195, 0.30))",
+                boxShadow: rect.active ? "0 0 0 1px rgba(248,113,113,0.44), 0 0 16px rgba(251,191,36,0.22)" : "none",
               }}
             />
           ))}
@@ -933,9 +947,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 top: rect.top,
                 width: rect.width,
                 height: rect.height,
-                borderRadius: 3,
-                background: rect.active ? "rgba(100, 116, 139, 0.52)" : "rgba(100, 116, 139, 0.34)",
-                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(100,116,139,0.16)` : "none",
+                borderRadius: 6,
+                background: rect.active ? "linear-gradient(135deg, rgba(103, 232, 249, 0.58), rgba(221, 214, 254, 0.58))" : "linear-gradient(135deg, rgba(103, 232, 249, 0.34), rgba(221, 214, 254, 0.34))",
+                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 16px rgba(183,124,255,0.26)` : "none",
               }}
             />
           ))}
@@ -1061,9 +1075,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           {contentChangeLabels.map((label) => {
             const active = activeContentChangeID === label.change.change_id;
             const addition = label.change.change_type === "addition";
-            const color = addition ? "#334155" : "#334155";
-            const border = addition ? "rgba(100,116,139,0.34)" : "rgba(100,116,139,0.34)";
-            const background = addition ? "rgba(248,250,252,0.98)" : "rgba(248,250,252,0.98)";
+            const color = addition ? "#047857" : "#be123c";
+            const border = addition ? "rgba(16,185,129,0.36)" : "rgba(244,63,94,0.36)";
+            const background = addition
+              ? "linear-gradient(135deg, rgba(236,253,245,0.96), rgba(207,250,254,0.72))"
+              : "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(254,249,195,0.72))";
             return (
               <div
                 key={label.change.change_id}
@@ -1082,14 +1098,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                   gap: 6,
                   minHeight: 24,
                   border: `1px solid ${border}`,
-                  borderRadius: 6,
+                  borderRadius: 9,
                   background,
                   color,
                   padding: "3px 4px 3px 7px",
                   fontSize: 10,
                   fontWeight: 900,
                   letterSpacing: 0,
-                  boxShadow: active ? "0 16px 34px rgba(15,23,42,0.22), 0 2px 7px rgba(15,23,42,0.10)" : "0 12px 26px rgba(15,23,42,0.16), 0 2px 6px rgba(15,23,42,0.08)",
+                  boxShadow: active ? "0 10px 24px rgba(15,23,42,0.16), 0 0 16px rgba(183,124,255,0.18), inset 1px 1px 0 rgba(255,255,255,0.86)" : "4px 4px 12px rgba(174,174,192,0.18), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)",
                   pointerEvents: "auto",
                 }}
               >
@@ -1110,13 +1126,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                   style={{
                     minHeight: 18,
                     border: `1px solid ${border}`,
-                    borderRadius: 5,
-                    background: "#ffffff",
+                    borderRadius: 7,
+                    background: EDITOR_NEU_SURFACE,
                     color,
                     padding: "0 5px",
                     cursor: "pointer",
                     fontSize: 10,
                     fontWeight: 900,
+                    boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)",
                     letterSpacing: 0,
                   }}
                 >
@@ -1135,11 +1152,11 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                       whiteSpace: "pre-wrap",
                       overflowWrap: "anywhere",
                       border: `1px solid ${border}`,
-                      borderRadius: 7,
-                      background: "#ffffff",
+                      borderRadius: 10,
+                      background: EDITOR_NEU_PANEL_BACKGROUND,
                       color: surfaceText,
                       padding: 8,
-                      boxShadow: "0 14px 30px rgba(15,23,42,0.20)",
+                      boxShadow: EDITOR_NEU_PANEL_SHADOW,
                       fontSize: 11,
                       fontWeight: 700,
                       lineHeight: 1.35,
@@ -1177,15 +1194,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             zIndex: 5,
             width: 28,
             height: 28,
-            borderRadius: 6,
-            border: `1px solid ${accent}`,
-            background: "#ffffff",
+            borderRadius: 8,
+            border: "1px solid transparent",
+            background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
             color: accent,
             display: "grid",
             placeItems: "center",
             padding: 0,
             cursor: "pointer",
-            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+            boxShadow: EDITOR_NEU_SHADOW,
           }}
         >
           <ChatIcon color={accent} />
@@ -1208,10 +1225,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             gridTemplateColumns: "28px 28px",
             gap: 5,
             padding: 4,
-            border: `1px solid ${accent}`,
-            borderRadius: 8,
-            background: "#ffffff",
-            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+            border: "1px solid transparent",
+            borderRadius: 10,
+            background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+            boxShadow: EDITOR_NEU_SHADOW,
           }}
         >
           <button
@@ -1223,7 +1240,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
               onImageChatRequest(imageDraft);
               setImageDraft(null);
             }}
-            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${accent}`, background: "#ffffff", color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer" }}
+            style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
           >
             <ChatIcon color={accent} />
           </button>
@@ -1236,7 +1253,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
               onImageNodeRequest(imageDraft);
               setImageDraft(null);
             }}
-            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${accent}`, background: "#ffffff", color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer" }}
+            style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
           >
             <PlusIcon color={accent} />
           </button>
@@ -1456,14 +1473,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           marginTop: 0,
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr) auto 7px",
-          border: `1px solid ${active ? accent : strokeColor}`,
-          borderRadius: 8,
-          background: active ? "#ffffff" : panelBackground,
+          border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+          borderRadius: 14,
+          background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
           overflow: "hidden",
           opacity: active || messages.length > 0 ? 1 : 0.72,
+          boxShadow: active ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW,
         }}
       >
-        <div style={{ minHeight: 30, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", color: surfaceText, fontSize: 11, fontWeight: 800 }}>
+        <div style={{ minHeight: 30, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", color: surfaceText, fontSize: 11, fontWeight: 800, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
           <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
           <span>{messages.length}</span>
         </div>
@@ -1493,7 +1511,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
         <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
-            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(100,116,139,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
+            <div style={{ border: "1px solid rgba(92,238,255,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
               {selectionAnchor.quote}
             </div>
           )}
@@ -1521,10 +1539,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   gap: 2,
                   maxHeight: 206,
                   overflowY: "auto",
-                  border: `1px solid ${strokeColor}`,
-                  borderRadius: 8,
-                  background: "#ffffff",
-                  boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+                  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                  borderRadius: 12,
+                  background: EDITOR_NEU_PANEL_BACKGROUND,
+                  boxShadow: EDITOR_NEU_PANEL_SHADOW,
                   padding: 4,
                 }}
               >
@@ -1551,14 +1569,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         gridTemplateColumns: "24px minmax(0, 1fr)",
                         alignItems: "center",
                         gap: 8,
-                        border: "none",
-                        borderRadius: 6,
-                        background: selected ? "rgba(100, 116, 139, 0.16)" : "transparent",
+                        border: "1px solid transparent",
+                        borderRadius: 10,
+                        background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent",
                         color: surfaceText,
                         cursor: "pointer",
                         padding: "5px 8px",
                         textAlign: "left",
                         font: "inherit",
+                        boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
                       }}
                     >
                       <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name), color: "#ffffff", fontSize: 10, fontWeight: 900 }}>
@@ -1582,7 +1601,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 focusComposer();
                 fileInputRef.current?.click();
               }}
-              style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46 }}
+              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
             >
               <PlusIcon color={accent} />
             </button>
@@ -1668,7 +1687,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default" }}
+              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
@@ -1676,9 +1695,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               title="Send"
               disabled={!canSubmit}
               onClick={onSubmit}
-              style={{ width: 32, height: 32, border: `1px solid ${accent}`, background: canSubmit && active ? accent : "#ffffff", color: canSubmit && active ? "#ffffff" : accent, borderRadius: 6, display: "grid", placeItems: "center", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.44 }}
+              style={{ width: 32, height: 32, border: canSubmit && active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: canSubmit && active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, borderRadius: 9, display: "grid", placeItems: "center", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.44, boxShadow: EDITOR_NEU_SHADOW }}
             >
-              <ArrowRightIcon color={canSubmit && active ? "#ffffff" : accent} />
+              <ArrowRightIcon color={accent} />
             </button>
             <input
               ref={fileInputRef}
@@ -1742,7 +1761,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
         <span
           key={`${segment.text}:${index}`}
           title={segment.user ? mentionUserOptionLabel(segment.user) : segment.text}
-          style={{ background: "#f1f5f9", color: "#334155", borderRadius: 3, padding: "0 2px", fontWeight: 800, boxDecorationBreak: "clone" }}
+          style={{ background: EDITOR_MENTION_BACKGROUND, color: EDITOR_MENTION_COLOR, border: "1px solid rgba(183,124,255,0.34)", borderRadius: 6, padding: "0 4px", fontWeight: 850, boxDecorationBreak: "clone", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)" }}
         >
           {segment.text}
         </span>
@@ -1760,6 +1779,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
   const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
   const isActive = activeMessageID === message.id;
   const canDelete = editable && canDeleteEditorTextBlockChatMessage(message, currentUserID);
+  const authorAccent = userAccentForName(message.authorName || message.authorID);
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
@@ -1781,9 +1801,10 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         gridTemplateColumns: "28px minmax(0, 1fr)",
         columnGap: 7,
         alignItems: "start",
-        borderRadius: 6,
-        background: isActive ? "rgba(100,116,139,0.08)" : "transparent",
-        boxShadow: isActive ? `inset 0 0 0 1px ${accent}` : "none",
+        border: "1px solid transparent",
+        borderRadius: 10,
+        background: isActive ? "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(230,252,255,0.48) 48%, rgba(247,239,255,0.54))" : "transparent",
+        boxShadow: isActive ? `0 8px 20px rgba(15,23,42,0.10), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)` : "none",
         padding: "4px 4px 4px 0",
         cursor: "pointer",
       }}
@@ -1806,9 +1827,9 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               left: -2,
               width: 14,
               height: 14,
-              border: `1px solid ${ruleColor}`,
+              border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
               borderRadius: 999,
-              background: "#ffffff",
+              background: EDITOR_NEU_SURFACE,
               color: "rgba(15,23,42,0.72)",
               display: "grid",
               placeItems: "center",
@@ -1822,13 +1843,13 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
             {collapsed ? "+" : "-"}
           </button>
         )}
-        <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
+        <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: "1px solid rgba(255,255,255,0.82)", background: avatarBackgroundForName(message.authorName || message.authorID), color: "#ffffff", display: "grid", placeItems: "center", fontSize: 9, fontWeight: 900, letterSpacing: 0, boxShadow: "3px 3px 8px rgba(174,174,192,0.22), -3px -3px 8px rgba(255,255,255,0.78)" }}>
           {initialsForName(message.authorName || message.authorID)}
         </div>
       </div>
       <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: authorAccent, fontWeight: 900 }}>{message.authorName}</span>
           <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
         </div>
         {message.message && <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} />}
@@ -2087,8 +2108,8 @@ type AttachedEmailsPanelProps = {
   onOpenEmail: (messageID: string) => void;
 };
 
-export const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails, accent, surfaceText, panelBackground, strokeColor, onOpenEmail }) => (
-  <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 8, maxHeight: 260, overflowY: "auto" }}>
+export const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails, accent, surfaceText, panelBackground: _panelBackground, strokeColor, onOpenEmail }) => (
+  <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: EDITOR_NEU_SURFACE, padding: 8, maxHeight: 260, overflowY: "auto", boxShadow: EDITOR_NEU_SHADOW }}>
     <div style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 800 }}>
       <MailIcon color={accent} />
       <span>{emails.length}</span>

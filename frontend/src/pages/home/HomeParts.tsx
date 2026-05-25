@@ -1872,10 +1872,12 @@ export function LogicGateRail({
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; creatorRaciRole?: LogicGateRaciRole } | null>(null);
   const [triagePriorityMenu, setTriagePriorityMenu] = useState<TriageConversionPriorityMenuState | null>(null);
+  const [logicGateDropTargetRowID, setLogicGateDropTargetRowID] = useState("");
   const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, creatorRaciRole?: LogicGateRaciRole) => {
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
+    setLogicGateDropTargetRowID("");
     setTriagePriorityMenu(null);
     setCreateContextMenu({ x: event.clientX, y: event.clientY, creatorRaciRole });
   }, []);
@@ -1887,6 +1889,7 @@ export function LogicGateRail({
     event.stopPropagation();
     setPinContextMenu(null);
     setCreateContextMenu(null);
+    setLogicGateDropTargetRowID("");
     setTriagePriorityMenu({ x: event.clientX, y: event.clientY, logicGateID: cleanLogicGateID, messageIDs: ids });
   }, []);
 
@@ -1969,7 +1972,7 @@ export function LogicGateRail({
               <div
                 key={row.id}
                 draggable
-                style={logicGateTreeRowStyle(row.depth, selected, row.kind === "logic_gate")}
+                style={logicGateTreeRowStyle(row.depth, selected, logicGateDropTargetRowID === row.id)}
                 onClick={(event) => onSelectRow(row, event)}
                 onDoubleClick={(event) => {
                   if (row.kind !== "logic_gate" || !logicGateID) return;
@@ -1992,15 +1995,21 @@ export function LogicGateRail({
                   event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
                   event.dataTransfer.setData("text/plain", row.label);
                 }}
+                onDragEnd={() => setLogicGateDropTargetRowID("")}
                 onDragOver={(event) => {
                   if (row.kind !== "logic_gate" || !hasTriageMessageDrag(event.dataTransfer)) return;
                   event.preventDefault();
+                  setLogicGateDropTargetRowID(row.id);
                   event.dataTransfer.dropEffect = "copy";
+                }}
+                onDragLeave={() => {
+                  setLogicGateDropTargetRowID((current) => current === row.id ? "" : current);
                 }}
                 onDrop={(event) => {
                   if (row.kind !== "logic_gate" || !logicGateID) return;
                   const messageIDs = readTriageMessageIDs(event.dataTransfer);
                   if (messageIDs.length === 0) return;
+                  setLogicGateDropTargetRowID("");
                   requestTriageConversionPriority(event, logicGateID, messageIDs);
                 }}
               >

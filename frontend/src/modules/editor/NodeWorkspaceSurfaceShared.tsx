@@ -102,6 +102,14 @@ export const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
 export const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
 export const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
 export const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
+export const EDITOR_NEU_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";
+export const EDITOR_NEU_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
+export const EDITOR_NEU_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
+export const EDITOR_NEU_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+export const EDITOR_NEU_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
+export const EDITOR_NEU_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
+export const EDITOR_NEU_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
+const USER_ACCENT_COLORS = ["#db2777", "#7c3aed", "#2563eb", "#0891b2", "#059669", "#ca8a04", "#ea580c", "#dc2626"];
 
 export function projectionsKey(items: NodeProjectionItem[]): string {
   return items.map((item) => `${item.information_id}:${item.type}:${item.updated_timestamp}`).join("|");
@@ -289,8 +297,17 @@ export function initialsForName(name: string): string {
 }
 
 export function avatarBackgroundForName(name: string): string {
-  void name;
-  return `#e2e8f0`;
+  const color = userAccentForName(name);
+  return `linear-gradient(135deg, ${color}, rgba(92, 238, 255, 0.72) 52%, rgba(183, 124, 255, 0.78))`;
+}
+
+export function userAccentForName(name: string): string {
+  const value = name.trim() || "Unknown user";
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return USER_ACCENT_COLORS[Math.abs(hash) % USER_ACCENT_COLORS.length] ?? USER_ACCENT_COLORS[0];
 }
 
 export const ChatIcon: React.FC<{ color: string }> = ({ color }) => (
