@@ -282,11 +282,11 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
-      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
-      {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
-      <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
+      <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
+      {onClose && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
+      <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
-        <button type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
+        <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
       )}
     </div>
   );
@@ -437,11 +437,20 @@ function permissionUserLabel(user: CompanyUserGroupMember): string {
   return name || email || user.user_id;
 }
 
+const PERMISSION_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)";
+const PERMISSION_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
+const PERMISSION_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
+const PERMISSION_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const PERMISSION_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
+const PERMISSION_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 18px 42px rgba(15, 23, 42, 0.16)";
+
 const permissionBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
   zIndex: 180,
-  background: "rgba(255,255,255,0.74)",
+  background: "rgba(241, 245, 249, 0.66)",
+  backdropFilter: "blur(14px) saturate(1.18)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.18)",
   display: "grid",
   placeItems: "center",
   padding: 16,
@@ -450,15 +459,15 @@ const permissionBackdropStyle: React.CSSProperties = {
 const permissionDialogStyle: React.CSSProperties = {
   width: "min(680px, 100%)",
   maxHeight: "min(760px, calc(100vh - 32px))",
-  border: "1px solid rgba(100, 116, 139, 0.64)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#111111",
-  boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 18,
+  background: PERMISSION_PANEL_BACKGROUND,
+  color: "#111827",
+  boxShadow: PERMISSION_PANEL_SHADOW,
   display: "grid",
   gridTemplateRows: "auto auto minmax(0, 1fr)",
-  gap: 10,
-  padding: 12,
+  gap: 12,
+  padding: 14,
   boxSizing: "border-box",
 };
 
@@ -466,15 +475,16 @@ const permissionEmbeddedStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   minHeight: 0,
-  border: "1px solid rgba(100, 116, 139, 0.42)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#111111",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 16,
+  background: PERMISSION_PANEL_BACKGROUND,
+  color: "#111827",
   display: "grid",
   gridTemplateRows: "auto auto minmax(0, 1fr)",
-  gap: 10,
-  padding: 12,
+  gap: 12,
+  padding: 14,
   boxSizing: "border-box",
+  boxShadow: PERMISSION_PANEL_SHADOW,
 };
 
 const permissionHeaderStyle: React.CSSProperties = {
@@ -482,6 +492,11 @@ const permissionHeaderStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "start",
   gap: 10,
+  padding: "8px 10px",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 12,
+  background: "linear-gradient(90deg, rgba(255, 241, 242, 0.74), rgba(254, 249, 195, 0.52) 34%, rgba(236, 253, 245, 0.54) 66%, rgba(239, 246, 255, 0.70))",
+  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
 };
 
 const permissionHeaderActionsStyle: React.CSSProperties = {
@@ -494,26 +509,29 @@ const permissionHeaderActionsStyle: React.CSSProperties = {
 
 const permissionTitleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 16,
+  fontSize: 18,
   lineHeight: 1.2,
+  fontWeight: 850,
 };
 
 const permissionIconButtonStyle: React.CSSProperties = {
   width: 30,
   height: 30,
-  border: "1px solid rgba(0,0,0,0.14)",
-  borderRadius: 6,
-  background: "#ffffff",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 8,
+  background: PERMISSION_SURFACE,
+  boxShadow: PERMISSION_SHADOW,
   cursor: "pointer",
   fontWeight: 700,
 };
 
 const permissionInfoStyle: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,0.12)",
-  borderRadius: 6,
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 10,
   padding: "8px 10px",
   fontSize: 12,
-  background: "#fbfbfb",
+  background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.52) 46%, rgba(247,239,255,0.58))",
+  boxShadow: "inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
 };
 
 const permissionReadOnlyNoticeStyle: React.CSSProperties = {
@@ -530,10 +548,12 @@ const permissionListStyle: React.CSSProperties = {
   overflow: "auto",
   display: "grid",
   alignContent: "start",
-  gap: 8,
-  border: "1px solid rgba(0,0,0,0.1)",
-  borderRadius: 6,
+  gap: 7,
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 12,
   padding: 8,
+  background: "rgba(255, 255, 255, 0.42)",
+  boxShadow: "inset 4px 4px 14px rgba(174, 174, 192, 0.16), inset -4px -4px 14px rgba(255, 255, 255, 0.82)",
 };
 
 const permissionRowStyle: React.CSSProperties = {
@@ -542,17 +562,25 @@ const permissionRowStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto 120px",
   alignItems: "center",
   gap: 8,
-  padding: "5px 6px",
+  padding: "7px 8px",
   fontSize: 12,
+  border: "1px solid rgba(255, 255, 255, 0.70)",
+  borderRadius: 10,
+  background: PERMISSION_SURFACE,
+  boxShadow: "3px 3px 9px rgba(174, 174, 192, 0.16), -3px -3px 9px rgba(255, 255, 255, 0.78)",
 };
 
 const permissionSelectStyle: React.CSSProperties = {
   minWidth: 0,
   height: 30,
-  border: "1px solid rgba(0,0,0,0.16)",
-  borderRadius: 6,
-  background: "#ffffff",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: PERMISSION_ACTIVE_SURFACE,
+  boxShadow: "inset 2px 2px 6px rgba(174, 174, 192, 0.18), inset -2px -2px 6px rgba(255, 255, 255, 0.82)",
   fontSize: 12,
+  color: "#111827",
+  fontWeight: 700,
+  padding: "0 8px",
 };
 
 const permissionStrongTextStyle: React.CSSProperties = {
@@ -570,8 +598,8 @@ const permissionMutedTextStyle: React.CSSProperties = {
 
 const permissionSubheadStyle: React.CSSProperties = {
   fontSize: 11,
-  fontWeight: 700,
-  color: "#333333",
+  fontWeight: 850,
+  color: "#334155",
   padding: "4px 6px",
 };
 
@@ -582,18 +610,21 @@ const permissionErrorStyle: React.CSSProperties = {
 
 const permissionSecondaryButtonStyle: React.CSSProperties = {
   minHeight: 32,
-  border: "1px solid rgba(0,0,0,0.16)",
-  borderRadius: 6,
-  background: "#ffffff",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 10,
+  background: PERMISSION_SURFACE,
   color: "#111111",
   cursor: "pointer",
   fontWeight: 700,
   padding: "0 10px",
+  boxShadow: PERMISSION_SHADOW,
+  transition: "background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease",
 };
 
 const permissionPrimaryButtonStyle: React.CSSProperties = {
   ...permissionSecondaryButtonStyle,
-  borderColor: "rgba(100,116,139,0.74)",
-  background: "#64748b",
-  color: "#111111",
+  borderColor: "transparent",
+  background: `${PERMISSION_ACTIVE_SURFACE} padding-box, ${PERMISSION_EDGE_FRAME} border-box`,
+  color: "#0f172a",
+  boxShadow: `${PERMISSION_SHADOW}, 0 0 0 1px rgba(120, 224, 255, 0.18), 0 0 14px rgba(183, 124, 255, 0.20)`,
 };

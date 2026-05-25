@@ -283,7 +283,7 @@ export const sidebarSectionStyle: React.CSSProperties = {
 
 export const sharedInboxRowsStyle: React.CSSProperties = {
   display: "grid",
-  gap: 3,
+  gap: 1,
   minWidth: 0,
 };
 
@@ -293,22 +293,22 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.66) 46%, rgba(247, 240, 255, 0.74))"
     : "linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(230, 252, 255, 0.58) 46%, rgba(247, 239, 255, 0.66))";
   return {
-    width: "calc(100% - 10px)",
-    minHeight: 30,
+    width: "calc(100% - 4px)",
+    minHeight: 26,
     display: "grid",
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
-    gap: 5,
-    margin: "0 5px",
+    gap: 4,
+    margin: "0 2px",
     border: "1px solid transparent",
-    borderRadius: 10,
+    borderRadius: 9,
     background: framed ? `${liquidSurface} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : "#ffffff",
     color: "#111827",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
     fontWeight: active ? 700 : 500,
-    padding: `3px 5px 3px ${8 + depth * 14}px`,
+    padding: `2px 5px 2px ${7 + depth * 13}px`,
     textAlign: "left",
     minWidth: 0,
     boxShadow: dropPlacement === "before"
@@ -1305,7 +1305,9 @@ export const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   zIndex: 130,
   display: "grid",
   placeItems: "center",
-  background: "rgba(15, 23, 42, 0.18)",
+  background: "rgba(241, 245, 249, 0.66)",
+  backdropFilter: "blur(14px) saturate(1.18)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.18)",
   padding: 22,
 };
 
@@ -1315,10 +1317,10 @@ export const nodeEditorPopupStyle: React.CSSProperties = {
   height: "min(820px, calc(100vh - 64px))",
   minWidth: "min(420px, calc(100vw - 44px))",
   minHeight: "min(320px, calc(100vh - 64px))",
-  border: "1px solid rgba(100, 116, 139, 0.54)",
-  borderRadius: 16,
-  background: "#ffffff",
-  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  border: "1px solid transparent",
+  borderRadius: 18,
+  background: `${HOME_KEY_PANEL_BACKGROUND} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`,
+  boxShadow: HOME_KEY_PANEL_SHADOW,
   overflow: "hidden",
   cursor: "default",
 };
@@ -1330,14 +1332,15 @@ export const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   zIndex: 8,
   width: 24,
   height: 24,
-  border: "1px solid #334155",
-  borderRadius: 4,
-  background: "#475569",
-  color: "#ffffff",
+  border: "1px solid transparent",
+  borderRadius: 8,
+  background: `${HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`,
+  color: "#0f172a",
   fontSize: 16,
   fontWeight: 600,
   lineHeight: "20px",
   cursor: "pointer",
+  boxShadow: HOME_KEY_SHADOW,
 };
 
 export const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
@@ -1349,12 +1352,13 @@ export const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.56)",
-  borderRadius: 4,
-  background: "#ffffff",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: 8,
+  background: HOME_KEY_SURFACE,
   color: "#334155",
   padding: 0,
   cursor: "pointer",
+  boxShadow: HOME_KEY_SHADOW,
 };
 
 export const deleteModalBackdropStyle: React.CSSProperties = {
@@ -1563,6 +1567,17 @@ export const mailListTitleStackStyle: React.CSSProperties = {
   gap: 2,
 };
 
+export const mailListPrimaryTitleStyle: React.CSSProperties = {
+  ...panelTitleStyle,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 16,
+  fontWeight: 800,
+  lineHeight: 1.15,
+};
+
 export const accountRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -1604,10 +1619,27 @@ export const mailPanelSearchButtonStyle: React.CSSProperties = {
 
 export const mailArchiveActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(5, minmax(0, 1fr)) minmax(68px, 0.9fr)",
-  gap: 4,
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 6,
   alignItems: "center",
   minWidth: 0,
+};
+
+export const mailComposeSentActionsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  gap: 6,
+  alignItems: "center",
+};
+
+export const mailUnreadFilterRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 24,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 10,
+  padding: "0 2px",
 };
 
 export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperties {
@@ -1673,6 +1705,13 @@ export const selectedCountStyle: React.CSSProperties = {
   color: "rgba(15, 23, 42, 0.58)",
   fontSize: 11,
   fontWeight: 600,
+  whiteSpace: "nowrap",
+};
+
+export const unreadCountInlineStyle: React.CSSProperties = {
+  color: "rgba(15, 23, 42, 0.58)",
+  fontSize: 11,
+  fontWeight: 700,
   whiteSpace: "nowrap",
 };
 

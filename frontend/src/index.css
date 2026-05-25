@@ -279,6 +279,20 @@ button, input, textarea, select {
   opacity: 0.52;
 }
 
+.mango-elevated-action {
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease, color 150ms ease;
+}
+
+.mango-elevated-action:not(:disabled):hover {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(230, 252, 255, 0.58) 46%, rgba(247, 239, 255, 0.66)) padding-box,
+    linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86)) border-box !important;
+  border-color: transparent !important;
+  box-shadow: 0 9px 24px rgba(15, 23, 42, 0.14), 0 0 16px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.86) !important;
+  color: #0f172a !important;
+  transform: translateY(-1px);
+}
+
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
 .editor-document-scroll {
   --editor-document-scroll-accent: rgb(71, 85, 105);

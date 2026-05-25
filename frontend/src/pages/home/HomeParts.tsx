@@ -650,6 +650,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
         ))}
         {onCollapseToTab && (
           <button
+            className="mango-elevated-action"
             type="button"
             title="Collapse node editor to app tab"
             aria-label="Collapse node editor to app tab"
@@ -660,6 +661,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
           </button>
         )}
         <button
+          className="mango-elevated-action"
           type="button"
           title="Close node editor"
           onClick={onClose}
@@ -667,7 +669,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
         >
           X
         </button>
-        <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
+        <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)" }} />}>
           <LazyHomeNodeEditorContent
             accent="#334155"
             widgetId={`communications-node-editor-overlay:${nodeID}`}
