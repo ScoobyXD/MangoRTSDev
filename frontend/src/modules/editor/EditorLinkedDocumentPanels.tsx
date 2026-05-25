@@ -2,6 +2,17 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import type { LogicGateRaciAssignment, LogicGateRaciRole } from "../logic-gate-map/shared";
+import {
+  avatarBackgroundForName,
+  EDITOR_NEU_ACTIVE_SURFACE,
+  EDITOR_NEU_EDGE_FRAME,
+  EDITOR_NEU_PANEL_BACKGROUND,
+  EDITOR_NEU_PANEL_SHADOW,
+  EDITOR_NEU_SOFT_BORDER,
+  EDITOR_NEU_SURFACE,
+  initialsForName,
+  userAccentForName,
+} from "./NodeWorkspaceSurfaceShared";
 
 type EditorLinkedDocumentPanelsProps = {
   activeTab: EditorTabID;
@@ -340,7 +351,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     aria-haspopup="listbox"
                     aria-expanded={canEdit && assigneeMenuOpen}
                     aria-controls={`${assigneeListID}-options`}
-                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: `1px solid ${assigneeMenuOpen ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 500, padding: "3px 27px 3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default" }}
+                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: assigneeMenuOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: assigneeMenuOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: nodePresetFields.assigneeDraft ? userAccentForName(nodePresetFields.assigneeDraft) : "#111827", font: "inherit", fontSize: 11.5, fontWeight: 750, padding: "3px 27px 3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                   />
                   <span aria-hidden="true" style={{ position: "absolute", right: 7, top: 5, color: accent, pointerEvents: "none" }}>
                     <PersonIcon color={accent} />
@@ -350,7 +361,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       id={`${assigneeListID}-options`}
                       role="listbox"
                       aria-label="People"
-                      style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: "4px 0", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.18)", color: "#111827" }}
+                      style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
                     >
                       {assigneeMatches.length === 0 ? (
                         <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>No matches</div>
@@ -358,25 +369,27 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         const label = companyUserOptionLabel(user);
                         const name = (user.display_name ?? "").trim() || label;
                         const email = (user.email ?? "").trim();
+                        const selected = label === nodePresetFields.assigneeDraft;
+                        const userAccent = userAccentForName(name || user.user_id);
                         return (
                           <button
                             key={user.user_id}
                             type="button"
                             role="option"
-                            aria-selected={label === nodePresetFields.assigneeDraft}
+                            aria-selected={selected}
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => {
                               onSetNodeAssigneeDraft(label);
                               onCommitNodeAssigneeDraft(label);
                               setAssigneeMenuOpen(false);
                             }}
-                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(100, 116, 139, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                            style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined }}
                           >
-                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(100, 116, 139, 0.13)", color: accent }}>
-                              <PersonIcon color={accent} />
+                            <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name || user.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                              {initialsForName(name || user.user_id)}
                             </span>
                             <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 500 }}>{name}</span>
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: userAccent }}>{name}</span>
                               {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
                             </span>
                           </button>
@@ -613,8 +626,8 @@ function LogicGateRaciRoleEditor({
   assignments,
   companyUsers,
   accent,
-  panelBackground,
-  ruleColor,
+  panelBackground: _panelBackground,
+  ruleColor: _ruleColor,
   canEdit,
   onAddUser,
   onRemoveUser,
@@ -687,25 +700,32 @@ function LogicGateRaciRoleEditor({
       <div style={{ minHeight: 30, display: "flex", flexWrap: "wrap", gap: 4 }}>
         {assignments.length === 0 ? (
           <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11 }}>No people</span>
-        ) : assignments.map((assignment) => (
-          <span
-            key={`${assignment.role}:${assignment.user_id}`}
-            title={assignment.user_email || assignment.user_id}
-            style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "minmax(0, 1fr) 16px" : "minmax(0, 1fr)", alignItems: "center", gap: 4, border: `1px solid ${ruleColor}`, borderRadius: 6, background: panelBackground, padding: canEdit ? "2px 3px 2px 6px" : "2px 6px", color: "inherit" }}
-          >
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600 }}>{raciAssignmentLabel(assignment)}</span>
-            {canEdit && (
-              <button
-                type="button"
-                aria-label={`Remove ${raciAssignmentLabel(assignment)} from ${label}`}
-                onClick={() => onRemoveUser(role, assignment.user_id)}
-                style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
-              >
-                x
-              </button>
-            )}
-          </span>
-        ))}
+        ) : assignments.map((assignment) => {
+          const assignmentLabel = raciAssignmentLabel(assignment);
+          const assignmentAccent = userAccentForName(assignmentLabel || assignment.user_id);
+          return (
+            <span
+              key={`${assignment.role}:${assignment.user_id}`}
+              title={assignment.user_email || assignment.user_id}
+              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "18px minmax(0, 1fr) 16px" : "18px minmax(0, 1fr)", alignItems: "center", gap: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px 2px 4px" : "2px 7px 2px 4px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+            >
+              <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 7.5, fontWeight: 900 }}>
+                {initialsForName(assignmentLabel || assignment.user_id)}
+              </span>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
+              {canEdit && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${assignmentLabel} from ${label}`}
+                  onClick={() => onRemoveUser(role, assignment.user_id)}
+                  style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
+                >
+                  x
+                </button>
+              )}
+            </span>
+          );
+        })}
       </div>
       <div ref={menuRef} style={{ position: "relative", minWidth: 0 }}>
         <input
@@ -737,14 +757,14 @@ function LogicGateRaciRoleEditor({
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 24, boxSizing: "border-box", border: `1px solid ${open ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11, fontWeight: 500, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 650, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
         />
         {canEdit && open && (
           <div
             id={`${inputID}-options`}
             role="listbox"
             aria-label={`${label} people`}
-            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: "4px 0", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.18)", color: "#111827" }}
+            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {matches.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>{companyUsers.length === assignedIDs.size ? "All people added" : "No matches"}</div>
@@ -752,6 +772,7 @@ function LogicGateRaciRoleEditor({
               const optionLabel = companyUserOptionLabel(user);
               const name = (user.display_name ?? "").trim() || optionLabel;
               const email = (user.email ?? "").trim();
+              const optionAccent = userAccentForName(name || user.user_id);
               return (
                 <button
                   key={user.user_id}
@@ -760,13 +781,13 @@ function LogicGateRaciRoleEditor({
                   aria-selected={false}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => addUser(user.user_id)}
-                  style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                  style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit" }}
                 >
-                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(100, 116, 139, 0.13)", color: accent }}>
-                    <PersonIcon color={accent} />
+                  <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name || user.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                    {initialsForName(name || user.user_id)}
                   </span>
                   <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 500 }}>{name}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent }}>{name}</span>
                     {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
                   </span>
                 </button>

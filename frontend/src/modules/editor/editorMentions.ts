@@ -20,8 +20,8 @@ export type MentionTextSegment = {
 
 export const EDITOR_MENTION_ATTRIBUTE = "data-mango-mention";
 export const EDITOR_MENTION_USER_ID_ATTRIBUTE = "data-mango-mention-user-id";
-export const EDITOR_MENTION_BACKGROUND = "#f1f5f9";
-export const EDITOR_MENTION_COLOR = "#334155";
+export const EDITOR_MENTION_BACKGROUND = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.66) 46%, rgba(247,239,255,0.72))";
+export const EDITOR_MENTION_COLOR = "#0f172a";
 
 const MENTION_BOUNDARY_PATTERN = /[A-Za-z0-9_@.-]/;
 
@@ -79,11 +79,13 @@ export function buildMentionOptions(users: MentionableCompanyUser[], query: stri
 
 export function applyEditorMentionStyle(element: HTMLElement) {
   element.setAttribute(EDITOR_MENTION_ATTRIBUTE, "true");
-  element.style.backgroundColor = EDITOR_MENTION_BACKGROUND;
+  element.style.background = EDITOR_MENTION_BACKGROUND;
   element.style.color = EDITOR_MENTION_COLOR;
-  element.style.borderRadius = "3px";
-  element.style.padding = "0 2px";
-  element.style.fontWeight = "700";
+  element.style.border = "1px solid rgba(183, 124, 255, 0.34)";
+  element.style.borderRadius = "6px";
+  element.style.padding = "0 4px";
+  element.style.fontWeight = "800";
+  element.style.boxShadow = "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)";
   element.style.setProperty("box-decoration-break", "clone");
 }
 

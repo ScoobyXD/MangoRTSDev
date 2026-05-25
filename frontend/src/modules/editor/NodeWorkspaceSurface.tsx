@@ -43,6 +43,12 @@ import {
   CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   DEFAULT_TEXT_BLOCK_TITLE,
   EMAIL_DRAG_MIME,
+  EDITOR_NEU_ACTIVE_SURFACE,
+  EDITOR_NEU_EDGE_FRAME,
+  EDITOR_NEU_PANEL_SHADOW,
+  EDITOR_NEU_SHADOW,
+  EDITOR_NEU_SOFT_BORDER,
+  EDITOR_NEU_SURFACE,
   formatFileSize,
   formatTimestamp,
   ChatIcon,
@@ -1147,15 +1153,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           alignContent: "center",
           justifyItems: "center",
           gap: 7,
-          border: `1px solid ${selected || busy ? accent : "rgba(100, 116, 139, 0.28)"}`,
-          borderRadius: 7,
-          background: busy ? "rgba(100,116,139,0.16)" : selected ? "#f8fafc" : "#f8fafc",
+          border: selected || busy ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+          borderRadius: 12,
+          background: selected || busy ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
           color: surfaceText,
           cursor: assigningLogicGateID ? "default" : "pointer",
           font: "inherit",
           padding: "10px 8px",
           minWidth: 0,
-          boxShadow: selected ? "0 0 0 2px rgba(100, 116, 139, 0.12) inset" : "none",
+          boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW,
         }}
       >
         <span aria-hidden="true" style={{ width: 28, height: 28, display: "grid", placeItems: "center", transform: "scale(1.3)" }}>
@@ -1216,14 +1222,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               style={{
                 width: 30,
                 height: 30,
-                borderRadius: 6,
-                border: `1px solid ${accent}`,
-                background: panelBackground,
+                borderRadius: 9,
+                border: "1px solid transparent",
+                background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
                 color: accent,
                 display: "grid",
                 placeItems: "center",
                 cursor: "pointer",
                 flex: "0 0 auto",
+                boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
               <PlusIcon color={accent} />
@@ -1235,10 +1242,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onClick={onMarkAllChangesSeen}
               style={{
                 minHeight: 30,
-                borderRadius: 6,
-                border: "1px solid rgba(100, 116, 139, 0.34)",
-                background: "rgba(248, 250, 252, 0.94)",
-                color: "#334155",
+                borderRadius: 9,
+                border: "1px solid rgba(16,185,129,0.34)",
+                background: "linear-gradient(135deg, rgba(236,253,245,0.94), rgba(207,250,254,0.64))",
+                color: "#047857",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1247,6 +1254,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 900,
                 letterSpacing: 0,
+                boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
               Seen all
@@ -1258,9 +1266,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onClick={() => setEmailPickerOpen(true)}
               style={{
                 minHeight: 30,
-                borderRadius: 6,
-                border: `1px solid ${strokeColor}`,
-                background: panelBackground,
+                borderRadius: 9,
+                border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                background: EDITOR_NEU_SURFACE,
                 color: surfaceText,
                 display: "inline-flex",
                 alignItems: "center",
@@ -1270,6 +1278,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 800,
                 letterSpacing: 0,
+                boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
               <MailIcon color={accent} />
@@ -1285,9 +1294,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               }}
               style={{
                 minHeight: 30,
-                borderRadius: 6,
-                border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
-                background: logicGateAssignerOpen ? "rgba(100,116,139,0.12)" : panelBackground,
+                borderRadius: 9,
+                border: logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                background: logicGateAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
                 color: surfaceText,
                 display: "inline-flex",
                 alignItems: "center",
@@ -1297,6 +1306,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 800,
                 letterSpacing: 0,
+                boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
               <ExplorerRowIcon kind="logic_gate" />
@@ -1333,7 +1343,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {canEdit && logicGateAssignerOpen && (
           <>
             <div aria-hidden="true" />
-            <div style={{ minWidth: 0, display: "grid", gap: 10, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 10, boxShadow: "0 10px 24px rgba(15,23,42,0.08)" }}>
+            <div style={{ minWidth: 0, display: "grid", gap: 10, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, padding: 10, boxShadow: EDITOR_NEU_PANEL_SHADOW }}>
               <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
                   <ExplorerRowIcon kind="logic_gate" />
@@ -1341,7 +1351,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 </div>
                 {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
               </div>
-              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(255, 61, 127, 0.28)" : "rgba(22, 163, 74, 0.22)"}`, borderRadius: 7, background: nodePriorityUnassignedForLogicGate ? "#fff0f4" : "#f0fdf4", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3 }}>
+              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(255, 61, 127, 0.28)" : "rgba(22, 163, 74, 0.22)"}`, borderRadius: 10, background: nodePriorityUnassignedForLogicGate ? "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(254,249,195,0.66))" : "linear-gradient(135deg, rgba(236,253,245,0.96), rgba(207,250,254,0.66))", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
                 In order to assign to a Logic Gate, give this node a priority.
               </div>
 
@@ -1367,7 +1377,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   }}
                   placeholder="Search logic gates"
                   aria-label="Search logic gates"
-                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(100,116,139,0.10)" : "none" }}
+                  style={{ width: "100%", minHeight: 32, border: logicGateSearch.trim() ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", background: logicGateSearch.trim() ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 />
                 <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 10, top: 9, color: accent, pointerEvents: "none" }}>
                   <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -1375,7 +1385,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 </svg>
               </div>
               {logicGateSearch.trim() && (
-                <div role="listbox" aria-label="Logic gate search results" style={{ display: "grid", gap: 8, maxHeight: 220, overflowY: "auto", padding: 8, border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.14)" }}>
+                <div role="listbox" aria-label="Logic gate search results" style={{ display: "grid", gap: 8, maxHeight: 220, overflowY: "auto", padding: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_ACTIVE_SURFACE, boxShadow: EDITOR_NEU_PANEL_SHADOW }}>
                   {logicGateSearchLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>Searching...</div>}
                   {!logicGateSearchLoading && searchedLogicGateGroups.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No matches</div>}
                   {!logicGateSearchLoading && searchedLogicGateGroups.length > 0 && renderLogicGateGroups(searchedLogicGateGroups, "search")}
@@ -1462,8 +1472,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <React.Fragment key={block.id}>
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(100,116,139,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
+                <div style={{ border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
                     <input
                       value={block.title}
                       disabled={!canEdit}
@@ -1505,9 +1515,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         type="button"
                         title={chatIsVisible ? "Hide chat" : "Open chat"}
                         onClick={toggleChat}
-                        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer" }}
+                        style={{ width: 26, height: 24, borderRadius: 8, border: chatIsActive ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatIsActive ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
                       >
-                        <ChatIcon color={chatIsActive ? "#ffffff" : accent} />
+                        <ChatIcon color={accent} />
                       </button>
                     ) : (
                       <div aria-hidden="true" style={{ width: 26, height: 24 }} />
@@ -1644,9 +1654,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onDrop={onDropEmail}
               style={{
                 minHeight: 58,
-                border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
-                borderRadius: 8,
-                background: dropActive ? "rgba(100,116,139,0.08)" : panelBackground,
+                border: dropActive ? "1px solid transparent" : `1px dashed ${EDITOR_NEU_SOFT_BORDER}`,
+                borderRadius: 14,
+                background: dropActive ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
@@ -1655,6 +1665,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 color: surfaceText,
                 fontSize: 12,
                 fontWeight: 800,
+                boxShadow: dropActive ? "0 10px 24px rgba(15,23,42,0.12), 0 0 16px rgba(183,124,255,0.18)" : EDITOR_NEU_SHADOW,
               }}
             >
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -1664,7 +1675,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <button
                 type="button"
                 onClick={() => setEmailPickerOpen(true)}
-                style={{ border: `1px solid ${accent}`, background: "#ffffff", color: accent, borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto" }}
+                style={{ border: "1px solid transparent", background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, color: accent, borderRadius: 9, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto", boxShadow: EDITOR_NEU_SHADOW }}
               >
                 Add email
               </button>
