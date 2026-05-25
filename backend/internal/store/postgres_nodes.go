@@ -1549,50 +1549,65 @@ func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListI
 		return nil, ErrNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, `
-select change.company_id::text,
-       change.change_id::text,
-       change.node_id::text,
-       change.information_id::text,
-       change.change_type,
-       change.text,
-       change.start_offset,
-       change.end_offset,
-       coalesce(change.actor_user_id::text, ''),
-       coalesce(change.actor_display_name, ''),
-       change.created_timestamp
-from node_content_changes change
-left join node_content_change_seen seen
-  on seen.company_id=change.company_id
- and seen.change_id=change.change_id
+select projection.company_id::text,
+       projection.node_id::text,
+       projection.information_id::text,
+       projection.information,
+       coalesce(seen.information, ''),
+       coalesce(actor.actor_user_id::text, ''),
+       coalesce(actor.actor_display_name, ''),
+       actor.created_timestamp
+from node_projection_table projection
+left join node_projection_seen_snapshots seen
+  on seen.company_id=projection.company_id
+ and seen.node_id=projection.node_id
+ and seen.information_id=projection.information_id
  and seen.user_id=$3::uuid
-where change.company_id=$1::uuid
-  and change.node_id=$2::uuid
-  and seen.change_id is null
-  and change.actor_user_id is distinct from $3::uuid
-order by change.created_timestamp asc, change.change_id asc`, companyID, nodeID, userID)
+left join lateral (
+  select change.actor_user_id, change.actor_display_name, change.created_timestamp, change.change_id
+    from node_content_changes change
+   where change.company_id=projection.company_id
+     and change.node_id=projection.node_id
+     and change.information_id=projection.information_id
+     and change.actor_user_id is distinct from $3::uuid
+     and (seen.seen_timestamp is null or change.created_timestamp >= seen.seen_timestamp)
+   order by change.created_timestamp desc, change.change_id desc
+   limit 1
+) actor on true
+where projection.company_id=$1::uuid
+  and projection.node_id=$2::uuid
+  and projection.type='Text box'::information_type
+  and actor.created_timestamp is not null
+order by actor.created_timestamp asc, projection.created_timestamp asc, projection.information_id asc`, companyID, nodeID, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := make([]domain.NodeContentChange, 0)
 	for rows.Next() {
-		var item domain.NodeContentChange
+		var companyIDValue, nodeIDValue, informationID, currentInformation, seenInformation, actorUserID, actorDisplayName string
+		var changedAt time.Time
 		if err := rows.Scan(
-			&item.CompanyID,
-			&item.ChangeID,
-			&item.NodeID,
-			&item.InformationID,
-			&item.ChangeType,
-			&item.Text,
-			&item.StartOffset,
-			&item.EndOffset,
-			&item.ActorUserID,
-			&item.ActorDisplayName,
-			&item.CreatedTimestamp,
+			&companyIDValue,
+			&nodeIDValue,
+			&informationID,
+			&currentInformation,
+			&seenInformation,
+			&actorUserID,
+			&actorDisplayName,
+			&changedAt,
 		); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		items = append(items, buildNodeProjectionSnapshotChanges(
+			companyIDValue,
+			nodeIDValue,
+			informationID,
+			seenInformation,
+			currentInformation,
+			normalizeNodeContentChangeActor(actorUserID, actorDisplayName),
+			changedAt,
+		)...)
 	}
 	return items, rows.Err()
 }
@@ -1617,8 +1632,23 @@ func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInpu
 		return 0, ErrNotFound
 	}
 
+	if informationID := nodeProjectionInformationIDFromContentChangeID(changeID); informationID != "" {
+		count, err := markNodeProjectionSeenSnapshotsTx(ctx, tx, companyID, nodeID, informationID, userID)
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
+
 	if changeID != "" {
-		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from node_content_changes where company_id=$1::uuid and node_id=$2::uuid and change_id=$3::uuid)`, companyID, nodeID, changeID); err != nil {
+		rawChangeID := cleanUUIDText(changeID)
+		if rawChangeID == "" {
+			return 0, ErrInvalid
+		}
+		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from node_content_changes where company_id=$1::uuid and node_id=$2::uuid and change_id=$3::uuid)`, companyID, nodeID, rawChangeID); err != nil {
 			return 0, err
 		} else if !exists {
 			return 0, ErrNotFound
@@ -1626,7 +1656,7 @@ func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInpu
 		result, err := tx.ExecContext(ctx, `
 insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, now())
-on conflict (company_id, change_id, user_id) do nothing`, companyID, changeID, userID)
+on conflict (company_id, change_id, user_id) do nothing`, companyID, rawChangeID, userID)
 		if err != nil {
 			return 0, err
 		}
@@ -1637,17 +1667,67 @@ on conflict (company_id, change_id, user_id) do nothing`, companyID, changeID, u
 		return int(affected), nil
 	}
 
-	result, err := tx.ExecContext(ctx, `
+	count, err := markNodeProjectionSeenSnapshotsTx(ctx, tx, companyID, nodeID, "", userID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `
 insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
 select change.company_id, change.change_id, $3::uuid, now()
 from node_content_changes change
 where change.company_id=$1::uuid
   and change.node_id=$2::uuid
-on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, userID)
-	if err != nil {
+on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, userID); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func markNodeProjectionSeenSnapshotsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID, userID string) (int, error) {
+	if informationID != "" {
+		result, err := tx.ExecContext(ctx, `
+insert into node_projection_seen_snapshots
+  (company_id, node_id, information_id, user_id, information, projection_updated_timestamp, seen_timestamp)
+select projection.company_id, projection.node_id, projection.information_id, $4::uuid,
+       projection.information, projection.updated_timestamp, now()
+  from node_projection_table projection
+ where projection.company_id=$1::uuid
+   and projection.node_id=$2::uuid
+   and projection.information_id=$3::uuid
+   and projection.type='Text box'::information_type
+on conflict (company_id, node_id, information_id, user_id)
+do update set
+  information=excluded.information,
+  projection_updated_timestamp=excluded.projection_updated_timestamp,
+  seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, informationID, userID)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return 0, ErrNotFound
+		}
+		return int(affected), nil
+	}
+
+	result, err := tx.ExecContext(ctx, `
+insert into node_projection_seen_snapshots
+  (company_id, node_id, information_id, user_id, information, projection_updated_timestamp, seen_timestamp)
+select projection.company_id, projection.node_id, projection.information_id, $3::uuid,
+       projection.information, projection.updated_timestamp, now()
+  from node_projection_table projection
+ where projection.company_id=$1::uuid
+   and projection.node_id=$2::uuid
+   and projection.type='Text box'::information_type
+on conflict (company_id, node_id, information_id, user_id)
+do update set
+  information=excluded.information,
+  projection_updated_timestamp=excluded.projection_updated_timestamp,
+  seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, userID)
+	if err != nil {
 		return 0, err
 	}
 	affected, _ := result.RowsAffected()

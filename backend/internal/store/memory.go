@@ -13,6 +13,7 @@ type MemoryRepo struct {
 	nodeText                 map[string]map[string]domain.NodeProjection
 	nodeContentChanges       map[string]domain.NodeContentChange
 	nodeContentChangeSeen    map[string]time.Time
+	nodeProjectionSeen       map[string]memoryNodeProjectionSeen
 	nodeRels                 map[string][]domain.NodeRelationship
 	logicGates               map[string]domain.LogicGate
 	logicGateInfo            map[string][]domain.LogicGateInformation
@@ -58,6 +59,7 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeText:                 map[string]map[string]domain.NodeProjection{},
 		nodeContentChanges:       map[string]domain.NodeContentChange{},
 		nodeContentChangeSeen:    map[string]time.Time{},
+		nodeProjectionSeen:       map[string]memoryNodeProjectionSeen{},
 		nodeRels:                 map[string][]domain.NodeRelationship{},
 		logicGates:               map[string]domain.LogicGate{},
 		logicGateInfo:            map[string][]domain.LogicGateInformation{},
@@ -101,6 +103,15 @@ func key(companyID, id string) string {
 
 func nodeContentChangeSeenKey(companyID, changeID, userID string) string {
 	return companyID + ":" + changeID + ":" + userID
+}
+
+type memoryNodeProjectionSeen struct {
+	information string
+	seenAt      time.Time
+}
+
+func nodeProjectionSeenKey(companyID, nodeID, informationID, userID string) string {
+	return companyID + ":" + nodeID + ":" + informationID + ":" + userID
 }
 
 func folderItemKey(companyID, itemType, itemID string) string {

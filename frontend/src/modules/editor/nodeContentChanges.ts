@@ -20,8 +20,17 @@ export type NodeContentChangeResponse = {
   changes?: NodeContentChange[];
 };
 
+const NODE_PROJECTION_CONTENT_CHANGE_PREFIX = "projection:";
+
 function cleanOffset(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
+}
+
+export function nodeContentChangeSeenGroupKey(change: NodeContentChange): string {
+  if (change.change_id.startsWith(NODE_PROJECTION_CONTENT_CHANGE_PREFIX) && change.information_id) {
+    return `${change.node_id}:${change.information_id}`;
+  }
+  return change.change_id;
 }
 
 export function resolveNodeAdditionRange(documentText: string, change: NodeContentChange): { startOffset: number; endOffset: number } | null {

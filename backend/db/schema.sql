@@ -257,6 +257,19 @@ create table if not exists node_content_change_seen (
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
+create table if not exists node_projection_seen_snapshots (
+  company_id uuid not null,
+  node_id uuid not null,
+  information_id uuid not null,
+  user_id uuid not null,
+  information text not null,
+  projection_updated_timestamp timestamptz not null,
+  seen_timestamp timestamptz not null default now(),
+  primary key (company_id, node_id, information_id, user_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
+  foreign key (user_id) references users (user_id) on delete cascade
+);
+
 create table if not exists node_map_positions (
   company_id uuid not null,
   node_id uuid not null,
@@ -1813,6 +1826,8 @@ create index if not exists idx_node_content_changes_node_created
   on node_content_changes(company_id, node_id, created_timestamp, change_id);
 create index if not exists idx_node_content_change_seen_user
   on node_content_change_seen(company_id, user_id, change_id);
+create index if not exists idx_node_projection_seen_user
+  on node_projection_seen_snapshots(company_id, user_id, node_id, information_id);
 create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);

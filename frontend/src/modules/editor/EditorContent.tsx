@@ -36,7 +36,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import type { NodeContentChange } from "./nodeContentChanges";
+import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
@@ -1650,16 +1650,22 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const markNodeContentChangeSeen = useCallback((changeID: string) => {
     if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
     const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);
-    setNodeContentChanges((current) => current.filter((change) => change.change_id !== changeID));
+    const removedGroupKey = removedChange ? nodeContentChangeSeenGroupKey(removedChange) : "";
+    const removedChanges = removedGroupKey
+      ? nodeContentChanges.filter((change) => nodeContentChangeSeenGroupKey(change) === removedGroupKey)
+      : removedChange ? [removedChange] : [];
+    setNodeContentChanges((current) => current.filter((change) => removedGroupKey ? nodeContentChangeSeenGroupKey(change) !== removedGroupKey : change.change_id !== changeID));
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/${changeID}/seen`, {
       method: "POST",
       body: JSON.stringify({ company_id: companyID }),
     }).catch((cause) => {
-      if (removedChange) {
+      if (removedChanges.length > 0) {
         setNodeContentChanges((current) => {
-          if (current.some((change) => change.change_id === removedChange.change_id)) return current;
-          return [...current, removedChange].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
+          const existingIDs = new Set(current.map((change) => change.change_id));
+          const restored = removedChanges.filter((change) => !existingIDs.has(change.change_id));
+          if (restored.length === 0) return current;
+          return [...current, ...restored].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
         });
       }
       setError(cause instanceof Error ? cause.message : "failed_to_mark_node_change_seen");

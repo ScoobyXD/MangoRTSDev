@@ -14,11 +14,17 @@ func TestPostgresUnseenNodeContentChangesComparesActorAsUUID(t *testing.T) {
 	body := extractNodeContentChangeFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) ListUnseenNodeContentChanges")
 	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
 
+	if !strings.Contains(normalized, "node_projection_seen_snapshots seen") {
+		t.Fatalf("ListUnseenNodeContentChanges must use per-user projection seen snapshots")
+	}
 	if !strings.Contains(normalized, "seen.user_id=$3::uuid") {
-		t.Fatalf("ListUnseenNodeContentChanges must bind the viewer id as uuid for seen rows")
+		t.Fatalf("ListUnseenNodeContentChanges must bind the viewer id as uuid for projection seen rows")
 	}
 	if !strings.Contains(normalized, "change.actor_user_id is distinct from $3::uuid") {
 		t.Fatalf("ListUnseenNodeContentChanges must compare actor_user_id to the viewer id as uuid")
+	}
+	if !strings.Contains(normalized, "change.created_timestamp >= seen.seen_timestamp") {
+		t.Fatalf("ListUnseenNodeContentChanges must anchor raw actor changes after the viewer's seen snapshot")
 	}
 	for _, forbidden := range []string{
 		"coalesce(change.actor_user_id::text, '') <> $3",

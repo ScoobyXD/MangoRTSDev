@@ -10,6 +10,7 @@ type nodeViewLoader interface {
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
+	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
 }
 
 type logicGateViewLoader interface {
@@ -55,6 +56,23 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		})
 		if err != nil {
 			return domain.NodeView{}, err
+		}
+		changedProjectionIDs := map[string]bool{}
+		for _, change := range contentChanges {
+			changedProjectionIDs[change.InformationID] = true
+		}
+		for _, projection := range projections {
+			if projection.Type != "Text box" || changedProjectionIDs[projection.InformationID] {
+				continue
+			}
+			if _, err := loader.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+				CompanyID: companyID,
+				NodeID:    nodeID,
+				ChangeID:  nodeProjectionContentChangeID(projection.InformationID, NodeContentChangeAddition),
+				UserID:    userID,
+			}); err != nil {
+				return domain.NodeView{}, err
+			}
 		}
 	}
 	if details.Information == nil {
