@@ -24,10 +24,16 @@ type KanbanCardViewProps = {
   text: string;
   subtext: string;
   accent: string;
+  editingTitle: boolean;
+  renameTitleDraft: string;
+  renameInputRef: React.RefObject<HTMLInputElement>;
   onMouseDown: React.MouseEventHandler<HTMLElement>;
   onClick: React.MouseEventHandler<HTMLElement>;
   onDoubleClick: React.MouseEventHandler<HTMLElement>;
   onContextMenu: React.MouseEventHandler<HTMLElement>;
+  onSetRenameTitleDraft: (title: string) => void;
+  onCommitRenameTitle: (title: string) => void;
+  onCancelRenameTitle: () => void;
   onDragStart: React.DragEventHandler<HTMLElement>;
   onDragEnd: React.DragEventHandler<HTMLElement>;
   onDragOver: React.DragEventHandler<HTMLElement>;
@@ -47,10 +53,16 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   text,
   subtext,
   accent,
+  editingTitle,
+  renameTitleDraft,
+  renameInputRef,
   onMouseDown,
   onClick,
   onDoubleClick,
   onContextMenu,
+  onSetRenameTitleDraft,
+  onCommitRenameTitle,
+  onCancelRenameTitle,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -62,7 +74,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
 
   return (
     <article
-      draggable
+      draggable={!editingTitle}
       tabIndex={0}
       onMouseDown={onMouseDown}
       onClick={onClick}
@@ -80,7 +92,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         color: isIssue ? "#111111" : text,
         padding: "8px 9px 8px 13px",
         minHeight: 58,
-        cursor: "grab",
+        cursor: editingTitle ? "text" : "grab",
         outline: "none",
         overflow: "hidden",
         boxShadow: [
@@ -97,7 +109,44 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
           <NodeDocumentIcon color={color} />
         </span>
-        <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+        {editingTitle ? (
+          <input
+            ref={renameInputRef}
+            value={renameTitleDraft}
+            onChange={(event) => onSetRenameTitleDraft(event.currentTarget.value)}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                onCommitRenameTitle(event.currentTarget.value);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                onCancelRenameTitle();
+              }
+            }}
+            onBlur={(event) => onCommitRenameTitle(event.currentTarget.value)}
+            style={{
+              minWidth: 0,
+              width: "100%",
+              border: `1px solid ${accent}`,
+              background: cardBackground,
+              color: isIssue ? "#111111" : text,
+              font: "inherit",
+              fontSize: 12,
+              fontWeight: 500,
+              lineHeight: 1.25,
+              padding: "1px 4px",
+              outline: "none",
+            }}
+          />
+        ) : (
+          <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+        )}
       </div>
       {description && (
         <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
