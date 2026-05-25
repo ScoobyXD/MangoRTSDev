@@ -90,6 +90,11 @@ import {
   dataTransferIncludes,
   formatKanbanLoadError,
   isEditableKeyboardTarget,
+  KANBAN_EDGE_FRAME,
+  KANBAN_PANEL_BACKGROUND,
+  KANBAN_PANEL_SHADOW,
+  KANBAN_SOFT_BORDER,
+  KANBAN_SURFACE,
   publishKanbanBoardSelectionToLinkedFrames,
   publishKanbanSelectionToLinkedFrames,
   readLinkedExplorerSelection,
@@ -223,14 +228,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [companyID, requestJSON]);
 
   const isDark = theme === "dark";
-  const surface = isDark ? "#11161b" : "#ffffff";
+  const surface = isDark ? "#11161b" : KANBAN_PANEL_BACKGROUND;
   const text = isDark ? "#f6f8fb" : "#111827";
   const subtext = isDark ? "#b8c4cc" : "#475569";
-  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(100, 116, 139, 0.16)";
-  const laneBackground = isDark ? "#1a2229" : "#ffffff";
-  const laneBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(17,17,17,0.78)";
-  const laneShadow = isDark ? "none" : "0 4px 12px rgba(16,24,40,0.08)";
-  const cardBackground = isDark ? "#101418" : "#ffffff";
+  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(148, 163, 184, 0.18)";
+  const laneBackground = isDark ? "#1a2229" : "rgba(255, 255, 255, 0.62)";
+  const laneBorder = isDark ? "rgba(255,255,255,0.18)" : KANBAN_SOFT_BORDER;
+  const laneShadow = isDark ? "none" : KANBAN_PANEL_SHADOW;
+  const cardBackground = isDark ? "#101418" : KANBAN_SURFACE;
   const topClearancePx = arenaMode ? 34 : KANBAN_MODULE_TOP_CLEARANCE_PX;
   const boardHeaderLeftPaddingPx = arenaMode ? 0 : 162;
   const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
@@ -1588,7 +1593,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} yGroupBy={arenaYGroupBy} xGroupBy={arenaXGroupBy} ySortDirection={arenaYSortDirection} xSortDirection={arenaXSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetYGroupBy={selectArenaYGroupBy} onSetXGroupBy={setArenaXGroupBy} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} renderCard={renderCard} /> : (
@@ -1631,6 +1636,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             );
           })}
           {!arenaMode && !activeBoardIsLogicGate && <button
+            className="mango-elevated-action"
             type="button"
             title="Add column"
             onClick={() => void addColumn()}
@@ -1644,8 +1650,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               flex: "0 0 72px",
               width: 72,
               height: 72,
-              border: "1.5px solid #111111",
-              background: "#ffffff",
+              border: "1px solid transparent",
+              borderRadius: 16,
+              background: `${KANBAN_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
               color: "#111111",
               cursor: "pointer",
               display: "grid",
@@ -1653,7 +1660,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               fontSize: 34,
               fontWeight: 500,
               lineHeight: 1,
-              boxShadow: addColumnHover ? "0 8px 18px rgba(16,24,40,0.18)" : "none",
+              boxShadow: addColumnHover ? "0 12px 28px rgba(15, 23, 42, 0.14), 0 0 16px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255,255,255,0.86)" : "7px 7px 16px rgba(174, 174, 192, 0.22), -7px -7px 16px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.86)",
               transition: "box-shadow 120ms ease, transform 120ms ease",
               transform: addColumnHover ? "translateY(-1px)" : "none",
             }}

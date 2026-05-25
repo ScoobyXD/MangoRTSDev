@@ -17,9 +17,11 @@ import {
   mailArchiveActionCountStyle,
   mailArchiveActionLabelStyle,
   mailArchiveActionsStyle,
+  mailComposeSentActionsStyle,
   mailFiltersRowStyle,
   mailListTitleStackStyle,
   mailListToolbarStyle,
+  mailListPrimaryTitleStyle,
   mailPanelInputStyle,
   mailPanelPrimaryButtonStyle,
   mailPanelSearchButtonStyle,
@@ -32,7 +34,6 @@ import {
   messageRowStyle,
   messageRowTopStyle,
   messageStarButtonStyle,
-  mutedSmallStyle,
   panelTitleStyle,
   searchRowStyle,
   selectedCountStyle,
@@ -44,6 +45,8 @@ import {
   triageMessageRowStyle,
   triageSenderStyle,
   triageSubjectStyle,
+  mailUnreadFilterRowStyle,
+  unreadCountInlineStyle,
 } from "./homeStyles";
 
 type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred" | "archive">;
@@ -89,6 +92,15 @@ function StarIcon({ filled }: { filled: boolean }) {
   );
 }
 
+function SendPointerIcon() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M2.1 2.35 14 8 2.1 13.65l1.45-4.25L8.2 8 3.55 6.6z" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinejoin="round" />
+      <path d="M8.2 8H3.65" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function HomeMailWorkspace({
   activeViewID,
   accountEmail,
@@ -127,12 +139,12 @@ export function HomeMailWorkspace({
   onDeleteSelected,
   onDisconnect,
   onLoadMoreMessages,
-  onOpenAllMailbox,
   onOpenArchivedMailbox,
   onOpenContextMenu,
   onOpenNewCompose,
   onOpenPendingMailbox,
   onOpenReply,
+  onOpenSentMailbox,
   onOpenStarredMailbox,
   onSearchDraftChange,
   onSelectMessage,
@@ -181,12 +193,12 @@ export function HomeMailWorkspace({
   onDeleteSelected: () => void;
   onDisconnect: () => void;
   onLoadMoreMessages: () => void;
-  onOpenAllMailbox: () => void;
   onOpenArchivedMailbox: () => void;
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
   onOpenNewCompose: () => void;
   onOpenPendingMailbox: () => void;
   onOpenReply: () => void;
+  onOpenSentMailbox: () => void;
   onOpenStarredMailbox: () => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
@@ -239,14 +251,13 @@ export function HomeMailWorkspace({
             <div style={triageMailListHeaderStyle}>
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
+                  <h2 style={mailListPrimaryTitleStyle}>{listViewLabel}</h2>
+                  {sharedInboxSettings && <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>}
                 </div>
-                <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>
               <div style={accountRowStyle}>
                 <span style={accountEmailStyle}>{accountEmail}</span>
-                <button style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+                <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
               </div>
             </div>
           ) : (
@@ -262,6 +273,7 @@ export function HomeMailWorkspace({
           {isArchivableListView && (
             <div style={mailArchiveActionsStyle}>
               <button
+                className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "primary")}
                 title={mailboxCounts.primary === undefined ? "My Triage" : `My Triage (${formatMailboxCount(mailboxCounts.primary)})`}
@@ -272,6 +284,7 @@ export function HomeMailWorkspace({
                 <MailboxActionContent label="My Triage" count={mailboxCounts.primary} />
               </button>
               <button
+                className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "starred")}
                 title={mailboxCounts.starred === undefined ? "Starred" : `Starred (${formatMailboxCount(mailboxCounts.starred)})`}
@@ -282,31 +295,38 @@ export function HomeMailWorkspace({
                 <MailboxActionContent label="Starred" count={mailboxCounts.starred} />
               </button>
               <button
+                className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "archive")}
-                title={mailboxCounts.archive === undefined ? "Archived" : `Archived (${formatMailboxCount(mailboxCounts.archive)})`}
+                title={mailboxCounts.archive === undefined ? "Archive" : `Archive (${formatMailboxCount(mailboxCounts.archive)})`}
                 onClick={() => {
                   if (mailbox !== "archive") onOpenArchivedMailbox();
                 }}
               >
-                <MailboxActionContent label="Archived" count={mailboxCounts.archive} />
-              </button>
-              <button
-                type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "all")}
-                onClick={() => {
-                  if (mailbox !== "all") onOpenAllMailbox();
-                }}
-              >
-                All
+                <MailboxActionContent label="Archive" count={mailboxCounts.archive} />
               </button>
             </div>
           )}
-          {isArchivableListView && <button style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>}
+          {isArchivableListView && (
+            <div style={mailComposeSentActionsStyle}>
+              <button className="mango-elevated-action" style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
+              <button
+                className="mango-elevated-action"
+                type="button"
+                style={mailArchiveActionButtonStyle(mailbox === "sent")}
+                onClick={() => {
+                  if (mailbox !== "sent") onOpenSentMailbox();
+                }}
+              >
+                <SendPointerIcon />
+                <span style={mailArchiveActionLabelStyle}>Sent</span>
+              </button>
+            </div>
+          )}
           {!isArchivableListView && (
             <div style={accountRowStyle}>
               <span style={accountEmailStyle}>{accountEmail}</span>
-              <button style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+              <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
             </div>
           )}
           <form style={searchRowStyle} onSubmit={onSubmitSearch}>
@@ -316,19 +336,33 @@ export function HomeMailWorkspace({
               onChange={(event) => onSearchDraftChange(event.target.value)}
               placeholder="Search mail"
             />
-            <button type="submit" style={mailPanelSearchButtonStyle}>Search</button>
+            <button className="mango-elevated-action" type="submit" style={mailPanelSearchButtonStyle}>Search</button>
           </form>
-          <div style={mailFiltersRowStyle}>
-            <label style={checkboxStyle}>
-              <input
-                type="checkbox"
-                checked={unreadOnly}
-                onChange={(event) => onToggleUnreadOnly(event.target.checked)}
-              />
-              <span>Unread only</span>
-            </label>
-            {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
-          </div>
+          {isArchivableListView ? (
+            <div style={mailUnreadFilterRowStyle}>
+              <span style={unreadCountInlineStyle}>{mailFilterStatus || `${unreadMessageCount} unread`}</span>
+              <label style={checkboxStyle}>
+                <input
+                  type="checkbox"
+                  checked={unreadOnly}
+                  onChange={(event) => onToggleUnreadOnly(event.target.checked)}
+                />
+                <span>Unread only</span>
+              </label>
+            </div>
+          ) : (
+            <div style={mailFiltersRowStyle}>
+              <label style={checkboxStyle}>
+                <input
+                  type="checkbox"
+                  checked={unreadOnly}
+                  onChange={(event) => onToggleUnreadOnly(event.target.checked)}
+                />
+                <span>Unread only</span>
+              </label>
+              {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
+            </div>
+          )}
           {!isArchivableListView && (
             <div style={listHeaderStyle}>
               <span>{mailboxLabel(mailbox)}</span>

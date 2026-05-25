@@ -4,6 +4,7 @@ import {
   hexToRgba,
   type KanbanCard,
 } from "./shared";
+import { KANBAN_EDGE_FRAME } from "./KanbanContentModel";
 
 const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
@@ -59,6 +60,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
+  const cardSurfaceStop = cardBackground.includes("gradient") ? "rgba(255,255,255,0.86)" : cardBackground;
 
   return (
     <article
@@ -75,8 +77,11 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       onDrop={onDrop}
       style={{
         position: "relative",
-        border: `1px solid ${selected || highlighted ? color : hexToRgba(color, 0.58)}`,
-        background: isIssue ? "#f1f5f9" : `linear-gradient(90deg, ${hexToRgba(color, 0.1)}, ${cardBackground} 42px)`,
+        border: "1px solid transparent",
+        borderRadius: 11,
+        background: isIssue
+          ? `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,241,242,0.74) 48%, rgba(254,249,195,0.60)) padding-box, ${KANBAN_EDGE_FRAME} border-box`
+          : `linear-gradient(90deg, ${hexToRgba(color, 0.13)}, rgba(255,255,255,0.90) 46px, ${cardSurfaceStop}) padding-box, linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.82 : 0.58)}, rgba(255,255,255,0.78)) border-box`,
         color: isIssue ? "#111111" : text,
         padding: "8px 9px 8px 13px",
         minHeight: 58,
@@ -84,11 +89,13 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         outline: "none",
         overflow: "hidden",
         boxShadow: [
+          "4px 4px 12px rgba(174, 174, 192, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.80), inset 1px 1px 0 rgba(255,255,255,0.86)",
           selected ? `0 0 0 1px ${color}, 0 0 12px ${hexToRgba(color, 0.28)}, inset 0 0 0 1px ${hexToRgba(color, 0.16)}` : "",
           highlighted && !selected ? `0 0 0 1px ${color} inset, 0 0 10px ${hexToRgba(color, 0.22)}` : "",
           dragBefore ? `0 -3px 0 ${accent}` : "",
           dragAfter ? `0 3px 0 ${accent}` : "",
         ].filter(Boolean).join(", ") || undefined,
+        transition: "box-shadow 150ms ease, transform 150ms ease, background 150ms ease",
       }}
     >
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}

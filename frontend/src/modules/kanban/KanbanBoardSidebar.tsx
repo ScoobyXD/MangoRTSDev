@@ -6,6 +6,16 @@ import {
   type KanbanBoard,
 } from "./shared";
 import { KanbanBoardIcon } from "./KanbanBoardIcon";
+import {
+  contextMenuHoverHandlers,
+  KANBAN_ACTIVE_SURFACE,
+  KANBAN_EDGE_FRAME,
+  KANBAN_PANEL_BACKGROUND,
+  KANBAN_PANEL_SHADOW,
+  KANBAN_SHADOW,
+  KANBAN_SOFT_BORDER,
+  KANBAN_SURFACE,
+} from "./KanbanContentModel";
 
 type KanbanBoardGroup = {
   folderLabel: string;
@@ -101,7 +111,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: onCollapseToTab ? "minmax(150px, 270px) minmax(140px, 1fr) auto 25px" : "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: headerLeftPaddingPx, zIndex: 6, pointerEvents: "auto" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 3, left: 10, right: 10, display: "grid", gridTemplateColumns: onCollapseToTab ? "minmax(150px, 270px) minmax(140px, 1fr) auto 25px" : "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, padding: `3px 6px 3px ${Math.max(6, headerLeftPaddingPx)}px`, zIndex: 6, pointerEvents: "auto", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 12, background: isDark ? "rgba(17,22,27,0.82)" : "linear-gradient(90deg, rgba(255,241,242,0.70), rgba(254,249,195,0.46) 34%, rgba(236,253,245,0.50) 66%, rgba(239,246,255,0.70))", boxShadow: isDark ? "none" : "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255,255,255,0.88)" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -138,7 +148,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           value={boardSearchQuery}
           onChange={(event) => onSetBoardSearchQuery(event.target.value)}
           placeholder="Search boards"
-          style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.92)", color: text, fontSize: 11, fontWeight: 500, padding: "0 28px 0 8px", outline: "none" }}
+          style={{ width: "100%", height: "100%", boxSizing: "border-box", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_ACTIVE_SURFACE, color: text, fontSize: 11, fontWeight: 600, padding: "0 28px 0 8px", outline: "none", boxShadow: isDark ? "none" : "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
         />
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: subtext, pointerEvents: "none" }}>
           <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -146,9 +156,10 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         </svg>
       </label>
       <button
+        className="mango-elevated-action"
         type="button"
         onClick={onToggleAllBoards}
-        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 500, letterSpacing: 0, padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: allBoardsOpen && !isDark ? "1px solid transparent" : `1px solid ${allBoardsOpen ? accent : (isDark ? line : KANBAN_SOFT_BORDER)}`, background: allBoardsOpen && !isDark ? `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box` : (isDark ? (allBoardsOpen ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.08)") : KANBAN_SURFACE), color: text, fontSize: 10, fontWeight: 700, letterSpacing: 0, padding: "0 9px", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
       >
         <span aria-hidden="true" style={{ width: 12, display: "grid", gap: 2 }}>
           <span style={{ height: 2, background: text }} />
@@ -159,11 +170,12 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       </button>
       {onCollapseToTab && (
         <button
+          className="mango-elevated-action"
           type="button"
           title="Collapse Logic Gate Arena to app tab"
           aria-label="Collapse Logic Gate Arena to app tab"
           onClick={onCollapseToTab}
-          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: `1px solid ${line}`, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.9)", color: text, padding: 0, cursor: "pointer" }}
+          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE, color: text, padding: 0, cursor: "pointer", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
         >
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
             <rect x="2.3" y="3" width="11.4" height="7.6" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
@@ -173,7 +185,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       )}
     </div>
     {boardPickerOpen && (
-      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
+      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 14, background: isDark ? "rgba(17,22,27,0.98)" : KANBAN_PANEL_BACKGROUND, boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : KANBAN_PANEL_SHADOW, padding: "5px 0", zIndex: 8, overflow: "hidden" }}>
         <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
@@ -189,7 +201,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     type="button"
                     title={board.board_id}
                     onClick={() => onSelectBoard(board.board_id)}
-                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(100,116,139,0.2)" : "rgba(100, 116, 139, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                    style={{ width: "calc(100% - 10px)", margin: "2px 5px", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 19px", border: "1px solid transparent", borderRadius: 10, background: selected ? (isDark ? "rgba(100,116,139,0.2)" : `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`) : "transparent", color: text, cursor: "pointer", textAlign: "left", boxShadow: selected && !isDark ? "0 9px 24px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined, transition: "background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease" }}
+                    {...(!selected ? contextMenuHoverHandlers : {})}
                   >
                     <KanbanBoardIcon />
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }}>

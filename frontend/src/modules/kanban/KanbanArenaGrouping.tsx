@@ -16,6 +16,13 @@ import {
   ARENA_GROUP_ROW_LABEL_WIDTH_PX,
   KanbanCheckIcon,
   KanbanDisclosureIcon,
+  KANBAN_ACTIVE_SURFACE,
+  KANBAN_EDGE_FRAME,
+  KANBAN_PANEL_BACKGROUND,
+  KANBAN_PANEL_SHADOW,
+  KANBAN_SHADOW,
+  KANBAN_SOFT_BORDER,
+  KANBAN_SURFACE,
 } from "./KanbanContentModel";
 
 type AxisID = "x" | "y";
@@ -53,21 +60,22 @@ function ArenaGroupSelect({
 }: ArenaGroupSelectProps) {
   const selectedField = KANBAN_GROUP_FIELDS.find((field) => field.value === value) ?? KANBAN_GROUP_FIELDS[0];
   const groupMenuAccent = "rgb(71, 85, 105)";
-  const selectedBackground = isDark ? "rgba(100, 116, 139, 0.18)" : "rgba(100, 116, 139, 0.22)";
+  const selectedBackground = isDark ? "rgba(100, 116, 139, 0.18)" : `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`;
   const hoveredBackground = "rgba(100, 116, 139, 0.14)";
   const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
   const compact = layout === "compact";
   const sortButton = (
     <button
+      className="mango-elevated-action"
       type="button"
       title={`${label} sort ${sortDirection === "asc" ? "ascending" : "descending"}`}
       onClick={onToggleSortDirection}
       style={{
         height: compact ? 20 : 28,
         minWidth: compact ? 44 : undefined,
-        border: `1px solid ${line}`,
-        borderRadius: compact ? 4 : 6,
-        background: cardBackground,
+        border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`,
+        borderRadius: compact ? 7 : 8,
+        background: isDark ? cardBackground : KANBAN_SURFACE,
         color: text,
         font: "inherit",
         fontSize: compact ? 9 : 10.5,
@@ -75,6 +83,7 @@ function ArenaGroupSelect({
         cursor: "pointer",
         padding: compact ? "0 5px" : "0 8px",
         textAlign: "center",
+        boxShadow: isDark ? "none" : KANBAN_SHADOW,
       }}
     >
       {sortLabel}
@@ -84,6 +93,7 @@ function ArenaGroupSelect({
   const selectButton = (
     <span style={{ position: "relative", minWidth: 0, width: "100%" }}>
       <button
+        className="mango-elevated-action"
         type="button"
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
@@ -95,9 +105,9 @@ function ArenaGroupSelect({
           gridTemplateColumns: "minmax(0, 1fr) 16px",
           alignItems: "center",
           gap: 8,
-          border: `1px solid ${menuOpen ? groupMenuAccent : line}`,
-          borderRadius: 6,
-          background: menuOpen ? selectedBackground : cardBackground,
+          border: menuOpen && !isDark ? "1px solid transparent" : `1px solid ${menuOpen ? groupMenuAccent : (isDark ? line : KANBAN_SOFT_BORDER)}`,
+          borderRadius: 8,
+          background: menuOpen ? selectedBackground : (isDark ? cardBackground : KANBAN_SURFACE),
           color: menuOpen ? groupMenuAccent : text,
           font: "inherit",
           fontSize: 11,
@@ -105,7 +115,7 @@ function ArenaGroupSelect({
           padding: compact ? "4px 6px" : "4px 8px",
           cursor: "pointer",
           textAlign: "left",
-          boxShadow: menuOpen ? "0 0 0 2px rgba(100, 116, 139, 0.14)" : "none",
+          boxShadow: isDark ? (menuOpen ? "0 0 0 2px rgba(100, 116, 139, 0.14)" : "none") : KANBAN_SHADOW,
         }}
       >
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
@@ -124,10 +134,10 @@ function ArenaGroupSelect({
             left: 0,
             width: "min(220px, 78vw)",
             padding: 5,
-            border: "1px solid rgba(100, 116, 139, 0.34)",
-            borderRadius: 6,
-            background: "#ffffff",
-            boxShadow: "0 12px 28px rgba(15,23,42,0.18)",
+            border: `1px solid ${KANBAN_SOFT_BORDER}`,
+            borderRadius: 12,
+            background: KANBAN_PANEL_BACKGROUND,
+            boxShadow: KANBAN_PANEL_SHADOW,
             color: "#111827",
           }}
         >
@@ -150,8 +160,8 @@ function ArenaGroupSelect({
                   alignItems: "center",
                   gap: 6,
                   minHeight: 28,
-                  border: "none",
-                  borderRadius: 5,
+                  border: "1px solid transparent",
+                  borderRadius: 9,
                   background: selected ? selectedBackground : "transparent",
                   color: selected ? groupMenuAccent : "#111827",
                   font: "inherit",
@@ -160,6 +170,7 @@ function ArenaGroupSelect({
                   cursor: "pointer",
                   textAlign: "left",
                   padding: "4px 7px",
+                  boxShadow: selected && !isDark ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
                 }}
                 onMouseEnter={(event) => {
                   if (!selected) event.currentTarget.style.background = hoveredBackground;
@@ -241,19 +252,21 @@ export function KanbanArenaGroupingControls({
   return (
     <div ref={controlsRef as React.Ref<HTMLDivElement>} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, margin: "0 0 8px 0", minHeight: 32 }}>
       <button
+        className="mango-elevated-action"
         type="button"
         onClick={onToggleGroupingOpen}
         style={{
           height: 28,
-          border: `1px solid ${groupingOpen ? "rgb(71, 85, 105)" : line}`,
-          borderRadius: 6,
-          background: groupingOpen ? "rgba(100, 116, 139, 0.16)" : cardBackground,
+          border: groupingOpen && !isDark ? "1px solid transparent" : `1px solid ${groupingOpen ? "rgb(71, 85, 105)" : (isDark ? line : KANBAN_SOFT_BORDER)}`,
+          borderRadius: 8,
+          background: groupingOpen && !isDark ? `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box` : (groupingOpen ? "rgba(100, 116, 139, 0.16)" : (isDark ? cardBackground : KANBAN_SURFACE)),
           color: groupingOpen ? "rgb(71, 85, 105)" : text,
           font: "inherit",
           fontSize: 11,
           fontWeight: 700,
           cursor: "pointer",
           padding: "0 9px",
+          boxShadow: isDark ? "none" : KANBAN_SHADOW,
         }}
       >
         Group

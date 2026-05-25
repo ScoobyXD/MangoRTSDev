@@ -1133,13 +1133,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setCompose(emptyCompose);
     selectMailbox("starred");
   }, [selectMailbox]);
+  const openSentMailbox = useCallback(() => {
+    setCompose(emptyCompose);
+    selectMailbox("sent");
+  }, [selectMailbox]);
   const openArchivedMailbox = useCallback(() => {
     setCompose(emptyCompose);
     selectMailbox("archive");
-  }, [selectMailbox]);
-  const openAllMailbox = useCallback(() => {
-    setCompose(emptyCompose);
-    selectMailbox("all");
   }, [selectMailbox]);
   const currentMailComposeError = () => {
     if (activeViewID === "shared-root") return "Select a Shared Triage inbox before composing.";
@@ -2346,12 +2346,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             onDeleteSelected={deleteSelected}
             onDisconnect={disconnect}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
-            onOpenAllMailbox={openAllMailbox}
             onOpenArchivedMailbox={openArchivedMailbox}
             onOpenContextMenu={openMessageContextMenu}
             onOpenNewCompose={openNewCompose}
             onOpenPendingMailbox={openPendingMailbox}
             onOpenReply={openReply}
+            onOpenSentMailbox={openSentMailbox}
             onOpenStarredMailbox={openStarredMailbox}
             onSearchDraftChange={setSearchDraft}
             onSelectMessage={selectMessageRow}

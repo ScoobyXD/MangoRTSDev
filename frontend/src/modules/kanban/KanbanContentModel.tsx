@@ -147,13 +147,21 @@ export const contextMenuHoverHandlers = {
   },
 };
 
+export const KANBAN_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";
+export const KANBAN_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
+export const KANBAN_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
+export const KANBAN_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+export const KANBAN_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
+export const KANBAN_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
+export const KANBAN_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
+
 export const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
 export const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
 export const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
-export const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
-export const ARENA_GROUP_GLASS_BORDER_LIGHT = "#000000";
-export const ARENA_GROUP_GLASS_BORDER_DARK = "#000000";
-export const ARENA_GROUP_FRAME_SHADOW = "0 1px 2px rgba(15,23,42,0.06)";
+export const ARENA_GROUP_FRAME_BACKGROUND = KANBAN_SURFACE;
+export const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(255, 255, 255, 0.76)";
+export const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(255,255,255,0.18)";
+export const ARENA_GROUP_FRAME_SHADOW = "4px 4px 12px rgba(174, 174, 192, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.78), inset 1px 1px 0 rgba(255,255,255,0.82)";
 
 export const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>

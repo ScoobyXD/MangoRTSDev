@@ -10,6 +10,7 @@ import {
   type KanbanCard,
   type KanbanColumn,
 } from "./shared";
+import { KANBAN_SURFACE } from "./KanbanContentModel";
 
 export type KanbanColumnResizeState = {
   axis: "width" | "height";
@@ -93,6 +94,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   const columnDropActive = dragOverColumnID === column.column_id;
   const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
   const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
+  const columnFrame = `linear-gradient(135deg, ${hexToRgba(columnColor, 0.70)} 0%, rgba(92, 238, 255, 0.76) 42%, rgba(183, 124, 255, 0.76) 78%, rgba(255,255,255,0.88) 100%)`;
 
   return (
     <section
@@ -117,13 +119,15 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         width: columnWidth,
         height: columnHeight,
         minHeight: minimumColumnHeight,
-        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.1)}, ${laneBackground} 78px)`,
-        border: `1px solid ${columnColor || laneBorder}`,
+        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.14)}, ${laneBackground} 72px, rgba(255,255,255,0.54)) padding-box, ${columnFrame} border-box`,
+        border: `1px solid ${laneBorder}`,
+        borderRadius: 16,
         boxShadow: columnShadow,
         display: "grid",
         gridTemplateRows: "42px minmax(0, 1fr)",
         opacity: draggingColumnID === column.column_id ? 0.72 : 1,
         cursor: "default",
+        overflow: "hidden",
       }}
     >
       <div
@@ -138,7 +142,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.72)}`, background: hexToRgba(columnColor, 0.12), cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.28)}`, background: `linear-gradient(90deg, ${hexToRgba(columnColor, 0.20)}, rgba(255,255,255,0.70) 48%, rgba(245,243,255,0.58))`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)", cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (
@@ -162,34 +166,36 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             }}
             // Column titles are user-authored board data. Preserve casing so
             // names keep the exact meaning users and agents assigned.
-            style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 500, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+            style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 750, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
           />
         ) : (
           <div
             title={column.title}
             onClick={() => onSetEditingColumnID(column.column_id)}
-            style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 500, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
+            style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 750, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
           >
             {column.title}
           </div>
         )}
         {showCreateNodeButton && (
           <button
+            className="mango-elevated-action"
             title="Create node"
             type="button"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={() => onCreateNodeInColumn(column.column_id)}
-            style={{ width: 28, height: 28, border: "none", background: "transparent", color: text, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
+            style={{ width: 24, height: 24, border: "1px solid rgba(255,255,255,0.74)", borderRadius: 7, background: KANBAN_SURFACE, color: text, cursor: "pointer", fontSize: 18, lineHeight: 1, boxShadow: "3px 3px 8px rgba(174,174,192,0.18), -3px -3px 8px rgba(255,255,255,0.78)" }}
           >
             +
           </button>
         )}
         <button
+          className="mango-elevated-action"
           title="Delete column"
           type="button"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => onRequestColumnDelete(column.column_id)}
-          style={{ width: 28, height: 28, border: "none", background: "transparent", color: subtext, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
+          style={{ width: 24, height: 24, border: "1px solid rgba(255,255,255,0.74)", borderRadius: 7, background: KANBAN_SURFACE, color: subtext, cursor: "pointer", fontSize: 17, lineHeight: 1, boxShadow: "3px 3px 8px rgba(174,174,192,0.18), -3px -3px 8px rgba(255,255,255,0.78)" }}
         >
           x
         </button>

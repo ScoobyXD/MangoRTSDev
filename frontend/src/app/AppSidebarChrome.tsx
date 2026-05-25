@@ -2081,8 +2081,8 @@ const appSidebarSharedRowsStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignContent: "start",
-  gap: 1,
-  padding: "2px 0 7px",
+  gap: 0,
+  padding: "1px 0 5px",
 };
 
 const appSidebarSharedErrorStyle: React.CSSProperties = {
@@ -2099,22 +2099,22 @@ function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlac
     ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 250, 255, 0.74) 44%, rgba(247, 241, 255, 0.76))"
     : "linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(236, 251, 255, 0.58) 45%, rgba(247, 240, 255, 0.62))";
   return {
-    width: "calc(100% - 10px)",
-    minHeight: 28,
+    width: "calc(100% - 4px)",
+    minHeight: 25,
     display: "grid",
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
-    gap: 5,
-    margin: "0 5px",
+    gap: 4,
+    margin: "0 2px",
     border: `1px solid ${framed ? "transparent" : "transparent"}`,
-    borderRadius: 10,
+    borderRadius: 9,
     background: framed ? `${frameBackground} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : "transparent",
     color: "#334155",
     cursor: "pointer",
     font: "inherit",
     fontSize: 11,
     fontWeight: active ? 700 : 600,
-    padding: `2px 6px 2px ${6 + depth * 14}px`,
+    padding: `1px 5px 1px ${5 + depth * 13}px`,
     textAlign: "left",
     minWidth: 0,
     transition: "background 120ms ease, border-color 120ms ease, box-shadow 140ms ease",

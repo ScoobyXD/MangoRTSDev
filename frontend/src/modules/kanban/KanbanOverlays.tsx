@@ -6,6 +6,12 @@ import { normalizeKanbanColumnItemColor, type KanbanCard, type KanbanColumn } fr
 import {
   contextMenuButtonStyle,
   contextMenuHoverHandlers,
+  KANBAN_EDGE_FRAME,
+  KANBAN_PANEL_BACKGROUND,
+  KANBAN_PANEL_SHADOW,
+  KANBAN_SHADOW,
+  KANBAN_SOFT_BORDER,
+  KANBAN_SURFACE,
   nodeEditorOverlayResizeHandles,
   type NodeEditorOverlayRatio,
   type NodeEditorOverlayState,
@@ -153,15 +159,16 @@ export function KanbanNodeEditorOverlay({
         transform: "translateX(-50%)",
         minWidth: "min(420px, calc(100% - 44px))",
         minHeight: "min(320px, calc(100% - 64px))",
-        border: "1px solid rgba(100, 116, 139, 0.54)",
-        borderRadius: 16,
-        background: "#ffffff",
-        boxShadow: "0 18px 42px rgba(15, 23, 42, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+        border: "1px solid transparent",
+        borderRadius: 18,
+        background: `${KANBAN_PANEL_BACKGROUND} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
+        boxShadow: KANBAN_PANEL_SHADOW,
         overflow: "hidden",
         cursor: "default",
       }}
     >
       <button
+        className="mango-elevated-action"
         type="button"
         title="Collapse node editor to app tab"
         aria-label="Collapse node editor to app tab"
@@ -175,17 +182,19 @@ export function KanbanNodeEditorOverlay({
           height: 24,
           display: "grid",
           placeItems: "center",
-          border: "1px solid rgba(100, 116, 139, 0.56)",
-          borderRadius: 4,
-          background: "#ffffff",
+          border: `1px solid ${KANBAN_SOFT_BORDER}`,
+          borderRadius: 8,
+          background: KANBAN_SURFACE,
           color: "#334155",
           padding: 0,
           cursor: "pointer",
+          boxShadow: KANBAN_SHADOW,
         }}
       >
         <MinimizeToLineIcon />
       </button>
       <button
+        className="mango-elevated-action"
         type="button"
         title="Close node editor"
         onClick={onClose}
@@ -196,19 +205,20 @@ export function KanbanNodeEditorOverlay({
           zIndex: 8,
           width: 24,
           height: 24,
-          border: "1px solid #334155",
-          borderRadius: 4,
-          background: "#475569",
-          color: "#ffffff",
+          border: "1px solid transparent",
+          borderRadius: 8,
+          background: `${KANBAN_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
+          color: "#0f172a",
           fontSize: 16,
           fontWeight: 600,
           lineHeight: "20px",
           cursor: "pointer",
+          boxShadow: KANBAN_SHADOW,
         }}
       >
         X
       </button>
-      <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />}>
+      <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: KANBAN_PANEL_BACKGROUND }} />}>
         <LazyKanbanNodeEditorContent
           accent={accent}
           widgetId={`${frameID}:node-editor-overlay:${overlay.nodeID}`}
@@ -253,7 +263,9 @@ export function KanbanNodeEditorOverlay({
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.28)",
+  background: "rgba(241, 245, 249, 0.66)",
+  backdropFilter: "blur(14px) saturate(1.18)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.18)",
   zIndex: 120,
   display: "grid",
   placeItems: "center",
@@ -261,26 +273,30 @@ const modalBackdropStyle: React.CSSProperties = {
 
 const modalPanelStyle: React.CSSProperties = {
   width: "min(420px, 90%)",
-  borderRadius: 10,
-  border: "1px solid rgba(100,116,139,0.45)",
-  background: "rgba(255,255,255,0.95)",
+  borderRadius: 16,
+  border: `1px solid ${KANBAN_SOFT_BORDER}`,
+  background: KANBAN_PANEL_BACKGROUND,
   padding: 12,
   display: "grid",
   gap: 10,
+  boxShadow: KANBAN_PANEL_SHADOW,
 };
 
 const yesButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(100,116,139,0.45)",
-  background: "#fff",
+  border: `1px solid ${KANBAN_SOFT_BORDER}`,
+  borderRadius: 10,
+  background: KANBAN_SURFACE,
   cursor: "pointer",
   fontWeight: 700,
+  boxShadow: KANBAN_SHADOW,
 };
 
 const noButtonStyle: React.CSSProperties = {
-  border: "1px solid #64748b",
-  boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)",
+  border: "1px solid transparent",
+  borderRadius: 10,
+  boxShadow: `${KANBAN_SHADOW}, 0 0 14px rgba(183, 124, 255, 0.18)`,
   color: "#334155",
-  background: "#fff",
+  background: `${KANBAN_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
   cursor: "pointer",
   fontWeight: 700,
 };
@@ -297,8 +313,8 @@ function ModalShell({ title, detail, onConfirm, onCancel }: {
         <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>{title}</div>
         <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>{detail}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" onClick={onConfirm} style={yesButtonStyle}>Yes</button>
-          <button type="button" onClick={onCancel} style={noButtonStyle}>No</button>
+          <button className="mango-elevated-action" type="button" onClick={onConfirm} style={yesButtonStyle}>Yes</button>
+          <button className="mango-elevated-action" type="button" onClick={onCancel} style={noButtonStyle}>No</button>
         </div>
       </div>
     </div>
