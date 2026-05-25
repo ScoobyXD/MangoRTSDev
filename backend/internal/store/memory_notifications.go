@@ -67,6 +67,9 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if companyID == "" || userID == "" {
 		return true
 	}
+	if logicGateID := strings.TrimSpace(item.LogicGateID); logicGateID != "" && notificationLogicGateRaciRole(item.Role) {
+		return r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID)
+	}
 	target, ok := NotificationPrimaryAccessTarget(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID)
 	if !ok {
 		return true
@@ -78,6 +81,15 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 		return false
 	}
 	return true
+}
+
+func notificationLogicGateRaciRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case domain.LogicGateRaciRoleResponsible, domain.LogicGateRaciRoleAccountable, domain.LogicGateRaciRoleConsulted, domain.LogicGateRaciRoleInformed:
+		return true
+	default:
+		return false
+	}
 }
 
 func notificationRoleSummaryTargetKey(item domain.Notification) string {

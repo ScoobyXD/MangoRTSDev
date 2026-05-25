@@ -185,12 +185,6 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				assignment.UserEmail = strings.TrimSpace(*creatorAssignee.Email)
 			}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
-			if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, input.CompanyID, created.LogicGateID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
 		}
 		if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
 			return WorkspaceEntityBatchResult{}, err

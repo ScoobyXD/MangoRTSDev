@@ -11,7 +11,7 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
-func TestPhase6NotificationRecipientsUseReverseEffectiveAccessAndRACIRouting(t *testing.T) {
+func TestPhase6NotificationRecipientsUseRACIRouting(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666601"
@@ -37,6 +37,8 @@ func TestPhase6NotificationRecipientsUseReverseEffectiveAccessAndRACIRouting(t *
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
 		Status:      "in_progress",
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
@@ -89,26 +91,22 @@ func TestPhase6NotificationRecipientsUseReverseEffectiveAccessAndRACIRouting(t *
 	for _, item := range notifications {
 		byUser[item.RecipientUserID] = item
 	}
-	for _, user := range []domain.User{viewer, editor, admin, responsible} {
+	for _, user := range []domain.User{responsible} {
 		if _, ok := byUser[user.UserID]; !ok {
-			t.Fatalf("missing notification for effective user %s; got %+v", user.UserID, notifications)
+			t.Fatalf("missing notification for RACI user %s; got %+v", user.UserID, notifications)
 		}
 	}
-	if _, ok := byUser[blocked.UserID]; ok {
-		t.Fatalf("blocked user received notification: %+v", byUser[blocked.UserID])
-	}
-	if _, ok := byUser[actor.UserID]; ok {
-		t.Fatalf("actor received self notification: %+v", byUser[actor.UserID])
+	for _, user := range []domain.User{viewer, editor, admin, blocked, actor} {
+		if _, ok := byUser[user.UserID]; ok {
+			t.Fatalf("non-RACI user %s received notification: %+v", user.UserID, byUser[user.UserID])
+		}
 	}
 	if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.LogicGateRaciRoleResponsible {
 		t.Fatalf("responsible metadata = %+v, want R inbox responsible", got)
 	}
-	if got := byUser[viewer.UserID]; got.Surface != domain.NotificationSurfaceACIInbox || got.Role != domain.NotificationRoleOther {
-		t.Fatalf("viewer metadata = %+v, want ACI other fallback", got)
-	}
 }
 
-func TestProcessDomainEventsLogicGateWorkUsesEffectiveAccessAndRACI(t *testing.T) {
+func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666611"
@@ -185,12 +183,12 @@ func TestProcessDomainEventsLogicGateWorkUsesEffectiveAccessAndRACI(t *testing.T
 			}
 			byUser[item.RecipientUserID] = item
 		}
-		for _, user := range []domain.User{viewer, responsible} {
+		for _, user := range []domain.User{responsible} {
 			if _, ok := byUser[user.UserID]; !ok {
 				t.Fatalf("%s missing notification for eligible user %s; got %+v", label, user.UserID, items)
 			}
 		}
-		for _, user := range []domain.User{actor, blocked, nodeOnlyViewer} {
+		for _, user := range []domain.User{viewer, actor, blocked, nodeOnlyViewer} {
 			if _, ok := byUser[user.UserID]; ok {
 				t.Fatalf("%s unexpected notification for user %s: %+v", label, user.UserID, byUser[user.UserID])
 			}
@@ -207,6 +205,8 @@ func TestProcessDomainEventsLogicGateWorkUsesEffectiveAccessAndRACI(t *testing.T
 		NodeID:      node.NodeID,
 		Status:      "pending",
 		ActorUserID: actor.UserID,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	})
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)

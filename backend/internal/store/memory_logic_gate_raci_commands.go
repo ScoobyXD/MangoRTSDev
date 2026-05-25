@@ -140,14 +140,6 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	}
 
 	r.logicGateRaci[raciKey] = assignments
-	if err := r.recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID); err != nil {
-		r.restoreLogicGateRaciCommandStateLocked(snapshot)
-		return LogicGateRaciAssignmentCommandResult{}, err
-	}
-	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{logicGateID}, nil); err != nil {
-		r.restoreLogicGateRaciCommandStateLocked(snapshot)
-		return LogicGateRaciAssignmentCommandResult{}, err
-	}
 	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	event, err := r.appendDomainEventLocked(logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))
 	if err != nil {

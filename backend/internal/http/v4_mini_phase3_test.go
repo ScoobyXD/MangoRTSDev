@@ -33,6 +33,8 @@ func TestV4MiniPhase3LegacyKanbanCardMutationUsesLogicGateWorkAccess(t *testing.
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
 		Status:      "pending",
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	})
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)

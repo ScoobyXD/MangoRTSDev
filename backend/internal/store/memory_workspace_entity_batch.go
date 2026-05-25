@@ -184,12 +184,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			}
 			r.logicGateRaci[key(input.CompanyID, created.LogicGateID)] = []domain.LogicGateRaciAssignment{assignment}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
-			if err := r.recomputeLogicGateRaciEffectiveAccessLocked(input.CompanyID, created.LogicGateID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{created.LogicGateID}, nil); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
 			r.rebuildWorkItemInboxEntriesForLogicGateLocked(input.CompanyID, created.LogicGateID)
 		}
 		if input.CreatorUserID != "" {

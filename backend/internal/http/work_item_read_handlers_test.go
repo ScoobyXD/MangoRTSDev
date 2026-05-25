@@ -93,14 +93,14 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee aci: %v", err)
 	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done"}); err != nil {
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done", Priority: testPriority(2), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus aci: %v", err)
 	}
 	responsibleNode, err := repo.CreateNode(companyID, "Read API responsible node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible: %v", err)
 	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: responsibleGate.LogicGateID, NodeID: responsibleNode.NodeID, Status: "in progress"}); err != nil {
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: responsibleGate.LogicGateID, NodeID: responsibleNode.NodeID, Status: "in progress", Priority: testPriority(4), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
 	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {

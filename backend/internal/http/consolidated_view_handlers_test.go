@@ -51,6 +51,8 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		NodeID:      node.NodeID,
 		Status:      "pending",
 		Position:    10,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus visible: %v", err)
 	}
@@ -246,6 +248,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		NodeID:      assignedNode.NodeID,
 		Status:      "done",
 		Position:    10,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus visible: %v", err)
 	}
@@ -255,6 +259,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		NodeID:      hiddenAssignedNode.NodeID,
 		Status:      "pending",
 		Position:    20,
+		Priority:    testPriority(4),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
 	}

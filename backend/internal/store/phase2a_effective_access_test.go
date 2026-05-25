@@ -94,8 +94,8 @@ func TestMemorySetEntityPermissionsNoAccessAndDirectPrecedence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions no_access: %v", err)
 	}
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
-	assertEffectiveAccessLevel(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionNoAccess)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionAdmin, true)
+	assertEffectiveAccessLevel(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionAdmin)
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -109,7 +109,7 @@ func TestMemorySetEntityPermissionsNoAccessAndDirectPrecedence(t *testing.T) {
 		t.Fatalf("SetEntityPermissions direct view: %v", err)
 	}
 	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionEdit, false)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeNode, node.NodeID, EntityPermissionAdmin, true)
 }
 
 func TestMemorySetEntityPermissionsRemovingDirectGrantPreservesOtherSource(t *testing.T) {

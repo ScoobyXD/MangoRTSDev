@@ -13,6 +13,7 @@ var (
 	ErrNotFound                      = errors.New("not found")
 	ErrInvalid                       = errors.New("invalid")
 	ErrAlreadyExists                 = errors.New("already exists")
+	ErrPriorityRequired              = errors.New("priority required")
 	ErrInvitationBadToken            = errors.New("invitation bad token")
 	ErrInvitationExpired             = errors.New("invitation expired")
 	ErrInvitationAlreadyAccepted     = errors.New("invitation already accepted")

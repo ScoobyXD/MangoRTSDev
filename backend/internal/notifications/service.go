@@ -178,16 +178,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		}
 		recipients[userID] = mergeNotificationRecipientMeta(recipients[userID], meta)
 	}
-	addEffectiveRecipients := func(resourceType, resourceID string, metaForUser func(string) notificationRecipientMeta) error {
-		userIDs, err := s.notificationEffectiveUsers(event.CompanyID, resourceType, resourceID)
-		if err != nil {
-			return err
-		}
-		for _, userID := range userIDs {
-			addRecipient(userID, metaForUser(userID))
-		}
-		return nil
-	}
 	addEffectiveRecipientSubset := func(resourceType, resourceID string, userIDs []string, metaForUser func(string) notificationRecipientMeta) error {
 		eligible, err := s.notificationEffectiveUserSet(event.CompanyID, resourceType, resourceID)
 		if err != nil {
@@ -205,18 +195,20 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		if err != nil {
 			return err
 		}
-		return addEffectiveRecipients(store.EntityTypeLogicGate, logicGateID, func(userID string) notificationRecipientMeta {
-			return notificationMetaForEffectiveLogicGateUser(roles[strings.TrimSpace(userID)], logicGateID, nodeID)
-		})
+		for userID, role := range roles {
+			addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, nodeID))
+		}
+		return nil
 	}
 	addLogicGateWorkRecipients := func(logicGateID, nodeID string) error {
 		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
 		if err != nil {
 			return err
 		}
-		return addEffectiveRecipients(store.EntityTypeLogicGate, logicGateID, func(userID string) notificationRecipientMeta {
-			return notificationMetaForEffectiveLogicGateUser(roles[strings.TrimSpace(userID)], logicGateID, nodeID)
-		})
+		for userID, role := range roles {
+			addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, nodeID))
+		}
+		return nil
 	}
 	addSharedTriageFolderRecipients := func(folderID string) error {
 		roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
@@ -296,17 +288,14 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		}
 		assignmentUserIDs := payloadStringSlice(payload, "assignment_user_ids")
 		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
-		if err == nil && len(roles) > 0 {
-			if err := addEffectiveRecipientSubset(store.EntityTypeLogicGate, logicGateID, assignmentUserIDs, func(userID string) notificationRecipientMeta {
-				return notificationMetaForLogicGateRole(roles[strings.TrimSpace(userID)], logicGateID, "")
-			}); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := addEffectiveRecipientSubset(store.EntityTypeLogicGate, logicGateID, assignmentUserIDs, func(string) notificationRecipientMeta {
-				return notificationRecipientMeta{LogicGateID: logicGateID}
-			}); err != nil {
-				return nil, err
+		if err != nil {
+			return nil, err
+		}
+		for _, userID := range cleanStrings(assignmentUserIDs) {
+			if role := roles[userID]; role != "" {
+				addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, ""))
+			} else {
+				addRecipient(userID, notificationRecipientMeta{LogicGateID: logicGateID})
 			}
 		}
 		gateTitle := payloadString(payload, "logic_gate_title")

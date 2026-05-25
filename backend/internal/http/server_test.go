@@ -1101,6 +1101,9 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	if columnID == "" {
 		t.Fatalf("attached board columns = %+v, want In Progress", columns)
 	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Priority: testPriority(3), PrioritySet: true}); err != nil {
+		t.Fatalf("UpdateNode priority: %v", err)
+	}
 
 	addCardBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,

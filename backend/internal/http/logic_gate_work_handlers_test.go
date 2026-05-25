@@ -49,6 +49,8 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		NodeID:      visibleNode.NodeID,
 		Status:      "pending",
 		Position:    10,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus visible: %v", err)
 	}
@@ -58,6 +60,8 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		NodeID:      hiddenNode.NodeID,
 		Status:      "done",
 		Position:    20,
+		Priority:    testPriority(4),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
 	}
@@ -118,6 +122,7 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	postPayload := map[string]any{
 		"company_id": companyID,
 		"node_id":    mutableNode.NodeID,
+		"priority":   3,
 		"status":     "pending",
 		"position":   30,
 	}
@@ -148,6 +153,7 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		"node_id":           clientGeneratedNodeID,
 		"create_node_title": "Created from Kanban",
 		"node_title":        "Created from Kanban",
+		"priority":          3,
 		"status":            "done",
 		"position":          40,
 	}
@@ -240,6 +246,8 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
 		Status:      "pending",
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
@@ -299,11 +307,8 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	}
 
 	viewerNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, viewer)
-	if len(viewerNotifications) != 1 {
-		t.Fatalf("viewer notification count = %d, want 1: %+v", len(viewerNotifications), viewerNotifications)
-	}
-	if viewerNotifications[0].Surface != domain.NotificationSurfaceACIInbox || viewerNotifications[0].Role != domain.NotificationRoleOther {
-		t.Fatalf("viewer notification metadata = %+v, want ACI other", viewerNotifications[0])
+	if len(viewerNotifications) != 0 {
+		t.Fatalf("viewer notifications = %+v, want none without RACI role", viewerNotifications)
 	}
 	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, editor); len(got) != 0 {
 		t.Fatalf("actor self notifications = %+v, want none", got)

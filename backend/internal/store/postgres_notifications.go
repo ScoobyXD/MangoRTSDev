@@ -98,6 +98,13 @@ const notificationRecipientVisibilityWhereSQL = `
   and (
     company_id is null
     or case
+        when btrim(logic_gate_id) <> ''
+          and btrim(role) in ('responsible', 'accountable', 'consulted', 'informed') then exists (
+          select 1
+          from logic_gates gate
+          where gate.company_id=notifications.company_id
+            and gate.logic_gate_id=notifications.logic_gate_id::uuid
+        )
         when btrim(logic_gate_id) <> '' then exists (
           select 1
           from effective_resource_access access

@@ -303,11 +303,11 @@ func TestLogicGateAssignmentMovePriorityOmittedNullAndValue(t *testing.T) {
 		NodeID:      node.NodeID,
 		PrioritySet: true,
 	})
-	if err != nil {
-		t.Fatalf("MoveLogicGateNodeAssignment clear priority: %v", err)
+	if !errors.Is(err, store.ErrPriorityRequired) {
+		t.Fatalf("MoveLogicGateNodeAssignment clear priority err = %v, want priority required", err)
 	}
-	if cleared.Node.Priority != nil {
-		t.Fatalf("cleared priority = %+v, want nil", cleared.Node.Priority)
+	if cleared.Node.NodeID != "" {
+		t.Fatalf("cleared priority result = %+v, want zero result on rejected move", cleared)
 	}
 
 	newPriority := 5
@@ -395,6 +395,8 @@ func TestLogicGateAssignmentRemoveUsesExplicitFallback(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
 		Status:      "done",
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

@@ -126,7 +126,6 @@ func TestWorkItemLogicGateAssignmentParityEndpoints(t *testing.T) {
 		"logic_gate_id": logicGate.LogicGateID,
 		"node_id":       node.NodeID,
 		"status":        "done",
-		"priority":      nil,
 	})
 	if moveRec.Code != http.StatusOK {
 		t.Fatalf("move status = %d, want %d body=%s", moveRec.Code, http.StatusOK, moveRec.Body.String())
@@ -141,8 +140,8 @@ func TestWorkItemLogicGateAssignmentParityEndpoints(t *testing.T) {
 	if moved.Node.Status == nil || *moved.Node.Status != "Done" {
 		t.Fatalf("move node status = %+v, want Done", moved.Node.Status)
 	}
-	if moved.Node.Priority != nil {
-		t.Fatalf("move priority = %+v, want nil after priority null", moved.Node.Priority)
+	if moved.Node.Priority == nil || *moved.Node.Priority != 2 {
+		t.Fatalf("move priority = %+v, want unchanged 2", moved.Node.Priority)
 	}
 
 	issueRec := postWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments/issue", map[string]any{

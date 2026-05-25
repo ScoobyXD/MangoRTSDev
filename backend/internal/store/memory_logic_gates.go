@@ -357,8 +357,6 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logicGateRaciSnapshot := cloneMemorySliceMap(r.logicGateRaci)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return nil, ErrNotFound
 	}
@@ -392,16 +390,6 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	}
 	sortLogicGateRaciAssignments(assignments)
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
-	if err := r.recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID); err != nil {
-		r.logicGateRaci = logicGateRaciSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		return nil, err
-	}
-	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{logicGateID}, nil); err != nil {
-		r.logicGateRaci = logicGateRaciSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		return nil, err
-	}
 	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil
 }

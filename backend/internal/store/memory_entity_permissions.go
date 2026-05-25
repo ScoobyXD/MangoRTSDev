@@ -507,7 +507,7 @@ func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, 
 				if !matchedGroup {
 					continue
 				}
-				subjectRank = 1
+				subjectRank = 3
 			default:
 				continue
 			}

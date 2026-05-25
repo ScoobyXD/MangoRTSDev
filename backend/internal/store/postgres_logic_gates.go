@@ -700,12 +700,6 @@ on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
 			return nil, err
 		}
 	}
-	if err := recomputeLogicGateRaciEffectiveAccessTx(ctx, tx, companyID, logicGateID); err != nil {
-		return nil, err
-	}
-	if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, []string{logicGateID}, nil); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

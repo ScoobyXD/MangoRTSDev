@@ -36,6 +36,11 @@ type EntityPermission = {
   access_level?: ResourceAccessLevel;
 };
 
+type EntityEffectiveAccess = {
+  user_id: string;
+  access_level?: ResourceAccessLevel;
+};
+
 type PermissionSelectionKey = `${PermissionSubjectType}:${string}`;
 
 type EntityPermissionsDialogProps = {
@@ -64,6 +69,8 @@ type EntityPermissionsPanelProps = {
 type PermissionPayload = {
   permissions?: EntityPermission[];
   access_grants?: EntityPermission[];
+  effective_access?: EntityEffectiveAccess[];
+  can_edit_permissions?: boolean;
 };
 
 const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label: string }> = [
@@ -72,6 +79,7 @@ const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label
   { value: "edit", label: "Edit" },
   { value: "admin", label: "Admin" },
 ];
+const CUSTOM_GROUP_ACCESS = "__custom__";
 
 export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
@@ -88,6 +96,8 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [members, setMembers] = useState<CompanyUserGroupMember[]>([]);
   const [accessBySubject, setAccessBySubject] = useState<Map<PermissionSelectionKey, ResourceAccessLevel>>(new Map());
+  const [effectiveAccessByUser, setEffectiveAccessByUser] = useState<Map<string, ResourceAccessLevel>>(new Map());
+  const [serverCanEditPermissions, setServerCanEditPermissions] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -110,6 +120,8 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         setGroups(groupsPayload.groups ?? []);
         setMembers(groupsPayload.members ?? []);
         setAccessBySubject(permissionsToMap(permissionsPayload.permissions ?? permissionsPayload.access_grants ?? []));
+        setEffectiveAccessByUser(effectiveAccessToMap(permissionsPayload.effective_access ?? []));
+        setServerCanEditPermissions(permissionsPayload.can_edit_permissions === true);
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
@@ -155,10 +167,11 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const usersByID = useMemo(() => new Map(users.map((user) => [user.user_id, user])), [users]);
   const ungroupedUsers = useMemo(() => users.filter((user) => !groupedUserIDs.has(user.user_id)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))), [groupedUserIDs, users]);
   const assignmentCount = accessBySubject.size;
-  const controlsDisabled = busy || readOnly;
+  const effectiveReadOnly = readOnly || !serverCanEditPermissions;
+  const controlsDisabled = busy || effectiveReadOnly;
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
-    if (readOnly) return;
+    if (effectiveReadOnly) return;
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
@@ -167,8 +180,18 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     });
   };
 
+  const clearAccess = (key: PermissionSelectionKey) => {
+    if (effectiveReadOnly) return;
+    setSaved(false);
+    setAccessBySubject((previous) => {
+      const next = new Map(previous);
+      next.delete(key);
+      return next;
+    });
+  };
+
   const save = async () => {
-    if (readOnly) return;
+    if (effectiveReadOnly) return;
     setBusy(true);
     setError("");
     try {
@@ -191,27 +214,44 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     }
   };
 
-  const renderAccessSelect = (key: PermissionSelectionKey, forcedAccessLevel: ResourceAccessLevel | "" = "") => (
-    <select
-      value={forcedAccessLevel || accessBySubject.get(key) || ""}
-      onChange={(event) => setAccess(key, event.target.value as ResourceAccessLevel)}
-      style={permissionSelectStyle}
-      disabled={controlsDisabled || !!forcedAccessLevel}
-      aria-label="Access level"
-    >
-      {forcedAccessLevel
-        ? <option value={forcedAccessLevel}>{roleAccessLabel(forcedAccessLevel)}</option>
-        : (
-          <>
-            <option value="" hidden>No Access</option>
-            {EXPLICIT_ACCESS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </>
-        )}
-    </select>
-  );
+  const renderAccessSelect = (
+    key: PermissionSelectionKey,
+    options: { forcedAccessLevel?: ResourceAccessLevel | ""; effectiveAccessLevel?: ResourceAccessLevel | ""; allowCustom?: boolean } = {},
+  ) => {
+    const forcedAccessLevel = options.forcedAccessLevel ?? "";
+    const directAccessLevel = accessBySubject.get(key) ?? "";
+    const displayAccessLevel = forcedAccessLevel || directAccessLevel || options.effectiveAccessLevel || "";
+    const value = options.allowCustom && !forcedAccessLevel && !directAccessLevel ? CUSTOM_GROUP_ACCESS : displayAccessLevel;
+    return (
+      <select
+        value={value}
+        onChange={(event) => {
+          if (event.target.value === CUSTOM_GROUP_ACCESS) {
+            clearAccess(key);
+            return;
+          }
+          setAccess(key, event.target.value as ResourceAccessLevel);
+        }}
+        style={permissionSelectStyle}
+        disabled={controlsDisabled || !!forcedAccessLevel}
+        aria-label="Access level"
+      >
+        {forcedAccessLevel
+          ? <option value={forcedAccessLevel}>{roleAccessLabel(forcedAccessLevel)}</option>
+          : (
+            <>
+              {!options.allowCustom && <option value="" hidden>No Access</option>}
+              {options.allowCustom && <option value={CUSTOM_GROUP_ACCESS}>Custom</option>}
+              {EXPLICIT_ACCESS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </>
+          )}
+      </select>
+    );
+  };
 
   const renderGroup = (group: CompanyUserGroup, depth: number): React.ReactNode => {
     const groupKey = `group:${group.group_id}` as PermissionSelectionKey;
+    const groupAccessLevel = accessBySubject.get(groupKey) ?? "";
     const groupMembers = membersByGroup.get(group.group_id) ?? [];
     const children = childrenByParent.get(group.group_id) ?? [];
     return (
@@ -219,17 +259,17 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         <div style={permissionRowStyle}>
           <span style={permissionStrongTextStyle}>{group.name}</span>
           <span style={permissionMutedTextStyle}>{groupMembers.length} users</span>
-          {renderAccessSelect(groupKey)}
+          {renderAccessSelect(groupKey, { allowCustom: true })}
         </div>
         {groupMembers.map((member) => {
           const userKey = `user:${member.user_id}` as PermissionSelectionKey;
           const user = usersByID.get(member.user_id);
-          const forcedAccessLevel = companyUserRoleForcesAdmin(user?.role) ? "admin" : "";
+          const forcedAccessLevel = companyUserRoleForcesAdmin(user?.role) ? "admin" : groupAccessLevel;
           return (
             <div key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
               <span>{permissionUserLabel(member)}</span>
               <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user?.role)}</span>
-              {renderAccessSelect(userKey, forcedAccessLevel)}
+              {renderAccessSelect(userKey, { forcedAccessLevel, effectiveAccessLevel: effectiveAccessByUser.get(member.user_id) ?? "" })}
             </div>
           );
         })}
@@ -242,7 +282,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
-      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!readOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
+      <button type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
       {onClose && <button type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
       <button type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
@@ -264,6 +304,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         <div style={permissionInfoStyle}>
           {permissionSummaryText(saved, assignmentCount, entityType)}
         </div>
+        {effectiveReadOnly && <div style={permissionReadOnlyNoticeStyle}>Only admins can edit permissions.</div>}
         {error && <div style={permissionErrorStyle}>{error}</div>}
       </div>
       <div style={permissionListStyle}>
@@ -278,7 +319,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
                 <div key={user.user_id} style={permissionRowStyle}>
                   <span>{companyUserLabel(user)}</span>
                   <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user.role)}</span>
-                  {renderAccessSelect(key, forcedAccessLevel)}
+                  {renderAccessSelect(key, { forcedAccessLevel, effectiveAccessLevel: effectiveAccessByUser.get(user.user_id) ?? "" })}
                 </div>
               );
             })}
@@ -367,6 +408,18 @@ function permissionsToMap(permissions: EntityPermission[]): Map<PermissionSelect
     const accessLevel = permission.access_level ?? permission.permission;
     if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
     out.set(`${permission.subject_type}:${permission.subject_id}` as PermissionSelectionKey, accessLevel);
+  }
+  return out;
+}
+
+function effectiveAccessToMap(items: EntityEffectiveAccess[]): Map<string, ResourceAccessLevel> {
+  const out = new Map<string, ResourceAccessLevel>();
+  for (const item of items) {
+    const userID = item.user_id?.trim();
+    const accessLevel = item.access_level;
+    if (!userID) continue;
+    if (accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    out.set(userID, accessLevel);
   }
   return out;
 }
@@ -461,6 +514,16 @@ const permissionInfoStyle: React.CSSProperties = {
   padding: "8px 10px",
   fontSize: 12,
   background: "#fbfbfb",
+};
+
+const permissionReadOnlyNoticeStyle: React.CSSProperties = {
+  border: "1px solid rgba(185, 28, 28, 0.32)",
+  borderRadius: 6,
+  padding: "10px 12px",
+  fontSize: 15,
+  fontWeight: 700,
+  background: "#fff7f7",
+  color: "#991b1b",
 };
 
 const permissionListStyle: React.CSSProperties = {
