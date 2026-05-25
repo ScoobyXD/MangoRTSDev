@@ -672,6 +672,7 @@ export async function convertMessagesToLogicGateCommand(args: {
   companyID: string;
   logicGateID: string;
   messageIDs: string[];
+  priority: number;
   convertTriageMessagesToLogicGate?: HomeConvertTriageMessagesToLogicGate;
   invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
@@ -688,8 +689,9 @@ export async function convertMessagesToLogicGateCommand(args: {
   const messageIDs = cleanIDList(args.messageIDs);
   if (!logicGateID || messageIDs.length === 0) return null;
 
+  const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
   const convertTriageMessagesToLogicGate = args.convertTriageMessagesToLogicGate ?? defaultConvertTriageMessagesToLogicGate;
-  const result = await convertTriageMessagesToLogicGate({ companyID: args.companyID, logicGateID, messageIDs });
+  const result = await convertTriageMessagesToLogicGate({ companyID: args.companyID, logicGateID, messageIDs, priority });
   const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);
   const boardLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
 

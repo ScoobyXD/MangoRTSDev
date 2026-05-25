@@ -51,6 +51,9 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if node.Title != message.Subject || node.Status == nil || *node.Status != "In Progress" {
 		t.Fatalf("node = %+v, want email title and In Progress status", node)
 	}
+	if node.Priority == nil || *node.Priority != CommunicationsTriageConversionDefaultPriority {
+		t.Fatalf("node priority = %+v, want default %d", node.Priority, CommunicationsTriageConversionDefaultPriority)
+	}
 	if node.AssigneeUserID == nil || *node.AssigneeUserID != user.UserID {
 		t.Fatalf("node assignee = %+v, want responsible user %s", node.AssigneeUserID, user.UserID)
 	}
@@ -200,6 +203,7 @@ func TestMemoryEmailConversionCommandValidatesInputs(t *testing.T) {
 		{UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID},
 		{UserID: user.UserID, CompanyID: companyID, Target: CommunicationsTriageConversionTarget{Mode: "unsupported"}, MessageIDs: []string{message.ID}},
 		{UserID: user.UserID, CompanyID: companyID, Target: CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetNewLogicGate}, MessageIDs: []string{message.ID}},
+		{UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}, Priority: emailConversionPriority(6), PrioritySet: true},
 	}
 	for _, input := range invalidCases {
 		if _, err := repo.ConvertCommunicationsTriageItems(input); !errors.Is(err, ErrInvalid) {
@@ -215,6 +219,10 @@ func TestMemoryEmailConversionCommandValidatesInputs(t *testing.T) {
 	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: "missing-user", CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing user/message scope err = %v, want ErrNotFound", err)
 	}
+}
+
+func emailConversionPriority(value int) *int {
+	return &value
 }
 
 func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID string) (domain.User, domain.LogicGate) {

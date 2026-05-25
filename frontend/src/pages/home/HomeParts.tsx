@@ -26,6 +26,13 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
+const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 1, label: "1  URGENT (<1 hr)" },
+  { value: 2, label: "2  By end of day" },
+  { value: 3, label: "3  Within a few days" },
+  { value: 4, label: "4  Within the week" },
+  { value: 5, label: "5  Later (low priority)" },
+];
 const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/EditorContent").then((module) => ({
   default: module.EditorContent as React.FC<{
     accent: string;
@@ -49,6 +56,13 @@ type HomePinContextMenuState = {
   kind: SidebarPinKind;
   id: string;
   label: string;
+};
+
+type TriageConversionPriorityMenuState = {
+  x: number;
+  y: number;
+  logicGateID: string;
+  messageIDs: string[];
 };
 
 function openHomePinContextMenu(
@@ -1847,18 +1861,30 @@ export function LogicGateRail({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
-  onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
+  onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onCreateLogicGate: (options?: { creatorRaciRole?: LogicGateRaciRole }) => void;
   onRequestDeleteLogicGate: (logicGateID: string) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; creatorRaciRole?: LogicGateRaciRole } | null>(null);
+  const [triagePriorityMenu, setTriagePriorityMenu] = useState<TriageConversionPriorityMenuState | null>(null);
   const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, creatorRaciRole?: LogicGateRaciRole) => {
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
+    setTriagePriorityMenu(null);
     setCreateContextMenu({ x: event.clientX, y: event.clientY, creatorRaciRole });
+  }, []);
+  const requestTriageConversionPriority = useCallback((event: React.DragEvent<HTMLElement>, logicGateID: string, messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID || ids.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setCreateContextMenu(null);
+    setTriagePriorityMenu({ x: event.clientX, y: event.clientY, logicGateID: cleanLogicGateID, messageIDs: ids });
   }, []);
 
   return (
@@ -1906,7 +1932,7 @@ export function LogicGateRail({
                     onOpenLogicGate={onOpenLogicGate}
                     onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
                     onRemoveShortcut={onRemoveShortcut}
-                    onConvertMessages={onConvertMessages}
+                    onConvertMessages={requestTriageConversionPriority}
                   />
                 ))}
               </div>
@@ -1972,8 +1998,7 @@ export function LogicGateRail({
                   if (row.kind !== "logic_gate" || !logicGateID) return;
                   const messageIDs = readTriageMessageIDs(event.dataTransfer);
                   if (messageIDs.length === 0) return;
-                  event.preventDefault();
-                  onConvertMessages(logicGateID, messageIDs);
+                  requestTriageConversionPriority(event, logicGateID, messageIDs);
                 }}
               >
                 {isFolder ? (
@@ -2021,6 +2046,24 @@ export function LogicGateRail({
         </button>
       </FrameRightClickMenu>
     )}
+    {triagePriorityMenu && (
+      <FrameRightClickMenu x={triagePriorityMenu.x} y={triagePriorityMenu.y} onClose={() => setTriagePriorityMenu(null)}>
+        {HOME_LOGIC_GATE_PRIORITY_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              const menu = triagePriorityMenu;
+              setTriagePriorityMenu(null);
+              onConvertMessages(menu.logicGateID, menu.messageIDs, option.value);
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </FrameRightClickMenu>
+    )}
     </>
   );
 }
@@ -2048,7 +2091,7 @@ export function MyLogicGateTile({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
   onRemoveShortcut: (logicGateID: string) => void;
-  onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
+  onConvertMessages: (event: React.DragEvent<HTMLElement>, logicGateID: string, messageIDs: string[]) => void;
 }) {
   const logicGateID = logicGate.logic_gate_id;
   return (
@@ -2079,8 +2122,7 @@ export function MyLogicGateTile({
       onDrop={(event) => {
         const messageIDs = readTriageMessageIDs(event.dataTransfer);
         if (messageIDs.length === 0) return;
-        event.preventDefault();
-        onConvertMessages(logicGateID, messageIDs);
+        onConvertMessages(event, logicGateID, messageIDs);
       }}
     >
       <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>

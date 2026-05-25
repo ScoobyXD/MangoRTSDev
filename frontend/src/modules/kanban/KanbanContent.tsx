@@ -116,6 +116,14 @@ const KANBAN_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string
   { value: 5, label: "5  Later (low priority)" },
 ];
 
+type KanbanPriorityMenuState = {
+  x: number;
+  y: number;
+  columnID: string;
+  mode: "create" | "drop";
+  items: ExplorerEntityDragItem[];
+};
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -166,7 +174,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [addColumnHover, setAddColumnHover] = useState(false);
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
-  const [createPriorityMenu, setCreatePriorityMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
+  const [priorityMenu, setPriorityMenu] = useState<KanbanPriorityMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
@@ -1358,8 +1366,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [deleteCardConfirmation, deleteNodeConfirmation, requestCardDelete, selectedCardIDs]);
 
-  const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[]) => {
+  const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[], priority?: number) => {
     setError("");
+    const logicGateID = logicGateIDFromKanbanBoardID(boardID);
+    const hasValidPriority = typeof priority === "number" && Number.isInteger(priority) && priority >= 1 && priority <= 5;
+    if (logicGateID && !hasValidPriority) {
+      setError("Priority is required");
+      return;
+    }
     const mutationBoardID = boardID;
     const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
     let shouldRefresh = false;
@@ -1369,6 +1383,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         cards: cardsRef.current,
         columnID,
         items,
+        priority,
         onOptimisticCards: (optimisticCards, nodeIDs) => {
           applyCards((previous) => [...previous.filter((card) => !nodeIDs.has(card.node_id)), ...optimisticCards]);
           syncNodeStatusesFromCards(optimisticCards);
@@ -1395,38 +1410,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     const nodeID = createClientUUIDv7();
     const title = "new node";
-    const timestamp = new Date().toISOString();
     const position = nextCardPosition(cardsRef.current, columnID);
-    const optimisticNode: NodeRecord = {
-      company_id: companyID,
-      node_id: nodeID,
-      title,
-      priority,
-      logic_gate_ids: [logicGateID],
-      created_timestamp: timestamp,
-    };
-    const optimisticCard: KanbanCard = {
-      company_id: companyID,
-      board_id: boardID,
-      card_id: `pending-node-${nodeID}`,
-      column_id: columnID,
-      node_id: nodeID,
-      logic_gate_id: logicGateID,
-      node_title: title,
-      description_snapshot: "",
-      is_issue: false,
-      position,
-      created_timestamp: timestamp,
-      updated_timestamp: timestamp,
-    };
     const endMutation = beginLocalBoardMutation(boardID, logicGateID);
     let shouldRefresh = false;
-    upsertNodeRelationshipGraphNode(apiBase, companyID, optimisticNode);
-    applyCards((previous) => [...previous.filter((card) => card.node_id !== nodeID), optimisticCard]);
-    syncNodeStatusesFromCards([optimisticCard]);
-    setSelectedCardIDs(new Set([optimisticCard.card_id]));
-    setSelectionAnchorCardID(optimisticCard.card_id);
-    setHighlightedEntity({ nodeID });
     try {
       const result = await assignNodeToLogicGateStatus({
         apiBase,
@@ -1440,7 +1426,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         priority,
       });
       upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
-      applyCards((previous) => [...previous.filter((card) => card.card_id !== optimisticCard.card_id && card.node_id !== nodeID), result.card]);
+      applyCards((previous) => [...previous.filter((card) => card.node_id !== nodeID), result.card]);
       syncNodeStatusesFromCards([result.card]);
       setSelectedCardIDs(new Set([result.card.card_id]));
       setSelectionAnchorCardID(result.card.card_id);
@@ -1448,9 +1434,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     } catch {
       setError("Node create failed");
       removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
-      applyCards((previous) => previous.filter((card) => card.card_id !== optimisticCard.card_id && card.node_id !== nodeID));
-      setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((cardID) => cardID !== optimisticCard.card_id)));
-      setSelectionAnchorCardID((current) => (current === optimisticCard.card_id ? "" : current));
       setHighlightedEntity((current) => (current?.nodeID === nodeID ? null : current));
       shouldRefresh = true;
     } finally {
@@ -1458,6 +1441,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     if (shouldRefresh) void refreshBoard(boardID);
   }, [apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, refreshBoard, syncNodeStatusesFromCards]);
+
+  const requestAddEntitiesToColumn = useCallback((columnID: string, items: ExplorerEntityDragItem[], anchor?: { x: number; y: number }) => {
+    setError("");
+    const logicGateID = logicGateIDFromKanbanBoardID(boardID);
+    if (!logicGateID) {
+      void addEntitiesToColumn(columnID, items);
+      return;
+    }
+    const fallbackRect = boardRootRef.current?.getBoundingClientRect();
+    setPriorityMenu({
+      columnID,
+      mode: "drop",
+      items,
+      x: anchor?.x ?? Math.round((fallbackRect?.left ?? 0) + 48),
+      y: anchor?.y ?? Math.round((fallbackRect?.top ?? 0) + 72),
+    });
+  }, [addEntitiesToColumn, boardID]);
 
   const requestCreateNodeInColumn = useCallback((columnID: string, anchor?: { x: number; y: number }) => {
     setError("");
@@ -1467,8 +1467,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       return;
     }
     const fallbackRect = boardRootRef.current?.getBoundingClientRect();
-    setCreatePriorityMenu({
+    setPriorityMenu({
       columnID,
+      mode: "create",
+      items: [],
       x: anchor?.x ?? Math.round((fallbackRect?.left ?? 0) + 48),
       y: anchor?.y ?? Math.round((fallbackRect?.top ?? 0) + 72),
     });
@@ -1490,9 +1492,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerItems.length > 0) {
-      void addEntitiesToColumn(columnID, explorerItems);
+      requestAddEntitiesToColumn(columnID, explorerItems, { x: event.clientX, y: event.clientY });
     }
-  }, [addEntitiesToColumn, reorderCards, reorderColumn]);
+  }, [reorderCards, reorderColumn, requestAddEntitiesToColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -1610,7 +1612,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           event.preventDefault();
           event.stopPropagation();
           setDragOverCard(null);
-          void addEntitiesToColumn(card.column_id, explorerItems);
+          requestAddEntitiesToColumn(card.column_id, explorerItems, { x: event.clientX, y: event.clientY });
         }}
       />
     );
@@ -1788,17 +1790,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
       />
-      {createPriorityMenu && (
-        <FrameRightClickMenu x={createPriorityMenu.x} y={createPriorityMenu.y} onClose={() => setCreatePriorityMenu(null)}>
+      {priorityMenu && (
+        <FrameRightClickMenu x={priorityMenu.x} y={priorityMenu.y} onClose={() => setPriorityMenu(null)}>
           {KANBAN_NODE_PRIORITY_OPTIONS.map((option) => (
             <button
               key={option.value}
               type="button"
               style={contextMenuButtonStyle}
               onClick={() => {
-                const columnID = createPriorityMenu.columnID;
-                setCreatePriorityMenu(null);
-                void createNodeInColumn(columnID, option.value);
+                const menu = priorityMenu;
+                setPriorityMenu(null);
+                if (menu.mode === "create") {
+                  void createNodeInColumn(menu.columnID, option.value);
+                } else {
+                  void addEntitiesToColumn(menu.columnID, menu.items, option.value);
+                }
               }}
               {...contextMenuHoverHandlers}
             >

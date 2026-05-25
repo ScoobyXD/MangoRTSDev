@@ -119,6 +119,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		Target             store.CommunicationsTriageConversionTarget `json:"target"`
 		Status             string                                     `json:"status"`
 		ColumnID           string                                     `json:"column_id"`
+		Priority           *int                                       `json:"priority"`
 		MessageIDs         []string                                   `json:"message_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -136,6 +137,8 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		Target:             req.Target,
 		Status:             req.Status,
 		ColumnID:           req.ColumnID,
+		Priority:           req.Priority,
+		PrioritySet:        req.Priority != nil,
 		MessageIDs:         req.MessageIDs,
 	})
 	if errors.Is(err, store.ErrInvalid) {

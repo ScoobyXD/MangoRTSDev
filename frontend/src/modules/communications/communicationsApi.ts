@@ -663,6 +663,7 @@ export async function convertTriageMessagesToLogicGate(input: {
   companyID: string;
   logicGateID: string;
   messageIDs: string[];
+  priority: number;
 }): Promise<{
   board: KanbanBoard;
   cards: KanbanCard[];
@@ -682,6 +683,7 @@ export async function convertTriageMessagesToLogicGate(input: {
       company_id: input.companyID,
       logic_gate_id: input.logicGateID,
       message_ids: cleanIDs(input.messageIDs),
+      priority: input.priority,
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);

@@ -13,6 +13,7 @@ import {
 import {
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+  logicGateKanbanBoardID,
   type KanbanCard,
   type KanbanColumn,
 } from "../../../../frontend/src/modules/kanban/shared.js";
@@ -292,6 +293,23 @@ test("addExplorerNodesToKanbanColumnCommand dedupes drag rows before API upserts
   assert.equal(calls.upsertCard.length, 2);
   assert.deepEqual(result.savedCards.map((item) => item.node_id), ["node-1", "node-2"]);
   assert.deepEqual(Array.from(result.nodeIDs), ["node-1", "node-2"]);
+});
+
+test("addExplorerNodesToKanbanColumnCommand sends priority for Logic Gate assignments", async () => {
+  const { client, calls } = createClient();
+  const result = await addExplorerNodesToKanbanColumnCommand({
+    context: { ...context, boardID: logicGateKanbanBoardID("gate-1") },
+    cards: [],
+    columnID: "todo",
+    items: [{ nodeID: "node-1", label: "Alpha" }],
+    priority: 2,
+    client,
+  });
+
+  assert.equal(result.savedCards.length, 1);
+  assert.equal(calls.upsertCard.length, 0);
+  assert.equal(calls.assignNodeToLogicGateStatus.length, 1);
+  assert.equal((calls.assignNodeToLogicGateStatus[0] as { priority?: number }).priority, 2);
 });
 
 test("toggleKanbanCardIssueCommand persists issue status without moving the card", async () => {

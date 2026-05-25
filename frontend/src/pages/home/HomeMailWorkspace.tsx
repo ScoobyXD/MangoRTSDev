@@ -382,7 +382,8 @@ export function HomeMailWorkspace({
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
             const hovered = hoveredMessageID === message.id;
-            const draggable = activeViewID === "my-triage" && mailbox === "primary";
+            const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
+            const draggable = triageView && mailbox === "primary";
             const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
             const starHovered = hoveredStarMessageID === message.id;
             const starHighlighted = message.starred || mailbox === "starred" || starHovered;

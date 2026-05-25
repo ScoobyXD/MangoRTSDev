@@ -1555,7 +1555,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setMessageContextMenu({ x: event.clientX, y: event.clientY, messageIDs: nextIDs });
   }, [selectedMessageIDs]);
   const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLElement>) => {
-    if (activeViewID !== "my-triage" || mailboxRef.current === "archive") return;
+    const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
+    if (!triageView || mailboxRef.current === "archive") return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
@@ -1642,7 +1643,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [companyID]);
-  const convertMessagesToLogicGate = useCallback(async (logicGateID: string, messageIDs: string[]) => {
+  const convertMessagesToLogicGate = useCallback(async (logicGateID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     if (!logicGateID || ids.length === 0) return;
     setBusy("triage-convert");
@@ -1653,6 +1654,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         companyID,
         logicGateID,
         messageIDs: ids,
+        priority,
         invalidateKanbanBoardList: invalidateKanbanBoardListCache,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         invalidateLogicGateArenaView: invalidateLogicGateArenaViewCache,

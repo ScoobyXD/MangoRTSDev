@@ -577,6 +577,8 @@ type CommunicationsTriageConversionInput struct {
 	NewLogicGateHeader string
 	Status             string
 	ColumnID           string
+	Priority           *int
+	PrioritySet        bool
 }
 
 type CommunicationsTriageConversionResult struct {
