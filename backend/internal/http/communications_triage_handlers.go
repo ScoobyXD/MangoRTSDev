@@ -152,6 +152,12 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	if !requireCompanyAccess(w, r, conversionInput.CompanyID) {
 		return
 	}
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingLogicGate {
+		userID := s.entityPermissionActorUserID(r, conversionInput.CompanyID)
+		if !s.requireKanbanLogicGateEffectiveAccess(w, conversionInput.CompanyID, userID, conversionInput.LogicGateID, store.EntityPermissionEdit) {
+			return
+		}
+	}
 
 	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)

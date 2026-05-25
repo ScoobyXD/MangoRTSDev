@@ -199,9 +199,25 @@ returning company_id::text, logic_gate_id::text, header, created_timestamp`, log
 	if logicGate.RaciAssignments == nil {
 		logicGate.RaciAssignments = []domain.LogicGateRaciAssignment{}
 	}
+	actorUserID := cleanUUIDText(input.ActorUserID)
 
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, input.LogicGateID, logicGate.Header); err != nil {
 		return CommunicationsTriageConversionResult{}, err
+	}
+	if createdLogicGate {
+		if actorUserID != "" {
+			if _, err := tx.ExecContext(ctx, `
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+values ($1::uuid, 'logic_gate', $2::uuid, 'user', $3::uuid, 'admin', now())
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`, input.CompanyID, input.LogicGateID, actorUserID); err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+		}
+		if err := rebuildEffectiveResourceAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, input.LogicGateID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 	}
 	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 	if err != nil {
@@ -290,6 +306,16 @@ insert into nodes (company_id, node_id, title, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		if actorUserID != "" {
+			if _, err := tx.ExecContext(ctx, `
+insert into resource_access_grants
+  (company_id, resource_type, resource_id, principal_type, principal_id, access_level, created_timestamp)
+values ($1::uuid, 'node', $2::uuid, 'user', $3::uuid, 'admin', now())
+on conflict (company_id, resource_type, resource_id, principal_type, principal_id) do update set
+  access_level=excluded.access_level`, input.CompanyID, nodeID, actorUserID); err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+		}
 		folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeNodeFolder.FolderID, "node", nodeID, 0)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
@@ -352,10 +378,7 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{input.LogicGateID}, []string{nodeID}); err != nil {
+		if err := rebuildEffectiveResourceAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `

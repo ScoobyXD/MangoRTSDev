@@ -254,6 +254,30 @@ func TestPostgresDeletePathsUseScopedStaleAccessCleanup(t *testing.T) {
 	}
 }
 
+func TestPostgresHotWriteEffectiveAccessRecomputeUsesScopedResourceRebuild(t *testing.T) {
+	raw, err := os.ReadFile("postgres_effective_access.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_effective_access.go: %v", err)
+	}
+	source := string(raw)
+	for _, signature := range []string{
+		"func recomputeDirectGrantEffectiveAccessForResourceTx",
+		"func recomputeCompanyAdminEffectiveAccessForResourceTx",
+		"func recomputeCompanyMemberDefaultEffectiveAccessForResourceTx",
+		"func recomputeNodeAssigneeEffectiveAccessTx",
+		"func recomputeLogicGateRaciEffectiveAccessTx",
+		"func recomputeLogicGateAssignedNodeVisibilityTx",
+	} {
+		body := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, signature)), " "))
+		if strings.Contains(body, "rebuildeffectiveresourceaccessforcompanytx") {
+			t.Fatalf("%s must not use a full-company effective access rebuild", signature)
+		}
+		if !strings.Contains(body, "rebuildeffectiveresourceaccessforresourcetx") {
+			t.Fatalf("%s must use resource-scoped effective access rebuilds", signature)
+		}
+	}
+}
+
 func assertNoEffectiveRowsForCompanyUser(t *testing.T, repo *MemoryRepo, companyID, userID string) {
 	t.Helper()
 	for _, fact := range repo.effectiveAccess {
