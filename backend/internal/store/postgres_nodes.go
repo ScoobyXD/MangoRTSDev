@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 	"time"
 )
@@ -1549,67 +1550,97 @@ func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListI
 		return nil, ErrNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, `
-select projection.company_id::text,
-       projection.node_id::text,
-       projection.information_id::text,
-       projection.information,
-       coalesce(seen.information, ''),
-       coalesce(actor.actor_user_id::text, ''),
-       coalesce(actor.actor_display_name, ''),
-       actor.created_timestamp
-from node_projection_table projection
+select change.company_id::text,
+       change.change_id::text,
+       change.node_id::text,
+       change.information_id::text,
+       change.change_type,
+       change.text,
+       change.start_offset,
+       change.end_offset,
+       coalesce(change.actor_user_id::text, ''),
+       coalesce(change.actor_display_name, ''),
+       change.created_timestamp,
+       coalesce(seen.information, '')
+from node_content_changes change
+join node_projection_table projection
+  on projection.company_id=change.company_id
+ and projection.node_id=change.node_id
+ and projection.information_id=change.information_id
 left join node_projection_seen_snapshots seen
-  on seen.company_id=projection.company_id
- and seen.node_id=projection.node_id
- and seen.information_id=projection.information_id
+  on seen.company_id=change.company_id
+ and seen.node_id=change.node_id
+ and seen.information_id=change.information_id
  and seen.user_id=$3::uuid
-left join lateral (
-  select change.actor_user_id, change.actor_display_name, change.created_timestamp, change.change_id
-    from node_content_changes change
-   where change.company_id=projection.company_id
-     and change.node_id=projection.node_id
-     and change.information_id=projection.information_id
-     and change.actor_user_id is distinct from $3::uuid
-     and (seen.seen_timestamp is null or change.created_timestamp >= seen.seen_timestamp)
-   order by change.created_timestamp desc, change.change_id desc
-   limit 1
-) actor on true
-where projection.company_id=$1::uuid
-  and projection.node_id=$2::uuid
+left join node_content_change_seen seen_change
+  on seen_change.company_id=change.company_id
+ and seen_change.change_id=change.change_id
+ and seen_change.user_id=$3::uuid
+where change.company_id=$1::uuid
+  and change.node_id=$2::uuid
   and projection.type='Text box'::information_type
-  and actor.created_timestamp is not null
-order by actor.created_timestamp asc, projection.created_timestamp asc, projection.information_id asc`, companyID, nodeID, userID)
+  and change.actor_user_id is distinct from $3::uuid
+  and seen_change.change_id is null
+  and (seen.seen_timestamp is null or change.created_timestamp >= seen.seen_timestamp)
+order by change.created_timestamp asc, change.change_id asc`, companyID, nodeID, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]domain.NodeContentChange, 0)
+	type unseenNodeContentChangeGroup struct {
+		seenInformation string
+		changes         []domain.NodeContentChange
+	}
+	groups := map[string]unseenNodeContentChangeGroup{}
+	groupOrder := make([]string, 0)
 	for rows.Next() {
-		var companyIDValue, nodeIDValue, informationID, currentInformation, seenInformation, actorUserID, actorDisplayName string
-		var changedAt time.Time
+		var item domain.NodeContentChange
+		var seenInformation string
 		if err := rows.Scan(
-			&companyIDValue,
-			&nodeIDValue,
-			&informationID,
-			&currentInformation,
+			&item.CompanyID,
+			&item.ChangeID,
+			&item.NodeID,
+			&item.InformationID,
+			&item.ChangeType,
+			&item.Text,
+			&item.StartOffset,
+			&item.EndOffset,
+			&item.ActorUserID,
+			&item.ActorDisplayName,
+			&item.CreatedTimestamp,
 			&seenInformation,
-			&actorUserID,
-			&actorDisplayName,
-			&changedAt,
 		); err != nil {
 			return nil, err
 		}
-		items = append(items, buildNodeProjectionSnapshotChanges(
-			companyIDValue,
-			nodeIDValue,
+		group, ok := groups[item.InformationID]
+		if !ok {
+			groupOrder = append(groupOrder, item.InformationID)
+			group.seenInformation = seenInformation
+		}
+		group.changes = append(group.changes, item)
+		groups[item.InformationID] = group
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items := make([]domain.NodeContentChange, 0, len(groups))
+	for _, informationID := range groupOrder {
+		group := groups[informationID]
+		items = append(items, buildNodeProjectionAuthoredSnapshotChanges(
+			companyID,
+			nodeID,
 			informationID,
-			seenInformation,
-			currentInformation,
-			normalizeNodeContentChangeActor(actorUserID, actorDisplayName),
-			changedAt,
+			group.seenInformation,
+			group.changes,
 		)...)
 	}
-	return items, rows.Err()
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].ChangeID < items[j].ChangeID
+	})
+	return items, nil
 }
 
 func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error) {
@@ -1635,6 +1666,16 @@ func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInpu
 	if informationID := nodeProjectionInformationIDFromContentChangeID(changeID); informationID != "" {
 		count, err := markNodeProjectionSeenSnapshotsTx(ctx, tx, companyID, nodeID, informationID, userID)
 		if err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
+select change.company_id, change.change_id, $4::uuid, now()
+from node_content_changes change
+where change.company_id=$1::uuid
+  and change.node_id=$2::uuid
+  and change.information_id=$3::uuid
+on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, informationID, userID); err != nil {
 			return 0, err
 		}
 		if err := tx.Commit(); err != nil {

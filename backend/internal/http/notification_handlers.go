@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	htmlpkg "html"
@@ -318,6 +320,11 @@ func editorMentionCommentPreview(infoType, information string) string {
 	return strings.TrimSpace(htmlpkg.UnescapeString(text))
 }
 
+func mentionNotificationContentKey(infoType, information string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(infoType) + "\x00" + strings.TrimSpace(information)))
+	return hex.EncodeToString(sum[:8])
+}
+
 func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityType, entityID, informationID, infoType, information string) {
 	companyID = strings.TrimSpace(companyID)
 	entityType = strings.TrimSpace(entityType)
@@ -332,6 +339,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	}
 	actorUserID, actorLabel := notificationActorPayload(r)
 	comment := editorMentionCommentPreview(infoType, information)
+	contentKey := mentionNotificationContentKey(infoType, information)
 	eventType := ""
 	streamID := ""
 	idempotencyEntityKey := ""
@@ -359,7 +367,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 		}
 		occurrenceIndex := mentionOccurrenceByUserID[userID]
 		mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
-		idempotencyKey := "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID
+		idempotencyKey := "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + contentKey
 		if occurrenceIndex > 0 {
 			idempotencyKey += ":" + strconv.Itoa(occurrenceIndex+1)
 		}
