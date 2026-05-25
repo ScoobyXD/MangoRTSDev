@@ -168,25 +168,20 @@ func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(
 	if err != nil {
 		t.Fatalf("ListUnseenNodeContentChanges after single seen failed: %v", err)
 	}
-	if len(viewerChanges) != 1 || viewerChanges[0].ChangeID == firstChangeID {
-		t.Fatalf("expected single unseen change after marking one seen, got %+v", viewerChanges)
-	}
-	if count, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
-		CompanyID: companyID,
-		NodeID:    node.NodeID,
-		UserID:    viewerID,
-	}); err != nil || count != 1 {
-		t.Fatalf("MarkNodeContentChangeSeen all remaining = (%d, %v), want (1, nil)", count, err)
+	if len(viewerChanges) != 0 {
+		t.Fatalf("expected projection group to be seen after marking one grouped change, got %+v", viewerChanges)
 	}
 
-	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
 		CompanyID:        companyID,
 		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "alpha"),
 		InformationID:    informationID,
 		ActorUserID:      actorID,
 		ActorDisplayName: "Ada Lovelace",
 	}); err != nil {
-		t.Fatalf("DeleteNodeProjectionWithActor failed: %v", err)
+		t.Fatalf("deletion AddNodeInformationWithActor failed: %v", err)
 	}
 	viewerChanges, err = repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
 		CompanyID: companyID,
@@ -196,8 +191,94 @@ func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(
 	if err != nil {
 		t.Fatalf("ListUnseenNodeContentChanges after delete failed: %v", err)
 	}
-	if len(viewerChanges) != 1 || viewerChanges[0].ChangeType != NodeContentChangeDeletion || viewerChanges[0].Text != "alpha gamma!" {
+	if len(viewerChanges) != 1 || viewerChanges[0].ChangeType != NodeContentChangeDeletion || viewerChanges[0].Text != " gamma!" {
 		t.Fatalf("delete should create one unseen deletion for viewer, got %+v", viewerChanges)
+	}
+}
+
+func TestMemoryRepo_NodeContentChangesCollapseAutosavesSinceLastSeen(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	viewerID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	informationID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+	node, err := repo.CreateNode(companyID, "Autosave grouped node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	for _, document := range []string{"alpha", "alpha beta", "alpha beta gamma"} {
+		if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+			CompanyID:        companyID,
+			NodeID:           node.NodeID,
+			Type:             "Text box",
+			Information:      memoryNodeTextBlockInformation(t, document),
+			InformationID:    informationID,
+			ActorUserID:      actorID,
+			ActorDisplayName: "Ada Lovelace",
+		}); err != nil {
+			t.Fatalf("AddNodeInformationWithActor(%q) failed: %v", document, err)
+		}
+	}
+
+	viewerChanges, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges failed: %v", err)
+	}
+	if len(viewerChanges) != 1 {
+		t.Fatalf("expected one grouped addition after multiple autosaves, got %+v", viewerChanges)
+	}
+	if change := viewerChanges[0]; change.ChangeType != NodeContentChangeAddition || change.Text != "alpha beta gamma" {
+		t.Fatalf("grouped change = %+v, want one addition for final projection", change)
+	}
+}
+
+func TestMemoryRepo_NodeViewAnchorsCleanProjectionForFutureDiffs(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	viewerID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	informationID := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+
+	node, err := repo.CreateNode(companyID, "Viewed clean node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", memoryNodeTextBlockInformation(t, "alpha"), informationID); err != nil {
+		t.Fatalf("AddNodeInformation failed: %v", err)
+	}
+	view, err := repo.GetNodeView(NodeViewInput{CompanyID: companyID, NodeID: node.NodeID, UserID: viewerID})
+	if err != nil {
+		t.Fatalf("GetNodeView failed: %v", err)
+	}
+	if len(view.ContentChanges) != 0 {
+		t.Fatalf("clean first view should not show content changes, got %+v", view.ContentChanges)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "alpha beta"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("AddNodeInformationWithActor update failed: %v", err)
+	}
+	changes, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		UserID:    viewerID,
+	})
+	if err != nil {
+		t.Fatalf("ListUnseenNodeContentChanges failed: %v", err)
+	}
+	if len(changes) != 1 || changes[0].ChangeType != NodeContentChangeAddition || changes[0].Text != " beta" {
+		t.Fatalf("future diff should anchor at the viewed projection, got %+v", changes)
 	}
 }
 

@@ -16,6 +16,8 @@ const (
 
 	editorTextBlockContentPrefix = "<!-- mango-node-text-block-v1 -->"
 	editorRichTextPrefix         = "<!-- mango-editor-html-v1 -->"
+
+	nodeProjectionContentChangePrefix = "projection:"
 )
 
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
@@ -111,6 +113,32 @@ func diffNodeContentText(companyID, nodeID, informationID, before, after string,
 		})
 	}
 	return out
+}
+
+func buildNodeProjectionSnapshotChanges(companyID, nodeID, informationID, seenInformation, currentInformation string, actor nodeContentChangeActor, changedAt time.Time) []domain.NodeContentChange {
+	before := extractNodeTextBlockDocumentText(seenInformation)
+	after := extractNodeTextBlockDocumentText(currentInformation)
+	changes := diffNodeContentText(companyID, nodeID, informationID, before, after, actor, changedAt)
+	for index := range changes {
+		changes[index].ChangeID = nodeProjectionContentChangeID(informationID, changes[index].ChangeType)
+	}
+	return changes
+}
+
+func nodeProjectionContentChangeID(informationID, changeType string) string {
+	return nodeProjectionContentChangePrefix + strings.TrimSpace(informationID) + ":" + strings.TrimSpace(changeType)
+}
+
+func nodeProjectionInformationIDFromContentChangeID(changeID string) string {
+	changeID = strings.TrimSpace(changeID)
+	if !strings.HasPrefix(changeID, nodeProjectionContentChangePrefix) {
+		return ""
+	}
+	remainder := strings.TrimPrefix(changeID, nodeProjectionContentChangePrefix)
+	if index := strings.LastIndex(remainder, ":"); index >= 0 {
+		remainder = remainder[:index]
+	}
+	return cleanUUIDText(remainder)
 }
 
 func utf16CodeUnitLen(value string) int {

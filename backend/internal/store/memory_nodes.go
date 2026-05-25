@@ -459,6 +459,12 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 			}
 		}
 	}
+	for seenKey := range r.nodeProjectionSeen {
+		parts := strings.Split(seenKey, ":")
+		if len(parts) >= 2 && parts[0] == companyID && parts[1] == nodeID {
+			delete(r.nodeProjectionSeen, seenKey)
+		}
+	}
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, nodeID))
@@ -850,17 +856,24 @@ func (r *MemoryRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInp
 		return nil, ErrNotFound
 	}
 	items := make([]domain.NodeContentChange, 0)
-	for _, change := range r.nodeContentChanges {
-		if change.CompanyID != companyID || change.NodeID != nodeID {
+	for _, projection := range r.nodeText[key(companyID, nodeID)] {
+		if projection.Type != "Text box" {
 			continue
 		}
-		if strings.TrimSpace(change.ActorUserID) == userID {
+		seen := r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, projection.InformationID, userID)]
+		actor, changedAt, ok := r.latestUnseenNodeProjectionActorLocked(companyID, nodeID, projection.InformationID, userID, seen.seenAt)
+		if !ok {
 			continue
 		}
-		if _, seen := r.nodeContentChangeSeen[nodeContentChangeSeenKey(companyID, change.ChangeID, userID)]; seen {
-			continue
-		}
-		items = append(items, change)
+		items = append(items, buildNodeProjectionSnapshotChanges(
+			companyID,
+			nodeID,
+			projection.InformationID,
+			seen.information,
+			projection.Information,
+			actor,
+			changedAt,
+		)...)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
@@ -869,6 +882,30 @@ func (r *MemoryRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInp
 		return items[i].ChangeID < items[j].ChangeID
 	})
 	return items, nil
+}
+
+func (r *MemoryRepo) latestUnseenNodeProjectionActorLocked(companyID, nodeID, informationID, userID string, seenAt time.Time) (nodeContentChangeActor, time.Time, bool) {
+	var latest domain.NodeContentChange
+	found := false
+	for _, change := range r.nodeContentChanges {
+		if change.CompanyID != companyID || change.NodeID != nodeID || change.InformationID != informationID {
+			continue
+		}
+		if strings.TrimSpace(change.ActorUserID) == userID {
+			continue
+		}
+		if !seenAt.IsZero() && change.CreatedTimestamp.Before(seenAt) {
+			continue
+		}
+		if !found || latest.CreatedTimestamp.Before(change.CreatedTimestamp) || (latest.CreatedTimestamp.Equal(change.CreatedTimestamp) && latest.ChangeID < change.ChangeID) {
+			latest = change
+			found = true
+		}
+	}
+	if !found {
+		return nodeContentChangeActor{}, time.Time{}, false
+	}
+	return normalizeNodeContentChangeActor(latest.ActorUserID, latest.ActorDisplayName), latest.CreatedTimestamp, true
 }
 
 func (r *MemoryRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error) {
@@ -884,29 +921,54 @@ func (r *MemoryRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput)
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return 0, ErrNotFound
 	}
+	if informationID := nodeProjectionInformationIDFromContentChangeID(changeID); informationID != "" {
+		return r.markNodeProjectionSeenLocked(companyID, nodeID, informationID, userID)
+	}
+	if changeID == "" {
+		return r.markNodeProjectionSeenLocked(companyID, nodeID, "", userID)
+	}
 	now := time.Now().UTC()
 	count := 0
-	if changeID != "" {
-		change, ok := r.nodeContentChanges[key(companyID, changeID)]
-		if !ok || change.NodeID != nodeID {
+	change, ok := r.nodeContentChanges[key(companyID, changeID)]
+	if !ok || change.NodeID != nodeID {
+		return 0, ErrNotFound
+	}
+	seenKey := nodeContentChangeSeenKey(companyID, changeID, userID)
+	if _, seen := r.nodeContentChangeSeen[seenKey]; !seen {
+		r.nodeContentChangeSeen[seenKey] = now
+		count = 1
+	}
+	return count, nil
+}
+
+func (r *MemoryRepo) markNodeProjectionSeenLocked(companyID, nodeID, informationID, userID string) (int, error) {
+	projections := r.nodeText[key(companyID, nodeID)]
+	now := time.Now().UTC()
+	if informationID != "" {
+		projection, ok := projections[informationID]
+		if !ok || projection.Type != "Text box" {
 			return 0, ErrNotFound
 		}
-		seenKey := nodeContentChangeSeenKey(companyID, changeID, userID)
-		if _, seen := r.nodeContentChangeSeen[seenKey]; !seen {
-			r.nodeContentChangeSeen[seenKey] = now
-			count = 1
+		r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, informationID, userID)] = memoryNodeProjectionSeen{
+			information: projection.Information,
+			seenAt:      now,
 		}
-		return count, nil
+		return 1, nil
 	}
+	count := 0
 	for _, change := range r.nodeContentChanges {
-		if change.CompanyID != companyID || change.NodeID != nodeID {
+		if change.CompanyID == companyID && change.NodeID == nodeID {
+			r.nodeContentChangeSeen[nodeContentChangeSeenKey(companyID, change.ChangeID, userID)] = now
+		}
+	}
+	for _, projection := range projections {
+		if projection.Type != "Text box" {
 			continue
 		}
-		seenKey := nodeContentChangeSeenKey(companyID, change.ChangeID, userID)
-		if _, seen := r.nodeContentChangeSeen[seenKey]; seen {
-			continue
+		r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, projection.InformationID, userID)] = memoryNodeProjectionSeen{
+			information: projection.Information,
+			seenAt:      now,
 		}
-		r.nodeContentChangeSeen[seenKey] = now
 		count++
 	}
 	return count, nil
