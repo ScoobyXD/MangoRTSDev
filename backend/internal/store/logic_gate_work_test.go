@@ -29,6 +29,8 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 		NodeID:      secondNode.NodeID,
 		Status:      "in_progress",
 		Position:    20,
+		Priority:    testPriority(4),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus second: %v", err)
 	}
@@ -38,6 +40,8 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 		NodeID:      firstNode.NodeID,
 		Status:      "pending",
 		Position:    10,
+		Priority:    testPriority(2),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus first: %v", err)
 	}

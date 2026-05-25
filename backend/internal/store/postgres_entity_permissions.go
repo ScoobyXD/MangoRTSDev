@@ -811,7 +811,7 @@ matching_grants(root_id, depth, subject_rank, access_rank) as (
   union all
   select permitted_group_scope.root_id,
          permitted_group_scope.depth,
-         1,
+         3,
          permitted_group_scope.access_rank
   from company_user_group_members member
   join permitted_group_scope

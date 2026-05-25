@@ -741,6 +741,14 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
+	if _, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:   companyID,
+		NodeID:      node.NodeID,
+		Priority:    testPriority(3),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("UpdateNode priority failed: %v", err)
+	}
 	responsibleUser, err := repo.UpsertAuthUser("placement-responsible-subject", "responsible@example.com", "Responsible User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser responsible failed: %v", err)
@@ -883,6 +891,14 @@ func TestMemoryRepo_LogicGateKanbanRawDeleteRemovesAssignmentSourceAndColumnDele
 	node, err := repo.CreateNode(companyID, "Delete guard node")
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
+	}
+	if _, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:   companyID,
+		NodeID:      node.NodeID,
+		Priority:    testPriority(3),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("UpdateNode priority failed: %v", err)
 	}
 	boardID := LogicGateKanbanBoardID(logicGate.LogicGateID)
 	columns, err := repo.ListKanbanColumns(companyID, boardID)

@@ -169,3 +169,107 @@ func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 		t.Fatalf("permissions = %+v, want saved edit grant for target", payload.Permissions)
 	}
 }
+
+func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111117"
+	repo.EnsureCompany(companyID, "Permission Company Manager Co")
+
+	resourceAdmin, err := repo.UpsertAuthUser("permission-resource-admin", "resource-admin@example.com", "Resource Admin")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser resource admin: %v", err)
+	}
+	if _, err := repo.UpsertAuthUser("permission-company-admin", "company-admin@example.com", "Company Admin"); err != nil {
+		t.Fatalf("UpsertAuthUser company admin: %v", err)
+	}
+	targetUser, err := repo.UpsertAuthUser("permission-view-target", "view-target@example.com", "View Target")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser target: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-resource-admin", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership resource admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-company-admin", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership company admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-view-target", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership target: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "View-only permission gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   resourceAdmin.UserID,
+			AccessLevel: store.EntityPermissionAdmin,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	resourceAdminToken := "Bearer " + testJWT(t, key, "kid", "permission-resource-admin", "resource-admin@example.com")
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq.Header.Set("Authorization", resourceAdminToken)
+	getRes := httptest.NewRecorder()
+	handler.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("resource admin GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
+	}
+	var getPayload struct {
+		CanEditPermissions bool `json:"can_edit_permissions"`
+	}
+	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
+		t.Fatalf("decode permissions: %v", err)
+	}
+	if getPayload.CanEditPermissions {
+		t.Fatalf("resource admin can_edit_permissions = true, want false for non-company-admin")
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"permissions": []map[string]string{{
+			"subject_type": "user",
+			"subject_id":   targetUser.UserID,
+			"access_level": store.EntityPermissionView,
+		}},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq.Header.Set("Authorization", resourceAdminToken)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRes := httptest.NewRecorder()
+	handler.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusForbidden {
+		t.Fatalf("resource admin PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusForbidden, strings.TrimSpace(putRes.Body.String()))
+	}
+
+	companyAdminToken := "Bearer " + testJWT(t, key, "kid", "permission-company-admin", "company-admin@example.com")
+	companyGetReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	companyGetReq.Header.Set("Authorization", companyAdminToken)
+	companyGetRes := httptest.NewRecorder()
+	handler.ServeHTTP(companyGetRes, companyGetReq)
+	if companyGetRes.Code != http.StatusOK {
+		t.Fatalf("company admin GET permissions status = %d, want %d body=%s", companyGetRes.Code, http.StatusOK, strings.TrimSpace(companyGetRes.Body.String()))
+	}
+	var companyPayload struct {
+		CanEditPermissions bool `json:"can_edit_permissions"`
+	}
+	if err := json.Unmarshal(companyGetRes.Body.Bytes(), &companyPayload); err != nil {
+		t.Fatalf("decode company permissions: %v", err)
+	}
+	if !companyPayload.CanEditPermissions {
+		t.Fatalf("company admin can_edit_permissions = false, want true")
+	}
+}

@@ -481,6 +481,11 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
 	board := r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
+	nodeKey := key(input.CompanyID, input.NodeID)
+	node := r.nodes[nodeKey]
+	if board.LogicGateID != nil && !logicGateAssignmentNodeHasPriority(node.Priority) {
+		return domain.KanbanCard{}, ErrPriorityRequired
+	}
 	if board.LogicGateID != nil {
 		for boardKeyValue, cards := range r.kanbanCards {
 			nextCards := cards[:0]
@@ -497,8 +502,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	now := time.Now().UTC()
-	nodeKey := key(input.CompanyID, input.NodeID)
-	node := r.nodes[nodeKey]
 	nodeTitle := node.Title
 	if strings.TrimSpace(nodeTitle) == "" {
 		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
@@ -599,6 +602,9 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	nodeKey := key(input.CompanyID, input.NodeID)
 	var createdNode domain.Node
 	if _, ok := r.nodes[nodeKey]; !ok {
+		if _, ok := logicGateAssignmentInputPriority(input); !ok {
+			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+		}
 		if input.CreateNodeTitle == "" {
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
@@ -607,10 +613,23 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
+	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && !logicGateAssignmentNodeHasPriority(r.nodes[nodeKey].Priority) {
+		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
 	previousNode := r.nodes[nodeKey]
 	previousAssigneeUserID := nodeAssigneeUserID(previousNode)
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
+
+	if input.PrioritySet {
+		priority, ok := logicGateAssignmentInputPriority(input)
+		if !ok {
+			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+		}
+		node := r.nodes[nodeKey]
+		value := *priority
+		node.Priority = &value
+		r.nodes[nodeKey] = node
+	}
 
 	card, err := r.upsertKanbanCardLocked(KanbanCardMutationInput{
 		CompanyID:           input.CompanyID,
@@ -628,16 +647,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
-	if input.PrioritySet {
-		node := r.nodes[nodeKey]
-		if input.Priority == nil {
-			node.Priority = nil
-		} else {
-			priority := *input.Priority
-			node.Priority = &priority
-		}
-		r.nodes[nodeKey] = node
-	}
 	if nodeAssigneeUserID(r.nodes[nodeKey]) != previousAssigneeUserID {
 		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
@@ -798,6 +807,18 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	} else if columnID != card.ColumnID {
 		position = nextKanbanCardPosition(r.kanbanCards[location.mapKey], columnID)
 	}
+	if input.PrioritySet {
+		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
+		if !ok {
+			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+		}
+		node = r.nodes[nodeKey]
+		value := *priority
+		node.Priority = &value
+		r.nodes[nodeKey] = node
+	} else if !logicGateAssignmentNodeHasPriority(node.Priority) {
+		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+	}
 
 	card.ColumnID = columnID
 	card.Position = position
@@ -830,16 +851,6 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		}
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
-	if input.PrioritySet {
-		node = r.nodes[nodeKey]
-		if input.Priority == nil {
-			node.Priority = nil
-		} else {
-			priority := *input.Priority
-			node.Priority = &priority
-		}
-		r.nodes[nodeKey] = node
-	}
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {

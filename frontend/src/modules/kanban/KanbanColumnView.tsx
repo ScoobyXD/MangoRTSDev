@@ -48,7 +48,7 @@ type KanbanColumnViewProps = {
   onCommitColumnTitle: (columnID: string, title: string) => void;
   onRefreshBoard: () => void;
   onRequestColumnDelete: (columnID: string) => void;
-  onCreateNodeInColumn: (columnID: string) => void;
+  onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
   showCreateNodeButton?: boolean;
@@ -178,7 +178,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             title="Create node"
             type="button"
             onMouseDown={(event) => event.stopPropagation()}
-            onClick={() => onCreateNodeInColumn(column.column_id)}
+            onClick={(event) => onCreateNodeInColumn(column.column_id, { x: event.clientX, y: event.clientY })}
             style={{ width: 28, height: 28, border: "none", background: "transparent", color: text, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
           >
             +

@@ -256,8 +256,8 @@ func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("RACI user logic gate edit allowed = %v err = %v, want true", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("RACI user logic gate edit allowed = %v err = %v, want false", allowed, err)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{CompanyID: companyID, EntityType: EntityTypeLogicGate, EntityID: gate.LogicGateID}); err != nil {
@@ -278,7 +278,7 @@ func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
 		t.Fatalf("duplicate AddLogicGateRaciAssignments changed = true, want false")
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("duplicate RACI add repaired edit allowed = %v err = %v, want true", allowed, err)
+		t.Fatalf("cleared direct permissions default edit allowed = %v err = %v, want true", allowed, err)
 	}
 }
 
@@ -355,10 +355,26 @@ func TestMemorySharedTriagePermissionsInheritAndChildOverrides(t *testing.T) {
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, parent.FolderID, joe.UserID, EntityPermissionView); err != nil || allowed {
 		t.Fatalf("joe parent view allowed = %v err = %v, want false", allowed, err)
 	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("joe child group override edit allowed = %v err = %v, want false", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("joe nested child group override edit allowed = %v err = %v, want false", allowed, err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeSharedTriageFolder,
+		EntityID:   child.FolderID,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: joe.UserID, AccessLevel: EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("Set child custom permissions: %v", err)
+	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("joe child override edit allowed = %v err = %v, want true", allowed, err)
+		t.Fatalf("joe child custom edit allowed = %v err = %v, want true", allowed, err)
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("joe nested parent edit propagated to grandchild allowed = %v err = %v, want true", allowed, err)
+		t.Fatalf("joe nested child custom edit allowed = %v err = %v, want true", allowed, err)
 	}
 }

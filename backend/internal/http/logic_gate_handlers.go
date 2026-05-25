@@ -262,7 +262,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
 		var beforeAssignments []domain.LogicGateRaciAssignment

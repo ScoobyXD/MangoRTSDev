@@ -41,7 +41,7 @@ func TestWorkItemAssignmentPublishesCommittedWorkspaceEventAfterAtomicCommit(t *
 	stream := server.hub.subscribe(companyID)
 	defer server.hub.unsubscribe(companyID, stream)
 
-	body, _ := json.Marshal(map[string]any{"company_id": companyID, "logic_gate_id": logicGate.LogicGateID, "node_id": node.NodeID, "status": "done"})
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "logic_gate_id": logicGate.LogicGateID, "node_id": node.NodeID, "priority": 3, "status": "done"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/work-items/logic-gate-assignments", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

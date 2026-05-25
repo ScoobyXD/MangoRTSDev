@@ -185,6 +185,8 @@ func TestMemoryLogicGateAssignedNodeVisibilityAssignmentRemovalAndNoOpMoves(t *t
 		NodeID:      node.NodeID,
 		Status:      "pending",
 		NodeTitle:   node.Title,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

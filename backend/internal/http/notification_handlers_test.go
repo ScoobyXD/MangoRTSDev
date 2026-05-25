@@ -144,6 +144,9 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Priority: testPriority(3), PrioritySet: true}); err != nil {
+		t.Fatalf("UpdateNode priority: %v", err)
+	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, responsible.UserID)
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, responsible.UserID)
 	card, err := repo.UpsertKanbanCard(store.KanbanCardMutationInput{

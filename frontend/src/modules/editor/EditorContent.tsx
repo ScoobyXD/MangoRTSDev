@@ -5,6 +5,7 @@ import {
   NODE_H,
   NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX,
   NODE_W,
+  canAdminResourceAccess,
   canEditResourceAccess,
   persistedMapPositionsToNodePositions,
   resolveOpenNodeMapPosition,
@@ -239,6 +240,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(true);
+  const [linkedEntityCanAdmin, setLinkedEntityCanAdmin] = useState(true);
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
@@ -746,6 +748,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const clearVisibleDocumentForSelection = useCallback(() => {
     setLinkedEntityCanEdit(true);
+    setLinkedEntityCanAdmin(true);
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
@@ -1079,7 +1082,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
   const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
-    if (!linkedEntityCanEdit) return;
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     setError("");
     try {
@@ -1099,7 +1101,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_raci");
     }
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const addLogicGateRaciUser = useCallback((role: LogicGateRaciRole, userID: string) => {
     const cleanUserID = userID.trim();
@@ -1423,6 +1425,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const node = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!node) return;
       setLinkedEntityCanEdit(canEditResourceAccess(node));
+      setLinkedEntityCanAdmin(canAdminResourceAccess(node));
       const nextTitle = getNodeTitle(node);
       setLinkedNodeTitle((current) => {
         if (current === nextTitle) return current;
@@ -1446,6 +1449,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const logicGate = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
       if (!logicGate) return;
       setLinkedEntityCanEdit(canEditResourceAccess(logicGate));
+      setLinkedEntityCanAdmin(canAdminResourceAccess(logicGate));
       const nextTitle = getLogicGateTitle(logicGate);
       setLinkedNodeTitle((current) => {
         if (current === nextTitle) return current;
@@ -1461,6 +1465,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     let cancelled = false;
     if (!linkedNodeID) {
       setLinkedEntityCanEdit(true);
+      setLinkedEntityCanAdmin(true);
       setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
@@ -1508,6 +1513,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           ]);
           if (cancelled) return;
           setLinkedEntityCanEdit(canEditResourceAccess(details));
+          setLinkedEntityCanAdmin(canAdminResourceAccess(details));
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           setNodeStatus("");
           setNodeStatusColor("");
@@ -1551,6 +1557,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         ]);
         if (cancelled) return;
         setLinkedEntityCanEdit(canEditResourceAccess(details));
+        setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         setLinkedNodeTitle(getNodeTitle(details.node));
         setNodeStatus(details.node.status ?? "");
         setNodeStatusColor(details.node.status_color ?? "");
@@ -1725,6 +1732,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
             canEdit={linkedEntityCanEdit}
+            canEditRaci={linkedEntityKind === "logic_gate" && Boolean(linkedNodeID)}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
               statusColor: nodeStatusColor || "",
@@ -1806,7 +1814,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               entityID={linkedNodeID}
               title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
               variant="embedded"
-              readOnly={!linkedEntityCanEdit}
+              readOnly={!linkedEntityCanAdmin}
             />
           </div>
         )}

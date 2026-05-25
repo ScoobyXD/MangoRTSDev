@@ -53,6 +53,8 @@ func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAssignmentsAndChange
 		NodeID:      node.NodeID,
 		Status:      "in_progress",
 		Position:    20,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
@@ -114,6 +116,8 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignme
 		NodeID:      node.NodeID,
 		Status:      "done",
 		Position:    10,
+		Priority:    testPriority(2),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

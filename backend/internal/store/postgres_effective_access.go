@@ -296,7 +296,7 @@ legacy_candidates as (
          'direct_group_grant'::text,
          grant_row.resource_type || ':' || grant_row.resource_id::text || ':group:' || grant_row.principal_id::text,
          resource_scope.depth,
-         1,
+         3,
          mangorts_access_level_rank(grant_row.access_level)
   from resource_access_grants grant_row
   join resource_scope
@@ -827,7 +827,7 @@ legacy_candidates as (
          greatest(scope.source_timestamp, member.updated_timestamp),
          30,
          scope.depth,
-         1,
+         3,
          mangorts_access_level_rank(scope.access_level)
   from legacy_grant_scope scope
   join group_descendants descendant
@@ -842,7 +842,7 @@ ranked_legacy_facts as (
   select legacy_candidates.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by depth asc, source_timestamp desc, subject_rank desc, access_rank desc, source_type asc, source_id asc
+           order by depth asc, subject_rank desc, source_timestamp desc, access_rank desc, source_type asc, source_id asc
          ) as rn
   from legacy_candidates
 ),
@@ -922,20 +922,6 @@ node_assignee_facts as (
   where node.company_id=$1::uuid
     and node.assignee_user_id is not null
 ),
-logic_gate_raci_facts as (
-  select assignment.company_id,
-         assignment.user_id,
-         'logic_gate'::text as resource_type,
-         assignment.logic_gate_id as resource_id,
-         'edit'::text as access_level,
-         'logic_gate_raci'::text as source_type,
-         'logic_gate:' || assignment.logic_gate_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
-         assignment.created_timestamp as source_timestamp,
-         70 as source_rank,
-         2 as access_rank
-  from logic_gate_raci_assignments assignment
-  where assignment.company_id=$1::uuid
-),
 shared_raci_user_facts as (
   select assignment.company_id,
          assignment.user_id,
@@ -984,8 +970,6 @@ base_facts as (
   select * from company_admin_facts
   union all
   select * from node_assignee_facts
-  union all
-  select * from logic_gate_raci_facts
   union all
   select * from shared_raci_user_facts
   union all
@@ -1193,7 +1177,7 @@ legacy_candidates as (
          greatest(scope.source_timestamp, member.updated_timestamp),
          30,
          scope.depth,
-         1,
+         3,
          mangorts_access_level_rank(scope.access_level)
   from legacy_grant_scope scope
   join group_descendants descendant
@@ -1208,7 +1192,7 @@ ranked_legacy_facts as (
   select legacy_candidates.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by depth asc, source_timestamp desc, subject_rank desc, access_rank desc, source_type asc, source_id asc
+           order by depth asc, subject_rank desc, source_timestamp desc, access_rank desc, source_type asc, source_id asc
          ) as rn
   from legacy_candidates
 ),
@@ -1288,20 +1272,6 @@ node_assignee_facts as (
   where node.company_id=$1::uuid
     and node.assignee_user_id is not null
 ),
-logic_gate_raci_facts as (
-  select assignment.company_id,
-         assignment.user_id,
-         'logic_gate'::text as resource_type,
-         assignment.logic_gate_id as resource_id,
-         'edit'::text as access_level,
-         'logic_gate_raci'::text as source_type,
-         'logic_gate:' || assignment.logic_gate_id::text || ':role:' || assignment.role || ':user:' || assignment.user_id::text as source_id,
-         assignment.created_timestamp as source_timestamp,
-         70 as source_rank,
-         2 as access_rank
-  from logic_gate_raci_assignments assignment
-  where assignment.company_id=$1::uuid
-),
 shared_raci_user_facts as (
   select assignment.company_id,
          assignment.user_id,
@@ -1350,8 +1320,6 @@ base_facts as (
   select * from company_admin_facts
   union all
   select * from node_assignee_facts
-  union all
-  select * from logic_gate_raci_facts
   union all
   select * from shared_raci_user_facts
   union all

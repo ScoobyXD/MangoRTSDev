@@ -280,6 +280,7 @@ func (s *Server) handleKanbanCardsCompatibility(w http.ResponseWriter, r *http.R
 		NodeTitle           string `json:"node_title"`
 		DescriptionSnapshot string `json:"description_snapshot"`
 		Position            int    `json:"position"`
+		Priority            *int   `json:"priority"`
 		IsIssue             bool   `json:"is_issue"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -308,12 +309,16 @@ func (s *Server) handleKanbanCardsCompatibility(w http.ResponseWriter, r *http.R
 		CompanyID:           req.CompanyID,
 		LogicGateID:         logicGateID,
 		NodeID:              req.NodeID,
-		Status:              req.ColumnID,
+		ColumnID:            req.ColumnID,
 		NodeTitle:           req.NodeTitle,
 		DescriptionSnapshot: req.DescriptionSnapshot,
 		Position:            req.Position,
 		IsIssue:             req.IsIssue,
 		IsIssueSet:          req.IsIssue,
+	}
+	if req.Priority != nil {
+		input.Priority = req.Priority
+		input.PrioritySet = true
 	}
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.repo.AssignNodeToLogicGateStatus(input)
@@ -841,6 +846,10 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	item := result.Card
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
+		return
+	}
+	if errors.Is(err, store.ErrPriorityRequired) {
+		writeError(w, http.StatusBadRequest, "priority_required")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {

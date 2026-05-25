@@ -69,6 +69,8 @@ func TestMemoryDeleteCompanyUserRemovesAllCompanyEffectiveAccessSources(t *testi
 		NodeID:      assignedNode.NodeID,
 		Status:      "pending",
 		NodeTitle:   assignedNode.Title,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
@@ -175,6 +177,8 @@ func TestMemoryDeleteLogicGateRemovesAssignedNodeVisibility(t *testing.T) {
 		NodeID:      node.NodeID,
 		Status:      "pending",
 		NodeTitle:   node.Title,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

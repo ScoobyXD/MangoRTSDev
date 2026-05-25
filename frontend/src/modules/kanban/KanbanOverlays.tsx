@@ -49,7 +49,7 @@ export function KanbanContextMenus({
   contextCardSelectionIDs: string[];
   onCloseColumnMenu: () => void;
   onCloseCardMenu: () => void;
-  onCreateNodeInColumn: (columnID: string) => void;
+  onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onEditColumn: (columnID: string) => void;
   onRequestColumnDelete: (columnID: string) => void;
   onPersistColumnItemColor: (columnID: string, color: string) => void;
@@ -62,7 +62,7 @@ export function KanbanContextMenus({
     <>
       {contextColumn && columnContextMenu && (
         <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={onCloseColumnMenu}>
-          <button type="button" style={contextMenuButtonStyle} onClick={() => onCreateNodeInColumn(contextColumn.column_id)} {...contextMenuHoverHandlers}>
+          <button type="button" style={contextMenuButtonStyle} onClick={() => onCreateNodeInColumn(contextColumn.column_id, { x: columnContextMenu.x, y: columnContextMenu.y })} {...contextMenuHoverHandlers}>
             Create new node
           </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onEditColumn(contextColumn.column_id)} {...contextMenuHoverHandlers}>

@@ -81,12 +81,15 @@ import {
 } from "./shared";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { createRequestJSON } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
 
 import {
   cardDropPlacement,
   clampNodeEditorOverlayRatio,
+  contextMenuButtonStyle,
+  contextMenuHoverHandlers,
   dataTransferIncludes,
   formatKanbanLoadError,
   isEditableKeyboardTarget,
@@ -104,6 +107,14 @@ import {
   type OverlayResizeState,
   type WorkspaceStreamEnvelope,
 } from "./KanbanContentModel";
+
+const KANBAN_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 1, label: "1  URGENT (<1 hr)" },
+  { value: 2, label: "2  By end of day" },
+  { value: 3, label: "3  Within a few days" },
+  { value: 4, label: "4  Within the week" },
+  { value: 5, label: "5  Later (low priority)" },
+];
 
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
@@ -155,6 +166,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [addColumnHover, setAddColumnHover] = useState(false);
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
+  const [createPriorityMenu, setCreatePriorityMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
@@ -1318,7 +1330,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
-  const createNodeInColumn = useCallback(async (columnID: string) => {
+  const createNodeInColumn = useCallback(async (columnID: string, priority: number) => {
     setError("");
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
     if (!logicGateID) {
@@ -1333,6 +1345,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       company_id: companyID,
       node_id: nodeID,
       title,
+      priority,
       logic_gate_ids: [logicGateID],
       created_timestamp: timestamp,
     };
@@ -1368,6 +1381,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         nodeTitle: title,
         createNodeTitle: title,
         position,
+        priority,
       });
       upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
       applyCards((previous) => [...previous.filter((card) => card.card_id !== optimisticCard.card_id && card.node_id !== nodeID), result.card]);
@@ -1388,6 +1402,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     if (shouldRefresh) void refreshBoard(boardID);
   }, [apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, refreshBoard, syncNodeStatusesFromCards]);
+
+  const requestCreateNodeInColumn = useCallback((columnID: string, anchor?: { x: number; y: number }) => {
+    setError("");
+    const logicGateID = logicGateIDFromKanbanBoardID(boardID);
+    if (!logicGateID) {
+      setError("Select a Logic Gate board first");
+      return;
+    }
+    const fallbackRect = boardRootRef.current?.getBoundingClientRect();
+    setCreatePriorityMenu({
+      columnID,
+      x: anchor?.x ?? Math.round((fallbackRect?.left ?? 0) + 48),
+      y: anchor?.y ?? Math.round((fallbackRect?.top ?? 0) + 72),
+    });
+  }, [boardID]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
@@ -1622,7 +1651,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 onCommitColumnTitle={(columnID, title) => void commitColumnTitle(columnID, title)}
                 onRefreshBoard={() => void refreshBoard()}
                 onRequestColumnDelete={requestColumnDelete}
-                onCreateNodeInColumn={(columnID) => void createNodeInColumn(columnID)}
+                onCreateNodeInColumn={(columnID, anchor) => requestCreateNodeInColumn(columnID, anchor)}
                 onDropColumn={onDropColumn}
                 dataTransferIncludes={dataTransferIncludes}
                 showCreateNodeButton={!arenaMode}
@@ -1672,9 +1701,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         contextCardSelectionIDs={contextCardSelectionIDs}
         onCloseColumnMenu={() => setColumnContextMenu(null)}
         onCloseCardMenu={() => setCardContextMenu(null)}
-        onCreateNodeInColumn={(columnID) => {
+        onCreateNodeInColumn={(columnID, anchor) => {
           setColumnContextMenu(null);
-          void createNodeInColumn(columnID);
+          requestCreateNodeInColumn(columnID, anchor);
         }}
         onEditColumn={(columnID) => {
           setEditingColumnID(columnID);
@@ -1686,7 +1715,27 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onRevertCardsToMyTriage={(cardIDs) => void revertCardsToMyTriage(cardIDs)}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
-      />      {nodeEditorOverlay && (
+      />
+      {createPriorityMenu && (
+        <FrameRightClickMenu x={createPriorityMenu.x} y={createPriorityMenu.y} onClose={() => setCreatePriorityMenu(null)}>
+          {KANBAN_NODE_PRIORITY_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              style={contextMenuButtonStyle}
+              onClick={() => {
+                const columnID = createPriorityMenu.columnID;
+                setCreatePriorityMenu(null);
+                void createNodeInColumn(columnID, option.value);
+              }}
+              {...contextMenuHoverHandlers}
+            >
+              {option.label}
+            </button>
+          ))}
+        </FrameRightClickMenu>
+      )}
+      {nodeEditorOverlay && (
         <KanbanNodeEditorOverlay
           overlay={nodeEditorOverlay}
           ratio={nodeEditorOverlayRatio}

@@ -370,6 +370,8 @@ func mustAssignVisibleQueryNodeToGate(t *testing.T, repo *MemoryRepo, companyID,
 		LogicGateID: logicGateID,
 		NodeID:      nodeID,
 		Status:      "pending",
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus %s/%s: %v", logicGateID, nodeID, err)
 	}

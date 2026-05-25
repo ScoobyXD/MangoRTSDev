@@ -103,7 +103,7 @@ func TestMemoryEffectiveAccessGroupGrantAndNestedInheritance(t *testing.T) {
 	assertEffectiveAccess(t, repo, companyID, otherUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
 }
 
-func TestMemoryEffectiveAccessRaciProjectsEdit(t *testing.T) {
+func TestMemoryEffectiveAccessRaciDoesNotOverridePermissions(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222203"
 	repo.EnsureCompany(companyID, "Effective RACI Co")
@@ -112,6 +112,18 @@ func TestMemoryEffectiveAccessRaciProjectsEdit(t *testing.T) {
 	gate, err := repo.CreateLogicGate(companyID, "RACI gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeLogicGate,
+		EntityID:   gate.LogicGateID,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
 	}
 	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
 		CompanyID:   companyID,
@@ -128,7 +140,8 @@ func TestMemoryEffectiveAccessRaciProjectsEdit(t *testing.T) {
 		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
-	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit, true)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView, false)
+	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit, false)
 	assertEffectiveAccess(t, repo, companyID, user.UserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionAdmin, false)
 }
 
@@ -193,6 +206,8 @@ func TestMemoryEffectiveAccessSourceSpecificReprojection(t *testing.T) {
 		NodeID:      node.NodeID,
 		Status:      "Pending",
 		NodeTitle:   node.Title,
+		Priority:    testPriority(3),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

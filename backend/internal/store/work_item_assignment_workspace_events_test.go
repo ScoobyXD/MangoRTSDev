@@ -110,7 +110,7 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 
 	t.Run("move", func(t *testing.T) {
 		repo, companyID, logicGate, node, _ := setupWorkItemAssignmentEventTest(t, "bbbbbbbbbbbb")
-		assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending"})
+		assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: testPriority(3), PrioritySet: true})
 		if err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
@@ -128,7 +128,7 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 
 	t.Run("remove", func(t *testing.T) {
 		repo, companyID, logicGate, node, _ := setupWorkItemAssignmentEventTest(t, "bbbbbbbbbbbc")
-		assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending"})
+		assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: testPriority(3), PrioritySet: true})
 		if err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
@@ -146,7 +146,7 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 
 	t.Run("issue", func(t *testing.T) {
 		repo, companyID, logicGate, node, _ := setupWorkItemAssignmentEventTest(t, "bbbbbbbbbbbd")
-		if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending"}); err != nil {
+		if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: testPriority(3), PrioritySet: true}); err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
 		repo.domainEventAppendErr = errAppend

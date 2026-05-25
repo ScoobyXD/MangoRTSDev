@@ -58,7 +58,6 @@ func (r *MemoryRepo) rebuildEffectiveResourceAccessForCompanyLocked(companyID st
 	r.projectCompanyMemberDefaultEffectiveAccessLocked(companyID, next, now)
 	r.projectCompanyAdminEffectiveAccessLocked(companyID, next, now)
 	r.projectNodeAssigneeEffectiveAccessLocked(companyID, next, now)
-	r.projectLogicGateRaciEffectiveAccessLocked(companyID, next, now)
 	r.projectSharedTriageRaciEffectiveAccessLocked(companyID, next, now)
 	r.projectLogicGateAssignmentVisibilityLocked(companyID, next, now)
 
@@ -506,7 +505,7 @@ func (r *MemoryRepo) projectLegacyGrantEffectiveAccessLocked(companyID string, f
 						sourceID:     sourceID,
 						sourceTime:   maxEffectiveAccessTime(sourceTime, member.UpdatedTimestamp),
 						depth:        depth,
-						subjectRank:  1,
+						subjectRank:  3,
 						accessRank:   EntityPermissionRank(accessLevel),
 					}
 					recordBestLegacyGrantEffectiveAccessCandidate(bestByUserResource, candidate)
@@ -761,11 +760,11 @@ func legacyGrantEffectiveAccessCandidateBetter(left, right legacyGrantEffectiveA
 	if left.depth != right.depth {
 		return left.depth < right.depth
 	}
-	if !left.sourceTime.Equal(right.sourceTime) {
-		return left.sourceTime.After(right.sourceTime)
-	}
 	if left.subjectRank != right.subjectRank {
 		return left.subjectRank > right.subjectRank
+	}
+	if !left.sourceTime.Equal(right.sourceTime) {
+		return left.sourceTime.After(right.sourceTime)
 	}
 	if left.accessRank != right.accessRank {
 		return left.accessRank > right.accessRank

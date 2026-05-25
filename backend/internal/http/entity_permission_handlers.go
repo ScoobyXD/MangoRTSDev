@@ -561,11 +561,27 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusInternalServerError, "failed_to_list_entity_permissions")
 			return
 		}
+		effectiveAccess, err := s.entityEffectiveAccessByUser(companyID, entityType, entityID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, notFoundCode)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_entity_effective_access")
+			return
+		}
+		actor, _ := authenticatedActor(r)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-			"company_id":  companyID,
-			"entity_type": entityType,
-			"entity_id":   entityID,
-			"permissions": permissions,
+			"company_id":           companyID,
+			"entity_type":          entityType,
+			"entity_id":            entityID,
+			"permissions":          permissions,
+			"effective_access":     effectiveAccess,
+			"can_edit_permissions": actorCanManageCompany(actor, companyID),
 		})
 		return
 	}
@@ -621,4 +637,33 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		"entity_id":   entityID,
 		"permissions": permissions,
 	})
+}
+
+func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID string) ([]map[string]string, error) {
+	users, err := s.repo.ListCompanyUsers(companyID)
+	if err != nil {
+		return nil, err
+	}
+	levels := []string{store.EntityPermissionAdmin, store.EntityPermissionEdit, store.EntityPermissionView}
+	out := make([]map[string]string, 0, len(users))
+	for _, user := range users {
+		userID := strings.TrimSpace(user.UserID)
+		if userID == "" {
+			continue
+		}
+		for _, level := range levels {
+			allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, level)
+			if err != nil {
+				return nil, err
+			}
+			if allowed {
+				out = append(out, map[string]string{
+					"user_id":      userID,
+					"access_level": level,
+				})
+				break
+			}
+		}
+	}
+	return out, nil
 }

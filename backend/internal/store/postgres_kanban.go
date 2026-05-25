@@ -638,15 +638,19 @@ select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 a
 	}
 
 	var canonicalNodeTitle string
+	var nodePriority sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
-select title
+select title, priority
 from nodes
 where company_id=$1 and node_id=$2`,
-		input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle); err != nil {
+		input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &nodePriority); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.KanbanCard{}, ErrNotFound
 		}
 		return domain.KanbanCard{}, err
+	}
+	if boardLogicGateID.Valid && (!nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5) {
+		return domain.KanbanCard{}, ErrPriorityRequired
 	}
 
 	if input.Position <= 0 {
@@ -782,12 +786,16 @@ order by kc.position asc, kc.created_timestamp asc, kc.column_id asc`, input.Com
 
 	var canonicalNodeTitle string
 	var previousAssignee sql.NullString
+	var nodePriority sql.NullInt64
 	var createdNode domain.Node
 	if err := tx.QueryRowContext(ctx, `
-select title, assignee_user_id::text
+select title, assignee_user_id::text, priority
 from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &previousAssignee); err != nil {
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &previousAssignee, &nodePriority); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if _, ok := logicGateAssignmentInputPriority(input); !ok {
+				return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			}
 			if input.CreateNodeTitle == "" {
 				return LogicGateNodeAssignmentResult{}, ErrNotFound
 			}
@@ -800,6 +808,20 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 				previousAssignee = sql.NullString{String: *createdNode.AssigneeUserID, Valid: true}
 			}
 		} else {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && (!nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5) {
+		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+	}
+	if input.PrioritySet {
+		priority, ok := logicGateAssignmentInputPriority(input)
+		if !ok {
+			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+		}
+		if _, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
@@ -921,19 +943,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
-	if input.PrioritySet {
-		var priority any
-		if input.Priority != nil {
-			priority = *input.Priority
-		}
-		if _, err := tx.ExecContext(ctx, `
-update nodes
-set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
-	}
-
 	status := column.Title
 	statusColor := column.ItemColor
 	if card.IsIssue {
@@ -1020,6 +1029,13 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&previo
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
+	var nodePriority sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+select priority
+from nodes
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&nodePriority); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 
 	columnID := card.ColumnID
 	if input.ColumnID != "" || input.Status != "" {
@@ -1073,6 +1089,20 @@ from kanban_columns
 where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, card.BoardID, columnID).Scan(&columnTitle); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	if input.PrioritySet {
+		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
+		if !ok {
+			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+		}
+		if _, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	} else if !nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5 {
+		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+	}
 	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
 		CompanyID:            input.CompanyID,
@@ -1125,19 +1155,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 			}
 		}
 	}
-	if input.PrioritySet {
-		var priority any
-		if input.Priority != nil {
-			priority = *input.Priority
-		}
-		if _, err := tx.ExecContext(ctx, `
-update nodes
-set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
-	}
-
 	node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n

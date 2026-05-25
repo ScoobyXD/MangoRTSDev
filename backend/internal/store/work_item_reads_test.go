@@ -65,6 +65,8 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 		LogicGateID: accountableGate.LogicGateID,
 		NodeID:      olderNode.NodeID,
 		Status:      "done",
+		Priority:    testPriority(5),
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}

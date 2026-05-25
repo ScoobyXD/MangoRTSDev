@@ -11,6 +11,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeMetadataRows: Array<{ label: string; value: string }>;
   linkedNodeHistoryRows: string[];
   canEdit: boolean;
+  canEditRaci?: boolean;
   nodePresetFields: {
     status: string;
     statusColor: string;
@@ -131,6 +132,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
   canEdit,
+  canEditRaci = canEdit,
   nodePresetFields,
   logicGateRaciFields,
   companyUsers,
@@ -570,7 +572,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   accent={accent}
                   panelBackground={panelBackground}
                   ruleColor={ruleColor}
-                  canEdit={canEdit}
+                  canEdit={canEditRaci}
                   onAddUser={onAddLogicGateRaciUser}
                   onRemoveUser={onRemoveLogicGateRaciUser}
                 />
