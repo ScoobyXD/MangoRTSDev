@@ -611,7 +611,7 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	}
 }
 
-func TestNodeTextBoxMentionsNotifyNewUsersAcrossSameInformationID(t *testing.T) {
+func TestNodeTextBoxMentionsCreateFreshNotificationsAcrossSameInformationID(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -688,11 +688,11 @@ func TestNodeTextBoxMentionsNotifyNewUsersAcrossSameInformationID(t *testing.T) 
 			t.Fatalf("body preview contains raw editor HTML: %q", payload.Notifications[0].BodyPreview)
 		}
 	}
-	assertMentionCount(first, 1)
+	assertMentionCount(first, 2)
 	assertMentionCount(second, 1)
 }
 
-func TestNodeTextBoxRepeatedMentionOccurrenceCreatesOneAdditionalNotification(t *testing.T) {
+func TestNodeTextBoxRepeatedMentionOccurrenceCreatesFreshAndOccurrenceNotifications(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -754,8 +754,8 @@ func TestNodeTextBoxRepeatedMentionOccurrenceCreatesOneAdditionalNotification(t 
 	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode notifications: %v", err)
 	}
-	if len(payload.Notifications) != 2 {
-		t.Fatalf("notification count = %d, want 2: %+v", len(payload.Notifications), payload.Notifications)
+	if len(payload.Notifications) != 3 {
+		t.Fatalf("notification count = %d, want 3: %+v", len(payload.Notifications), payload.Notifications)
 	}
 }
 

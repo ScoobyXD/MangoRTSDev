@@ -23,6 +23,7 @@ import {
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { formatNotificationTimestamp } from "../modules/notifications/notificationTime";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import {
   buildSharedInboxRows,
@@ -1303,13 +1304,7 @@ function formatSidebarNotificationCount(count: number): string {
 }
 
 function formatSidebarNotificationTimestamp(value: string): string {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return "";
-  const deltaMs = Date.now() - timestamp;
-  if (deltaMs < 60_000) return "Now";
-  if (deltaMs < 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / 60_000))}m`;
-  if (deltaMs < 24 * 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / (60 * 60_000)))}h`;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
+  return formatNotificationTimestamp(value);
 }
 
 function SidebarNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {

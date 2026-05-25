@@ -12,6 +12,7 @@ import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationClearInput, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
+import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
@@ -2385,13 +2386,7 @@ function inboxNotificationMatchesGroup(item: NotificationItem, role: Notificatio
 }
 
 function formatInboxNotificationTimestamp(value: string): string {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return "";
-  const deltaMs = Date.now() - timestamp;
-  if (deltaMs < 60_000) return "Now";
-  if (deltaMs < 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / 60_000))}m`;
-  if (deltaMs < 24 * 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / (60 * 60_000)))}h`;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
+  return formatNotificationTimestamp(value);
 }
 
 function InboxNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {

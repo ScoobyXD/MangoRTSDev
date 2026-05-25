@@ -283,6 +283,11 @@ type TextRangeBoundary = {
   offset: number;
 };
 
+function editorHasFocus(element: HTMLElement): boolean {
+  const activeElement = element.ownerDocument.activeElement;
+  return activeElement === element || Boolean(activeElement && element.contains(activeElement));
+}
+
 function locateTextRangeBoundary(root: HTMLElement, targetOffset: number): TextRangeBoundary {
   const target = Math.max(0, Math.trunc(targetOffset));
   let currentOffset = 0;
@@ -447,7 +452,7 @@ function buildNodeContentChangeVisuals(root: HTMLElement, wrapper: HTMLElement, 
       if (firstRect) {
         labels.push({
           change,
-          left: Math.max(6, Math.min(firstRect.left + Math.min(firstRect.width, 220) + 8, wrapperRect.width - 190)),
+          left: -12,
           top: Math.max(6, firstRect.top - 2),
         });
       }
@@ -461,7 +466,7 @@ function buildNodeContentChangeVisuals(root: HTMLElement, wrapper: HTMLElement, 
       : null;
     labels.push({
       change,
-      left: Math.max(6, Math.min((anchorRect?.left ?? TEXT_BLOCK_PADDING_LEFT) + 8, wrapperRect.width - 190)),
+      left: -12,
       top: Math.max(6, anchorRect?.top ?? TEXT_BLOCK_PADDING_TOP),
     });
   }
@@ -625,6 +630,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const nextHTML = deserializeEditorDocumentHTML(documentValue);
     const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
     if (!targetChanged && documentValue === lastAppliedDocumentRef.current) return;
+    if (!targetChanged) {
+      const currentDocument = serializeEditorDocumentHTML(element);
+      if (documentValue === currentDocument) {
+        lastAppliedDocumentRef.current = documentValue;
+        return;
+      }
+      if (editorHasFocus(element)) return;
+    }
     element.innerHTML = nextHTML;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     lastAppliedDocumentRef.current = documentValue;
@@ -1060,7 +1073,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                   position: "absolute",
                   left: label.left,
                   top: label.top,
-                  maxWidth: 240,
+                  width: 118,
+                  maxWidth: "min(118px, calc(100vw - 32px))",
+                  transform: "translateX(-100%)",
                   display: "inline-grid",
                   gridTemplateColumns: "minmax(0, 1fr) auto",
                   alignItems: "center",
@@ -1074,7 +1089,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                   fontSize: 10,
                   fontWeight: 900,
                   letterSpacing: 0,
-                  boxShadow: active ? "0 10px 24px rgba(15,23,42,0.18)" : "0 6px 16px rgba(15,23,42,0.10)",
+                  boxShadow: active ? "0 16px 34px rgba(15,23,42,0.22), 0 2px 7px rgba(15,23,42,0.10)" : "0 12px 26px rgba(15,23,42,0.16), 0 2px 6px rgba(15,23,42,0.08)",
                   pointerEvents: "auto",
                 }}
               >

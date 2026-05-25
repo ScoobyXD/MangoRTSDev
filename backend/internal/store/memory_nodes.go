@@ -855,24 +855,44 @@ func (r *MemoryRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInp
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return nil, ErrNotFound
 	}
-	items := make([]domain.NodeContentChange, 0)
-	for _, projection := range r.nodeText[key(companyID, nodeID)] {
-		if projection.Type != "Text box" {
+	projections := r.nodeText[key(companyID, nodeID)]
+	changesByInformationID := map[string][]domain.NodeContentChange{}
+	seenInformationByID := map[string]string{}
+	for _, change := range r.nodeContentChanges {
+		if change.CompanyID != companyID || change.NodeID != nodeID {
 			continue
 		}
-		seen := r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, projection.InformationID, userID)]
-		actor, changedAt, ok := r.latestUnseenNodeProjectionActorLocked(companyID, nodeID, projection.InformationID, userID, seen.seenAt)
-		if !ok {
+		if strings.TrimSpace(change.ActorUserID) == userID {
 			continue
 		}
-		items = append(items, buildNodeProjectionSnapshotChanges(
+		projection, ok := projections[change.InformationID]
+		if !ok || projection.Type != "Text box" {
+			continue
+		}
+		if _, seen := r.nodeContentChangeSeen[nodeContentChangeSeenKey(companyID, change.ChangeID, userID)]; seen {
+			continue
+		}
+		seen := r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, change.InformationID, userID)]
+		if !seen.seenAt.IsZero() && change.CreatedTimestamp.Before(seen.seenAt) {
+			continue
+		}
+		changesByInformationID[change.InformationID] = append(changesByInformationID[change.InformationID], change)
+		seenInformationByID[change.InformationID] = seen.information
+	}
+	items := make([]domain.NodeContentChange, 0, len(changesByInformationID))
+	for informationID, changes := range changesByInformationID {
+		sort.Slice(changes, func(i, j int) bool {
+			if !changes[i].CreatedTimestamp.Equal(changes[j].CreatedTimestamp) {
+				return changes[i].CreatedTimestamp.Before(changes[j].CreatedTimestamp)
+			}
+			return changes[i].ChangeID < changes[j].ChangeID
+		})
+		items = append(items, buildNodeProjectionAuthoredSnapshotChanges(
 			companyID,
 			nodeID,
-			projection.InformationID,
-			seen.information,
-			projection.Information,
-			actor,
-			changedAt,
+			informationID,
+			seenInformationByID[informationID],
+			changes,
 		)...)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -882,30 +902,6 @@ func (r *MemoryRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInp
 		return items[i].ChangeID < items[j].ChangeID
 	})
 	return items, nil
-}
-
-func (r *MemoryRepo) latestUnseenNodeProjectionActorLocked(companyID, nodeID, informationID, userID string, seenAt time.Time) (nodeContentChangeActor, time.Time, bool) {
-	var latest domain.NodeContentChange
-	found := false
-	for _, change := range r.nodeContentChanges {
-		if change.CompanyID != companyID || change.NodeID != nodeID || change.InformationID != informationID {
-			continue
-		}
-		if strings.TrimSpace(change.ActorUserID) == userID {
-			continue
-		}
-		if !seenAt.IsZero() && change.CreatedTimestamp.Before(seenAt) {
-			continue
-		}
-		if !found || latest.CreatedTimestamp.Before(change.CreatedTimestamp) || (latest.CreatedTimestamp.Equal(change.CreatedTimestamp) && latest.ChangeID < change.ChangeID) {
-			latest = change
-			found = true
-		}
-	}
-	if !found {
-		return nodeContentChangeActor{}, time.Time{}, false
-	}
-	return normalizeNodeContentChangeActor(latest.ActorUserID, latest.ActorDisplayName), latest.CreatedTimestamp, true
 }
 
 func (r *MemoryRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error) {
@@ -952,6 +948,11 @@ func (r *MemoryRepo) markNodeProjectionSeenLocked(companyID, nodeID, information
 		r.nodeProjectionSeen[nodeProjectionSeenKey(companyID, nodeID, informationID, userID)] = memoryNodeProjectionSeen{
 			information: projection.Information,
 			seenAt:      now,
+		}
+		for _, change := range r.nodeContentChanges {
+			if change.CompanyID == companyID && change.NodeID == nodeID && change.InformationID == informationID {
+				r.nodeContentChangeSeen[nodeContentChangeSeenKey(companyID, change.ChangeID, userID)] = now
+			}
 		}
 		return 1, nil
 	}

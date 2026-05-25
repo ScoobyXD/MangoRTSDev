@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 const (
@@ -123,6 +124,82 @@ func buildNodeProjectionSnapshotChanges(companyID, nodeID, informationID, seenIn
 		changes[index].ChangeID = nodeProjectionContentChangeID(informationID, changes[index].ChangeType)
 	}
 	return changes
+}
+
+func buildNodeProjectionAuthoredSnapshotChanges(companyID, nodeID, informationID, seenInformation string, rawChanges []domain.NodeContentChange) []domain.NodeContentChange {
+	if len(rawChanges) == 0 {
+		return nil
+	}
+	before := extractNodeTextBlockDocumentText(seenInformation)
+	after := before
+	latest := rawChanges[0]
+	for _, change := range rawChanges {
+		after = applyNodeContentChangeToText(after, change)
+		if latest.CreatedTimestamp.Before(change.CreatedTimestamp) || (latest.CreatedTimestamp.Equal(change.CreatedTimestamp) && latest.ChangeID < change.ChangeID) {
+			latest = change
+		}
+	}
+	changes := diffNodeContentText(companyID, nodeID, informationID, before, after, normalizeNodeContentChangeActor(latest.ActorUserID, latest.ActorDisplayName), latest.CreatedTimestamp)
+	for index := range changes {
+		changes[index].ChangeID = nodeProjectionContentChangeID(informationID, changes[index].ChangeType)
+	}
+	return changes
+}
+
+func applyNodeContentChangeToText(value string, change domain.NodeContentChange) string {
+	switch change.ChangeType {
+	case NodeContentChangeAddition:
+		offset := utf16CodeUnitOffsetToByteIndex(value, change.StartOffset)
+		return value[:offset] + change.Text + value[offset:]
+	case NodeContentChangeDeletion:
+		if strings.TrimSpace(change.Text) == "" {
+			return value
+		}
+		preferred := utf16CodeUnitOffsetToByteIndex(value, change.StartOffset)
+		if next, ok := removeNodeContentTextAtByteIndex(value, preferred, change.Text); ok {
+			return next
+		}
+		if index := strings.Index(value[preferred:], change.Text); index >= 0 {
+			if next, ok := removeNodeContentTextAtByteIndex(value, preferred+index, change.Text); ok {
+				return next
+			}
+		}
+		if index := strings.Index(value, change.Text); index >= 0 {
+			if next, ok := removeNodeContentTextAtByteIndex(value, index, change.Text); ok {
+				return next
+			}
+		}
+	}
+	return value
+}
+
+func removeNodeContentTextAtByteIndex(value string, byteIndex int, text string) (string, bool) {
+	if byteIndex < 0 || byteIndex > len(value) {
+		return value, false
+	}
+	end := byteIndex + len(text)
+	if end > len(value) || value[byteIndex:end] != text {
+		return value, false
+	}
+	return value[:byteIndex] + value[end:], true
+}
+
+func utf16CodeUnitOffsetToByteIndex(value string, target int) int {
+	if target <= 0 {
+		return 0
+	}
+	units := 0
+	for byteIndex, char := range value {
+		charUnits := len(utf16.Encode([]rune{char}))
+		if units+charUnits > target {
+			return byteIndex
+		}
+		units += charUnits
+		if units == target {
+			return byteIndex + utf8.RuneLen(char)
+		}
+	}
+	return len(value)
 }
 
 func nodeProjectionContentChangeID(informationID, changeType string) string {

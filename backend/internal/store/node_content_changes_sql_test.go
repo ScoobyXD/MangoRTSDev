@@ -26,6 +26,12 @@ func TestPostgresUnseenNodeContentChangesComparesActorAsUUID(t *testing.T) {
 	if !strings.Contains(normalized, "change.created_timestamp >= seen.seen_timestamp") {
 		t.Fatalf("ListUnseenNodeContentChanges must anchor raw actor changes after the viewer's seen snapshot")
 	}
+	if !strings.Contains(normalized, "node_content_change_seen seen_change") || !strings.Contains(normalized, "seen_change.change_id is null") {
+		t.Fatalf("ListUnseenNodeContentChanges must filter raw changes already marked seen by the viewer")
+	}
+	if strings.Contains(normalized, "buildnodeprojectionsnapshotchanges") {
+		t.Fatalf("ListUnseenNodeContentChanges must return raw per-actor changes instead of blended projection snapshot diffs")
+	}
 	for _, forbidden := range []string{
 		"coalesce(change.actor_user_id::text, '') <> $3",
 		"change.actor_user_id::text <> $3",
