@@ -6,6 +6,7 @@ import (
 )
 
 const WorkItemEmailConvertedEventType = "work_item.email_converted"
+const CommunicationsTriageConversionDefaultPriority = 3
 
 func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionInput, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
@@ -38,6 +39,18 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 
 	if input.Status == "" && input.ColumnID == "" {
 		input.Status = "Pending"
+	}
+	if input.Priority != nil {
+		if *input.Priority < 1 || *input.Priority > 5 {
+			return CommunicationsTriageConversionInput{}, ErrInvalid
+		}
+		input.PrioritySet = true
+	} else if input.PrioritySet {
+		return CommunicationsTriageConversionInput{}, ErrInvalid
+	} else {
+		priority := CommunicationsTriageConversionDefaultPriority
+		input.Priority = &priority
+		input.PrioritySet = true
 	}
 	if input.UserID == "" || input.CompanyID == "" || len(input.MessageIDs) == 0 {
 		return CommunicationsTriageConversionInput{}, ErrInvalid

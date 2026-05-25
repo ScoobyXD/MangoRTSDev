@@ -368,6 +368,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     companyID: "company-1",
     logicGateID: " gate-1 ",
     messageIDs: [" message-1 ", "message-2", "message-1"],
+    priority: 2,
     convertTriageMessagesToLogicGate,
     invalidateKanbanBoardList: (_apiBase, companyID) => invalidatedBoardLists.push(companyID),
     invalidateKanbanBoardContents: (_apiBase, _companyID, boardID) => invalidatedBoardContents.push(boardID),
@@ -381,7 +382,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     invalidateCommunications: (scope) => communicationScopes.push(scope),
   });
 
-  assert.deepEqual(convertCalls, [{ companyID: "company-1", logicGateID: "gate-1", messageIDs: ["message-1", "message-2"] }]);
+  assert.deepEqual(convertCalls, [{ companyID: "company-1", logicGateID: "gate-1", messageIDs: ["message-1", "message-2"], priority: 2 }]);
   assert.equal(result?.boardID, "logic-gate:gate-1");
   assert.equal(result?.logicGateID, "gate-1");
   assert.deepEqual(result?.convertedMessageIDs, ["message-1"]);

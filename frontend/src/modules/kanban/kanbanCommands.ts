@@ -219,6 +219,7 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   cards: KanbanCard[];
   columnID: string;
   items: ExplorerEntityDragItem[];
+  priority?: number;
   now?: () => string;
   onOptimisticCards?: (optimisticCards: KanbanCard[], nodeIDs: Set<string>) => void;
   client?: KanbanCommandClient;
@@ -228,10 +229,16 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   nodeIDs: Set<string>;
   savedCards: KanbanCard[];
 }> {
-  const { context, cards, columnID, items, now = () => new Date().toISOString(), onOptimisticCards, client = defaultKanbanCommandClient } = args;
+  const { context, cards, columnID, items, priority, now = () => new Date().toISOString(), onOptimisticCards, client = defaultKanbanCommandClient } = args;
   const dedupedItems = dedupeExplorerItems(items);
   if (dedupedItems.length === 0) {
     return { optimisticCards: [], optimisticCardIDs: new Set(), nodeIDs: new Set(), savedCards: [] };
+  }
+
+  const logicGateID = logicGateIDFromKanbanBoardID(context.boardID);
+  const hasValidPriority = typeof priority === "number" && Number.isInteger(priority) && priority >= 1 && priority <= 5;
+  if (logicGateID && !hasValidPriority) {
+    throw new Error("logic_gate_priority_required");
   }
 
   const firstPosition = nextCardPosition(cards, columnID);
@@ -253,7 +260,6 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   const optimisticCardIDs = new Set(optimisticCards.map((card) => card.card_id));
   onOptimisticCards?.(optimisticCards, nodeIDs);
 
-  const logicGateID = logicGateIDFromKanbanBoardID(context.boardID);
   const savedCards = await Promise.all(dedupedItems.map(async (item, index) => {
     const position = firstPosition + index * 1000;
     if (logicGateID) {
@@ -265,6 +271,7 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
         columnID,
         nodeTitle: item.label,
         position,
+        priority,
       });
       return result.card;
     }

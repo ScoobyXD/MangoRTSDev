@@ -216,10 +216,12 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 		nodeID := newUUIDv7String()
+		priority := *input.Priority
 		node := domain.Node{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
 			Title:            emailNodeTitle(triageItem.Message),
+			Priority:         &priority,
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
