@@ -221,7 +221,7 @@ test("grouped board layout sorts group axes and uses deadline priority labels", 
   });
 
   assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Done", "Todo"]);
-  assert.deepEqual(layout.rows.map((row) => row.label), ["1\u00A0\u00A0URGENT (<1 hr)", "5\u00A0\u00A0Later (low priority)", "Unassigned to a Logic Gate"]);
+  assert.deepEqual(layout.rows.map((row) => row.label), ["1\u00A0\u00A0URGENT(<1hr)", "5\u00A0\u00A0Later (low priority)", "Unassigned to a Logic Gate"]);
   assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], [], []]);
   assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"], ["unassigned"]]);
 });

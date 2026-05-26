@@ -95,7 +95,7 @@ function explorerFolderItem(folderID: string, itemID: string, itemType: "node" |
 test("Home view helpers map labels and mailboxes without changing backend mailbox names", () => {
   const shared = [sharedInbox("shared-a", "Team Triage", 1000)];
 
-  assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
+  assert.equal(getHomeViewLabel("my-triage", shared), "Inbox");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
   assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
   assert.equal(getHomeViewLabel("aci-inbox", shared), "A Nodes");
@@ -114,7 +114,7 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
-test("mailbox count helper reads provider folder totals for triage tabs", () => {
+test("mailbox count helper prefers the real Inbox total for the primary tab", () => {
   const counts = mailboxCountsFromFolders([
     { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
     { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
@@ -122,7 +122,7 @@ test("mailbox count helper reads provider folder totals for triage tabs", () => 
     { id: "archive-folder", name: "Archive", attributes: ["\\Archive"], total_count: 9 },
   ]);
 
-  assert.deepEqual(counts, { primary: 12, starred: 4, archive: 9 });
+  assert.deepEqual(counts, { primary: 30, starred: 4, archive: 9 });
 });
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {
@@ -330,7 +330,7 @@ test("home column sizing keeps generated grid tracks stable", () => {
   assert.deepEqual(resizeHomeInboxMatrixColumnsWithoutSidebar(widths, 2, -160, 780), [200, 400, 320, 450]);
 });
 
-test("home column sizing fits first-load widths into the available My Triage workspace", () => {
+test("home column sizing fits first-load widths into the available Inbox workspace", () => {
   const fitted = fitHomeColumnWidthsToAvailableWidth([220, 350, 360, 340], 1120, true);
 
   assert.deepEqual(fitted, [220, 310, 220, 340]);

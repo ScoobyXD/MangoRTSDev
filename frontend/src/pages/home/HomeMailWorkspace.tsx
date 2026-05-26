@@ -290,12 +290,12 @@ export function HomeMailWorkspace({
                 className="mango-elevated-action"
                 type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "primary")}
-                title={mailboxCounts.primary === undefined ? "My Triage" : `My Triage (${formatMailboxCount(mailboxCounts.primary)})`}
+                title={mailboxCounts.primary === undefined ? "Inbox" : `Inbox (${formatMailboxCount(mailboxCounts.primary)})`}
                 onClick={() => {
                   if (mailbox !== "primary") onOpenPendingMailbox();
                 }}
               >
-                <MailboxActionContent label="My Triage" count={mailboxCounts.primary} />
+                <MailboxActionContent label="Inbox" count={mailboxCounts.primary} />
               </button>
               <button
                 className="mango-elevated-action"

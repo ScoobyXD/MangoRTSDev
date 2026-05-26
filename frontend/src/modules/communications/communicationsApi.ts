@@ -1267,7 +1267,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
-  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "category:personal", "important", "\\important"]);
+  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }
 
 function messageIsArchived(message: EmailMessage): boolean {

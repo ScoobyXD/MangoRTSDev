@@ -55,10 +55,10 @@ type EditorLinkedDocumentPanelsProps = {
 };
 
 const NODE_PRIORITY_OPTIONS = [
-  { value: "1", label: "1\u00A0\u00A0URGENT (<1 hr)", color: "#334155" },
+  { value: "1", label: "1\u00A0\u00A0URGENT(<1hr)", color: "#334155" },
   { value: "2", label: "2\u00A0\u00A0By end of day", color: "#475569" },
-  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#334155" },
-  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#64748b" },
+  { value: "3", label: "3\u00A0\u00A0Tomorrow", color: "#334155" },
+  { value: "4", label: "4\u00A0\u00A0Sprint (1 week)", color: "#64748b" },
   { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
   { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;

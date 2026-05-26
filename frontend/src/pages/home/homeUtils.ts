@@ -926,7 +926,7 @@ export function getSharedInboxSiblingPosition(
 
 export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
   if (viewID === "primary") return "Primary";
-  if (viewID === "my-triage") return "My Triage";
+  if (viewID === "my-triage") return "Inbox";
   if (viewID === "shared-root") return "Shared Triage";
   const raciSection = raciInboxSectionForView(viewID);
   if (raciSection) return raciSection.title;
@@ -943,7 +943,7 @@ export function mailboxLabel(mailbox: EmailMailbox): string {
 export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred" | "archive">, number>>;
 
 export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMap {
-  const primaryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]) ?? findEmailFolder(folders, ["inbox"]);
+  const primaryFolder = findEmailFolder(folders, ["inbox"]) ?? findEmailFolder(folders, ["category:primary", "category:personal", "primary"]);
   return {
     primary: emailFolderTotalCount(primaryFolder),
     starred: emailFolderTotalCount(findEmailFolder(folders, ["starred", "flagged"])),

@@ -656,10 +656,10 @@ function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title" | "posit
 }
 
 function getKanbanPriorityGroupLabel(priority: number): string {
-  if (priority === 1) return "1\u00A0\u00A0URGENT (<1 hr)";
+  if (priority === 1) return "1\u00A0\u00A0URGENT(<1hr)";
   if (priority === 2) return "2\u00A0\u00A0By end of day";
-  if (priority === 3) return "3\u00A0\u00A0Within a few days";
-  if (priority === 4) return "4\u00A0\u00A0Within the week";
+  if (priority === 3) return "3\u00A0\u00A0Tomorrow";
+  if (priority === 4) return "4\u00A0\u00A0Sprint (1 week)";
   if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
   return "Unassigned to a Logic Gate";
 }

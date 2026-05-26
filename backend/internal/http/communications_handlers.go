@@ -1208,7 +1208,7 @@ func (s *Server) applyRequiredSystemFolderMailbox(ctx context.Context, connectio
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	parts := []string{"category:primary", "in:inbox"}
+	parts := []string{"in:inbox"}
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
 		parts = append(parts, trimmed)
 	}
