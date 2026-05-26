@@ -37,6 +37,7 @@ import {
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
+  type MessagePage,
   type CommunicationsStatus,
   type EmailProvider,
   type UserLogicGateShortcut,
@@ -66,7 +67,7 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { AciInboxMatrix, DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
-import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
@@ -98,6 +99,18 @@ async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEm
   window.location.assign(authURL);
   return true;
 }
+
+type PrefetchedMessagePage = {
+  filterKey: string;
+  pageToken: string;
+  page: MessagePage;
+};
+
+type QueuedArchiveBatch = {
+  companyID: string;
+  sharedInboxID?: string;
+  messageIDs: string[];
+};
 
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
@@ -167,10 +180,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const pendingMessageRefreshRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const loadMessagesRef = useRef<((options?: LoadMessagesOptions) => Promise<void>) | null>(null);
+  const prefetchedMessagePageRef = useRef<PrefetchedMessagePage | null>(null);
+  const prefetchMessageTokenRef = useRef("");
+  const prefetchMessageFilterKeyRef = useRef("");
+  const prefetchMessagePromiseRef = useRef<Promise<void> | null>(null);
   const selectedMessageIDRef = useRef("");
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
   const pendingAutoArchiveMessageIDsRef = useRef<Set<string>>(new Set());
   const autoArchiveTimerIDsRef = useRef<Map<string, number>>(new Map());
+  const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
+  const archiveBatchFlushTimerRef = useRef<number | null>(null);
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
@@ -267,13 +286,22 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       window.clearTimeout(timerID);
       autoArchiveTimerIDsRef.current.delete(id);
     }
+    for (const [key, batch] of queuedArchiveBatchesRef.current.entries()) {
+      batch.messageIDs = batch.messageIDs.filter((id) => !ids.includes(id));
+      if (batch.messageIDs.length === 0) queuedArchiveBatchesRef.current.delete(key);
+    }
     removePendingAutoArchiveMessages(ids);
   }, [removePendingAutoArchiveMessages]);
   useEffect(() => {
     return () => {
       autoArchiveTimerIDsRef.current.forEach((timerID) => window.clearTimeout(timerID));
       autoArchiveTimerIDsRef.current.clear();
+      if (archiveBatchFlushTimerRef.current !== null) {
+        window.clearTimeout(archiveBatchFlushTimerRef.current);
+        archiveBatchFlushTimerRef.current = null;
+      }
       pendingAutoArchiveMessageIDsRef.current.clear();
+      queuedArchiveBatchesRef.current.clear();
     };
   }, []);
   useEffect(() => {
@@ -544,6 +572,21 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       void loadLogicGatePanel();
     }, 250);
   }, [companyID, loadLogicGatePanel]);
+  const clearPrefetchedMessagePage = useCallback(() => {
+    prefetchedMessagePageRef.current = null;
+    prefetchMessageTokenRef.current = "";
+    prefetchMessageFilterKeyRef.current = "";
+    prefetchMessagePromiseRef.current = null;
+  }, []);
+  const currentMessageFilterKey = useCallback(() => (
+    messageListFilterKey(companyID, activeViewIDRef.current, mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current)
+  ), [companyID]);
+  const messageListWithinPrefetchDistance = useCallback(() => {
+    const list = messageListRef.current;
+    if (!list) return false;
+    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    return remaining < Math.max(800, list.clientHeight * 2);
+  }, []);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
     if (!status?.connected) return;
     if (isInboxMatrixViewID(activeViewID)) {
@@ -553,6 +596,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
       setNextPageToken("");
+      clearPrefetchedMessagePage();
       return;
     }
     if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail) {
@@ -564,6 +608,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setNextPageToken("");
       messageRequestKeyRef.current = "";
       messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+      clearPrefetchedMessagePage();
       return;
     }
     const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
@@ -574,6 +619,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       return;
     }
     messageRequestKeyRef.current = requestKey;
+    clearPrefetchedMessagePage();
     const requestSeq = messageRequestSeqRef.current + 1;
     messageRequestSeqRef.current = requestSeq;
     setLoadingMessages(true);
@@ -616,15 +662,91 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         }
       }
     }
-  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  const appendPrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): string | null => {
+    const prefetched = prefetchedMessagePageRef.current;
+    if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
+    prefetchedMessagePageRef.current = null;
+    prefetchMessageTokenRef.current = "";
+    prefetchMessageFilterKeyRef.current = "";
+    prefetchMessagePromiseRef.current = null;
+    const page = prefetched.page;
+    setMessages((previous) => {
+      const seen = new Set(previous.map((message) => message.id));
+      const next = [...previous];
+      for (const message of page.messages ?? []) {
+        if (!message.id || seen.has(message.id)) continue;
+        seen.add(message.id);
+        next.push(message);
+      }
+      return sortEmailMessagesByDateDescending(next);
+    });
+    setNextPageToken(page.next_page_token ?? "");
+    return page.next_page_token ?? "";
+  }, []);
+  const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
+    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
+    const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
+    if (!pageToken) return;
+    const filterKey = currentMessageFilterKey();
+    const prefetched = prefetchedMessagePageRef.current;
+    if (prefetched?.filterKey === filterKey && prefetched.pageToken === pageToken) return;
+    if (prefetchMessagePromiseRef.current && prefetchMessageFilterKeyRef.current === filterKey && prefetchMessageTokenRef.current === pageToken) return;
+    prefetchMessageFilterKeyRef.current = filterKey;
+    prefetchMessageTokenRef.current = pageToken;
+    const request = listEmailMessages({
+      limit: MESSAGE_BATCH_SIZE,
+      pageToken,
+      mailbox: mailboxRef.current,
+      companyID,
+      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
+      q: searchQueryRef.current,
+      unread: unreadOnlyRef.current ? true : undefined,
+    })
+      .then((page) => {
+        if (messageListFilterKeyRef.current !== filterKey || nextPageTokenRef.current !== pageToken) return;
+        prefetchedMessagePageRef.current = { filterKey, pageToken, page };
+      })
+      .catch((messageError) => {
+        if (isEmailAccessExpiredError(messageError)) {
+          void handleEmailAccessExpired(messageError);
+        }
+      })
+      .finally(() => {
+        if (prefetchMessagePromiseRef.current === request) {
+          prefetchMessagePromiseRef.current = null;
+          prefetchMessageTokenRef.current = "";
+          prefetchMessageFilterKeyRef.current = "";
+        }
+      });
+    prefetchMessagePromiseRef.current = request;
+    await request;
+  }, [companyID, currentMessageFilterKey, handleEmailAccessExpired, status?.connected]);
   const loadMoreMessages = useCallback(async () => {
     if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
-    const filterKey = messageListFilterKey(companyID, activeViewIDRef.current, mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current);
+    const filterKey = currentMessageFilterKey();
+    const appendedNextPageToken = appendPrefetchedMessagePage(filterKey, pageToken);
+    if (appendedNextPageToken !== null) {
+      window.setTimeout(() => {
+        if (appendedNextPageToken && messageListWithinPrefetchDistance()) void prefetchNextMessagePage(appendedNextPageToken);
+      }, 0);
+      return;
+    }
     setLoadingMoreMessages(true);
     setError("");
     try {
+      if (prefetchMessagePromiseRef.current && prefetchMessageFilterKeyRef.current === filterKey && prefetchMessageTokenRef.current === pageToken) {
+        await prefetchMessagePromiseRef.current;
+        const prefetchedNextPageToken = appendPrefetchedMessagePage(filterKey, pageToken);
+        if (prefetchedNextPageToken !== null) {
+          window.setTimeout(() => {
+            if (prefetchedNextPageToken && messageListWithinPrefetchDistance()) void prefetchNextMessagePage(prefetchedNextPageToken);
+          }, 0);
+          return;
+        }
+      }
       const page = await listEmailMessages({
         limit: MESSAGE_BATCH_SIZE,
         pageToken,
@@ -646,6 +768,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         return sortEmailMessagesByDateDescending(next);
       });
       setNextPageToken(page.next_page_token ?? "");
+      window.setTimeout(() => {
+        const nextToken = page.next_page_token ?? "";
+        if (nextToken && messageListWithinPrefetchDistance()) void prefetchNextMessagePage(nextToken);
+      }, 0);
     } catch (messageError) {
       if (isEmailAccessExpiredError(messageError)) {
         await handleEmailAccessExpired(messageError);
@@ -655,7 +781,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [companyID, handleEmailAccessExpired, status?.connected]);
+  }, [appendPrefetchedMessagePage, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage, status?.connected]);
   useEffect(() => {
     loadMessagesRef.current = loadMessages;
   }, [loadMessages]);
@@ -668,6 +794,89 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       void loadMessagesRef.current?.({ refresh: true });
     }, delayMs);
   }, [status?.connected]);
+  const fillMessageListAfterRemoval = useCallback(() => {
+    window.setTimeout(() => {
+      const list = messageListRef.current;
+      if (!list || !nextPageTokenRef.current) return;
+      if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
+      if (list.scrollHeight <= list.clientHeight + 160) void loadMoreMessages();
+    }, 0);
+  }, [loadMoreMessages, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
+  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+    setSelectedMessageIDs((previous) => {
+      const next = new Set(previous);
+      for (const id of ids) next.delete(id);
+      return next.size === previous.size ? previous : next;
+    });
+    setSelectionAnchorMessageID((current) => (ids.includes(current) ? "" : current));
+    if (ids.includes(selectedMessageIDRef.current)) {
+      setSelectedMessageID("");
+      setSelectedMessage(null);
+    }
+    setMessageContextMenu((current) => current && current.messageIDs.some((id) => ids.includes(id)) ? null : current);
+    fillMessageListAfterRemoval();
+  }, [fillMessageListAfterRemoval]);
+  const flushQueuedArchiveMessages = useCallback(() => {
+    if (archiveBatchFlushTimerRef.current !== null) {
+      window.clearTimeout(archiveBatchFlushTimerRef.current);
+      archiveBatchFlushTimerRef.current = null;
+    }
+    const batches = Array.from(queuedArchiveBatchesRef.current.values()).map((batch) => ({
+      ...batch,
+      messageIDs: cleanIDList(batch.messageIDs),
+    })).filter((batch) => batch.messageIDs.length > 0);
+    queuedArchiveBatchesRef.current.clear();
+    if (batches.length === 0) return;
+    void Promise.all(batches.map(async (batch) => {
+      const result = await archiveHomeMailMessagesCommand({
+        companyID: batch.companyID,
+        sharedInboxID: batch.sharedInboxID,
+        messageIDs: batch.messageIDs,
+      });
+      return result?.failed ?? [];
+    }))
+      .then((failuresByBatch) => {
+        const failures = failuresByBatch.flat();
+        if (failures.length > 0) {
+          setError(failures.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failures.length} messages.`);
+          scheduleMessageListRefresh(0);
+        }
+        void loadFolders();
+      })
+      .catch((archiveError) => {
+        if (isEmailAccessExpiredError(archiveError)) {
+          void handleEmailAccessExpired(archiveError);
+          return;
+        }
+        setError(formatError(archiveError, "Failed to archive scrolled messages"));
+        scheduleMessageListRefresh(0);
+      });
+  }, [handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh]);
+  const queueArchiveMessages = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current) || undefined;
+    const key = `${companyID}\x1f${sharedInboxID ?? ""}`;
+    const batch = queuedArchiveBatchesRef.current.get(key) ?? { companyID, sharedInboxID, messageIDs: [] };
+    const seen = new Set(batch.messageIDs);
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      batch.messageIDs.push(id);
+    }
+    queuedArchiveBatchesRef.current.set(key, batch);
+    const queuedCount = Array.from(queuedArchiveBatchesRef.current.values()).reduce((count, item) => count + item.messageIDs.length, 0);
+    if (queuedCount >= ARCHIVE_BATCH_SIZE) {
+      flushQueuedArchiveMessages();
+      return;
+    }
+    if (archiveBatchFlushTimerRef.current === null) {
+      archiveBatchFlushTimerRef.current = window.setTimeout(flushQueuedArchiveMessages, ARCHIVE_BATCH_FLUSH_DELAY_MS);
+    }
+  }, [companyID, flushQueuedArchiveMessages]);
   useEffect(() => {
     return () => {
       if (messageListRefreshTimerRef.current !== null) {
@@ -680,31 +889,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     autoArchiveTimerIDsRef.current.delete(messageID);
     removePendingAutoArchiveMessages([messageID]);
     if (isArchivableHomeViewID(activeViewIDRef.current) && mailboxRef.current === "primary") {
-      setMessages((previous) => previous.filter((message) => message.id !== messageID));
-      setSelectedMessageIDs((previous) => {
-        if (!previous.has(messageID)) return previous;
-        const next = new Set(previous);
-        next.delete(messageID);
-        return next;
-      });
-      setSelectionAnchorMessageID((current) => (current === messageID ? "" : current));
-      if (selectedMessageIDRef.current === messageID) {
-        setSelectedMessageID("");
-        setSelectedMessage(null);
-      }
-      setMessageContextMenu((current) => current && current.messageIDs.includes(messageID) ? null : current);
+      removeMessagesFromVisibleMailList([messageID]);
     }
-    void archiveHomeMailMessagesCommand({ companyID, sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current), messageIDs: [messageID] })
-      .then(() => { void loadFolders(); })
-      .catch((archiveError) => {
-        if (isEmailAccessExpiredError(archiveError)) {
-          void handleEmailAccessExpired(archiveError);
-          return;
-        }
-        setError(formatError(archiveError, "Failed to archive scrolled message"));
-        scheduleMessageListRefresh();
-      });
-  }, [companyID, handleEmailAccessExpired, loadFolders, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
+    queueArchiveMessages([messageID]);
+  }, [queueArchiveMessages, removeMessagesFromVisibleMailList, removePendingAutoArchiveMessages]);
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeViewID, loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
@@ -729,8 +917,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   useEffect(() => {
     const list = messageListRef.current;
     if (!list || !nextPageToken || loadingMessages || loadingMoreMessages) return;
+    if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
     if (list.scrollHeight <= list.clientHeight + 120) void loadMoreMessages();
-  }, [loadMoreMessages, loadingMessages, loadingMoreMessages, messages.length, nextPageToken]);
+  }, [loadMoreMessages, loadingMessages, loadingMoreMessages, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage]);
   useEffect(() => {
     if (!status?.connected) return undefined;
     const connectedAccountEmail = status.connection?.account_email ?? "";
@@ -1069,25 +1258,27 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("archive");
     setError("");
     setNotice("");
+    removeMessagesFromVisibleMailList(ids);
     try {
-      await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
-      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
-      if (selectedMessageID && ids.includes(selectedMessageID)) {
-        setSelectedMessageID("");
-        setSelectedMessage(null);
-      }
+      const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
+      const failed = result?.failed ?? [];
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
-      setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
-      await loadMessages();
+      if (failed.length > 0) {
+        setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
+        scheduleMessageListRefresh(0);
+      } else {
+        setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
+      }
       await loadFolders();
     } catch (archiveError) {
       setError(formatError(archiveError, ids.length === 1 ? "Failed to archive message" : "Failed to archive messages"));
+      scheduleMessageListRefresh(0);
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -2425,6 +2616,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             onDeleteSelected={deleteSelected}
             onDisconnect={disconnect}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
+            onPrefetchMessages={() => { void prefetchNextMessagePage(); }}
             onOpenAllMailbox={openAllMailbox}
             onOpenArchivedMailbox={openArchivedMailbox}
             onOpenContextMenu={openMessageContextMenu}

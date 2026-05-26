@@ -9,7 +9,9 @@ export const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "all", label: "All" },
 ];
 
-export const MESSAGE_BATCH_SIZE = 15;
+export const MESSAGE_BATCH_SIZE = 20;
+export const ARCHIVE_BATCH_SIZE = 5;
+export const ARCHIVE_BATCH_FLUSH_DELAY_MS = 500;
 export const MESSAGE_EVENT_REFRESH_DELAY_MS = 1_200;
 export const AUTO_ARCHIVE_SCROLL_DELAY_MS = 2_000;
 export const SELF_SEND_DELIVERY_REFRESH_DELAY_MS = 4_000;

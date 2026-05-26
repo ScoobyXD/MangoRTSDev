@@ -5,7 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateAssignmentCommandResult } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -430,6 +430,31 @@ test("Home mail message commands normalize ids and pass shared inbox context", a
   ]);
   assert.equal(updated?.message.id, "message-5");
   assert.equal(updated?.message.unread, false);
+});
+
+test("Home archive command uses five-message batch chunks by default", async () => {
+  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string }> = [];
+  const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID) => {
+    calls.push({ messageIDs, sharedInboxID, companyID });
+    return {
+      archived_ids: messageIDs.filter((messageID) => messageID !== "message-6"),
+      failed: messageIDs.includes("message-6") ? [{ message_id: "message-6", error: "nylas_rate_limited" }] : [],
+    };
+  };
+
+  const result = await archiveHomeMailMessagesCommand({
+    companyID: "company-1",
+    sharedInboxID: " shared-1 ",
+    messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"],
+    archiveEmailMessagesBatch,
+  });
+
+  assert.deepEqual(calls, [
+    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5"] },
+    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-6"] },
+  ]);
+  assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5"]);
+  assert.deepEqual(result?.failed, [{ message_id: "message-6", error: "nylas_rate_limited" }]);
 });
 
 test("Home compose command validates and normalizes send payloads", async () => {

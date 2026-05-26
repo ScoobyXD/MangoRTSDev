@@ -134,6 +134,31 @@ func (c *communicationsCache) getMessage(userID, messageID string, maxAge time.D
 	return cloneNylasMessage(entry.message), true
 }
 
+func (c *communicationsCache) getMessageFromPages(userID, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
+	if c == nil {
+		return NylasMessage{}, false
+	}
+	userID = strings.TrimSpace(userID)
+	messageID = strings.TrimSpace(messageID)
+	if userID == "" || messageID == "" {
+		return NylasMessage{}, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	prefix := userID + communicationsCacheKeySeparator
+	for key, entry := range c.messagePages {
+		if !strings.HasPrefix(key, prefix) || now.Sub(entry.fetchedAt) > maxAge {
+			continue
+		}
+		for _, message := range entry.page.Messages {
+			if strings.TrimSpace(message.ID) == messageID {
+				return cloneNylasMessage(message), true
+			}
+		}
+	}
+	return NylasMessage{}, false
+}
+
 func (c *communicationsCache) setMessage(userID string, message NylasMessage, now time.Time) {
 	if c == nil {
 		return

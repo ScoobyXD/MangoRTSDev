@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -223,6 +224,79 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	for key := range r.URL.Query() {
+		if key != "company_id" && key != "shared_inbox_id" {
+			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
+			return
+		}
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	requiredSharedInboxAccess := store.EntityPermissionView
+	if sharedInboxID != "" {
+		requiredSharedInboxAccess = store.EntityPermissionEdit
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, requiredSharedInboxAccess)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		MessageIDs []string `json:"message_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	messageIDs := cleanStringList(req.MessageIDs)
+	if len(messageIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "email_message_ids_required")
+		return
+	}
+
+	archiveFolderID := ""
+	if connection.Provider != "google" {
+		emailFolders, err := s.communicationsFolders(r.Context(), connection)
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
+		archiveFolderID = findNylasArchiveFolderID(emailFolders)
+		if archiveFolderID == "" {
+			writeError(w, http.StatusConflict, "archive_folder_unavailable")
+			return
+		}
+	}
+
+	result := s.archiveCommunicationsMessagesBatch(r.Context(), connection, messageIDs, archiveFolderID)
+	if result.retryAfter != "" {
+		w.Header().Set("Retry-After", result.retryAfter)
+	}
+	if len(result.ArchivedIDs) > 0 {
+		s.invalidateCommunicationsMessageMutations(connection.UserID, result.ArchivedIDs, true)
+		for _, messageID := range result.ArchivedIDs {
+			s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", messageID)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"archived_ids": result.ArchivedIDs,
+		"failed":       result.Failed,
+	})
+}
+
 func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.Request) {
 	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/messages/"), "/")
 	parts := strings.Split(suffix, "/")
@@ -348,77 +422,251 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
-	message, err := s.communicationsMessage(r.Context(), connection, messageID)
-	if err != nil {
-		s.writeNylasError(w, r, connection, err)
-		return
-	}
-
-	folders := archiveMessageFolderIDs(connection.Provider, message.Folders, "")
+	archiveFolderID := ""
 	if connection.Provider != "google" {
 		emailFolders, err := s.communicationsFolders(r.Context(), connection)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		archiveFolderID := findNylasArchiveFolderID(emailFolders)
+		archiveFolderID = findNylasArchiveFolderID(emailFolders)
 		if archiveFolderID == "" {
 			writeError(w, http.StatusConflict, "archive_folder_unavailable")
 			return
 		}
-		folders = []string{archiveFolderID}
 	}
 
-	var archived NylasMessage
-	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-		var err error
-		archived, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
-		return err
-	})
+	archived, err := s.archiveCommunicationsMessageByID(r.Context(), connection, messageID, archiveFolderID)
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
-	s.commCache.invalidateUser(connection.UserID)
+	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", archived.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
 }
 
 func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
-	message, err := s.communicationsMessage(r.Context(), connection, messageID)
-	if err != nil {
-		s.writeNylasError(w, r, connection, err)
-		return
-	}
-
-	folders := unarchiveMessageFolderIDs(connection.Provider, message.Folders, "INBOX")
+	inboxFolderID := ""
 	if connection.Provider != "google" {
 		emailFolders, err := s.communicationsFolders(r.Context(), connection)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		inboxFolderID := findNylasSystemFolderID(emailFolders, "inbox")
+		inboxFolderID = findNylasSystemFolderID(emailFolders, "inbox")
 		if inboxFolderID == "" {
 			writeError(w, http.StatusConflict, "inbox_folder_unavailable")
 			return
 		}
-		folders = []string{inboxFolderID}
 	}
 
-	var restored NylasMessage
-	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-		var err error
-		restored, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
-		return err
-	})
+	restored, err := s.unarchiveCommunicationsMessageByID(r.Context(), connection, messageID, inboxFolderID)
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
-	s.commCache.invalidateUser(connection.UserID)
+	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", restored.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
+}
+
+type communicationsArchiveBatchFailure struct {
+	MessageID string `json:"message_id"`
+	Error     string `json:"error"`
+}
+
+type communicationsArchiveBatchResult struct {
+	ArchivedIDs []string                            `json:"archived_ids"`
+	Failed      []communicationsArchiveBatchFailure `json:"failed"`
+	retryAfter  string
+}
+
+func (s *Server) archiveCommunicationsMessagesBatch(ctx context.Context, connection domain.UserEmailConnection, messageIDs []string, archiveFolderID string) communicationsArchiveBatchResult {
+	workers := communicationsArchiveBatchConcurrency
+	if workers <= 0 || workers > len(messageIDs) {
+		workers = len(messageIDs)
+	}
+	jobs := make(chan string)
+	var mu sync.Mutex
+	result := communicationsArchiveBatchResult{
+		ArchivedIDs: make([]string, 0, len(messageIDs)),
+		Failed:      []communicationsArchiveBatchFailure{},
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for messageID := range jobs {
+				archived, err := s.archiveCommunicationsMessageByID(ctx, connection, messageID, archiveFolderID)
+				mu.Lock()
+				if err != nil {
+					result.Failed = append(result.Failed, communicationsArchiveBatchFailure{
+						MessageID: messageID,
+						Error:     communicationsMutationErrorCode(err),
+					})
+					if result.retryAfter == "" {
+						var apiErr NylasAPIError
+						if errors.As(err, &apiErr) {
+							result.retryAfter = strings.TrimSpace(apiErr.RetryAfter)
+						}
+					}
+					var apiErr NylasAPIError
+					if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+						_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, "reauth_required")
+					}
+				} else {
+					result.ArchivedIDs = append(result.ArchivedIDs, firstNonBlank(archived.ID, messageID))
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, messageID := range messageIDs {
+		select {
+		case <-ctx.Done():
+			mu.Lock()
+			result.Failed = append(result.Failed, communicationsArchiveBatchFailure{
+				MessageID: messageID,
+				Error:     communicationsMutationErrorCode(ctx.Err()),
+			})
+			mu.Unlock()
+		case jobs <- messageID:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return result
+}
+
+func (s *Server) archiveCommunicationsMessageByID(ctx context.Context, connection domain.UserEmailConnection, messageID, archiveFolderID string) (NylasMessage, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return NylasMessage{}, store.ErrInvalid
+	}
+	folders := []string{strings.TrimSpace(archiveFolderID)}
+	if connection.Provider == "google" {
+		message, err := s.communicationsMessageForFolderMutation(ctx, connection, messageID)
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		folders = archiveMessageFolderIDs(connection.Provider, message.Folders, "")
+	} else if folders[0] == "" {
+		emailFolders, err := s.communicationsFolders(ctx, connection)
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		folderID := findNylasArchiveFolderID(emailFolders)
+		if folderID == "" {
+			return NylasMessage{}, errCommunicationsArchiveUnavailable
+		}
+		folders = []string{folderID}
+	}
+
+	var archived NylasMessage
+	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+		var err error
+		archived, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
+		return err
+	})
+	if archived.ID == "" {
+		archived.ID = messageID
+	}
+	return archived, err
+}
+
+func (s *Server) unarchiveCommunicationsMessageByID(ctx context.Context, connection domain.UserEmailConnection, messageID, inboxFolderID string) (NylasMessage, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return NylasMessage{}, store.ErrInvalid
+	}
+	cleanInboxFolderID := strings.TrimSpace(inboxFolderID)
+	if cleanInboxFolderID == "" {
+		cleanInboxFolderID = "INBOX"
+	}
+	folders := []string{cleanInboxFolderID}
+	if connection.Provider == "google" {
+		message, err := s.communicationsMessageForFolderMutation(ctx, connection, messageID)
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		folders = unarchiveMessageFolderIDs(connection.Provider, message.Folders, cleanInboxFolderID)
+	} else if strings.TrimSpace(inboxFolderID) == "" {
+		emailFolders, err := s.communicationsFolders(ctx, connection)
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		folderID := findNylasSystemFolderID(emailFolders, "inbox")
+		if folderID == "" {
+			return NylasMessage{}, errors.New("inbox_folder_unavailable")
+		}
+		folders = []string{folderID}
+	}
+
+	var restored NylasMessage
+	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+		var err error
+		restored, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
+		return err
+	})
+	if restored.ID == "" {
+		restored.ID = messageID
+	}
+	return restored, err
+}
+
+func (s *Server) communicationsMessageForFolderMutation(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
+	now := time.Now().UTC()
+	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok && message.Folders != nil {
+		return message, nil
+	}
+	if message, ok := s.commCache.getMessageFromPages(connection.UserID, messageID, communicationsMessagesCacheTTL, now); ok && message.Folders != nil {
+		return message, nil
+	}
+	return s.communicationsMessage(ctx, connection, messageID)
+}
+
+func (s *Server) invalidateCommunicationsMessageMutations(userID string, messageIDs []string, foldersChanged bool) {
+	if s.commCache == nil {
+		return
+	}
+	if foldersChanged {
+		s.commCache.invalidateFolders(userID)
+	}
+	s.commCache.invalidateMessagePages(userID)
+	for _, messageID := range messageIDs {
+		s.commCache.invalidateMessage(userID, messageID)
+	}
+}
+
+func communicationsMutationErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "request_cancelled"
+	}
+	if errors.Is(err, errCommunicationsArchiveUnavailable) {
+		return "archive_folder_unavailable"
+	}
+	var apiErr NylasAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "nylas_reauth_required"
+		case http.StatusNotFound:
+			return "nylas_resource_not_found"
+		case http.StatusTooManyRequests:
+			return "nylas_rate_limited"
+		default:
+			if apiErr.Code != "" {
+				return "nylas_" + strings.TrimSpace(apiErr.Code)
+			}
+			return "nylas_request_failed"
+		}
+	}
+	return "archive_failed"
 }
 
 func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
@@ -676,7 +924,9 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 const (
 	communicationsNylasDefaultMessageLimit = 20
 	communicationsNylasMaxMessageLimit     = 20
-	communicationsNylasMinRequestInterval  = 250 * time.Millisecond
+	communicationsNylasMinRequestInterval  = 10 * time.Millisecond
+	communicationsNylasMaxInFlightPerGrant = 4
+	communicationsArchiveBatchConcurrency  = 4
 )
 
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {

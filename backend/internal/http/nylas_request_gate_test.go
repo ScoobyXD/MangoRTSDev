@@ -6,40 +6,44 @@ import (
 	"time"
 )
 
-func TestNylasRequestGateSerializesSameKey(t *testing.T) {
+func TestNylasRequestGateLimitsSameKeyConcurrency(t *testing.T) {
 	t.Parallel()
 
 	gate := newNylasRequestGate(0)
-	releaseFirst, err := gate.acquire(context.Background(), "grant-1")
-	if err != nil {
-		t.Fatal(err)
+	releases := make([]func(), 0, communicationsNylasMaxInFlightPerGrant)
+	for i := 0; i < communicationsNylasMaxInFlightPerGrant; i++ {
+		release, err := gate.acquire(context.Background(), "grant-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		releases = append(releases, release)
+		defer release()
 	}
-	defer releaseFirst()
 
-	acquiredSecond := make(chan struct{})
+	acquiredNext := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		releaseSecond, err := gate.acquire(context.Background(), "grant-1")
+		release, err := gate.acquire(context.Background(), "grant-1")
 		if err != nil {
-			t.Errorf("second acquire: %v", err)
+			t.Errorf("next acquire: %v", err)
 			return
 		}
-		close(acquiredSecond)
-		releaseSecond()
+		close(acquiredNext)
+		release()
 	}()
 
 	select {
-	case <-acquiredSecond:
-		t.Fatal("second acquire completed while first request was still held")
+	case <-acquiredNext:
+		t.Fatal("acquire completed above the same-grant in-flight limit")
 	case <-time.After(25 * time.Millisecond):
 	}
 
-	releaseFirst()
+	releases[0]()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("second acquire did not unblock")
+		t.Fatal("blocked acquire did not unblock")
 	}
 }
 
@@ -60,4 +64,28 @@ func TestNylasRequestGateAllowsDifferentKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	releaseSecond()
+}
+
+func TestNylasRequestGateSpacesStartsForSameKey(t *testing.T) {
+	t.Parallel()
+
+	const interval = 25 * time.Millisecond
+	gate := newNylasRequestGate(interval)
+	releaseFirst, err := gate.acquire(context.Background(), "grant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Now()
+	releaseFirst()
+
+	releaseSecond, err := gate.acquire(context.Background(), "grant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := time.Now()
+	releaseSecond()
+
+	if elapsed := second.Sub(first); elapsed < 15*time.Millisecond {
+		t.Fatalf("same-grant starts were spaced by %s, want roughly %s", elapsed, interval)
+	}
 }

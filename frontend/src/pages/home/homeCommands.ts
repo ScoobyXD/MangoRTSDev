@@ -1,5 +1,6 @@
 import {
   archiveEmailMessage as defaultArchiveEmailMessage,
+  archiveEmailMessagesBatch as defaultArchiveEmailMessagesBatch,
   addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
   createCommunicationsSharedInbox as defaultCreateCommunicationsSharedInbox,
@@ -19,6 +20,7 @@ import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../m
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import type {
   CompanyUser,
+  ArchiveEmailMessagesBatchResult,
   CommunicationsSharedInbox,
   CommunicationsSharedInboxRaciAssignment,
   CommunicationsSharedInboxRaciRole,
@@ -63,6 +65,7 @@ export type HomeBulkMoveLogicGateAssignment = (
 ) => Promise<LogicGateAssignmentCommandResult>;
 
 export type HomeArchiveEmailMessage = typeof defaultArchiveEmailMessage;
+export type HomeArchiveEmailMessagesBatch = typeof defaultArchiveEmailMessagesBatch;
 export type HomeUnarchiveEmailMessage = typeof defaultUnarchiveEmailMessage;
 export type HomeDeleteEmailMessage = typeof defaultDeleteEmailMessage;
 export type HomeUpdateEmailMessage = typeof defaultUpdateEmailMessage;
@@ -98,6 +101,7 @@ export type HomeTriageConversionCommandResult = {
 
 export type HomeMailMessagesCommandResult = {
   messageIDs: string[];
+  failed?: ArchiveEmailMessagesBatchResult["failed"];
 };
 
 export type HomeMailMessageCommandResult = {
@@ -175,13 +179,28 @@ export async function archiveHomeMailMessagesCommand(args: {
   sharedInboxID?: string;
   messageIDs: string[];
   archiveEmailMessage?: HomeArchiveEmailMessage;
+  archiveEmailMessagesBatch?: HomeArchiveEmailMessagesBatch;
 }): Promise<HomeMailMessagesCommandResult | null> {
   const messageIDs = cleanIDList(args.messageIDs);
   if (messageIDs.length === 0) return null;
-  const archiveEmailMessage = args.archiveEmailMessage ?? defaultArchiveEmailMessage;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
-  await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID)));
-  return { messageIDs };
+  if (args.archiveEmailMessage && !args.archiveEmailMessagesBatch) {
+    const archiveEmailMessage = args.archiveEmailMessage;
+    await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID)));
+    return { messageIDs };
+  }
+  const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
+  const archivedIDs: string[] = [];
+  const failed: ArchiveEmailMessagesBatchResult["failed"] = [];
+  for (let index = 0; index < messageIDs.length; index += 5) {
+    const result = await archiveEmailMessagesBatch(messageIDs.slice(index, index + 5), sharedInboxID, args.companyID);
+    archivedIDs.push(...cleanIDList(result.archived_ids));
+    failed.push(...(result.failed ?? []));
+  }
+  if (archivedIDs.length === 0 && failed.length > 0) {
+    throw new Error(failed[0]?.error || "archive_failed");
+  }
+  return { messageIDs: archivedIDs.length > 0 ? archivedIDs : messageIDs, failed: failed.length ? failed : undefined };
 }
 
 export async function unarchiveHomeMailMessagesCommand(args: {
