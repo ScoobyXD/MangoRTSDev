@@ -25,6 +25,7 @@ import { useNotificationSummary } from "../modules/notifications/useNotification
 import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../modules/notifications/notificationTime";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
+import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import {
   buildSharedInboxRows,
   collectSharedInboxSubtreeIDs,
@@ -86,8 +87,24 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;
+export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
+
+type RaciHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+
+const APP_SIDEBAR_RACI_VIEWS = RACI_INBOX_SECTIONS.map((section) => ({
+  viewID: section.viewID,
+  role: section.role,
+  label: section.title,
+  notificationTitle: `${section.label} notifications`,
+  surface: section.role === "responsible" ? "r_inbox" : "aci_inbox",
+})) satisfies ReadonlyArray<{
+  viewID: RaciHomeSidebarView;
+  role: NotificationRaciRole;
+  label: string;
+  notificationTitle: string;
+  surface: NotificationSurface;
+}>;
 
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena";
 
@@ -126,6 +143,12 @@ type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
 
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
+}
+
+function homeSidebarViewForRaciNotification(surface: NotificationSurface | undefined, role: NotificationRaciRole | "" | undefined): RaciHomeSidebarView {
+  const roleView = APP_SIDEBAR_RACI_VIEWS.find((view) => view.role === role);
+  if (roleView) return roleView.viewID;
+  return surface === "r_inbox" ? "r-inbox" : "a-inbox";
 }
 
 function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): SharedInboxDropPlacement {
@@ -254,14 +277,11 @@ export function AppSidebar({
     [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
-  const aciNotificationCount = useMemo(
-    () => notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable")
-      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted")
-      + notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
-    [notificationSummary],
-  );
-  const responsibleNotificationCount = useMemo(
-    () => notificationSummaryRoleCount(notificationSummary, "r_inbox", "responsible"),
+  const raciNotificationCounts = useMemo(
+    () => APP_SIDEBAR_RACI_VIEWS.reduce<Partial<Record<NotificationRaciRole, number>>>((counts, view) => {
+      counts[view.role] = notificationSummaryRoleCount(notificationSummary, view.surface, view.role);
+      return counts;
+    }, {}),
     [notificationSummary],
   );
   const mentionNotificationCount = useMemo(
@@ -401,8 +421,7 @@ export function AppSidebar({
       });
       return;
     }
-    if (notification.surface === "aci_inbox") openMailBadgeView("aci-inbox");
-    else if (notification.surface === "r_inbox") openMailBadgeView("r-inbox");
+    if (notification.surface === "aci_inbox" || notification.surface === "r_inbox") openMailBadgeView(homeSidebarViewForRaciNotification(notification.surface, notification.role));
     else if (notification.surface === "shared_triage") openMailBadgeView("shared-root");
     else openMailBadgeView("my-triage");
   }, [companyID, openMailBadgeView]);
@@ -945,32 +964,22 @@ export function AppSidebar({
           )}
           {sharedError && <div style={appSidebarSharedErrorStyle}>{sharedError}</div>}
         </div>
-        <AppSidebarButton
-          label="ACIO Nodes"
-          active={homeActive && activeHomeView === "aci-inbox"}
-          elevated
-          trailing={<SidebarNotificationBadges badges={[{
-            key: "aci",
-            count: aciNotificationCount,
-            tone: "aci",
-            title: "ACIO nodes with changes",
-            onClick: (event) => openNotificationMenu(event, { title: "ACIO notifications", surface: "aci_inbox" }),
-          }]} />}
-          onClick={() => onHomeViewSelect("aci-inbox")}
-        />
-        <AppSidebarButton
-          label="R Nodes"
-          active={homeActive && activeHomeView === "r-inbox"}
-          elevated
-          trailing={<SidebarNotificationBadges badges={[{
-            key: "responsible",
-            count: responsibleNotificationCount,
-            tone: "responsible",
-            title: "Responsible notifications",
-            onClick: (event) => openNotificationMenu(event, { title: "Responsible notifications", surface: "r_inbox", role: "responsible" }),
-          }]} />}
-          onClick={() => onHomeViewSelect("r-inbox")}
-        />
+        {APP_SIDEBAR_RACI_VIEWS.map((view) => (
+          <AppSidebarButton
+            key={view.viewID}
+            label={view.label}
+            active={homeActive && (activeHomeView === view.viewID || (activeHomeView === "aci-inbox" && view.viewID === "a-inbox"))}
+            elevated
+            trailing={<SidebarNotificationBadges badges={[{
+              key: view.role,
+              count: raciNotificationCounts[view.role] ?? 0,
+              tone: view.role,
+              title: view.notificationTitle,
+              onClick: (event) => openNotificationMenu(event, { title: view.notificationTitle, surface: view.surface, role: view.role }),
+            }]} />}
+            onClick={() => onHomeViewSelect(view.viewID)}
+          />
+        ))}
         <AppSidebarButton
           label="@ Mentions"
           active={notificationMenu?.type === "mention.created"}
