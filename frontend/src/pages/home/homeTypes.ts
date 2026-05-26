@@ -62,6 +62,10 @@ export type HomeViewID =
   | "shared-root"
   | "aci-inbox"
   | "r-inbox"
+  | "a-inbox"
+  | "c-inbox"
+  | "i-inbox"
+  | "o-inbox"
   | "my-nodes"
   | "my-logic-gates"
   | `shared:${string}`;
@@ -97,6 +101,8 @@ export type HomeColumnResizeDrag = {
 
 export type AciInboxRaciRole = Extract<LogicGateRaciRole, "accountable" | "consulted" | "informed">;
 export type AciInboxRole = AciInboxRaciRole;
+export type RaciInboxRole = LogicGateRaciRole | "other";
+export type RaciInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 export type ResponsibleInboxStatus = "pending" | "in_progress" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 

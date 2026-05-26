@@ -65,11 +65,11 @@ import {
 } from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
+import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -2060,10 +2060,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [apiBase, companyID, mergeCreatedLogicGate, openLogicGateArena]);
-  const createLogicGateInInboxCell = useCallback(async (input: { creatorRaciRole: LogicGateRaciRole }) => {
+  const createLogicGateInInboxCell = useCallback(async (input: { creatorRaciRole?: LogicGateRaciRole }) => {
     await createHomeLogicGate({ creatorRaciRole: input.creatorRaciRole, openArena: false });
   }, [createHomeLogicGate]);
-  const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole: LogicGateRaciRole }) => {
+  const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole }) => {
     setBusy("create-node");
     setError("");
     try {
@@ -2397,7 +2397,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
-  const isAciInboxView = activeViewID === "aci-inbox";
+  const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
   const layoutColumnWidths = isNarrow || isInboxMatrixView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
@@ -2486,35 +2486,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           )}
           {isInboxMatrixView ? (
             <>
-              {isAciInboxView ? (
-                <AciInboxMatrix
-                  loading={loadingNodes}
-                  nodes={nodes}
-                  nodeByID={nodeByID}
-                  nodeRelationships={nodeRelationships}
-                  logicGateByID={logicGateByID}
-                  nodeFolders={nodeFolders}
-                  nodeFolderItems={nodeFolderItems}
-                  currentUserID={currentUserID}
-                  notificationSummary={notificationSummary}
-                  selectedRowIDs={selectedNodeRowIDs}
-                  selectedLogicGateRowIDs={selectedLogicGateRowIDs}
-                  getNodeDragIDs={getNodeDragIDs}
-                  onSelectNode={selectNodeMatrixCard}
-                  onSelectLogicGate={selectLogicGateTreeID}
-                  onOpenNode={openNodeEditorOverlay}
-                  onOpenLogicGate={openLogicGateArena}
-                  onOpenNodeBulkMenu={openNodeBulkEditMenu}
-                  onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
-                  onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
-                  onRequestDeleteLogicGate={requestDeleteLogicGateContext}
-                  onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
-                  onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
-                  onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
-                  onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
-                />
-              ) : (
-                <ResponsibleInboxMatrix
+              {activeRaciInboxSection && (
+                <RaciRoleInboxMatrix
+                  section={activeRaciInboxSection}
                   loading={loadingNodes}
                   nodes={nodes}
                   nodeByID={nodeByID}

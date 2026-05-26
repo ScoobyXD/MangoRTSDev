@@ -8,6 +8,7 @@ import {
   buildAciInboxGroupsByCell,
   buildMyLogicGateGroups,
   buildMyNodeGroups,
+  buildRaciRoleInboxGroupsByCell,
   buildResponsibleInboxGroupsByCell,
   buildSharedInboxRows,
   fitHomeColumnWidthsToAvailableWidth,
@@ -24,13 +25,14 @@ import {
   mailboxForHomeView,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
+  raciRoleCellKey,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
-import { ACI_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
+import { ACI_COLUMNS, RACI_INBOX_SECTIONS, RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {
@@ -96,14 +98,20 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
   assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
-  assert.equal(getHomeViewLabel("aci-inbox", shared), "ACIO Nodes");
+  assert.equal(getHomeViewLabel("aci-inbox", shared), "A Nodes");
   assert.equal(getHomeViewLabel("r-inbox", shared), "R Nodes");
+  assert.equal(getHomeViewLabel("a-inbox", shared), "A Nodes");
+  assert.equal(getHomeViewLabel("c-inbox", shared), "C Nodes");
+  assert.equal(getHomeViewLabel("i-inbox", shared), "I Nodes");
+  assert.equal(getHomeViewLabel("o-inbox", shared), "O Nodes");
   assert.equal(mailboxForHomeView("aci-inbox"), "all");
+  assert.equal(mailboxForHomeView("o-inbox"), "all");
   assert.equal(mailboxForHomeView("my-triage"), "primary");
   assert.equal(isWorkspacePanelHomeViewID("my-triage"), true);
   assert.equal(isWorkspacePanelHomeViewID("shared-root"), true);
   assert.equal(isWorkspacePanelHomeViewID("shared:shared-a"), true);
   assert.equal(isWorkspacePanelHomeViewID("aci-inbox"), true);
+  assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
 test("mailbox count helper reads provider folder totals for triage tabs", () => {
@@ -146,12 +154,13 @@ test("inbox group builders classify ACI and responsible work by role, status, an
     ["gate-other-user", logicGate("gate-other-user", [{ company_id: "company-1", logic_gate_id: "gate-other-user", role: "consulted", user_id: "user-2", created_timestamp: "2026-01-01T00:00:00Z" }])],
   ]);
   const nodes = [
-    node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], priority: 1 }),
+    node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], status: "pending", priority: 1 }),
     node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
     node("node-all", "All roles node", { logic_gate_ids: ["gate-all"], status: "pending", priority: 1 }),
     node("node-r-unassigned", "Responsible unassigned node", { logic_gate_ids: ["gate-r"], status: "pending" }),
     node("node-assigned-without-r", "Assigned without R node", { logic_gate_ids: ["gate-no-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
-    node("node-assigned-other-raci", "Assigned other RACI node", { logic_gate_ids: ["gate-other-user"], priority: 3, assignee_user_id: currentUserID }),
+    node("node-assigned-other-raci", "Assigned other RACI node", { logic_gate_ids: ["gate-other-user"], status: "pending", priority: 3, assignee_user_id: currentUserID }),
+    node("node-other-no-gate", "Assigned without Logic Gate", { status: "pending", priority: 4, assignee_user_id: currentUserID }),
     node("node-other-user", "Other user node", { logic_gate_ids: ["gate-other-user"], priority: 3 }),
     node("node-done", "Done node", { logic_gate_ids: ["gate-r"], status: "Done", priority: 1 }),
   ];
@@ -172,6 +181,23 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   assert.equal(responsibleGroups.get("in_progress:2")?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
   assert.equal(responsibleGroups.has("done:1"), false);
   assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress"]);
+  assert.deepEqual(RACI_INBOX_SECTIONS.map((section) => [section.viewID, section.role]), [
+    ["r-inbox", "responsible"],
+    ["a-inbox", "accountable"],
+    ["c-inbox", "consulted"],
+    ["i-inbox", "informed"],
+    ["o-inbox", "other"],
+  ]);
+  const accountableStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "accountable");
+  assert.deepEqual((accountableStatusGroups.get(raciRoleCellKey("accountable", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
+  assert.equal(accountableStatusGroups.has(raciRoleCellKey("accountable", "in_progress", 2)), false);
+  const otherGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "other");
+  assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 3))?.[0]?.nodeIDs, ["node-assigned-other-raci"]);
+  assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 4))?.[0], {
+    logicGateID: "__mango_inbox_no_logic_gate__",
+    label: "No Logic Gate",
+    nodeIDs: ["node-other-no-gate"],
+  });
   const opaqueID = "019e3de8-c507-7a03-a7ab-fbea8f4e1d22";
   assert.equal(inboxLogicGateLabel(opaqueID, new Map()), "Logic Gate");
   assert.equal(logicGateTitle({ logic_gate_id: opaqueID, header: opaqueID }), "Logic Gate");

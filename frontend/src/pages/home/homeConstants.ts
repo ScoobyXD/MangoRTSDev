@@ -1,5 +1,5 @@
 import type { EmailMailbox } from "../../modules/communications/communicationsApi.js";
-import type { MailboxOption, AciInboxRole, ResponsibleInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
+import type { MailboxOption, AciInboxRole, RaciInboxRole, RaciInboxViewID, ResponsibleInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "My Triage" },
@@ -38,6 +38,16 @@ export const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; la
 export const RESPONSIBLE_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus; letter: string; label: string }> = [
   { status: "pending", letter: "P", label: "Pending" },
   { status: "in_progress", letter: "IP", label: "In Progress" },
+];
+
+export const RACI_STATUS_COLUMNS = RESPONSIBLE_STATUS_COLUMNS;
+
+export const RACI_INBOX_SECTIONS: ReadonlyArray<{ viewID: RaciInboxViewID; role: RaciInboxRole; letter: string; label: string; title: string }> = [
+  { viewID: "r-inbox", role: "responsible", letter: "R", label: "Responsible", title: "R Nodes" },
+  { viewID: "a-inbox", role: "accountable", letter: "A", label: "Accountable", title: "A Nodes" },
+  { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "C Nodes" },
+  { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "I Nodes" },
+  { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "O Nodes" },
 ];
 
 export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> = [
