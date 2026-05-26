@@ -898,14 +898,14 @@ export function AppSidebar({
 
       <section style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
         <AppSidebarButton
-          label="My Triage"
+          label="Inbox"
           active={homeActive && activeHomeView === "my-triage"}
           elevated
           trailing={<SidebarNotificationBadges badges={[{
             key: "my-triage",
             count: myTriageNotificationCount,
             tone: "mail",
-            title: "Open My Triage unread mail",
+            title: "Open Inbox unread mail",
             onClick: () => openMailBadgeView("my-triage"),
           }]} />}
           onClick={() => onHomeViewSelect("my-triage")}

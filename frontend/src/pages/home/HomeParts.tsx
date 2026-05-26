@@ -28,10 +28,10 @@ const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
 const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 1, label: "1  URGENT (<1 hr)" },
+  { value: 1, label: "1  URGENT(<1hr)" },
   { value: 2, label: "2  By end of day" },
-  { value: 3, label: "3  Within a few days" },
-  { value: 4, label: "4  Within the week" },
+  { value: 3, label: "3  Tomorrow" },
+  { value: 4, label: "4  Sprint (1 week)" },
   { value: 5, label: "5  Later (low priority)" },
 ];
 const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/EditorContent").then((module) => ({
@@ -226,11 +226,11 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
               <select value={priority} onChange={(event) => setPriority(event.target.value)} style={fieldStyle}>
                 <option value="__no_change__">No change</option>
                 <option value="0">Unassigned to a Logic Gate</option>
-                <option value="1">1 Urgent</option>
-                <option value="2">2 End of day</option>
-                <option value="3">3 Few days</option>
-                <option value="4">4 This week</option>
-                <option value="5">5 Later</option>
+                <option value="1">1 URGENT(&lt;1hr)</option>
+                <option value="2">2 By end of day</option>
+                <option value="3">3 Tomorrow</option>
+                <option value="4">4 Sprint (1 week)</option>
+                <option value="5">5 Later (low priority)</option>
               </select>
             </label>
             <label style={labelStyle}>
@@ -1157,7 +1157,7 @@ export function HomeSidebar({
   return (
     <aside style={sidebarStyle}>
       <nav className="mango-home-scroll" style={sidebarNavStyle} aria-label="Home triage">
-        <HomeNavButton label="My Triage" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => onSelectView("my-triage", "primary")} />
+        <HomeNavButton label="Inbox" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => onSelectView("my-triage", "primary")} />
         <section style={sidebarSectionStyle}>
           <div
             style={{

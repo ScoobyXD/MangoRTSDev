@@ -1298,7 +1298,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
-      setNotice(ids.length === 1 ? "Message moved to My Triage." : `${ids.length} messages moved to My Triage.`);
+      setNotice(ids.length === 1 ? "Message moved to Inbox." : `${ids.length} messages moved to Inbox.`);
       await loadMessages();
       await loadFolders();
     } catch (unarchiveError) {

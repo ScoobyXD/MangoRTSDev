@@ -114,10 +114,10 @@ import {
 } from "./KanbanContentModel";
 
 const KANBAN_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 1, label: "1  URGENT (<1 hr)" },
+  { value: 1, label: "1  URGENT(<1hr)" },
   { value: 2, label: "2  By end of day" },
-  { value: 3, label: "3  Within a few days" },
-  { value: 4, label: "4  Within the week" },
+  { value: 3, label: "3  Tomorrow" },
+  { value: 4, label: "4  Sprint (1 week)" },
   { value: 5, label: "5  Later (low priority)" },
 ];
 

@@ -2,7 +2,7 @@ import type { EmailMailbox } from "../../modules/communications/communicationsAp
 import type { MailboxOption, AciInboxRole, RaciInboxRole, RaciInboxViewID, ResponsibleInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
-  { value: "primary", label: "My Triage" },
+  { value: "primary", label: "Inbox" },
   { value: "starred", label: "Starred" },
   { value: "sent", label: "Sent mail" },
   { value: "archive", label: "Archived" },
@@ -51,10 +51,10 @@ export const RACI_INBOX_SECTIONS: ReadonlyArray<{ viewID: RaciInboxViewID; role:
 ];
 
 export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> = [
-  { value: 1, label: "1\u00A0\u00A0URGENT (<1 hr)" },
+  { value: 1, label: "1\u00A0\u00A0URGENT(<1hr)" },
   { value: 2, label: "2\u00A0\u00A0By end of day" },
-  { value: 3, label: "3\u00A0\u00A0Within a few days" },
-  { value: 4, label: "4\u00A0\u00A0Within the week" },
+  { value: 3, label: "3\u00A0\u00A0Tomorrow" },
+  { value: 4, label: "4\u00A0\u00A0Sprint (1 week)" },
   { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
 ];
 
