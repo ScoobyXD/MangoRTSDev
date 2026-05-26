@@ -13,18 +13,23 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type fakeNylasClient struct {
+	mu                sync.Mutex
 	grant             NylasGrant
 	deletedGrants     []string
 	folders           []NylasFolder
 	messages          []NylasMessage
+	messagesByID      map[string]NylasMessage
 	message           NylasMessage
 	sent              NylasSendMessageRequest
 	update            NylasMessageUpdate
+	updateCalls       []fakeNylasUpdateCall
+	updateErrByID     map[string]error
 	lastQuery         NylasMessageQuery
 	lastFolderGrantID string
 	lastSendGrantID   string
@@ -35,7 +40,14 @@ type fakeNylasClient struct {
 	exchangeErr       error
 }
 
+type fakeNylasUpdateCall struct {
+	MessageID string
+	Update    NylasMessageUpdate
+}
+
 func (f *fakeNylasClient) ExchangeCode(_ context.Context, _, _ string) (NylasGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.exchangeErr != nil {
 		return NylasGrant{}, f.exchangeErr
 	}
@@ -43,17 +55,23 @@ func (f *fakeNylasClient) ExchangeCode(_ context.Context, _, _ string) (NylasGra
 }
 
 func (f *fakeNylasClient) DeleteGrant(_ context.Context, grantID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deletedGrants = append(f.deletedGrants, grantID)
 	return nil
 }
 
 func (f *fakeNylasClient) ListFolders(_ context.Context, grantID string) ([]NylasFolder, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.folderCalls++
 	f.lastFolderGrantID = grantID
 	return f.folders, nil
 }
 
 func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasMessageQuery) (NylasMessagePage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.messageCalls++
 	f.lastQuery = query
 	if f.listErr != nil {
@@ -62,14 +80,35 @@ func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasM
 	return NylasMessagePage{Messages: f.messages, NextPageToken: "next-token"}, nil
 }
 
-func (f *fakeNylasClient) GetMessage(_ context.Context, _, _ string) (NylasMessage, error) {
+func (f *fakeNylasClient) GetMessage(_ context.Context, _, messageID string) (NylasMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.detailCalls++
+	if f.messagesByID != nil {
+		if message, ok := f.messagesByID[messageID]; ok {
+			return message, nil
+		}
+	}
 	return f.message, nil
 }
 
-func (f *fakeNylasClient) UpdateMessage(_ context.Context, _, _ string, update NylasMessageUpdate) (NylasMessage, error) {
+func (f *fakeNylasClient) UpdateMessage(_ context.Context, _, messageID string, update NylasMessageUpdate) (NylasMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.updateErrByID != nil && f.updateErrByID[messageID] != nil {
+		return NylasMessage{}, f.updateErrByID[messageID]
+	}
 	f.update = update
+	f.updateCalls = append(f.updateCalls, fakeNylasUpdateCall{MessageID: messageID, Update: update})
 	message := f.message
+	if f.messagesByID != nil {
+		if stored, ok := f.messagesByID[messageID]; ok {
+			message = stored
+		}
+	}
+	if message.ID == "" {
+		message.ID = messageID
+	}
 	if update.Unread != nil {
 		message.Unread = *update.Unread
 	}
@@ -87,6 +126,8 @@ func (f *fakeNylasClient) DeleteMessage(_ context.Context, _, _ string) error {
 }
 
 func (f *fakeNylasClient) SendMessage(_ context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastSendGrantID = grantID
 	f.sent = request
 	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
@@ -831,6 +872,85 @@ func TestCommunicationsArchiveMessageMovesFolderProvidersToArchiveFolder(t *test
 	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive-id" {
 		t.Fatalf("folders = %+v, want archive-id", nylas.update.Folders)
 	}
+	if nylas.detailCalls != 0 {
+		t.Fatalf("detail calls = %d, want archive without message body fetch", nylas.detailCalls)
+	}
+}
+
+func TestCommunicationsArchiveBatchUsesCachedListFoldersAndReturnsCompactResult(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		messages: []NylasMessage{
+			{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}},
+			{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
+		},
+		updateErrByID: map[string]error{
+			"message-2": NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "4"},
+		},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+
+	body := `{"message_ids":["message-1","message-2","message-1"," "]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/archive-batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "4" {
+		t.Fatalf("Retry-After = %q, want 4", got)
+	}
+	if strings.Contains(rec.Body.String(), `"message"`) || strings.Contains(rec.Body.String(), "CATEGORY_PERSONAL") {
+		t.Fatalf("batch response should be compact, got %s", rec.Body.String())
+	}
+	var payload struct {
+		ArchivedIDs []string `json:"archived_ids"`
+		Failed      []struct {
+			MessageID string `json:"message_id"`
+			Error     string `json:"error"`
+		} `json:"failed"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.ArchivedIDs) != 1 || payload.ArchivedIDs[0] != "message-1" {
+		t.Fatalf("archived ids = %+v, want message-1", payload.ArchivedIDs)
+	}
+	if len(payload.Failed) != 1 || payload.Failed[0].MessageID != "message-2" || payload.Failed[0].Error != "nylas_rate_limited" {
+		t.Fatalf("failed = %+v, want message-2 rate limit", payload.Failed)
+	}
+	if nylas.detailCalls != 0 {
+		t.Fatalf("detail calls = %d, want cached list folder data", nylas.detailCalls)
+	}
+	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].MessageID != "message-1" || strings.Join(nylas.updateCalls[0].Update.Folders, ",") != "Label_123" {
+		t.Fatalf("update calls = %+v, want compact Gmail archive update", nylas.updateCalls)
+	}
 }
 
 func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
@@ -904,6 +1024,9 @@ func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *test
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive", "", token, http.StatusOK)
 	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "inbox-id" {
 		t.Fatalf("folders = %+v, want inbox-id", nylas.update.Folders)
+	}
+	if nylas.detailCalls != 0 {
+		t.Fatalf("detail calls = %d, want unarchive without message body fetch", nylas.detailCalls)
 	}
 }
 

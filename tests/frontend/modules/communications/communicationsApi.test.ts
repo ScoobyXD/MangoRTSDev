@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   addLogicGateRaciAssignments,
   archiveEmailMessage,
+  archiveEmailMessagesBatch,
   createFolderQuery,
   createCommunicationsSharedInbox,
   createMessageQuery,
@@ -203,20 +204,33 @@ test("starred mailbox filter only matches starred messages", () => {
 
 test("archive helpers call mailbox action endpoints", async () => {
   invalidateCommunicationsCache();
-  const calls: Array<{ path: string; method: string }> = [];
+  const calls: Array<{ path: string; method: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ path: input.toString(), method: init?.method ?? "GET" });
+    calls.push({ path: input.toString(), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (input.toString().includes("archive-batch")) {
+      return jsonResponse({ archived_ids: ["msg 2", "msg 3"], failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }] });
+    }
     return jsonResponse({ message: message("msg 1") });
   };
   try {
     await archiveEmailMessage("msg 1");
     await unarchiveEmailMessage("msg 1");
     await archiveEmailMessage("msg 2", "shared-1", "company-1");
+    const batch = await archiveEmailMessagesBatch(["msg 2", "msg 3", "msg 2", "msg 4"], "shared-1", "company-1");
+    assert.deepEqual(batch, {
+      archived_ids: ["msg 2", "msg 3"],
+      failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }],
+    });
     assert.deepEqual(calls, [
-      { path: "/v1/communications/messages/msg%201/archive", method: "POST" },
-      { path: "/v1/communications/messages/msg%201/unarchive", method: "POST" },
-      { path: "/v1/communications/messages/msg%202/archive?company_id=company-1&shared_inbox_id=shared-1", method: "POST" },
+      { path: "/v1/communications/messages/msg%201/archive", method: "POST", body: undefined },
+      { path: "/v1/communications/messages/msg%201/unarchive", method: "POST", body: undefined },
+      { path: "/v1/communications/messages/msg%202/archive?company_id=company-1&shared_inbox_id=shared-1", method: "POST", body: undefined },
+      {
+        path: "/v1/communications/messages/archive-batch?company_id=company-1&shared_inbox_id=shared-1",
+        method: "POST",
+        body: { message_ids: ["msg 2", "msg 3", "msg 4"] },
+      },
     ]);
   } finally {
     globalThis.fetch = originalFetch;

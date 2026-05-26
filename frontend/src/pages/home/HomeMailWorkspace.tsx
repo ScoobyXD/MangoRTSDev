@@ -139,6 +139,7 @@ export function HomeMailWorkspace({
   onDeleteSelected,
   onDisconnect,
   onLoadMoreMessages,
+  onPrefetchMessages,
   onOpenAllMailbox,
   onOpenArchivedMailbox,
   onOpenContextMenu,
@@ -194,6 +195,7 @@ export function HomeMailWorkspace({
   onDeleteSelected: () => void;
   onDisconnect: () => void;
   onLoadMoreMessages: () => void;
+  onPrefetchMessages: () => void;
   onOpenAllMailbox: () => void;
   onOpenArchivedMailbox: () => void;
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
@@ -402,7 +404,10 @@ export function HomeMailWorkspace({
               const scrolledOutIDs = collectScrolledOutMessageIDs(target);
               if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
             }
-            if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) onLoadMoreMessages();
+            const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+            const prefetchDistance = Math.max(800, target.clientHeight * 2);
+            if (remaining < prefetchDistance) onPrefetchMessages();
+            if (remaining < 160) onLoadMoreMessages();
           }}
         >
           {messages.length === 0 && !loadingMessages ? (

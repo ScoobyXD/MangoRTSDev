@@ -387,7 +387,8 @@ func (c *NylasRESTClient) UpdateMessage(ctx context.Context, grantID, messageID 
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodPut, grantPath(grantID, "messages", messageID), nil, update, &response, true); err != nil {
+	values := url.Values{"select": []string{nylasMessageListSelect}}
+	if err := c.do(ctx, http.MethodPut, grantPath(grantID, "messages", messageID), values, update, &response, true); err != nil {
 		return NylasMessage{}, err
 	}
 	return response.Data, nil

@@ -162,6 +162,11 @@ export type MessagePage = {
   next_page_token?: string;
 };
 
+export type ArchiveEmailMessagesBatchResult = {
+  archived_ids: string[];
+  failed: Array<{ message_id: string; error: string }>;
+};
+
 export type MergeEmailMessageOptions = {
   prependIfMissing?: boolean;
   maxMessages?: number;
@@ -336,6 +341,30 @@ export async function archiveEmailMessage(messageID: string, sharedInboxID?: str
   clearMessagePageCache();
   clearEmailFolderCache();
   return message;
+}
+
+export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string): Promise<ArchiveEmailMessagesBatchResult> {
+  const ids = cleanIDs(messageIDs);
+  if (ids.length === 0) return { archived_ids: [], failed: [] };
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const payload = await apiFetchJSON<Partial<ArchiveEmailMessagesBatchResult>>(`/v1/communications/messages/archive-batch${query}`, {
+    method: "POST",
+    body: JSON.stringify({ message_ids: ids }),
+  });
+  const archivedIDs = cleanIDs(payload.archived_ids ?? []);
+  for (const messageID of archivedIDs) {
+    recentPrimaryMessages.delete(messageID);
+    recentArchivedMessages.delete(messageID);
+    invalidateEmailMessageCache(messageID);
+  }
+  clearMessagePageCache();
+  clearEmailFolderCache();
+  return {
+    archived_ids: archivedIDs,
+    failed: (payload.failed ?? [])
+      .map((item) => ({ message_id: item.message_id?.trim() ?? "", error: item.error?.trim() ?? "archive_failed" }))
+      .filter((item) => item.message_id),
+  };
 }
 
 export async function unarchiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {

@@ -12,18 +12,21 @@ type nylasRequestGate struct {
 	mu       sync.Mutex
 	entries  map[string]*nylasRequestGateEntry
 	interval time.Duration
+	capacity int
 }
 
 type nylasRequestGateEntry struct {
-	sem         chan struct{}
-	refs        int
-	nextAllowed time.Time
+	mu        sync.Mutex
+	sem       chan struct{}
+	refs      int
+	nextStart time.Time
 }
 
 func newNylasRequestGate(interval time.Duration) *nylasRequestGate {
 	return &nylasRequestGate{
 		entries:  make(map[string]*nylasRequestGateEntry),
 		interval: interval,
+		capacity: communicationsNylasMaxInFlightPerGrant,
 	}
 }
 
@@ -53,7 +56,8 @@ func (g *nylasRequestGate) acquire(ctx context.Context, key string) (func(), err
 		acquired = true
 	}
 
-	if wait := time.Until(entry.nextAllowed); wait > 0 {
+	wait := entry.reserveStartDelay(g.interval)
+	if wait > 0 {
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
@@ -73,7 +77,6 @@ func (g *nylasRequestGate) acquire(ctx context.Context, key string) (func(), err
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			entry.nextAllowed = time.Now().Add(g.interval)
 			entry.sem <- struct{}{}
 			releaseRef()
 		})
@@ -83,14 +86,41 @@ func (g *nylasRequestGate) acquire(ctx context.Context, key string) (func(), err
 func (g *nylasRequestGate) entry(key string) *nylasRequestGateEntry {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	now := time.Now()
+	for existingKey, existing := range g.entries {
+		if existing.refs <= 0 && existing.startWindowExpired(now) {
+			delete(g.entries, existingKey)
+		}
+	}
 	entry := g.entries[key]
 	if entry == nil {
-		entry = &nylasRequestGateEntry{sem: make(chan struct{}, 1)}
-		entry.sem <- struct{}{}
+		capacity := g.capacity
+		if capacity <= 0 {
+			capacity = 1
+		}
+		entry = &nylasRequestGateEntry{sem: make(chan struct{}, capacity)}
+		for i := 0; i < capacity; i++ {
+			entry.sem <- struct{}{}
+		}
 		g.entries[key] = entry
 	}
 	entry.refs++
 	return entry
+}
+
+func (e *nylasRequestGateEntry) reserveStartDelay(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := time.Now()
+	start := now
+	if e.nextStart.After(now) {
+		start = e.nextStart
+	}
+	e.nextStart = start.Add(interval)
+	return time.Until(start)
 }
 
 func (g *nylasRequestGate) releaseRef(key string, entry *nylasRequestGateEntry) {
@@ -100,9 +130,15 @@ func (g *nylasRequestGate) releaseRef(key string, entry *nylasRequestGateEntry) 
 		return
 	}
 	entry.refs--
-	if entry.refs <= 0 {
+	if entry.refs <= 0 && entry.startWindowExpired(time.Now()) {
 		delete(g.entries, key)
 	}
+}
+
+func (e *nylasRequestGateEntry) startWindowExpired(now time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return !e.nextStart.After(now)
 }
 
 func (s *Server) withCommunicationsNylasGate(ctx context.Context, connection domain.UserEmailConnection, call func(context.Context) error) error {
