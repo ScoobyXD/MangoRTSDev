@@ -15,9 +15,9 @@ import { fetchNotifications, markNotificationRead, markNotificationsRead, type N
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
-import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
-import type { AciInboxRole, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
+import type { AciInboxRole, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
+import { aciCellKey, buildAciInboxGroupsByCell, buildRaciRoleInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
@@ -320,7 +320,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
   );
 }
 
-type InboxMatrixViewID = Extract<HomeViewID, "aci-inbox" | "r-inbox">;
+type InboxMatrixViewID = Extract<HomeViewID, "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 
 type InboxNodeDropInput = {
   logicGateID: string;
@@ -332,7 +332,7 @@ type InboxNodeDropInput = {
 type InboxCellCreateInput = {
   priority: InboxPriority;
   status?: ResponsibleInboxStatus;
-  creatorRaciRole: LogicGateRaciRole;
+  creatorRaciRole?: LogicGateRaciRole;
 };
 
 type InboxGroupResizeState = {
@@ -768,8 +768,9 @@ export function HomeSidebar({
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
   const mentionUnreadCount = notificationCountForType(notificationSummary, "mention.created");
-  const aciChangedNodeCount = notificationCountForRoles(notificationSummary, "aci_inbox", ["accountable", "consulted", "informed"]);
-  const responsibleChangedNodeCount = notificationCountForRole(notificationSummary, "r_inbox", "responsible");
+  const raciInboxNotificationCount = (role: RaciInboxRole): number => (
+    notificationCountForRole(notificationSummary, role === "responsible" ? "r_inbox" : "aci_inbox", role)
+  );
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -1212,18 +1213,19 @@ export function HomeSidebar({
             <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create Shared Triage">+</button>
           </form>
         </section>
-        <HomeNavButton
-          label="ACIO Nodes"
-          active={activeViewID === "aci-inbox"}
-          meta={aciChangedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(aciChangedNodeCount)}</span> : undefined}
-          onClick={() => onSelectView("aci-inbox", "all")}
-        />
-        <HomeNavButton
-          label="R Nodes"
-          active={activeViewID === "r-inbox"}
-          meta={responsibleChangedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(responsibleChangedNodeCount)}</span> : undefined}
-          onClick={() => onSelectView("r-inbox", "all")}
-        />
+        {RACI_INBOX_SECTIONS.map((section) => {
+          const changedNodeCount = raciInboxNotificationCount(section.role);
+          const active = activeViewID === section.viewID || (activeViewID === "aci-inbox" && section.viewID === "a-inbox");
+          return (
+            <HomeNavButton
+              key={section.viewID}
+              label={section.title}
+              active={active}
+              meta={changedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(changedNodeCount)}</span> : undefined}
+              onClick={() => onSelectView(section.viewID, "all")}
+            />
+          );
+        })}
         <HomeNavButton
           label="@ Mentions"
           active={mentionNotificationMenu !== null}
@@ -2398,14 +2400,6 @@ function notificationCountForRole(summary: NotificationSummary, surface: string,
   }, 0);
 }
 
-function notificationCountForRoles(summary: NotificationSummary, surface: string, roles: NotificationRaciRole[]): number {
-  const roleSet = new Set(roles);
-  return (summary.role_counts ?? []).reduce((count, item) => {
-    if (item.surface !== surface || !item.role || !roleSet.has(item.role)) return count;
-    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
-  }, 0);
-}
-
 function formatInboxNotificationCount(count: number): string {
   const normalized = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
   return normalized > 99 ? "99+" : String(normalized);
@@ -2621,6 +2615,288 @@ const mentionNotificationBadgeStyle: React.CSSProperties = {
   fontWeight: 800,
   padding: "0 6px",
 };
+
+export function RaciRoleInboxMatrix({
+  section,
+  loading,
+  nodes,
+  nodeByID,
+  nodeRelationships,
+  logicGateByID,
+  nodeFolders,
+  nodeFolderItems,
+  currentUserID,
+  notificationSummary,
+  selectedRowIDs,
+  selectedLogicGateRowIDs,
+  getNodeDragIDs,
+  onSelectNode,
+  onSelectLogicGate,
+  onOpenNode,
+  onOpenLogicGate,
+  onOpenNodeBulkMenu,
+  onOpenLogicGateBulkMenu,
+  onOpenLogicGateBulkMenuAt,
+  onRequestDeleteLogicGate,
+  onCreateNodeInLogicGate,
+  onCreateLogicGateInCell,
+  onCreateNodeInCell,
+  onDropNodes,
+}: {
+  section: (typeof RACI_INBOX_SECTIONS)[number];
+  loading: boolean;
+  nodes: NodeRecord[];
+  nodeByID: Map<string, NodeRecord>;
+  nodeRelationships: NodeRelationship[];
+  logicGateByID: Map<string, LogicGateRecord>;
+  nodeFolders: CompanyExplorerFolder[];
+  nodeFolderItems: CompanyExplorerFolderItem[];
+  currentUserID: string;
+  notificationSummary: NotificationSummary;
+  selectedRowIDs: Set<string>;
+  selectedLogicGateRowIDs: Set<string>;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
+  onRequestDeleteLogicGate: (logicGateID: string) => void;
+  onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
+  onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
+  onCreateNodeInCell: (input: InboxCellCreateInput) => void;
+  onDropNodes: (input: InboxNodeDropInput) => void;
+}) {
+  const cellLogicGateGroups = useMemo(() => buildRaciRoleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID, section.role), [currentUserID, logicGateByID, nodeByID, nodes, section.role]);
+  const { groupHeights, startGroupResize } = useInboxGroupCardHeights(section.viewID);
+  const { collapsedGroupKeys, toggleCollapsedGroup } = useInboxGroupCollapsedState(section.viewID);
+  const [activeDropKey, setActiveDropKey] = useState("");
+  const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
+  const [notificationMenu, setNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
+  const [cellContextMenu, setCellContextMenu] = useState<(InboxCellCreateInput & { x: number; y: number }) | null>(null);
+  const creatorRaciRole = section.role === "other" ? undefined : section.role;
+  const notificationRole: NotificationRaciRole = section.role;
+  const orderedRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of RACI_STATUS_COLUMNS) {
+        const groups = cellLogicGateGroups.get(raciRoleCellKey(section.role, column.status, priority.value)) ?? [];
+        for (const group of groups) ids.push(...group.nodeIDs);
+      }
+    }
+    return cleanIDList(ids).map(nodeTreeID);
+  }, [cellLogicGateGroups, section.role]);
+  const orderedLogicGateRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of RACI_STATUS_COLUMNS) {
+        const groups = cellLogicGateGroups.get(raciRoleCellKey(section.role, column.status, priority.value)) ?? [];
+        for (const group of groups) ids.push(group.logicGateID);
+      }
+    }
+    return cleanIDList(ids).filter((id) => id !== INBOX_NO_LOGIC_GATE_ID).map(logicGateTreeID);
+  }, [cellLogicGateGroups, section.role]);
+  const placedCount = orderedRowIDs.length;
+  const openGroupNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextMenu: InboxNotificationMenuState = {
+      x: event.clientX,
+      y: event.clientY,
+      title: `${group.label} notifications`,
+      loading: true,
+      error: "",
+      items: [],
+    };
+    setNotificationMenu(nextMenu);
+    fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
+      .then((items) => {
+        const filtered = items.filter((item) => inboxNotificationMatchesGroup(item, role, group));
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items: filtered }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            : current
+        ));
+      });
+  }, []);
+  const openNotificationTarget = useCallback((notification: NotificationItem) => {
+    const notificationID = notification.notification_id.trim();
+    if (notificationID) {
+      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+    }
+    setNotificationMenu(null);
+    const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
+    const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
+    const node = nodeID ? nodeByID.get(nodeID) : undefined;
+    if (node) {
+      onOpenNode(node);
+      return;
+    }
+    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
+  }, [nodeByID, onOpenLogicGate, onOpenNode]);
+  const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
+    const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
+    if (menu.loading || notificationIDs.length === 0) return;
+    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+      console.error("Failed to clear notifications", error);
+      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+    });
+  }, []);
+  const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setNotificationMenu(null);
+    setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
+  }, []);
+
+  return (
+    <>
+    <section style={logicGateRaciPanelStyle}>
+      <div style={logicGateRaciMatrixSurfaceStyle}>
+        <div style={logicGateRaciHeaderStyle}>
+          <h2 style={panelTitleStyle}>{section.title}</h2>
+          <div style={logicGateRaciMetaStyle}>
+            {placedCount > 0 && <span>{placedCount} active</span>}
+            {loading && <span>Loading</span>}
+          </div>
+        </div>
+        <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
+          <div style={inboxMatrixGridStyle(RACI_STATUS_COLUMNS.length)}>
+            <div className="mango-inbox-matrix-cell" data-rail-right="true" data-rail-bottom="true" style={logicGateRaciCornerStyle} />
+            {RACI_STATUS_COLUMNS.map((column, columnIndex) => (
+              <div
+                key={column.status}
+                className="mango-inbox-matrix-cell"
+                data-rail-right={columnIndex === RACI_STATUS_COLUMNS.length - 1 ? undefined : "true"}
+                data-rail-bottom="true"
+                style={logicGateRaciColumnHeaderStyle(column.status)}
+              >
+                <strong style={logicGateRaciColumnLetterStyle(column.status)}>{column.letter}</strong>
+                <span style={logicGateRaciColumnLabelStyle(column.status)}>{column.label}</span>
+              </div>
+            ))}
+            {INBOX_PRIORITIES.map((priority, priorityIndex) => (
+              <React.Fragment key={priority.value}>
+                <div
+                  className="mango-inbox-matrix-cell"
+                  data-rail-right="true"
+                  data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
+                  style={logicGateRaciPriorityHeaderStyle(priority.value)}
+                >
+                  {priority.label}
+                </div>
+                {RACI_STATUS_COLUMNS.map((column, columnIndex) => {
+                  const cellKey = raciRoleCellKey(section.role, column.status, priority.value);
+                  const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
+                  const statusColor = responsibleStatusColor(column.status);
+                  const cellStyle = logicGateRaciCellStyle(false);
+                  return (
+                    <div
+                      key={cellKey}
+                      className="mango-inbox-matrix-cell"
+                      data-rail-right={columnIndex === RACI_STATUS_COLUMNS.length - 1 ? undefined : "true"}
+                      data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
+                      style={cellStyle}
+                      onContextMenu={(event) => openCellCreateMenu(event, {
+                        priority: priority.value,
+                        status: column.status,
+                        creatorRaciRole,
+                      })}
+                    >
+                      {logicGateGroups.map((group) => {
+                        const resizeKey = inboxGroupResizeKey(cellKey, group);
+                        return (
+                          <LogicGateInboxNodeGroupCard
+                            key={group.logicGateID}
+                            group={group}
+                            selectedRowIDs={selectedRowIDs}
+                            selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
+                            orderedLogicGateRowIDs={orderedLogicGateRowIDs}
+                            orderedRowIDs={orderedRowIDs}
+                            nodeByID={nodeByID}
+                            nodeRelationships={nodeRelationships}
+                            nodeFolders={nodeFolders}
+                            nodeFolderItems={nodeFolderItems}
+                            getNodeDragIDs={getNodeDragIDs}
+                            onSelectNode={onSelectNode}
+                            onSelectLogicGate={onSelectLogicGate}
+                            onOpenNode={onOpenNode}
+                            onOpenLogicGate={onOpenLogicGate}
+                            onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                            onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                            onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                            onRequestDeleteLogicGate={onRequestDeleteLogicGate}
+                            onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole })}
+                            onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
+                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
+                            dropActive={activeDropKey === resizeKey}
+                            onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
+                            notificationSummary={notificationSummary}
+                            notificationCount={notificationCountForInboxGroup(notificationSummary, notificationRole, group)}
+                            notificationRole={notificationRole}
+                            onOpenNotifications={(event) => openGroupNotifications(event, notificationRole, group)}
+                            groupColor={statusColor}
+                            resizeKey={resizeKey}
+                            heightPx={groupHeights[resizeKey]}
+                            onStartResize={startGroupResize}
+                            collapsed={collapsedGroupKeys.has(resizeKey)}
+                            onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
+                            onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+    <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    {cellContextMenu && (
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateLogicGateInCell(input);
+          }}
+        >
+          Create Logic Gate
+        </button>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            setCellContextMenu(null);
+            onCreateNodeInCell(input);
+          }}
+        >
+          Create Note
+        </button>
+      </FrameRightClickMenu>
+    )}
+    <InboxNotificationMenu menu={notificationMenu} onClose={() => setNotificationMenu(null)} onOpen={openNotificationTarget} onClear={clearGroupNotifications} />
+  </>
+  );
+}
 
 export function AciInboxMatrix({
   loading,
@@ -3558,7 +3834,7 @@ export function LogicGateInboxNodeRow({
       {onRemovePlacement && (
         <button
           type="button"
-          aria-label={`Remove ${nodeTitle(node)} from ACIO nodes`}
+          aria-label={`Remove ${nodeTitle(node)} from matrix`}
           style={logicGateInboxNodeRemoveStyle}
           onClick={(event) => {
             event.stopPropagation();
