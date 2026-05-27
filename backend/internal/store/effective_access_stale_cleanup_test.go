@@ -278,6 +278,20 @@ func TestPostgresHotWriteEffectiveAccessRecomputeUsesScopedResourceRebuild(t *te
 	}
 }
 
+func TestPostgresEffectiveAccessRanksRoleAdminBeforeTimestamp(t *testing.T) {
+	raw, err := os.ReadFile("postgres_effective_access.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_effective_access.go: %v", err)
+	}
+	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	if strings.Contains(source, "order by source_timestamp desc, source_rank desc") {
+		t.Fatal("effective access final ranking must not let newer no_access grants outrank role admin facts")
+	}
+	if count := strings.Count(source, "order by case when source_type='company_admin' then 1 else 0 end desc, source_timestamp desc, source_rank desc"); count < 3 {
+		t.Fatalf("effective access final ranking role admin priority count = %d, want at least 3", count)
+	}
+}
+
 func assertNoEffectiveRowsForCompanyUser(t *testing.T, repo *MemoryRepo, companyID, userID string) {
 	t.Helper()
 	for _, fact := range repo.effectiveAccess {

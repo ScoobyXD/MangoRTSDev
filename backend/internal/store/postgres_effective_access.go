@@ -1048,7 +1048,12 @@ ranked_all_facts as (
   select all_facts.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by source_timestamp desc, source_rank desc, access_rank desc, source_type asc, source_id asc
+           order by case when source_type='company_admin' then 1 else 0 end desc,
+                    source_timestamp desc,
+                    source_rank desc,
+                    access_rank desc,
+                    source_type asc,
+                    source_id asc
          ) as rn
   from all_facts
   where access_level in ('no_access', 'view', 'edit', 'admin')
@@ -1344,7 +1349,12 @@ ranked_all_facts as (
   select all_facts.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by source_timestamp desc, source_rank desc, access_rank desc, source_type asc, source_id asc
+           order by case when source_type='company_admin' then 1 else 0 end desc,
+                    source_timestamp desc,
+                    source_rank desc,
+                    access_rank desc,
+                    source_type asc,
+                    source_id asc
          ) as rn
   from all_facts
   where access_level in ('no_access', 'view', 'edit', 'admin')
@@ -1650,7 +1660,12 @@ ranked_all_facts as (
   select all_facts.*,
          row_number() over (
            partition by company_id, user_id, resource_type, resource_id
-           order by source_timestamp desc, source_rank desc, access_rank desc, source_type asc, source_id asc
+           order by case when source_type='company_admin' then 1 else 0 end desc,
+                    source_timestamp desc,
+                    source_rank desc,
+                    access_rank desc,
+                    source_type asc,
+                    source_id asc
          ) as rn
   from all_facts
   where access_level in ('no_access', 'view', 'edit', 'admin')

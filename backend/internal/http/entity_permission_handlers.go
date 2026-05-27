@@ -651,6 +651,7 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 		if userID == "" {
 			continue
 		}
+		found := false
 		for _, level := range levels {
 			allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, level)
 			if err != nil {
@@ -661,8 +662,15 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 					"user_id":      userID,
 					"access_level": level,
 				})
+				found = true
 				break
 			}
+		}
+		if !found {
+			out = append(out, map[string]string{
+				"user_id":      userID,
+				"access_level": store.EntityPermissionNoAccess,
+			})
 		}
 	}
 	return out, nil

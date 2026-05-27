@@ -578,13 +578,20 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 	} else if !exists {
 		return nil, ErrNotFound
 	}
+	filtered := normalized[:0]
 	for _, item := range normalized {
 		switch item.subjectType {
 		case EntityPermissionSubjectUser:
-			if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_memberships where company_id=$1::uuid and user_id=$2::uuid)`, companyID, item.subjectID); err != nil {
-				return nil, err
-			} else if !exists {
+			var role string
+			err := tx.QueryRowContext(ctx, `select role from company_memberships where company_id=$1::uuid and user_id=$2::uuid`, companyID, item.subjectID).Scan(&role)
+			if errors.Is(err, sql.ErrNoRows) {
 				return nil, ErrAssigneeNotInCompany
+			}
+			if err != nil {
+				return nil, err
+			}
+			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && item.permission == EntityPermissionNoAccess && domain.CanManageCompany(role) {
+				continue
 			}
 		case EntityPermissionSubjectGroup:
 			if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_user_groups where company_id=$1::uuid and group_id=$2::uuid)`, companyID, item.subjectID); err != nil {
@@ -593,7 +600,9 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 				return nil, ErrNotFound
 			}
 		}
+		filtered = append(filtered, item)
 	}
+	normalized = filtered
 	targetEntityIDs := []string{entityID}
 	if entityType == EntityTypeSharedTriageFolder {
 		ids, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, entityID)
