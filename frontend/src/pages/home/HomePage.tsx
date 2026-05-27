@@ -126,6 +126,45 @@ function messageHasInboxLabel(message: EmailMessage): boolean {
   });
 }
 
+type MessageListScrollAnchor = {
+  messageID: string;
+  top: number;
+};
+
+function captureMessageListScrollAnchor(container: HTMLDivElement, removedIDs: Set<string>): MessageListScrollAnchor | null {
+  const containerTop = container.getBoundingClientRect().top;
+  const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"));
+  for (const row of rows) {
+    const messageID = row.dataset.homeMailMessageId?.trim();
+    if (!messageID || removedIDs.has(messageID)) continue;
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom <= containerTop + 1) continue;
+    return { messageID, top: rect.top - containerTop };
+  }
+  return null;
+}
+
+function restoreMessageListScrollAnchor(container: HTMLDivElement, anchor: MessageListScrollAnchor): void {
+  const row = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"))
+    .find((item) => item.dataset.homeMailMessageId?.trim() === anchor.messageID);
+  if (!row) return;
+  const nextTop = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  const delta = nextTop - anchor.top;
+  if (Math.abs(delta) > 0.5) container.scrollTop += delta;
+}
+
+function messageListAutoArchiveSpacerHeight(container: HTMLDivElement): number {
+  return container.querySelector<HTMLElement>("[data-home-mail-auto-archive-spacer]")?.offsetHeight ?? 0;
+}
+
+function messageListRemainingDistance(container: HTMLDivElement): number {
+  return container.scrollHeight - container.scrollTop - container.clientHeight - messageListAutoArchiveSpacerHeight(container);
+}
+
+function messageListContentScrollHeight(container: HTMLDivElement): number {
+  return container.scrollHeight - messageListAutoArchiveSpacerHeight(container);
+}
+
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
@@ -648,7 +687,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const messageListWithinPrefetchDistance = useCallback(() => {
     const list = messageListRef.current;
     if (!list) return false;
-    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    const remaining = messageListRemainingDistance(list);
     return remaining < Math.max(800, list.clientHeight * 2);
   }, []);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
@@ -867,12 +906,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const list = messageListRef.current;
       if (!list || !nextPageTokenRef.current) return;
       if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
-      if (list.scrollHeight <= list.clientHeight + 160) void loadMoreMessages();
+      if (messageListContentScrollHeight(list) <= list.clientHeight + 160) void loadMoreMessages();
     }, 0);
   }, [loadMoreMessages, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
-  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[]) => {
+  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[], options?: { preserveScrollAnchor?: boolean }) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    const removedIDSet = new Set(ids);
+    const list = options?.preserveScrollAnchor ? messageListRef.current : null;
+    const scrollAnchor = list ? captureMessageListScrollAnchor(list, removedIDSet) : null;
     setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
     setSelectedMessageIDs((previous) => {
       const next = new Set(previous);
@@ -885,6 +927,11 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectedMessage(null);
     }
     setMessageContextMenu((current) => current && current.messageIDs.some((id) => ids.includes(id)) ? null : current);
+    if (list && scrollAnchor) {
+      window.requestAnimationFrame(() => {
+        restoreMessageListScrollAnchor(list, scrollAnchor);
+      });
+    }
     fillMessageListAfterRemoval();
   }, [fillMessageListAfterRemoval]);
   const flushQueuedArchiveMessages = useCallback(() => {
@@ -962,7 +1009,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     autoArchiveTimerIDsRef.current.delete(messageID);
     removePendingAutoArchiveMessages([messageID]);
     if (isArchivableHomeViewID(activeViewIDRef.current) && mailboxRef.current === "primary") {
-      removeMessagesFromVisibleMailList([messageID]);
+      removeMessagesFromVisibleMailList([messageID], { preserveScrollAnchor: true });
     }
     queueArchiveMessages([messageID]);
   }, [queueArchiveMessages, removeMessagesFromVisibleMailList, removePendingAutoArchiveMessages]);
@@ -991,7 +1038,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     const list = messageListRef.current;
     if (!list || !nextPageToken || loadingMessages || loadingMoreMessages) return;
     if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
-    if (list.scrollHeight <= list.clientHeight + 120) void loadMoreMessages();
+    if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
   }, [loadMoreMessages, loadingMessages, loadingMoreMessages, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage]);
   useEffect(() => {
     if (!status?.connected) return undefined;

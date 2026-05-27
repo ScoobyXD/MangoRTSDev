@@ -1740,6 +1740,34 @@ export const messageListStyle: React.CSSProperties = {
   padding: "2px 4px 4px",
 };
 
+export const mailMessageListFrameStyle: React.CSSProperties = {
+  position: "relative",
+  minHeight: 0,
+  minWidth: 0,
+  display: "grid",
+  overflow: "hidden",
+};
+
+export function mailAutoArchiveGuideStyle(top: number): React.CSSProperties {
+  return {
+    position: "absolute",
+    top,
+    left: 12,
+    right: 14,
+    zIndex: 2,
+    height: 1,
+    pointerEvents: "none",
+    background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.56) 12%, rgba(100, 116, 139, 0.56) 88%, transparent)",
+    boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 -12px 22px rgba(148, 163, 184, 0.12)",
+  };
+}
+
+export const mailAutoArchiveTailSpacerStyle: React.CSSProperties = {
+  minHeight: 180,
+  height: "100%",
+  pointerEvents: "none",
+};
+
 export const loadingMoreStyle: React.CSSProperties = {
   minHeight: 28,
   display: "grid",
@@ -1772,11 +1800,14 @@ export function messageRowStyle(active: boolean, unread: boolean, hovered = fals
   };
 }
 
-export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false): React.CSSProperties {
+export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false, autoArchiveProgress = 0): React.CSSProperties {
   const framed = active || hovered;
   const outlined = framed || unread;
   const frameBackground = unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
-  const borderColor = pendingAutoArchive && unread ? HOME_MAIL_UNREAD_EDGE : outlined ? "transparent" : HOME_KEY_SOFT_BORDER;
+  const archiveProgress = Math.max(pendingAutoArchive ? 1 : 0, Math.min(1, Math.max(0, autoArchiveProgress)));
+  const archiveVisualActive = archiveProgress > 0.01;
+  const borderColor = pendingAutoArchive && unread ? HOME_MAIL_UNREAD_EDGE : outlined ? "transparent" : archiveVisualActive ? "rgba(148, 163, 184, 0.22)" : HOME_KEY_SOFT_BORDER;
+  const archiveShadowAlpha = 0.12 + archiveProgress * 0.14;
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 98px",
@@ -1785,13 +1816,13 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     minHeight: 82,
     border: `1px solid ${borderColor}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
-    background: pendingAutoArchive
-      ? "linear-gradient(145deg, #f2f3f6 0%, #e7e9ee 100%)"
+    background: archiveVisualActive
+      ? "linear-gradient(145deg, #f4f5f7 0%, #e6e9ee 100%)"
       : outlined
         ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${frameBackground} border-box`
         : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
-    color: pendingAutoArchive ? "rgba(15, 23, 42, 0.72)" : "#111827",
+    color: archiveVisualActive ? `rgba(15, 23, 42, ${Math.max(0.68, 1 - archiveProgress * 0.3)})` : "#111827",
     font: "inherit",
     fontSize: 12,
     padding: "10px 10px 9px",
@@ -1799,12 +1830,13 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     minWidth: 0,
     boxShadow: framed
       ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
-      : pendingAutoArchive
-        ? "inset 0 0 0 1px rgba(148, 163, 184, 0.16)"
+      : archiveVisualActive
+        ? `inset 0 0 0 1px rgba(148, 163, 184, ${archiveShadowAlpha}), inset 0 0 ${Math.round(10 + archiveProgress * 18)}px rgba(100, 116, 139, ${0.04 + archiveProgress * 0.08})`
         : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
+    filter: archiveVisualActive ? `grayscale(${Math.round(archiveProgress * 78)}%) saturate(${Math.max(0.54, 1 - archiveProgress * 0.46).toFixed(2)})` : undefined,
     letterSpacing: 0,
     transform: hovered ? "translateY(-2px)" : "translateY(0)",
-    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease, filter 120ms ease",
   };
 }
 
