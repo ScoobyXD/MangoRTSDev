@@ -308,6 +308,122 @@ func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, e
 	return items, nil
 }
 
+func (r *MemoryRepo) ListCompanyUserOnboarding(companyID string) ([]domain.CompanyUserOnboarding, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	latestInvitationByEmail := map[string]domain.Invitation{}
+	for _, invitation := range r.invitations {
+		if invitation.CompanyID != companyID || invitation.Status == domain.InvitationStatusRevoked {
+			continue
+		}
+		email := normalizeEmail(invitation.Email)
+		existing, ok := latestInvitationByEmail[email]
+		if !ok || invitation.CreatedTimestamp.After(existing.CreatedTimestamp) {
+			latestInvitationByEmail[email] = invitation
+		}
+	}
+
+	items := make([]domain.CompanyUserOnboarding, 0)
+	seenEmails := map[string]bool{}
+	for _, membership := range r.memberships {
+		if membership.CompanyID != companyID {
+			continue
+		}
+		var user domain.User
+		found := false
+		for _, candidate := range r.users {
+			if candidate.UserID == membership.UserID {
+				user = candidate
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		email := normalizeEmail(user.Email)
+		invitation := latestInvitationByEmail[email]
+		connection := r.emailConnections[user.UserID]
+		item := domain.CompanyUserOnboarding{
+			CompanyID:                    companyID,
+			Email:                        email,
+			Role:                         membership.Role,
+			UserID:                       user.UserID,
+			DisplayName:                  user.DisplayName,
+			InvitationID:                 invitation.InvitationID,
+			InvitationStatus:             invitation.Status,
+			CognitoStatus:                invitation.CognitoStatus,
+			InviteEmailStatus:            invitation.InviteEmailStatus,
+			InviteEmailError:             invitation.InviteEmailError,
+			InviteEmailSentTimestamp:     invitation.EmailSentTimestamp,
+			InviteAccepted:               invitation.Status == domain.InvitationStatusAccepted,
+			GoogleConnectionStatus:       googleConnectionStatus(connection),
+			GoogleConnectionAccountEmail: googleConnectionAccountEmail(connection),
+			CreatedTimestamp:             membership.CreatedTimestamp,
+			UpdatedTimestamp:             membership.UpdatedTimestamp,
+		}
+		if item.InvitationStatus == "" {
+			item.InvitationStatus = "none"
+		}
+		if item.CognitoStatus == "" {
+			item.CognitoStatus = "existing_mango_user"
+		}
+		if item.InviteEmailStatus == "" {
+			item.InviteEmailStatus = "not_started"
+		}
+		items = append(items, item)
+		seenEmails[email] = true
+	}
+
+	for email, invitation := range latestInvitationByEmail {
+		if seenEmails[email] || invitation.Status != domain.InvitationStatusPending {
+			continue
+		}
+		item := domain.CompanyUserOnboarding{
+			CompanyID:                companyID,
+			Email:                    email,
+			Role:                     invitation.Role,
+			InvitationID:             invitation.InvitationID,
+			InvitationStatus:         invitation.Status,
+			CognitoStatus:            invitation.CognitoStatus,
+			InviteEmailStatus:        invitation.InviteEmailStatus,
+			InviteEmailError:         invitation.InviteEmailError,
+			InviteEmailSentTimestamp: invitation.EmailSentTimestamp,
+			GoogleConnectionStatus:   "not_connected",
+			CreatedTimestamp:         invitation.CreatedTimestamp,
+			UpdatedTimestamp:         invitation.UpdatedTimestamp,
+		}
+		if item.CognitoStatus == "" {
+			item.CognitoStatus = "not_started"
+		}
+		if item.InviteEmailStatus == "" {
+			item.InviteEmailStatus = "not_started"
+		}
+		items = append(items, item)
+	}
+
+	slices.SortFunc(items, func(a, b domain.CompanyUserOnboarding) int {
+		if cmp := strings.Compare(a.Email, b.Email); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.UserID, b.UserID)
+	})
+	return items, nil
+}
+
+func googleConnectionAccountEmail(connection domain.UserEmailConnection) string {
+	if strings.TrimSpace(strings.ToLower(connection.Provider)) != "google" {
+		return ""
+	}
+	return normalizeEmail(connection.AccountEmail)
+}
+
 func (r *MemoryRepo) ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
@@ -665,20 +781,71 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 		}
 	}
 	invitation := domain.Invitation{
-		InvitationID:     newUUIDv7String(),
-		CompanyID:        companyID,
-		CompanyName:      r.companies[companyID].Name,
-		Email:            email,
-		Role:             role,
-		Status:           domain.InvitationStatusPending,
-		Token:            token,
-		InvitedByUserID:  invitedByUserID,
-		ExpiresTimestamp: now.Add(ttl),
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+		InvitationID:      newUUIDv7String(),
+		CompanyID:         companyID,
+		CompanyName:       r.companies[companyID].Name,
+		Email:             email,
+		Role:              role,
+		Status:            domain.InvitationStatusPending,
+		Token:             token,
+		CognitoStatus:     "not_started",
+		InviteEmailStatus: "not_started",
+		InvitedByUserID:   invitedByUserID,
+		ExpiresTimestamp:  now.Add(ttl),
+		CreatedTimestamp:  now,
+		UpdatedTimestamp:  now,
 	}
 	r.invitations[tokenHash] = invitation
 	return invitation, nil
+}
+
+func (r *MemoryRepo) UpdateInvitationDeliveryStatus(input InvitationDeliveryStatusInput) (domain.Invitation, error) {
+	invitationID := strings.TrimSpace(input.InvitationID)
+	if invitationID == "" {
+		return domain.Invitation{}, ErrInvalid
+	}
+	cognitoStatus := strings.TrimSpace(input.CognitoStatus)
+	if cognitoStatus != "" {
+		cognitoStatus = normalizeInvitationCognitoStatus(cognitoStatus)
+		if cognitoStatus == "" {
+			return domain.Invitation{}, ErrInvalid
+		}
+	}
+	emailStatus := strings.TrimSpace(input.InviteEmailStatus)
+	if emailStatus != "" {
+		emailStatus = normalizeInvitationEmailStatus(emailStatus)
+		if emailStatus == "" {
+			return domain.Invitation{}, ErrInvalid
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for tokenHash, invitation := range r.invitations {
+		if invitation.InvitationID != invitationID {
+			continue
+		}
+		if cognitoStatus != "" {
+			invitation.CognitoStatus = cognitoStatus
+			invitation.CognitoError = strings.TrimSpace(input.CognitoError)
+		}
+		if emailStatus != "" {
+			invitation.InviteEmailStatus = emailStatus
+			invitation.InviteEmailError = strings.TrimSpace(input.InviteEmailError)
+			if emailStatus == "sent" {
+				now := time.Now().UTC()
+				invitation.EmailSentTimestamp = &now
+			}
+		}
+		invitation.UpdatedTimestamp = time.Now().UTC()
+		if company, ok := r.companies[invitation.CompanyID]; ok {
+			invitation.CompanyName = company.Name
+		}
+		r.invitations[tokenHash] = invitation
+		return invitation, nil
+	}
+	return domain.Invitation{}, ErrNotFound
 }
 
 func (r *MemoryRepo) ValidateInvitationToken(token string) (domain.Invitation, error) {

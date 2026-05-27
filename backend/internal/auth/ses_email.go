@@ -22,12 +22,48 @@ type SESEmailSender struct {
 	cached awsCredentials
 }
 
+type InvitationEmailInput struct {
+	Email             string
+	CompanyName       string
+	AcceptURL         string
+	TemporaryPassword string
+	ExpiresAt         time.Time
+}
+
 func NewSESEmailSender(region, fromEmailAddress string) *SESEmailSender {
 	return &SESEmailSender{
 		Region:           strings.TrimSpace(region),
 		FromEmailAddress: strings.TrimSpace(fromEmailAddress),
 		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+func (s *SESEmailSender) SendInvitation(ctx context.Context, input InvitationEmailInput) error {
+	companyName := strings.TrimSpace(input.CompanyName)
+	if companyName == "" {
+		companyName = "your company"
+	}
+	acceptURL := strings.TrimSpace(input.AcceptURL)
+	subject := "You're invited to MangoRTS"
+	var body strings.Builder
+	body.WriteString("You have been invited to MangoRTS for ")
+	body.WriteString(companyName)
+	body.WriteString(".\n\nOpen this link to accept the invitation:\n")
+	body.WriteString(acceptURL)
+	body.WriteString("\n\n")
+	if password := strings.TrimSpace(input.TemporaryPassword); password != "" {
+		body.WriteString("Temporary password:\n")
+		body.WriteString(password)
+		body.WriteString("\n\nUse this temporary password once, then set a new password on the invite page.\n")
+	} else {
+		body.WriteString("Sign in with your existing MangoRTS password when prompted.\n")
+	}
+	if !input.ExpiresAt.IsZero() {
+		body.WriteString("\nThis invitation expires on ")
+		body.WriteString(input.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))
+		body.WriteString(".\n")
+	}
+	return s.sendTextEmail(ctx, input.Email, subject, body.String())
 }
 
 func (s *SESEmailSender) SendSignupConfirmation(ctx context.Context, email, companyName string) error {

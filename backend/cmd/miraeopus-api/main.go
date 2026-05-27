@@ -26,6 +26,7 @@ func main() {
 		AuthValidator:        buildAuthValidator(),
 		CognitoAdmin:         buildCognitoAdminClient(),
 		EmailSender:          buildEmailSender(),
+		AppBaseURL:           strings.TrimSpace(os.Getenv("MANGORTS_APP_URL")),
 		NylasClient:          buildNylasClient(),
 		NylasConfig:          buildNylasConfig(),
 		WorkspaceEventFanout: workspaceFanout,

@@ -71,6 +71,25 @@ type CompanyUser struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type CompanyUserOnboarding struct {
+	CompanyID                    string     `json:"company_id"`
+	Email                        string     `json:"email"`
+	Role                         string     `json:"role"`
+	UserID                       string     `json:"user_id,omitempty"`
+	DisplayName                  string     `json:"display_name,omitempty"`
+	InvitationID                 string     `json:"invitation_id,omitempty"`
+	InvitationStatus             string     `json:"invitation_status"`
+	CognitoStatus                string     `json:"cognito_status"`
+	InviteEmailStatus            string     `json:"invite_email_status"`
+	InviteEmailError             string     `json:"invite_email_error,omitempty"`
+	InviteEmailSentTimestamp     *time.Time `json:"invite_email_sent_timestamp,omitempty"`
+	InviteAccepted               bool       `json:"invite_accepted"`
+	GoogleConnectionStatus       string     `json:"google_connection_status"`
+	GoogleConnectionAccountEmail string     `json:"google_connection_account_email,omitempty"`
+	CreatedTimestamp             time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp             time.Time  `json:"updated_timestamp"`
+}
+
 type CompanyUserGroup struct {
 	CompanyID        string    `json:"company_id"`
 	GroupID          string    `json:"group_id"`
@@ -117,19 +136,24 @@ type EffectiveResourceAccess struct {
 }
 
 type Invitation struct {
-	InvitationID      string     `json:"invitation_id"`
-	CompanyID         string     `json:"company_id"`
-	CompanyName       string     `json:"company_name,omitempty"`
-	Email             string     `json:"email"`
-	Role              string     `json:"role"`
-	Status            string     `json:"status"`
-	Token             string     `json:"token,omitempty"`
-	InvitedByUserID   string     `json:"invited_by_user_id"`
-	AcceptedByUserID  *string    `json:"accepted_by_user_id,omitempty"`
-	ExpiresTimestamp  time.Time  `json:"expires_timestamp"`
-	AcceptedTimestamp *time.Time `json:"accepted_timestamp,omitempty"`
-	CreatedTimestamp  time.Time  `json:"created_timestamp"`
-	UpdatedTimestamp  time.Time  `json:"updated_timestamp"`
+	InvitationID       string     `json:"invitation_id"`
+	CompanyID          string     `json:"company_id"`
+	CompanyName        string     `json:"company_name,omitempty"`
+	Email              string     `json:"email"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	Token              string     `json:"token,omitempty"`
+	CognitoStatus      string     `json:"cognito_status,omitempty"`
+	CognitoError       string     `json:"cognito_error,omitempty"`
+	InviteEmailStatus  string     `json:"invite_email_status,omitempty"`
+	InviteEmailError   string     `json:"invite_email_error,omitempty"`
+	InvitedByUserID    string     `json:"invited_by_user_id"`
+	AcceptedByUserID   *string    `json:"accepted_by_user_id,omitempty"`
+	ExpiresTimestamp   time.Time  `json:"expires_timestamp"`
+	AcceptedTimestamp  *time.Time `json:"accepted_timestamp,omitempty"`
+	EmailSentTimestamp *time.Time `json:"invite_email_sent_timestamp,omitempty"`
+	CreatedTimestamp   time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp   time.Time  `json:"updated_timestamp"`
 }
 
 type UserEmailConnection struct {

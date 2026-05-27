@@ -677,11 +677,12 @@ func (s *Server) sendCognitoInvitation(r *http.Request, email string, existingMa
 	if s.cognitoAdmin == nil {
 		return "not_configured"
 	}
-	if err := s.cognitoAdmin.AdminCreateUser(r.Context(), email); err != nil {
+	result, err := s.cognitoAdmin.AdminCreateUser(r.Context(), email)
+	if err != nil {
 		log.Printf("failed to create cognito invitation user email=%s: %v", email, err)
 		return "failed"
 	}
-	return "sent"
+	return firstNonBlank(result.Status, "created")
 }
 
 func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http.Request) {

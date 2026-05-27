@@ -42,6 +42,8 @@ export type MangoInvitation = {
   email: string;
   role: "company_admin" | "company_user";
   status: string;
+  cognito_status?: string;
+  invite_email_status?: string;
   expires_timestamp: string;
 };
 
@@ -404,7 +406,9 @@ function friendlyCognitoError(type: string, message: string, action: string): st
 function friendlyApiError(code: string): string {
   switch (code) {
     case "failed_to_create_cognito_user":
-      return "Mango created the invite, but Cognito did not create the user. Check backend logs and AWS credentials, then create a fresh invite.";
+      return "Mango created the invite, but Cognito did not create the user. Check backend logs, AWS credentials, and onboarding status, then resend.";
+    case "failed_to_list_onboarding":
+      return "User onboarding status could not be loaded.";
     case "invitation_email_mismatch":
       return "This Mango invite token belongs to a different email address.";
     case "invitation_token_required":
@@ -449,6 +453,8 @@ function friendlyApiError(code: string): string {
       return "Email access expired. Disconnect and reconnect your mailbox.";
     case "nylas_not_connected":
       return "Connect your mailbox before opening Home.";
+    case "nylas_not_configured":
+      return "Google connection is not configured for this environment.";
     case "failed_to_list_shared_inboxes":
       return "Shared Triage folders could not be loaded.";
     case "failed_to_create_shared_inbox":

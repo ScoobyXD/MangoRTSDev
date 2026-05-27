@@ -52,6 +52,7 @@ type IdentityRepository interface {
 	CreateCompany(name string) (domain.Company, error)
 	ListCompanies(query string, limit int) ([]domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
+	ListCompanyUserOnboarding(companyID string) ([]domain.CompanyUserOnboarding, error)
 	ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error)
@@ -63,6 +64,7 @@ type IdentityRepository interface {
 	SetCompanyUserGroupMembers(companyID, groupID string, userIDs []string) ([]domain.CompanyUserGroupMember, error)
 	CompleteExternalIdentityDeletion(cognitoSubject string) error
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
+	UpdateInvitationDeliveryStatus(input InvitationDeliveryStatusInput) (domain.Invitation, error)
 	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
 	GetUserEmailConnection(userID string) (domain.UserEmailConnection, error)
@@ -932,6 +934,14 @@ type CreateInvitationInput struct {
 	Role            string
 	InvitedByUserID string
 	ExpiresIn       time.Duration
+}
+
+type InvitationDeliveryStatusInput struct {
+	InvitationID      string
+	CognitoStatus     string
+	CognitoError      string
+	InviteEmailStatus string
+	InviteEmailError  string
 }
 
 type UserEmailConnectionInput struct {

@@ -238,6 +238,128 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.CompanyUserOnboarding, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+
+	rows, err := r.db.Query(
+		`with latest_invitation as (
+		   select distinct on (i.company_id, i.email)
+		     i.invitation_id::text as invitation_id, i.company_id, i.email, i.role, i.status, i.cognito_status,
+		     i.invite_email_status, i.invite_email_error, i.invite_email_sent_timestamp,
+		     i.accepted_by_user_id, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
+		   from invitations i
+		   where i.company_id = $1
+		     and i.status <> 'revoked'
+		   order by i.company_id, i.email, i.created_timestamp desc
+		 ), member_rows as (
+		   select cm.company_id, lower(u.email) as email, cm.role, u.user_id::text as user_id, u.display_name,
+		     li.invitation_id, coalesce(li.status, 'none') as invitation_status,
+		     coalesce(li.cognito_status, 'existing_mango_user') as cognito_status,
+		     coalesce(li.invite_email_status, 'not_started') as invite_email_status,
+		     coalesce(li.invite_email_error, '') as invite_email_error,
+		     li.invite_email_sent_timestamp,
+		     (li.status = 'accepted') as invite_accepted,
+		     case
+		       when connection.provider = 'google' and connection.status = 'connected' then 'connected'
+		       when connection.provider = 'google' and connection.status = 'reauth_required' then 'reauth_required'
+		       else 'not_connected'
+		     end as google_connection_status,
+		     case when connection.provider = 'google' then connection.account_email else '' end as google_connection_account_email,
+		     cm.created_timestamp,
+		     greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp), coalesce(connection.updated_timestamp, cm.updated_timestamp)) as updated_timestamp
+		   from company_memberships cm
+		   join users u on u.user_id = cm.user_id
+		   left join latest_invitation li on li.company_id = cm.company_id and li.email = lower(u.email)
+		   left join user_email_connections connection on connection.user_id = u.user_id
+		   where cm.company_id = $1
+		 ), pending_invite_rows as (
+		   select li.company_id, li.email, li.role, null::text as user_id, ''::text as display_name,
+		     li.invitation_id, li.status as invitation_status,
+		     coalesce(li.cognito_status, 'not_started') as cognito_status,
+		     coalesce(li.invite_email_status, 'not_started') as invite_email_status,
+		     coalesce(li.invite_email_error, '') as invite_email_error,
+		     li.invite_email_sent_timestamp,
+		     false as invite_accepted,
+		     'not_connected'::text as google_connection_status,
+		     ''::text as google_connection_account_email,
+		     li.created_timestamp,
+		     li.updated_timestamp
+		   from latest_invitation li
+		   where li.status = 'pending'
+		     and not exists (
+		       select 1
+		       from users u
+		       join company_memberships cm on cm.user_id = u.user_id
+		       where cm.company_id = li.company_id
+		         and lower(u.email) = li.email
+		     )
+		 )
+		 select company_id, email, role, user_id, display_name, invitation_id, invitation_status,
+		   cognito_status, invite_email_status, invite_email_error, invite_email_sent_timestamp,
+		   invite_accepted, google_connection_status, google_connection_account_email,
+		   created_timestamp, updated_timestamp
+		 from member_rows
+		 union all
+		 select company_id, email, role, user_id, display_name, invitation_id, invitation_status,
+		   cognito_status, invite_email_status, invite_email_error, invite_email_sent_timestamp,
+		   invite_accepted, google_connection_status, google_connection_account_email,
+		   created_timestamp, updated_timestamp
+		 from pending_invite_rows
+		 order by email, user_id nulls first`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.CompanyUserOnboarding, 0)
+	for rows.Next() {
+		var item domain.CompanyUserOnboarding
+		var userID sql.NullString
+		var displayName sql.NullString
+		var invitationID sql.NullString
+		var emailSentAt sql.NullTime
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.Email,
+			&item.Role,
+			&userID,
+			&displayName,
+			&invitationID,
+			&item.InvitationStatus,
+			&item.CognitoStatus,
+			&item.InviteEmailStatus,
+			&item.InviteEmailError,
+			&emailSentAt,
+			&item.InviteAccepted,
+			&item.GoogleConnectionStatus,
+			&item.GoogleConnectionAccountEmail,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		if userID.Valid {
+			item.UserID = userID.String
+		}
+		if displayName.Valid {
+			item.DisplayName = displayName.String
+		}
+		if invitationID.Valid {
+			item.InvitationID = invitationID.String
+		}
+		if emailSentAt.Valid {
+			item.InviteEmailSentTimestamp = &emailSentAt.Time
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
@@ -537,13 +659,15 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	); err != nil {
 		return domain.Invitation{}, err
 	}
+	var emailSentAt sql.NullTime
 	err = tx.QueryRow(
 		`insert into invitations (
 		   invitation_id, company_id, email, role, token_hash, status,
 		   invited_by_user_id, expires_timestamp, created_timestamp, updated_timestamp
 		 )
 		 values ($1, $2, $3, $4, $5, 'pending', $6, now() + ($7 * interval '1 second'), now(), now())
-		 returning invitation_id, company_id, email, role, status, invited_by_user_id,
+		 returning invitation_id, company_id, email, role, status, cognito_status, cognito_error,
+		   invite_email_status, invite_email_error, invite_email_sent_timestamp, invited_by_user_id,
 		   expires_timestamp, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		companyID,
@@ -558,6 +682,11 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 		&invitation.Email,
 		&invitation.Role,
 		&invitation.Status,
+		&invitation.CognitoStatus,
+		&invitation.CognitoError,
+		&invitation.InviteEmailStatus,
+		&invitation.InviteEmailError,
+		&emailSentAt,
 		&invitation.InvitedByUserID,
 		&invitation.ExpiresTimestamp,
 		&invitation.CreatedTimestamp,
@@ -566,12 +695,100 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if err != nil {
 		return domain.Invitation{}, err
 	}
+	if emailSentAt.Valid {
+		invitation.EmailSentTimestamp = &emailSentAt.Time
+	}
 	if err = tx.QueryRow(`select name from companies where company_id = $1`, companyID).Scan(&invitation.CompanyName); err != nil {
 		return domain.Invitation{}, err
 	}
 	invitation.Token = token
 	if err = tx.Commit(); err != nil {
 		return domain.Invitation{}, err
+	}
+	return invitation, nil
+}
+
+func (r *PostgresRepo) UpdateInvitationDeliveryStatus(input InvitationDeliveryStatusInput) (domain.Invitation, error) {
+	invitationID := strings.TrimSpace(input.InvitationID)
+	if invitationID == "" {
+		return domain.Invitation{}, ErrInvalid
+	}
+	cognitoStatus := strings.TrimSpace(input.CognitoStatus)
+	if cognitoStatus != "" {
+		cognitoStatus = normalizeInvitationCognitoStatus(cognitoStatus)
+		if cognitoStatus == "" {
+			return domain.Invitation{}, ErrInvalid
+		}
+	}
+	emailStatus := strings.TrimSpace(input.InviteEmailStatus)
+	if emailStatus != "" {
+		emailStatus = normalizeInvitationEmailStatus(emailStatus)
+		if emailStatus == "" {
+			return domain.Invitation{}, ErrInvalid
+		}
+	}
+
+	var invitation domain.Invitation
+	var acceptedBy sql.NullString
+	var acceptedAt sql.NullTime
+	var emailSentAt sql.NullTime
+	err := r.db.QueryRow(
+		`update invitations i
+		 set cognito_status = case when $2 <> '' then $2 else i.cognito_status end,
+		     cognito_error = case when $2 <> '' then $3 else i.cognito_error end,
+		     invite_email_status = case when $4 <> '' then $4 else i.invite_email_status end,
+		     invite_email_error = case when $4 <> '' then $5 else i.invite_email_error end,
+		     invite_email_sent_timestamp = case
+		       when $4 = 'sent' then now()
+		       when $4 <> '' then null
+		       else i.invite_email_sent_timestamp
+		     end,
+		     updated_timestamp = now()
+		 from companies c
+		 where i.company_id = c.company_id
+		   and i.invitation_id = $1
+		 returning i.invitation_id, i.company_id, c.name, i.email, i.role, i.status,
+		   i.cognito_status, i.cognito_error, i.invite_email_status, i.invite_email_error,
+		   i.invite_email_sent_timestamp, i.invited_by_user_id, i.accepted_by_user_id,
+		   i.expires_timestamp, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp`,
+		invitationID,
+		cognitoStatus,
+		strings.TrimSpace(input.CognitoError),
+		emailStatus,
+		strings.TrimSpace(input.InviteEmailError),
+	).Scan(
+		&invitation.InvitationID,
+		&invitation.CompanyID,
+		&invitation.CompanyName,
+		&invitation.Email,
+		&invitation.Role,
+		&invitation.Status,
+		&invitation.CognitoStatus,
+		&invitation.CognitoError,
+		&invitation.InviteEmailStatus,
+		&invitation.InviteEmailError,
+		&emailSentAt,
+		&invitation.InvitedByUserID,
+		&acceptedBy,
+		&invitation.ExpiresTimestamp,
+		&acceptedAt,
+		&invitation.CreatedTimestamp,
+		&invitation.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Invitation{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if acceptedBy.Valid {
+		invitation.AcceptedByUserID = &acceptedBy.String
+	}
+	if acceptedAt.Valid {
+		invitation.AcceptedTimestamp = &acceptedAt.Time
+	}
+	if emailSentAt.Valid {
+		invitation.EmailSentTimestamp = &emailSentAt.Time
 	}
 	return invitation, nil
 }
@@ -585,8 +802,10 @@ func (r *PostgresRepo) ValidateInvitationToken(token string) (domain.Invitation,
 	var invitation domain.Invitation
 	var acceptedBy sql.NullString
 	var acceptedAt sql.NullTime
+	var emailSentAt sql.NullTime
 	err := r.db.QueryRow(
 		`select i.invitation_id, i.company_id, c.name, i.email, i.role, i.status, i.invited_by_user_id,
+		   i.cognito_status, i.cognito_error, i.invite_email_status, i.invite_email_error, i.invite_email_sent_timestamp,
 		   i.accepted_by_user_id, i.expires_timestamp, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
 		 from invitations i
 		 join companies c on c.company_id = i.company_id
@@ -600,6 +819,11 @@ func (r *PostgresRepo) ValidateInvitationToken(token string) (domain.Invitation,
 		&invitation.Role,
 		&invitation.Status,
 		&invitation.InvitedByUserID,
+		&invitation.CognitoStatus,
+		&invitation.CognitoError,
+		&invitation.InviteEmailStatus,
+		&invitation.InviteEmailError,
+		&emailSentAt,
 		&acceptedBy,
 		&invitation.ExpiresTimestamp,
 		&acceptedAt,
@@ -617,6 +841,9 @@ func (r *PostgresRepo) ValidateInvitationToken(token string) (domain.Invitation,
 	}
 	if acceptedAt.Valid {
 		invitation.AcceptedTimestamp = &acceptedAt.Time
+	}
+	if emailSentAt.Valid {
+		invitation.EmailSentTimestamp = &emailSentAt.Time
 	}
 	if err := invitationAvailabilityError(invitation, time.Now().UTC()); err != nil {
 		return domain.Invitation{}, err
@@ -647,8 +874,10 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 	var tokenHash string
 	var acceptedBy sql.NullString
 	var acceptedAt sql.NullTime
+	var emailSentAt sql.NullTime
 	err = tx.QueryRow(
 		`select i.invitation_id, i.company_id, c.name, i.email, i.role, i.status, i.token_hash, i.invited_by_user_id,
+		   i.cognito_status, i.cognito_error, i.invite_email_status, i.invite_email_error, i.invite_email_sent_timestamp,
 		   i.accepted_by_user_id, i.expires_timestamp, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
 		 from invitations i
 		 join companies c on c.company_id = i.company_id
@@ -664,6 +893,11 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		&invitation.Status,
 		&tokenHash,
 		&invitation.InvitedByUserID,
+		&invitation.CognitoStatus,
+		&invitation.CognitoError,
+		&invitation.InviteEmailStatus,
+		&invitation.InviteEmailError,
+		&emailSentAt,
 		&acceptedBy,
 		&invitation.ExpiresTimestamp,
 		&acceptedAt,
@@ -681,6 +915,9 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 	}
 	if acceptedAt.Valid {
 		invitation.AcceptedTimestamp = &acceptedAt.Time
+	}
+	if emailSentAt.Valid {
+		invitation.EmailSentTimestamp = &emailSentAt.Time
 	}
 	if stateErr := invitationAvailabilityError(invitation, time.Now().UTC()); stateErr != nil {
 		err = stateErr

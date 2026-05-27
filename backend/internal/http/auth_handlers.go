@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -90,11 +92,33 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 	switch parts[1] {
 	case "users":
 		s.handleCompanyUsersSubresource(w, r, companyID, parts[2:])
+	case "onboarding":
+		s.handleCompanyOnboardingSubresource(w, r, companyID, parts[2:])
 	case "user-groups":
 		s.handleCompanyUserGroupsSubresource(w, r, companyID, parts[2:])
 	default:
 		writeError(w, http.StatusNotFound, "not_found")
 	}
+}
+
+func (s *Server) handleCompanyOnboardingSubresource(w http.ResponseWriter, r *http.Request, companyID string, parts []string) {
+	if len(parts) != 0 {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	if !requireCompanyManager(w, r, companyID) {
+		return
+	}
+	items, err := s.repo.ListCompanyUserOnboarding(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_onboarding")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"onboarding": items})
 }
 
 func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Request, companyID string, parts []string) {
@@ -393,6 +417,7 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
+	inviteToken := invitation.Token
 
 	_, existingUserErr := s.repo.GetAuthUserByEmail(invitation.Email)
 	existingMangoUser := existingUserErr == nil
@@ -402,21 +427,78 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cognitoStatus := "not_configured"
+	temporaryPassword := ""
 	if s.cognitoAdmin != nil {
 		if existingMangoUser {
 			cognitoStatus = "existing_mango_user"
 		} else {
-			cognitoStatus = "sent"
-			if err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email); err != nil {
+			result, err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email)
+			if err != nil {
 				log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
+				updated, updateErr := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
+					InvitationID:  invitation.InvitationID,
+					CognitoStatus: "failed",
+					CognitoError:  compactErrorDetail(err),
+				})
+				if updateErr != nil {
+					log.Printf("failed to persist cognito invite failure invitation_id=%s email=%s: %v", invitation.InvitationID, invitation.Email, updateErr)
+				} else {
+					invitation = updated
+					invitation.Token = inviteToken
+				}
 				writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
 				return
 			}
+			cognitoStatus = firstNonBlank(result.Status, "created")
+			temporaryPassword = result.TemporaryPassword
 		}
 	}
+	if updated, err := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
+		InvitationID:  invitation.InvitationID,
+		CognitoStatus: cognitoStatus,
+	}); err != nil {
+		log.Printf("failed to persist cognito invite status invitation_id=%s email=%s status=%s: %v", invitation.InvitationID, invitation.Email, cognitoStatus, err)
+	} else {
+		invitation = updated
+		invitation.Token = inviteToken
+	}
+
+	inviteEmailStatus := "not_configured"
+	inviteEmailError := ""
+	acceptURL := s.invitationAcceptURL(r, inviteToken)
+	if s.emailSender != nil {
+		inviteEmailStatus = "sent"
+		if err := s.emailSender.SendInvitation(r.Context(), auth.InvitationEmailInput{
+			Email:             invitation.Email,
+			CompanyName:       invitation.CompanyName,
+			AcceptURL:         acceptURL,
+			TemporaryPassword: temporaryPassword,
+			ExpiresAt:         invitation.ExpiresTimestamp,
+		}); err != nil {
+			inviteEmailStatus = "failed"
+			inviteEmailError = compactErrorDetail(err)
+			log.Printf("failed to send invitation email=%s company_id=%s invitation_id=%s: %v", invitation.Email, invitation.CompanyID, invitation.InvitationID, err)
+		}
+	}
+	if updated, err := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
+		InvitationID:      invitation.InvitationID,
+		InviteEmailStatus: inviteEmailStatus,
+		InviteEmailError:  inviteEmailError,
+	}); err != nil {
+		log.Printf("failed to persist invite email status invitation_id=%s email=%s status=%s: %v", invitation.InvitationID, invitation.Email, inviteEmailStatus, err)
+	} else {
+		invitation = updated
+		invitation.Token = inviteToken
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"invitation":            invitation,
 		"cognito_invite_status": cognitoStatus,
+		"cognito_user_status":   cognitoStatus,
+		"invite_email_status":   inviteEmailStatus,
+		"invite_email_error":    inviteEmailError,
+		"delivery_ok":           inviteEmailStatus == "sent",
+		"accept_url":            acceptURL,
 	})
 }
 
@@ -512,6 +594,76 @@ func writeInvitationError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	return true
+}
+
+func compactErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(err.Error())
+	if len(detail) <= 500 {
+		return detail
+	}
+	return detail[:500]
+}
+
+func (s *Server) invitationAcceptURL(r *http.Request, token string) string {
+	base := strings.TrimSpace(s.appBaseURL)
+	if base == "" {
+		base = frontendOriginFromURL(s.nylasConfig.FrontendRedirectURL)
+	}
+	if base == "" {
+		base = requestOrigin(r)
+	}
+	if base == "" {
+		base = "/"
+	}
+	target, err := url.Parse(base)
+	if err != nil {
+		target = &url.URL{Path: "/"}
+	}
+	if target.Scheme == "" && target.Host == "" && !strings.HasPrefix(target.Path, "/") {
+		target.Path = "/" + target.Path
+	}
+	target.Path = "/accept-invite"
+	query := target.Query()
+	query.Set("token", strings.TrimSpace(token))
+	target.RawQuery = query.Encode()
+	target.Fragment = ""
+	return target.String()
+}
+
+func frontendOriginFromURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func requestOrigin(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		return origin
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		return ""
+	}
+	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return scheme + "://" + host
 }
 
 func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request) {

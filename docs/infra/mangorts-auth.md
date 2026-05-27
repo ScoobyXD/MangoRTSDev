@@ -1,19 +1,47 @@
-# MangoRTS Auth MVP
+# MangoRTS Auth
 
 MangoRTS uses Amazon Cognito for authentication and Mango-owned PostgreSQL tables for company authorization.
 
-## Login Flow
+## Onboarding Flow
 
-The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in, invite password challenges, and Cognito password resets:
+The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in and invite password challenges, Nylas Hosted OAuth for Google mailbox access, and Cognito password resets:
 
 1. Dev admin or company admin creates an invitation in Mango.
-2. The backend stores a hashed Mango invitation token and calls Cognito `AdminCreateUser`.
-3. The user opens `/accept-invite`, enters the Mango invite token, Cognito temporary password, and a new password.
-4. Cognito completes the `NEW_PASSWORD_REQUIRED` challenge and issues tokens.
-5. The frontend calls `/v1/invitations/accept` with the user's display name; Mango links the Cognito subject to `users`, writes `company_memberships`, and sends a signup confirmation email when `MANGORTS_EMAIL_FROM` is configured.
-6. Authenticated requests send a Cognito bearer token to the backend.
+2. The backend stores a hashed Mango invitation token, creates or reissues the Cognito user with `AdminCreateUser`, and records Cognito status on the invitation.
+3. Mango sends its own SES invitation email with `/accept-invite?token=...`. The email includes the Cognito temporary password for new users, or tells existing Mango users to sign in with their existing password.
+4. The user opens the Mango invite link, sets or finishes the Cognito password flow, and accepts the Mango invitation.
+5. Mango links the Cognito subject to `users`, writes `company_memberships`, marks the invitation accepted, and sends a signup confirmation email when `MANGORTS_EMAIL_FROM` is configured.
+6. After acceptance, the frontend sends the user to Connect Google. Mango starts Nylas Hosted OAuth with the user's email as the login hint.
+7. The user approves Google access. Nylas creates a grant, Mango stores the Nylas `grant_id` in `user_email_connections`, and the user lands in the app.
 
 The app does not use Cognito Managed Login / Hosted UI. Local development keeps auth disabled unless `VITE_AUTH_MODE=cognito` is set.
+
+## Admin Visibility
+
+Settings includes onboarding status for each company user or pending invitation:
+
+- invitation state: invited, accepted, or replaced by a newer invitation
+- Cognito user status: not configured, created, resent, existing Mango user, or failed
+- Mango invitation email status: sent, failed, or not configured
+- Google status: not connected, connected, or reauth required when Nylas detects an invalid or expired grant
+
+The admin invite action is still only email + role. The invite token is not part of the normal admin workflow; the backend may return it for dev/test fallback, but the UI does not ask admins to copy it.
+
+## Login Flow
+
+Authenticated requests send a Cognito bearer token to the backend:
+
+1. The user signs in with Cognito email and password.
+2. Cognito completes any `NEW_PASSWORD_REQUIRED` challenge and issues tokens.
+3. The backend validates each request and loads Mango memberships from PostgreSQL.
+
+Password resets use Cognito `ForgotPassword` and `ConfirmForgotPassword`. Mango's public `/v1/password-resets/request` endpoint only verifies that the email belongs to a Mango user before the frontend asks Cognito to send the reset code. Cognito owns reset-code delivery and its one-hour code lifetime.
+
+## Google/Nylas Notes
+
+Google Audience test users are only a development/testing allowlist for the Google OAuth app. Adding an email there does not create a Nylas grant. A grant is created only after the invited user completes Google approval through Nylas Hosted OAuth.
+
+While the Google app is in Testing mode, add invited Google accounts to Google Audience test users before asking them to connect Google.
 
 ## Local Cognito Backend
 
@@ -24,7 +52,7 @@ aws sso login --profile <profile>
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile <profile> -StopExisting
 ```
 
-The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
+The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
 
 ## Backend Enforcement
 
@@ -42,14 +70,15 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - `company_user` has full access inside their company for now.
 - Company invitations can only be created by `dev_admin` or `company_admin`; this is enforced in both HTTP handlers and repository writes.
 - Creating a new pending invitation for the same company and email revokes older pending invitations, so only the latest token can be accepted.
-- Password resets use Cognito `ForgotPassword` and `ConfirmForgotPassword`. Mango's public `/v1/password-resets/request` endpoint only verifies that the email belongs to a Mango user before the frontend asks Cognito to send the reset code. Cognito owns reset-code delivery and its one-hour code lifetime.
+- Mango-owned invitation delivery is tracked independently from Cognito user creation, so admins can see when Cognito succeeded but SES invite delivery failed.
 
 ## Tables
 
 - `users`: maps Cognito `sub` values to internal user IDs.
 - `companies`: stores tenant/company rows.
 - `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`.
-- `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored.
+- `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored. It also tracks Cognito creation and Mango invitation email delivery status.
+- `user_email_connections`: one Nylas mailbox grant per Mango user, including provider, account email, grant ID, and connection status.
 
 ## Frontend Env
 
@@ -61,7 +90,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 
 ## Backend Email Env
 
-- `MANGORTS_EMAIL_FROM`: verified SES sender address for signup confirmation emails.
+- `MANGORTS_APP_URL`: frontend base URL used to build `/accept-invite?token=...` links.
+- `MANGORTS_EMAIL_FROM`: verified SES sender address for invitation and signup confirmation emails.
 
 Tokens are kept in `sessionStorage` for this MVP. This avoids persistent local storage, but a future secure cookie/session layer is still the preferred production hardening path.
-
