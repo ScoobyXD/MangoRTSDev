@@ -2451,37 +2451,59 @@ function filterInboxGroupMapForUnread(groupsByCell: Map<string, InboxLogicGateNo
 
 function InboxMatrixUnreadToggle({ unreadOnly, onChange }: { unreadOnly: boolean; onChange: (value: boolean) => void }) {
   const buttonStyle = (active: boolean): React.CSSProperties => ({
+    position: "relative",
+    zIndex: 1,
     height: 24,
-    minWidth: 54,
-    border: active ? "1px solid rgba(71, 85, 105, 0.38)" : "1px solid transparent",
+    minWidth: 0,
+    border: "none",
     borderRadius: 6,
-    background: active ? "#ffffff" : "transparent",
+    background: "transparent",
     color: active ? "#334155" : "#64748b",
     cursor: "pointer",
     font: "inherit",
     fontSize: 11,
     fontWeight: 800,
     padding: "0 8px",
-    boxShadow: active ? "0 3px 8px rgba(15, 23, 42, 0.10)" : "none",
+    transition: "color 160ms ease",
   });
   return (
     <div
       role="group"
       aria-label="Matrix notification filter"
       style={{
+        position: "relative",
         height: 28,
-        display: "inline-grid",
+        width: 122,
+        flex: "0 0 122px",
+        display: "grid",
         gridTemplateColumns: "1fr 1fr",
         alignItems: "center",
-        gap: 2,
         padding: 2,
         border: "1px solid rgba(100, 116, 139, 0.18)",
         borderRadius: 8,
         background: "rgba(255, 255, 255, 0.56)",
+        boxSizing: "border-box",
       }}
     >
-      <button type="button" style={buttonStyle(!unreadOnly)} onClick={() => onChange(false)}>All</button>
-      <button type="button" style={buttonStyle(unreadOnly)} onClick={() => onChange(true)}>Unread</button>
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: 2,
+          top: 2,
+          width: "calc((100% - 4px) / 2)",
+          height: 22,
+          border: "1px solid rgba(71, 85, 105, 0.38)",
+          borderRadius: 6,
+          background: "#ffffff",
+          boxShadow: "0 3px 8px rgba(15, 23, 42, 0.10)",
+          transform: unreadOnly ? "translateX(100%)" : "translateX(0)",
+          transition: "transform 180ms cubic-bezier(0.2, 0, 0, 1)",
+          boxSizing: "border-box",
+        }}
+      />
+      <button type="button" aria-pressed={!unreadOnly} style={buttonStyle(!unreadOnly)} onClick={() => onChange(false)}>All</button>
+      <button type="button" aria-pressed={unreadOnly} style={buttonStyle(unreadOnly)} onClick={() => onChange(true)}>Unread</button>
     </div>
   );
 }

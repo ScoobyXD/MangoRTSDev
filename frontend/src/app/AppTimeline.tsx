@@ -66,7 +66,10 @@ const COMPACT_HEADER_HEIGHT = 22;
 const EXPANDED_TRACK_HEIGHT = 88;
 const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
 const TIMELINE_NODE_ACCENT = "#19a8ff";
+const TIMELINE_NODE_ACCENT_TOP = "#33ddd5";
 const TIMELINE_LOGIC_GATE_ACCENT = "#19f07a";
+const TIMELINE_LOGIC_GATE_ACCENT_TOP = "#7cff9b";
+const TIMELINE_LOGIC_GATE_ACCENT_BOTTOM = "#00c86f";
 const TIMELINE_ITEM_BORDER_WIDTH = 1.5;
 const TIMELINE_ITEM_EDGE_WIDTH = 4;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
@@ -546,6 +549,12 @@ function timelineKindAccent(kind: AppTimelineEntityKind): string {
   return kind === "logic_gate" ? TIMELINE_LOGIC_GATE_ACCENT : TIMELINE_NODE_ACCENT;
 }
 
+function timelineKindFrame(kind: AppTimelineEntityKind): string {
+  return kind === "logic_gate"
+    ? `linear-gradient(180deg, ${TIMELINE_LOGIC_GATE_ACCENT_TOP} 0%, ${TIMELINE_LOGIC_GATE_ACCENT} 58%, ${TIMELINE_LOGIC_GATE_ACCENT_BOTTOM} 100%)`
+    : `linear-gradient(180deg, ${TIMELINE_NODE_ACCENT_TOP} 0%, ${TIMELINE_NODE_ACCENT} 100%)`;
+}
+
 function rgbaFromTimelineAccent(hex: string, alpha: number): string {
   const clean = hex.trim().replace("#", "");
   if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(25,168,255,${alpha})`;
@@ -772,10 +781,10 @@ function timelineItemStyle(
 ): React.CSSProperties {
   const accent = timelineKindAccent(kind);
   const selectionShadow = kind === "logic_gate" ? "rgba(25, 240, 122, 0.32)" : "rgba(25, 168, 255, 0.32)";
-  const itemFrame = `linear-gradient(135deg, ${rgbaFromTimelineAccent(accent, selected ? 0.92 : 0.68)}, rgba(255,255,255,0.84) 72%)`;
+  const itemFrame = timelineKindFrame(kind);
   const itemShadow = selected
-    ? `0 0 0 1px ${selectionShadow}, 0 0 13px ${selectionShadow}, inset 1px 1px 0 rgba(255,255,255,0.88)`
-    : `4px 4px 11px rgba(174, 174, 192, 0.16), -3px -3px 10px rgba(255, 255, 255, 0.78), 0 6px 14px ${rgbaFromTimelineAccent(accent, 0.10)}, inset 1px 1px 0 rgba(255,255,255,0.82)`;
+    ? `0 0 0 1px ${selectionShadow}, 0 0 13px ${selectionShadow}, inset 1px 1px 0 rgba(255,255,255,0.92)`
+    : `4px 4px 11px rgba(174, 174, 192, 0.16), -3px -3px 10px rgba(255, 255, 255, 0.78), 0 6px 14px ${rgbaFromTimelineAccent(accent, 0.10)}, inset 1px 1px 0 rgba(255,255,255,0.92)`;
   return {
     position: "absolute",
     left,
@@ -787,7 +796,7 @@ function timelineItemStyle(
     gridTemplateColumns: "minmax(0, 1fr)",
     border: `${TIMELINE_ITEM_BORDER_WIDTH}px solid transparent`,
     borderRadius: 8,
-    background: `linear-gradient(135deg, ${rgbaFromTimelineAccent(accent, 0.13)}, rgba(255,255,255,0.94) 38%, rgba(248,250,252,0.86)) padding-box, ${itemFrame} border-box`,
+    background: `#ffffff padding-box, ${itemFrame} border-box`,
     color: "#0f172a",
     boxShadow: itemShadow,
     cursor: readOnly ? "default" : "grab",
@@ -800,6 +809,9 @@ function timelineItemStyle(
 
 function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntityKind, _completed: boolean): React.CSSProperties {
   const accent = timelineKindAccent(kind);
+  const handleFrame = kind === "logic_gate"
+    ? `linear-gradient(180deg, ${TIMELINE_LOGIC_GATE_ACCENT_TOP}, ${TIMELINE_LOGIC_GATE_ACCENT}, ${TIMELINE_LOGIC_GATE_ACCENT_BOTTOM})`
+    : `linear-gradient(180deg, ${TIMELINE_NODE_ACCENT_TOP}, ${TIMELINE_NODE_ACCENT})`;
   return {
     position: "absolute",
     top: 0,
@@ -808,7 +820,7 @@ function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntity
     zIndex: 2,
     width: TIMELINE_ITEM_EDGE_WIDTH,
     cursor: "ew-resize",
-    background: `linear-gradient(180deg, ${accent}, ${rgbaFromTimelineAccent(accent, 0.58)})`,
+    background: handleFrame,
     borderRadius: side === "left" ? "8px 0 0 8px" : "0 8px 8px 0",
     boxShadow: `0 0 10px ${rgbaFromTimelineAccent(accent, 0.22)}`,
   };
