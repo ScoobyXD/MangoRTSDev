@@ -2252,8 +2252,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     event.stopPropagation();
     openLogicGateBulkEditMenuAt(logicGateID, event.clientX, event.clientY);
   }, [openLogicGateBulkEditMenuAt]);
-  const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus }) => {
+  const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; fromLogicGateID?: string }) => {
     const logicGateID = input.logicGateID.trim();
+    const fromLogicGateID = input.fromLogicGateID?.trim() ?? "";
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (!logicGateID || nodeIDs.length === 0) return;
     setBusy("inbox-node-drop");
@@ -2263,6 +2264,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         apiBase,
         companyID,
         logicGateID,
+        fromLogicGateID,
         nodeIDs,
         priority: input.priority,
         status: input.status,
@@ -2272,13 +2274,105 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       for (const node of updatedNodes) {
         if (node) mergeUpdatedNode(node);
       }
-      setNotice(nodeIDs.length === 1 ? "Node added to Logic Gate." : `${nodeIDs.length} nodes added to Logic Gate.`);
+      const action = fromLogicGateID ? "moved" : "added";
+      setNotice(nodeIDs.length === 1 ? `Node ${action} to Logic Gate.` : `${nodeIDs.length} nodes ${action} to Logic Gate.`);
     } catch (dropError) {
       setError(formatError(dropError, "Failed to add nodes to Logic Gate"));
     } finally {
       setBusy("");
     }
   }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
+  const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; fromLogicGateID?: string }) => {
+    const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
+    if (nodeIDs.length === 0) return;
+    setBusy("inbox-node-drop");
+    setError("");
+    try {
+      const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole: input.creatorRaciRole });
+      const logicGate = logicGateResult.logicGate;
+      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
+      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+        apiBase,
+        companyID,
+        logicGateID: logicGate.logic_gate_id,
+        fromLogicGateID: input.fromLogicGateID,
+        nodeIDs,
+        priority: input.priority,
+        status: input.status,
+        nodeByID,
+        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+      });
+      for (const node of updatedNodes) mergeUpdatedNode(node);
+      setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
+    } catch (dropError) {
+      setError(formatError(dropError, "Failed to move nodes into a new Logic Gate"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
+  const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
+    const logicGateIDs = cleanIDList(input.logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
+    if (logicGateIDs.length === 0) return;
+    setBusy("inbox-logic-gate-drop");
+    setError("");
+    try {
+      const targetRole = input.creatorRaciRole;
+      if (currentUserID && targetRole) {
+        const raciRoles: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
+        const assignmentUpdates = await Promise.all(logicGateIDs.map(async (logicGateID) => {
+          const gate = logicGateByID.get(logicGateID);
+          let assignments = gate?.raci_assignments ?? [];
+          const removalRoles = raciRoles.filter((role) => (
+            role !== targetRole
+            && assignments.some((assignment) => assignment.role === role && assignment.user_id?.trim() === currentUserID)
+          ));
+          if (removalRoles.length > 0) {
+            assignments = await removeLogicGateRaciAssignments(companyID, logicGateID, removalRoles.map((role) => ({ role, user_id: currentUserID })));
+          }
+          const hasTargetRole = assignments.some((assignment) => assignment.role === targetRole && assignment.user_id?.trim() === currentUserID);
+          if (!hasTargetRole) {
+            assignments = await addLogicGateRaciAssignments(companyID, logicGateID, [{ role: targetRole, user_id: currentUserID }]);
+          }
+          return { logicGateID, assignments };
+        }));
+        setLogicGates((previous) => previous.map((logicGate) => {
+          const update = assignmentUpdates.find((item) => item.logicGateID === logicGate.logic_gate_id);
+          return update ? { ...logicGate, raci_assignments: update.assignments } : logicGate;
+        }));
+      }
+
+      let movedNodeCount = 0;
+      for (const logicGateID of logicGateIDs) {
+        const explicitNodeIDs = cleanIDList(input.nodeIDsByLogicGateID?.[logicGateID] ?? []);
+        const nodeIDs = explicitNodeIDs.length > 0
+          ? explicitNodeIDs.filter((nodeID) => nodeByID.has(nodeID))
+          : nodes
+            .filter((node) => cleanIDList(node.logic_gate_ids ?? []).includes(logicGateID))
+            .map((node) => node.node_id);
+        if (nodeIDs.length === 0) continue;
+        const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+          apiBase,
+          companyID,
+          logicGateID,
+          fromLogicGateID: logicGateID,
+          nodeIDs,
+          priority: input.priority,
+          status: input.status,
+          nodeByID,
+          invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        });
+        movedNodeCount += updatedNodes.length;
+        for (const node of updatedNodes) mergeUpdatedNode(node);
+      }
+      setNotice(logicGateIDs.length === 1
+        ? (movedNodeCount > 0 ? "Logic Gate moved." : "Logic Gate assignment updated.")
+        : `${logicGateIDs.length} Logic Gates moved.`);
+    } catch (dropError) {
+      setError(formatError(dropError, "Failed to move Logic Gates"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
   const addNodesToLogicGate = useCallback(async (nodeIDs: string[], logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
@@ -2657,6 +2751,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   selectedRowIDs={selectedNodeRowIDs}
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
+                  getLogicGateDragIDs={getLogicGateDragIDs}
                   onSelectNode={selectNodeMatrixCard}
                   onSelectLogicGate={selectLogicGateTreeID}
                   onOpenNode={openNodeEditorOverlay}
@@ -2669,6 +2764,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
                   onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
                   onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
+                  onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
+                  onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
                 />
               )}
               {hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
