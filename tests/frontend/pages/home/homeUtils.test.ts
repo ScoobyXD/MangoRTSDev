@@ -156,6 +156,7 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const nodes = [
     node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], status: "pending", priority: 1 }),
     node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
+    node("node-verify", "Verify node", { logic_gate_ids: ["gate-r"], status: "verify", priority: 2, assignee_user_id: currentUserID }),
     node("node-all", "All roles node", { logic_gate_ids: ["gate-all"], status: "pending", priority: 1 }),
     node("node-r-unassigned", "Responsible unassigned node", { logic_gate_ids: ["gate-r"], status: "pending" }),
     node("node-assigned-without-r", "Assigned without R node", { logic_gate_ids: ["gate-no-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
@@ -175,12 +176,13 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   assert.equal(aciGroups.has("other:3"), false);
   const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
   assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
+  assert.deepEqual(responsibleGroups.get("verify:2")?.[0]?.nodeIDs, ["node-verify"]);
   assert.deepEqual((responsibleGroups.get("pending:1") ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
   assert.deepEqual(responsibleGroups.get("pending:0")?.[0]?.nodeIDs, ["node-r-unassigned"]);
   assert.equal(responsibleGroups.get("pending:1")?.some((group) => group.nodeIDs.includes("node-a")), false);
   assert.equal(responsibleGroups.get("in_progress:2")?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
   assert.equal(responsibleGroups.has("done:1"), false);
-  assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress"]);
+  assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress", "verify"]);
   assert.deepEqual(RACI_INBOX_SECTIONS.map((section) => [section.viewID, section.role]), [
     ["r-inbox", "responsible"],
     ["a-inbox", "accountable"],

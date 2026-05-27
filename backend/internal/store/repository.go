@@ -629,6 +629,7 @@ func NormalizeCompanyListLimit(limit int) int {
 
 const KanbanDefaultPendingColor = "#808080"
 const KanbanDefaultInProgressColor = "#ff9500"
+const KanbanDefaultVerifyColor = "#00aaff"
 const KanbanDefaultDoneColor = "#39ff14"
 
 type KanbanBoardQuery struct {

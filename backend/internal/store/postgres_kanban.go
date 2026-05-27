@@ -90,7 +90,8 @@ defaults(title, position, color) as (
   values
     ('Pending', 1000, $5::text),
     ('In Progress', 2000, $6::text),
-    ('Done', 3000, $7::text)
+    ('Verify', 3000, $7::text),
+    ('Done', 4000, $8::text)
 )
 insert into kanban_columns (
   company_id,
@@ -135,6 +136,7 @@ do update set
 		normalizeKanbanBoardTitle(boardID, title),
 		KanbanDefaultPendingColor,
 		KanbanDefaultInProgressColor,
+		KanbanDefaultVerifyColor,
 		KanbanDefaultDoneColor,
 	)
 	return err

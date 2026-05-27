@@ -265,6 +265,122 @@ func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 	process("removed", store.WorkItemLogicGateAssignmentRemovedEventType, "removed", removed.Events)
 }
 
+func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666612"
+	repo.EnsureCompany(companyID, "Verify Notification Co")
+
+	responsible := mustNotificationUser(t, repo, companyID, "verify-responsible")
+	accountable := mustNotificationUser(t, repo, companyID, "verify-accountable")
+	consulted := mustNotificationUser(t, repo, companyID, "verify-consulted")
+	informed := mustNotificationUser(t, repo, companyID, "verify-informed")
+	actor := mustNotificationUser(t, repo, companyID, "verify-actor")
+	viewer := mustNotificationUser(t, repo, companyID, "verify-viewer")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Verify Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Verify Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{
+			{Role: domain.LogicGateRaciRoleResponsible, UserID: responsible.UserID},
+			{Role: domain.LogicGateRaciRoleAccountable, UserID: accountable.UserID},
+			{Role: domain.LogicGateRaciRoleConsulted, UserID: consulted.UserID},
+			{Role: domain.LogicGateRaciRoleInformed, UserID: informed.UserID},
+		},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionAdmin, Permission: store.EntityPermissionAdmin},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    testPriority(2),
+		PrioritySet: true,
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if assigned.Assignment.StatusKey != store.LogicGateWorkStatusPending {
+		t.Fatalf("assigned status = %q, want pending", assigned.Assignment.StatusKey)
+	}
+	moved, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "verify",
+		ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+	}
+	if moved.Assignment.StatusKey != store.LogicGateWorkStatusVerify || moved.Node.Status == nil || *moved.Node.Status != "Verify" {
+		t.Fatalf("moved status assignment=%q node=%+v, want Verify", moved.Assignment.StatusKey, moved.Node.Status)
+	}
+
+	items, err := service.ProcessDomainEvent(context.Background(), moved.Events[0])
+	if err != nil {
+		t.Fatalf("ProcessDomainEvent: %v", err)
+	}
+	byUser := map[string]domain.Notification{}
+	for _, item := range items {
+		if item.Type != store.WorkItemLogicGateAssignmentMovedEventType || !strings.Contains(item.Title, "Verify") {
+			t.Fatalf("verify notification = %+v, want moved Verify notification", item)
+		}
+		if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
+			t.Fatalf("verify notification target = %+v", item)
+		}
+		byUser[item.RecipientUserID] = item
+	}
+	want := map[string]struct {
+		surface string
+		role    string
+	}{
+		responsible.UserID: {surface: domain.NotificationSurfaceRInbox, role: domain.LogicGateRaciRoleResponsible},
+		accountable.UserID: {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleAccountable},
+		consulted.UserID:   {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleConsulted},
+		informed.UserID:    {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleInformed},
+	}
+	if len(byUser) != len(want) {
+		t.Fatalf("verify notification recipients = %+v, want %d RACI users", byUser, len(want))
+	}
+	for userID, expected := range want {
+		item, ok := byUser[userID]
+		if !ok {
+			t.Fatalf("missing verify notification for %s; got %+v", userID, byUser)
+		}
+		if item.Surface != expected.surface || item.Role != expected.role {
+			t.Fatalf("verify notification metadata for %s = %+v, want %s/%s", userID, item, expected.surface, expected.role)
+		}
+	}
+	if _, ok := byUser[actor.UserID]; ok {
+		t.Fatalf("actor received verify notification: %+v", byUser[actor.UserID])
+	}
+	if _, ok := byUser[viewer.UserID]; ok {
+		t.Fatalf("non-RACI viewer received verify notification: %+v", byUser[viewer.UserID])
+	}
+}
+
 func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)

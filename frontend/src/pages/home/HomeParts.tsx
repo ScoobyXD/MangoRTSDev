@@ -239,6 +239,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
                 <option value="__no_change__">No change</option>
                 <option value="Pending">Pending</option>
                 <option value="In Progress">In Progress</option>
+                <option value="Verify">Verify</option>
                 <option value="Done">Done</option>
               </select>
             </label>

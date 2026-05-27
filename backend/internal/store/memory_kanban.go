@@ -165,6 +165,7 @@ func (r *MemoryRepo) ensureLogicGateKanbanBoardLocked(companyID, logicGateID, ti
 	}{
 		{title: "Pending", color: KanbanDefaultPendingColor},
 		{title: "In Progress", color: KanbanDefaultInProgressColor},
+		{title: "Verify", color: KanbanDefaultVerifyColor},
 		{title: "Done", color: KanbanDefaultDoneColor},
 	}
 	existing := map[string]bool{}

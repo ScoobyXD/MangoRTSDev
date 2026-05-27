@@ -91,6 +91,14 @@ const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
     labelColor: "#134e4a",
     glow: "0 10px 24px rgba(13, 148, 136, 0.12)",
   },
+  verify: {
+    surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(236, 253, 245, 0.72))",
+    edge: "rgba(37, 99, 235, 0.38)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(219, 234, 254, 0.88) 52%, rgba(209, 250, 229, 0.76))",
+    letterColor: "#1d4ed8",
+    labelColor: "#1e3a8a",
+    glow: "0 10px 24px rgba(37, 99, 235, 0.11)",
+  },
   "priority-1": {
     surface: "linear-gradient(135deg, rgba(254, 226, 226, 0.96), rgba(254, 249, 195, 0.76))",
     edge: "rgba(220, 38, 38, 0.42)",

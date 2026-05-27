@@ -6,7 +6,7 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
-import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
 import type { AciInboxRaciRole, AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
@@ -564,6 +564,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
   const status = typeof value === "string" ? value.trim().toLowerCase().replace(/[\s_-]+/g, " ") : "";
   if (status === "pending" || status === "p") return "pending";
   if (status === "in progress" || status === "ip") return "in_progress";
+  if (status === "verify" || status === "verification" || status === "v") return "verify";
   if (status === "done" || status === "d") return "done";
   return null;
 }
@@ -571,6 +572,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
 export function responsibleStatusColor(status: ResponsibleInboxStatus): string {
   if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+  if (status === "verify") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
   return KANBAN_LOGIC_GATE_DONE_COLOR;
 }
 
@@ -578,6 +580,7 @@ export function responsibleStatusLetter(value: unknown): string {
   const status = normalizeResponsibleInboxStatus(value);
   if (status === "pending") return "P";
   if (status === "in_progress") return "IP";
+  if (status === "verify") return "V";
   if (status === "done") return "D";
   return "";
 }

@@ -796,9 +796,13 @@ func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	}
 	pending := mustFindKanbanColumn(t, columns, "Pending")
 	inProgress := mustFindKanbanColumn(t, columns, "In Progress")
+	verify := mustFindKanbanColumn(t, columns, "Verify")
 	done := mustFindKanbanColumn(t, columns, "Done")
-	if pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || done.ItemColor != KanbanDefaultDoneColor {
-		t.Fatalf("default colors = %q/%q/%q", pending.ItemColor, inProgress.ItemColor, done.ItemColor)
+	if pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || verify.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
+		t.Fatalf("default colors = %q/%q/%q/%q", pending.ItemColor, inProgress.ItemColor, verify.ItemColor, done.ItemColor)
+	}
+	if pending.Position >= inProgress.Position || inProgress.Position >= verify.Position || verify.Position >= done.Position {
+		t.Fatalf("default column order = %d/%d/%d/%d, want Pending, In Progress, Verify, Done", pending.Position, inProgress.Position, verify.Position, done.Position)
 	}
 	if err := repo.DeleteKanbanBoard(companyID, boards[0].BoardID); err != ErrInvalid {
 		t.Fatalf("expected attached board delete to return ErrInvalid, got %v", err)

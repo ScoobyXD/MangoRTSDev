@@ -1296,7 +1296,7 @@ func TestLogicGateArenaGETLoadsExistingBoardWithoutRepair(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode arena payload: %v", err)
 	}
-	if payload.Board.BoardID != store.LogicGateKanbanBoardID(logicGate.LogicGateID) || len(payload.Columns) != 3 {
+	if payload.Board.BoardID != store.LogicGateKanbanBoardID(logicGate.LogicGateID) || len(payload.Columns) != 4 {
 		t.Fatalf("arena payload board=%q columns=%d, want existing provisioned board and columns", payload.Board.BoardID, len(payload.Columns))
 	}
 }
@@ -2772,7 +2772,7 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 	if arenaPayload.Board.BoardID != store.LogicGateKanbanBoardID(createdID) || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != createdID {
 		t.Fatalf("arena board = %+v, want attached board for created gate %s", arenaPayload.Board, createdID)
 	}
-	if len(arenaPayload.Columns) != 3 {
+	if len(arenaPayload.Columns) != 4 {
 		t.Fatalf("arena columns = %d, want default columns", len(arenaPayload.Columns))
 	}
 }

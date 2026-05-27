@@ -108,7 +108,11 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	if len(work.Nodes) != 1 || work.Nodes[0].NodeID != visibleNode.NodeID {
 		t.Fatalf("viewer work nodes = %+v, want assigned node without node grant", work.Nodes)
 	}
-	if len(work.Statuses) != 3 || work.Statuses[0].StatusKey != store.LogicGateWorkStatusPending {
+	if len(work.Statuses) != 4 ||
+		work.Statuses[0].StatusKey != store.LogicGateWorkStatusPending ||
+		work.Statuses[1].StatusKey != store.LogicGateWorkStatusInProgress ||
+		work.Statuses[2].StatusKey != store.LogicGateWorkStatusVerify ||
+		work.Statuses[3].StatusKey != store.LogicGateWorkStatusDone {
 		t.Fatalf("statuses = %+v, want canonical statuses", work.Statuses)
 	}
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
