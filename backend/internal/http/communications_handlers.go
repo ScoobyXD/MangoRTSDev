@@ -924,7 +924,7 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 const (
 	communicationsNylasDefaultMessageLimit = 20
 	communicationsNylasMaxMessageLimit     = 20
-	communicationsNylasMinRequestInterval  = 10 * time.Millisecond
+	communicationsNylasMinRequestInterval  = 50 * time.Millisecond
 	communicationsNylasMaxInFlightPerGrant = 4
 	communicationsArchiveBatchConcurrency  = 4
 )
@@ -1208,7 +1208,7 @@ func (s *Server) applyRequiredSystemFolderMailbox(ctx context.Context, connectio
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	parts := []string{"in:inbox"}
+	parts := []string{"category:primary", "in:inbox"}
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
 		parts = append(parts, trimmed)
 	}

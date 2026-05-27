@@ -1,4 +1,4 @@
-import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
@@ -210,8 +210,10 @@ const messagePageInflight = new Map<string, Promise<MessagePage>>();
 const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
 const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
 const communicationsReadInflight = new Map<string, Promise<unknown>>();
+let communicationsAuthSessionGeneration = getAuthSessionCacheGeneration();
 
 export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus> {
+  ensureCommunicationsCacheAuthScope();
   const cached = readCache(statusCache, STATUS_CACHE_TTL_MS, cloneStatus);
   if (cached) return cached;
   if (statusInflight) return cloneStatus(await statusInflight);
@@ -241,6 +243,7 @@ export async function disconnectCommunications(): Promise<void> {
 }
 
 export async function listEmailFolders(params: ListEmailFoldersParams = {}): Promise<EmailFolder[]> {
+  ensureCommunicationsCacheAuthScope();
   const cachePath = `/v1/communications/folders${createFolderQuery(params)}`;
   const cached = readCache(foldersCache.get(cachePath) ?? null, FOLDERS_CACHE_TTL_MS, cloneFolders);
   if (cached) return cached;
@@ -260,6 +263,7 @@ export async function listEmailFolders(params: ListEmailFoldersParams = {}): Pro
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
+  ensureCommunicationsCacheAuthScope();
   const cacheParams = { ...params, refresh: false };
   const cachePath = `/v1/communications/messages${createMessageQuery(cacheParams)}`;
   const requestPath = params.refresh ? `/v1/communications/messages${createMessageQuery(params)}` : cachePath;
@@ -295,6 +299,7 @@ export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): Ema
 }
 
 export async function getEmailMessage(messageID: string, companyID?: string, sharedInboxID?: string): Promise<EmailMessage> {
+  ensureCommunicationsCacheAuthScope();
   const cacheKey = messageDetailCacheKey(messageID, companyID, sharedInboxID);
   const cached = readCache(messageDetailCache.get(cacheKey) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
   if (cached && isEmailMessageDetailed(cached)) return cached;
@@ -1011,6 +1016,7 @@ function parseEmailAddress(raw: string): EmailAddress | null {
 }
 
 async function cachedRead<T>(key: string, maxAgeMs: number, load: () => Promise<T>, clone: (value: T) => T): Promise<T> {
+  ensureCommunicationsCacheAuthScope();
   const cachedEntry = communicationsReadCache.get(key) as CacheEntry<T> | undefined;
   const cached = readCache(cachedEntry ?? null, maxAgeMs, clone);
   if (cached) return cached;
@@ -1029,6 +1035,13 @@ async function cachedRead<T>(key: string, maxAgeMs: number, load: () => Promise<
     });
   communicationsReadInflight.set(key, request);
   return clone(await request);
+}
+
+function ensureCommunicationsCacheAuthScope(): void {
+  const generation = getAuthSessionCacheGeneration();
+  if (generation === communicationsAuthSessionGeneration) return;
+  communicationsAuthSessionGeneration = generation;
+  invalidateCommunicationsCache();
 }
 
 function invalidateCacheKey(key: string): void {

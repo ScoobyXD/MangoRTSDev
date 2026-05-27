@@ -216,6 +216,10 @@ export function logout(): void {
   clearToken();
 }
 
+export function getAuthSessionCacheGeneration(): number {
+  return currentUserCacheGeneration;
+}
+
 export function installAuthenticatedFetch(): void {
   const config = readAuthConfig();
   const installedFetch = window.fetch as typeof window.fetch & { __mangortsAuthInstalled?: boolean };

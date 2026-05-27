@@ -22,6 +22,7 @@ import {
   updateCommunicationsSharedInboxRaciAssignments,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
 
 test("communications message query omits empty values and encodes filters", () => {
   assert.equal(
@@ -335,6 +336,32 @@ test("message list refresh bypasses stale page cache and replaces the normal cac
   }
 });
 
+test("message page cache is scoped to the active auth session", async () => {
+  invalidateCommunicationsCache();
+  const restoreSessionStorage = installSessionStorageStub();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    return jsonResponse({ messages: [message(`message-${calls.length}`, { folders: ["inbox"] })] });
+  };
+  try {
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages[0]?.id, "message-1");
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages[0]?.id, "message-1");
+    logout();
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages[0]?.id, "message-2");
+    assert.deepEqual(calls, [
+      "/v1/communications/messages?limit=25&mailbox=primary",
+      "/v1/communications/messages?limit=25&mailbox=primary",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreSessionStorage();
+    invalidateCommunicationsCache();
+  }
+});
+
 test("logic gate RACI helpers call add and remove command endpoints", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
@@ -415,4 +442,28 @@ function jsonResponse(payload: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function installSessionStorageStub(): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+      clear: () => {
+        values.clear();
+      },
+    },
+  });
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, "sessionStorage", descriptor);
+    else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+  };
 }

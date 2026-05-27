@@ -14,6 +14,8 @@ import {
   listHeaderStyle,
   loadingMoreStyle,
   mailAutoArchiveGuideStyle,
+  mailAutoArchiveGuideLabelStyle,
+  mailAutoArchiveGuideLineStyle,
   mailAutoArchiveTailSpacerStyle,
   mailArchiveActionButtonStyle,
   mailArchiveActionCountStyle,
@@ -92,6 +94,10 @@ function clampArchiveGuideTop(container: HTMLDivElement, top: number): number {
 
 function measureArchiveGuideTop(container: HTMLDivElement): number {
   const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"));
+  if (rows.length >= 3) {
+    const secondBottom = rows[1].offsetTop + rows[1].offsetHeight;
+    return clampArchiveGuideTop(container, secondBottom + (rows[2].offsetTop - secondBottom) / 2);
+  }
   if (rows.length >= 2) return clampArchiveGuideTop(container, rows[1].offsetTop + rows[1].offsetHeight);
   if (rows.length === 1) return clampArchiveGuideTop(container, rows[0].offsetTop + rows[0].offsetHeight * 2 + 10);
   return clampArchiveGuideTop(container, ARCHIVE_GUIDE_FALLBACK_TOP);
@@ -474,7 +480,12 @@ export function HomeMailWorkspace({
           )}
         </div>
         <div style={mailMessageListFrameStyle}>
-          {autoArchiveEnabled && messages.length > 0 && <div aria-hidden="true" style={mailAutoArchiveGuideStyle(archiveGuideTop)} />}
+          {autoArchiveEnabled && messages.length > 0 && (
+            <div aria-hidden="true" style={mailAutoArchiveGuideStyle(archiveGuideTop)}>
+              <span style={mailAutoArchiveGuideLabelStyle}>archive</span>
+              <span style={mailAutoArchiveGuideLineStyle} />
+            </div>
+          )}
           <div
             className="mango-home-scroll"
             ref={messageListRef}
