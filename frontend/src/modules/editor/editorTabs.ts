@@ -3,12 +3,12 @@ export type EditorRelatedNodeCreationKind = "parent" | "peer" | "child";
 
 export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }> = [
   { id: "editor", label: "Editor" },
+  { id: "permissions", label: "Permissions" },
+  { id: "relationships", label: "Relationships" },
   { id: "format", label: "Format" },
   { id: "outline-styles", label: "Outline Styles" },
   { id: "metadata", label: "Metadata" },
   { id: "history", label: "History" },
-  { id: "relationships", label: "Relationships" },
-  { id: "permissions", label: "Permissions" },
 ];
 
 export type EditorDocumentIsolationState = {

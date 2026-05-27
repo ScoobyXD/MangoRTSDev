@@ -75,12 +75,16 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "create" | null>(null);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const outlineHoverBackground = colorWithAlpha(outlineMenuAccent, 0.14);
   const outlineSelectedBackground = colorWithAlpha(outlineMenuAccent, 0.2);
+  const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+  const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
+  const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
 
   useEffect(() => {
     setFontSizeDraft(String(documentFontSize));
@@ -123,30 +127,41 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   }, [createMenuOpen]);
 
   const currentOutlineStyleLabel = EDITOR_OUTLINE_STYLE_ITEMS.find((item) => item.id === outlineStyle)?.label ?? "Outline Styles";
+  const tabStyleFor = (selected: boolean, hovered: boolean): React.CSSProperties => ({
+    flex: "0 0 auto",
+    whiteSpace: "nowrap",
+    border: `1px solid ${selected || hovered ? "transparent" : strokeColor}`,
+    background: selected
+      ? `${tabSelectedBackground} padding-box, ${tabFrameBackground} border-box`
+      : hovered
+        ? `${tabHoverBackground} padding-box, ${tabFrameBackground} border-box`
+        : tabBackground,
+    color: surfaceText,
+    fontSize: 10,
+    fontWeight: selected ? 650 : 500,
+    letterSpacing: 0,
+    padding: "4px 10px",
+    borderRadius: 8,
+    cursor: "pointer",
+    boxShadow: selected || hovered ? tabHoverShadow : "none",
+    transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
+  });
 
   return (
     <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
       {EDITOR_TAB_ITEMS.map((tab) => {
         const selected = activeTab === tab.id;
-        const tabStyle: React.CSSProperties = {
-          flex: "0 0 auto",
-          whiteSpace: "nowrap",
-          border: `1px solid ${selected ? accent : strokeColor}`,
-          background: selected ? tabSelectedBackground : tabBackground,
-          color: surfaceText,
-          fontSize: 10,
-          fontWeight: 500,
-          letterSpacing: 0,
-          padding: "4px 10px",
-          borderRadius: 4,
-          cursor: "pointer",
-        };
+        const hovered = hoveredTabID === tab.id;
+        const tabStyle = tabStyleFor(selected, hovered);
 
         if (tab.id === "format") {
           return (
             <div
               key={tab.id}
               aria-label="Font size"
+              onMouseEnter={() => setHoveredTabID(tab.id)}
+              onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
               style={{ ...tabStyle, display: "inline-flex", alignItems: "center", gap: 0, padding: 0, overflow: "hidden" }}
             >
               <button
@@ -199,7 +214,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
 
         if (tab.id === "outline-styles") {
           return (
-            <div key={tab.id} ref={outlineMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
+            <div
+              key={tab.id}
+              ref={outlineMenuRef}
+              onMouseEnter={() => setHoveredTabID(tab.id)}
+              onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
+              style={{ position: "relative", flex: "0 0 auto" }}
+            >
               <button
                 type="button"
                 aria-haspopup="menu"
@@ -279,7 +300,14 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         }
 
         return (
-          <button key={tab.id} type="button" onClick={() => onSelectTab(tab.id)} style={tabStyle}>
+          <button
+            key={tab.id}
+            type="button"
+            onMouseEnter={() => setHoveredTabID(tab.id)}
+            onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
+            onClick={() => onSelectTab(tab.id)}
+            style={tabStyle}
+          >
             {tab.label}
           </button>
         );
@@ -292,13 +320,19 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
             aria-haspopup="menu"
             aria-expanded={createMenuOpen}
             title="Create related node"
+            onMouseEnter={() => setHoveredTabID("create")}
+            onMouseLeave={() => setHoveredTabID((current) => (current === "create" ? null : current))}
             onClick={() => setCreateMenuOpen((open) => !open)}
             style={{
               width: 26,
               height: 24,
-              border: `1px solid ${createMenuOpen ? accent : strokeColor}`,
-              borderRadius: 4,
-              background: createMenuOpen ? tabSelectedBackground : tabBackground,
+              border: `1px solid ${createMenuOpen || hoveredTabID === "create" ? "transparent" : strokeColor}`,
+              borderRadius: 8,
+              background: createMenuOpen
+                ? `${tabSelectedBackground} padding-box, ${tabFrameBackground} border-box`
+                : hoveredTabID === "create"
+                  ? `${tabHoverBackground} padding-box, ${tabFrameBackground} border-box`
+                  : tabBackground,
               color: accent,
               cursor: "pointer",
               fontSize: 17,
@@ -307,6 +341,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               display: "grid",
               placeItems: "center",
               padding: 0,
+              boxShadow: createMenuOpen || hoveredTabID === "create" ? tabHoverShadow : "none",
+              transform: hoveredTabID === "create" && !createMenuOpen ? "translateY(-1px)" : "translateY(0)",
+              transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
             }}
           >
             +

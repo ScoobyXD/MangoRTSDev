@@ -31,6 +31,12 @@ const TASKBAR_TIMELINE_MIN_WIDTH = 520;
 const TASKBAR_DOCK_BUTTON_WIDTH = 68;
 const TASKBAR_DOCK_BUTTON_GAP = 10;
 const APP_TASKBAR_DOCK_TAB_DRAG_MIME = "application/x-mangorts-app-taskbar-dock-tab";
+const TASKBAR_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const TASKBAR_SURFACE = "linear-gradient(145deg, rgba(255,255,255,0.96) 0%, rgba(246,247,251,0.94) 100%)";
+const TASKBAR_ACTIVE_SURFACE = "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
+const TASKBAR_SHADOW = "12px 12px 28px rgba(174, 174, 192, 0.28), -10px -10px 24px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
+const TASKBAR_RAISED_SHADOW = "0 14px 32px rgba(15, 23, 42, 0.15), 0 0 16px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.88)";
+const TASKBAR_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
 
 type TaskbarLayout = {
   left: number;
@@ -60,6 +66,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   const suppressNextClickRef = useRef(false);
   const previousTabCountRef = useRef(tabs.length);
   const [movingTabID, setMovingTabID] = useState("");
+  const [hoveredDockTabID, setHoveredDockTabID] = useState("");
   const [timelineVisible, setTimelineVisible] = useState(true);
   const [leftDockOpen, setLeftDockOpen] = useState(() => tabs.length > 0);
   const hasDockTabs = tabs.length > 0;
@@ -183,6 +190,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   onDragEnd={() => {
                     setMovingTabID("");
                   }}
+                  onMouseEnter={() => setHoveredDockTabID(tab.id)}
+                  onMouseLeave={() => setHoveredDockTabID((current) => (current === tab.id ? "" : current))}
                   onDragEnter={(event) => {
                     const bounds = event.currentTarget.getBoundingClientRect();
                     reorderDockTabFromDrag(event, tab.id, event.clientX > bounds.left + bounds.width / 2 ? "after" : "before");
@@ -204,12 +213,12 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                     onOpenTab(tab);
                   }}
                   onContextMenu={(event) => onTabContextMenu(event, tab)}
-                  style={dockButtonStyle(active, movingTabID === tab.id)}
+                  style={dockButtonStyle(active, movingTabID === tab.id, hoveredDockTabID === tab.id)}
                 >
-                  <span style={dockIconStyle(active)}>
+                  <span style={dockIconStyle(active, hoveredDockTabID === tab.id)}>
                     <ExplorerRowIcon kind={tab.kind === "node" ? "node" : "logic_gate"} />
                   </span>
-                  <span style={dockLabelStyle(active)}>{shortLabel}</span>
+                  <span style={dockLabelStyle(active, hoveredDockTabID === tab.id)}>{shortLabel}</span>
                   {tab.pinned && <span style={dockPinnedStyle}><PinIndicator /></span>}
                 </button>
               );
@@ -429,10 +438,10 @@ function taskbarShellStyle(expanded: boolean, layout: TaskbarLayout, timelineVis
     gap: 0,
     padding: 0,
     boxSizing: "border-box",
-    border: surfaceVisible ? "1px solid rgba(148, 163, 184, 0.38)" : "none",
-    borderRadius: surfaceVisible ? 16 : 0,
-    background: surfaceVisible ? "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.94) 100%)" : "transparent",
-    boxShadow: surfaceVisible ? "0 28px 64px rgba(15, 23, 42, 0.26), 0 10px 22px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92)" : "none",
+    border: surfaceVisible ? "1px solid transparent" : "none",
+    borderRadius: surfaceVisible ? 18 : 0,
+    background: surfaceVisible ? `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box` : "transparent",
+    boxShadow: surfaceVisible ? TASKBAR_SHADOW : "none",
     backdropFilter: surfaceVisible ? "blur(18px)" : "none",
     WebkitBackdropFilter: surfaceVisible ? "blur(18px)" : "none",
     zIndex: 116,
@@ -451,7 +460,7 @@ function taskbarCenterDividerStyle(dockWidth: number, visible: boolean, timeline
     top: 0,
     bottom: 0,
     width: 1,
-    background: "rgba(100, 116, 139, 0.25)",
+    background: "linear-gradient(180deg, rgba(92, 238, 255, 0.34), rgba(183, 124, 255, 0.28), rgba(255, 255, 255, 0.7))",
     transform: "translateX(-0.5px)",
     pointerEvents: "none",
   };
@@ -472,10 +481,10 @@ function taskbarDockPaneStyle(expanded: boolean, visible: boolean, detached: boo
     overflow: "hidden",
     visibility: visible ? "visible" : "hidden",
     pointerEvents: visible ? "auto" : "none",
-    border: detached ? "1px solid rgba(148, 163, 184, 0.38)" : "none",
-    borderRadius: detached ? 16 : 0,
-    background: detached ? "linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.94) 100%)" : "transparent",
-    boxShadow: detached ? "0 18px 42px rgba(15, 23, 42, 0.20), 0 8px 18px rgba(15, 23, 42, 0.12)" : "none",
+    border: detached ? "1px solid transparent" : "none",
+    borderRadius: detached ? 18 : 0,
+    background: detached ? `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box` : "transparent",
+    boxShadow: detached ? TASKBAR_SHADOW : "none",
     backdropFilter: detached ? "blur(18px)" : "none",
     WebkitBackdropFilter: detached ? "blur(18px)" : "none",
   };
@@ -492,10 +501,10 @@ function taskbarTimelinePaneStyle(expanded: boolean, timelineVisible: boolean, d
       boxSizing: "border-box",
       display: "block",
       overflow: "visible",
-      border: "1px solid rgba(100, 116, 139, 0.34)",
+      border: "1px solid transparent",
       borderRadius: 999,
-      background: "#ffffff",
-      boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+      background: `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+      boxShadow: "4px 4px 12px rgba(174, 174, 192, 0.24), -4px -4px 12px rgba(255, 255, 255, 0.9)",
     };
   }
   return {
@@ -535,7 +544,8 @@ const dockRailStyle: React.CSSProperties = {
   marginLeft: "auto",
 };
 
-function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties {
+function dockButtonStyle(active: boolean, moving: boolean, hovered: boolean): React.CSSProperties {
+  const lifted = active || hovered;
   return {
     flex: "0 0 auto",
     position: "relative",
@@ -544,46 +554,48 @@ function dockButtonStyle(active: boolean, moving: boolean): React.CSSProperties 
     display: "grid",
     gridTemplateRows: "36px 20px",
     placeItems: "center",
-    border: `1px solid ${active ? "rgba(100, 116, 139, 0.62)" : "rgba(100, 116, 139, 0.26)"}`,
-    borderRadius: 8,
-    background: active ? "linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%)" : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-    color: active ? "#334155" : "#334155",
+    border: lifted ? "1px solid transparent" : `1px solid ${TASKBAR_SOFT_BORDER}`,
+    borderRadius: 10,
+    background: lifted ? `${TASKBAR_ACTIVE_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box` : TASKBAR_SURFACE,
+    color: active || hovered ? "#0f172a" : "#334155",
     cursor: moving ? "grabbing" : "pointer",
     font: "inherit",
     letterSpacing: 0,
     padding: "5px 5px 4px",
     opacity: moving ? 0.78 : 1,
-    boxShadow: active ? "0 6px 14px rgba(100, 116, 139, 0.16)" : "0 4px 10px rgba(15, 23, 42, 0.08)",
-    transform: "none",
-    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease",
+    boxShadow: lifted ? TASKBAR_RAISED_SHADOW : "4px 4px 11px rgba(174, 174, 192, 0.20), -4px -4px 11px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.84)",
+    transform: hovered && !moving ? "translateY(-2px)" : "none",
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, opacity 120ms ease, transform 160ms ease, color 140ms ease",
   };
 }
 
-function dockIconStyle(active: boolean): React.CSSProperties {
+function dockIconStyle(active: boolean, hovered: boolean): React.CSSProperties {
   return {
     width: 36,
     height: 34,
     display: "grid",
     placeItems: "center",
-    color: active ? "#334155" : "#334155",
-    transform: "scale(1.45)",
+    color: active || hovered ? "#19a8ff" : "#334155",
+    transform: active || hovered ? "scale(1.52)" : "scale(1.45)",
+    transition: "color 140ms ease, transform 160ms ease",
   };
 }
 
-function dockLabelStyle(active: boolean): React.CSSProperties {
+function dockLabelStyle(active: boolean, hovered: boolean): React.CSSProperties {
   return {
     maxWidth: "100%",
     minWidth: 0,
     height: 20,
     overflow: "hidden",
-    color: active ? "#334155" : "#475569",
+    color: active || hovered ? "#111827" : "#475569",
     fontSize: 9,
-    fontWeight: 800,
+    fontWeight: active || hovered ? 850 : 750,
     lineHeight: "10px",
     letterSpacing: 0,
     textAlign: "center",
     whiteSpace: "normal",
     wordBreak: "break-word",
+    transition: "color 140ms ease, font-weight 140ms ease",
   };
 }
 
@@ -614,11 +626,11 @@ function taskbarSideToggleStyle(layout: TaskbarLayout, side: "left" | "right", t
     display: "grid",
     placeItems: "center",
     transform: timelineVisible ? "translate(-50%, -50%)" : "translateX(-50%)",
-    border: "1px solid rgba(100, 116, 139, 0.3)",
+    border: "1px solid transparent",
     borderRadius: 999,
-    background: active ? "#f8fafc" : "#ffffff",
+    background: `${active ? TASKBAR_ACTIVE_SURFACE : TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
     color: active ? "#0f172a" : "#334155",
-    boxShadow: "none",
+    boxShadow: active ? TASKBAR_RAISED_SHADOW : "4px 4px 12px rgba(174, 174, 192, 0.22), -4px -4px 12px rgba(255, 255, 255, 0.9)",
     cursor: "pointer",
     padding: 0,
     zIndex: 2,
@@ -636,11 +648,11 @@ function taskbarCenterToggleStyle(layout: TaskbarLayout, timelineVisible: boolea
     gridTemplateRows: split ? "1fr 1fr" : "1fr",
     overflow: "hidden",
     transform: "translateX(-50%)",
-    border: "1px solid rgba(100, 116, 139, 0.3)",
+    border: "1px solid transparent",
     borderRadius: 999,
-    background: "#ffffff",
+    background: `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
     color: "#334155",
-    boxShadow: "none",
+    boxShadow: "4px 4px 12px rgba(174, 174, 192, 0.24), -4px -4px 12px rgba(255, 255, 255, 0.92), 0 0 12px rgba(183, 124, 255, 0.14)",
     zIndex: 3,
   };
 }

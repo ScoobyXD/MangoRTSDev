@@ -54,6 +54,7 @@ import {
   clampColumnWidth,
   createClientUUIDv7,
   getKanbanBoardDisplayTitle,
+  getKanbanColumnDisplayColor,
   getKanbanConditionalColor,
   getDefaultKanbanYAxisSortDirection,
   getOrderedKanbanCardIDs,
@@ -353,7 +354,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [companyID, frameID]);
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
-  const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
+  const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const arenaNodeByID = useMemo(() => {
@@ -428,7 +429,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (statusCards.length === 0) return;
     const columnsForStatus = columnSource ?? columnsRef.current;
     const columnByID = new Map(columnsForStatus.map((column) => [column.column_id, column]));
-    const statusColorByColumnID = new Map(columnsForStatus.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)]));
+    const statusColorByColumnID = new Map(columnsForStatus.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)]));
     const nodeByID = new Map((getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).map((node) => [node.node_id, node]));
     const seenNodeIDs = new Set<string>();
     for (const card of statusCards) {
