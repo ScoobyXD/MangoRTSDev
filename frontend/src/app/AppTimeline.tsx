@@ -67,8 +67,12 @@ const EXPANDED_LANE_TOP = COMPACT_HEADER_HEIGHT;
 const TIMELINE_NODE_ACCENT = "#19a8ff";
 const TIMELINE_LOGIC_GATE_ACCENT = "#19f07a";
 const TIMELINE_ITEM_BORDER_WIDTH = 1.5;
-const TIMELINE_ITEM_EDGE_WIDTH = 2;
+const TIMELINE_ITEM_EDGE_WIDTH = 4;
 const TIMELINE_ITEM_CHECKBOX_WIDTH = 24;
+const TIMELINE_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const TIMELINE_SURFACE = "linear-gradient(145deg, rgba(255,255,255,0.96) 0%, rgba(246,247,251,0.94) 100%)";
+const TIMELINE_ACTIVE_SURFACE = "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
+const TIMELINE_PANEL_SHADOW = "6px 6px 16px rgba(174, 174, 192, 0.20), -6px -6px 16px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
 
 export const AppTimeline: React.FC<AppTimelineProps> = ({
   state,
@@ -536,16 +540,28 @@ function timelineKindAccent(kind: AppTimelineEntityKind): string {
   return kind === "logic_gate" ? TIMELINE_LOGIC_GATE_ACCENT : TIMELINE_NODE_ACCENT;
 }
 
+function rgbaFromTimelineAccent(hex: string, alpha: number): string {
+  const clean = hex.trim().replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(25,168,255,${alpha})`;
+  const value = Number.parseInt(clean, 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return `rgba(${red},${green},${blue},${alpha})`;
+}
+
 function timelineShellStyle(expanded: boolean): React.CSSProperties {
   return {
     width: "100%",
     height: "100%",
     minWidth: 0,
+    minHeight: 0,
     display: "grid",
-    gridTemplateRows: expanded ? "34px minmax(0, 1fr)" : "minmax(0, 1fr)",
+    gridTemplateRows: expanded ? "44px minmax(0, 1fr)" : "minmax(0, 1fr)",
     gap: expanded ? 8 : 0,
     color: "#0f172a",
     fontFamily: "var(--mango-font-family)",
+    overflow: "hidden",
   };
 }
 
@@ -555,6 +571,9 @@ const timelineHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 12,
   minWidth: 0,
+  minHeight: 0,
+  padding: "4px 8px 0 0",
+  boxSizing: "border-box",
 };
 
 const timelineTitleStyle: React.CSSProperties = {
@@ -574,36 +593,51 @@ const timelineMetaStyle: React.CSSProperties = {
 };
 
 const timelineControlGroupStyle: React.CSSProperties = {
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(114px, auto))",
   alignItems: "center",
   justifyContent: "end",
-  gap: 8,
+  gap: 7,
   minWidth: 0,
-  flexWrap: "wrap",
+  padding: 4,
+  border: "1px solid transparent",
+  borderRadius: 13,
+  background: `${TIMELINE_SURFACE} padding-box, ${TIMELINE_EDGE_FRAME} border-box`,
+  boxShadow: "3px 3px 10px rgba(174, 174, 192, 0.18), -3px -3px 10px rgba(255, 255, 255, 0.86)",
 };
 
 const timeFieldStyle: React.CSSProperties = {
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
   alignItems: "center",
-  gap: 5,
+  gap: 6,
   color: "#475569",
-  fontSize: 11,
-  fontWeight: 800,
+  fontSize: 10,
+  fontWeight: 750,
+  minWidth: 0,
+  minHeight: 30,
+  padding: "3px 5px 3px 8px",
+  border: "1px solid rgba(255, 255, 255, 0.74)",
+  borderRadius: 10,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.92), rgba(248,250,252,0.72))",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12)",
 };
 
 const timeInputStyle: React.CSSProperties = {
-  width: 92,
-  height: 27,
-  border: "1px solid rgba(100, 116, 139, 0.32)",
-  borderRadius: 6,
-  background: "#ffffff",
+  width: 94,
+  height: 24,
+  border: "1px solid rgba(100, 116, 139, 0.18)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.98), rgba(247,249,252,0.86))",
   color: "#0f172a",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 750,
   padding: "0 6px",
   letterSpacing: 0,
   outline: "none",
+  textAlign: "center",
+  boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.14), inset -2px -2px 6px rgba(255,255,255,0.86)",
 };
 
 function timelineDaysScrollerStyle(expanded: boolean): React.CSSProperties {
@@ -611,14 +645,18 @@ function timelineDaysScrollerStyle(expanded: boolean): React.CSSProperties {
     minWidth: 0,
     minHeight: 0,
     height: "100%",
+    maxHeight: "100%",
     display: "grid",
     alignContent: expanded ? "start" : "stretch",
     gap: expanded ? 10 : 0,
     overflowX: "hidden",
     overflowY: expanded ? "auto" : "hidden",
-    paddingRight: expanded ? 3 : 0,
+    overscrollBehavior: "contain",
+    padding: expanded ? "2px 6px 8px 2px" : 0,
     boxSizing: "border-box",
     scrollbarWidth: "thin",
+    ["--mango-home-scroll-accent" as string]: "rgb(71, 85, 105)",
+    ["--mango-home-scroll-track" as string]: "rgba(100, 116, 139, 0.08)",
   };
 }
 
@@ -630,6 +668,12 @@ function timelineDayPanelStyle(expanded: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateRows: expanded ? undefined : "minmax(0, 1fr)",
     gap: expanded ? 6 : 0,
+    padding: expanded ? 7 : 0,
+    border: expanded ? "1px solid rgba(255, 255, 255, 0.76)" : "none",
+    borderRadius: expanded ? 13 : 0,
+    background: expanded ? "linear-gradient(145deg, rgba(255,255,255,0.82), rgba(246,247,251,0.56))" : "transparent",
+    boxShadow: expanded ? "inset 1px 1px 0 rgba(255,255,255,0.74), 3px 3px 10px rgba(174,174,192,0.12)" : "none",
+    boxSizing: "border-box",
   };
 }
 
@@ -639,8 +683,8 @@ const timelineDayTitleStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 10,
   color: "#475569",
-  fontSize: 10,
-  fontWeight: 800,
+  fontSize: 10.5,
+  fontWeight: 750,
   letterSpacing: 0,
 };
 
@@ -651,10 +695,10 @@ function timelineScrollerStyle(active: boolean, compact: boolean): React.CSSProp
     height: compact ? "100%" : EXPANDED_TRACK_HEIGHT,
     overflowX: "hidden",
     overflowY: "hidden",
-    border: compact ? 0 : `1px solid ${active ? "rgba(100, 116, 139, 0.58)" : "rgba(100, 116, 139, 0.22)"}`,
-    borderRadius: compact ? "0 15px 15px 0" : 8,
-    background: "#ffffff",
-    boxShadow: active ? "0 0 0 2px rgba(100, 116, 139, 0.13) inset" : "inset 0 1px 0 rgba(255, 255, 255, 0.82)",
+    border: compact ? 0 : "1px solid transparent",
+    borderRadius: compact ? "0 17px 17px 0" : 10,
+    background: compact ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(246,247,251,0.78))" : `${active ? TIMELINE_ACTIVE_SURFACE : TIMELINE_SURFACE} padding-box, ${TIMELINE_EDGE_FRAME} border-box`,
+    boxShadow: active ? `0 0 0 2px rgba(25, 168, 255, 0.16) inset, ${TIMELINE_PANEL_SHADOW}` : TIMELINE_PANEL_SHADOW,
     scrollbarWidth: "none",
   };
 }
@@ -705,9 +749,9 @@ function timelineLaneStyle(compact: boolean): React.CSSProperties {
     top: compact ? COMPACT_HEADER_HEIGHT : EXPANDED_LANE_TOP,
     bottom: 0,
     height: undefined,
-    borderTop: "1px solid rgba(100, 116, 139, 0.18)",
-    borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
-    background: "#ffffff",
+    borderTop: "1px solid rgba(100, 116, 139, 0.16)",
+    borderBottom: "1px solid rgba(100, 116, 139, 0.12)",
+    background: "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,250,252,0.74))",
   };
 }
 
@@ -722,9 +766,10 @@ function timelineItemStyle(
 ): React.CSSProperties {
   const accent = timelineKindAccent(kind);
   const selectionShadow = kind === "logic_gate" ? "rgba(25, 240, 122, 0.32)" : "rgba(25, 168, 255, 0.32)";
+  const itemFrame = `linear-gradient(135deg, ${rgbaFromTimelineAccent(accent, selected ? 0.92 : 0.68)}, rgba(255,255,255,0.84) 72%)`;
   const itemShadow = selected
-    ? `inset 0 0 0 2px ${selectionShadow}`
-    : "inset 0 1px 0 rgba(255, 255, 255, 0.62)";
+    ? `0 0 0 1px ${selectionShadow}, 0 0 13px ${selectionShadow}, inset 1px 1px 0 rgba(255,255,255,0.88)`
+    : `4px 4px 11px rgba(174, 174, 192, 0.16), -3px -3px 10px rgba(255, 255, 255, 0.78), 0 6px 14px ${rgbaFromTimelineAccent(accent, 0.10)}, inset 1px 1px 0 rgba(255,255,255,0.82)`;
   return {
     position: "absolute",
     left,
@@ -734,9 +779,9 @@ function timelineItemStyle(
     minWidth: 0,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    border: `${TIMELINE_ITEM_BORDER_WIDTH}px solid ${accent}`,
-    borderRadius: 0,
-    background: "#ffffff",
+    border: `${TIMELINE_ITEM_BORDER_WIDTH}px solid transparent`,
+    borderRadius: 8,
+    background: `linear-gradient(135deg, ${rgbaFromTimelineAccent(accent, 0.13)}, rgba(255,255,255,0.94) 38%, rgba(248,250,252,0.86)) padding-box, ${itemFrame} border-box`,
     color: "#0f172a",
     boxShadow: itemShadow,
     cursor: readOnly ? "default" : "grab",
@@ -757,7 +802,9 @@ function timelineItemHandleStyle(side: "left" | "right", kind: AppTimelineEntity
     zIndex: 2,
     width: TIMELINE_ITEM_EDGE_WIDTH,
     cursor: "ew-resize",
-    background: accent,
+    background: `linear-gradient(180deg, ${accent}, ${rgbaFromTimelineAccent(accent, 0.58)})`,
+    borderRadius: side === "left" ? "8px 0 0 8px" : "0 8px 8px 0",
+    boxShadow: `0 0 10px ${rgbaFromTimelineAccent(accent, 0.22)}`,
   };
 }
 
@@ -858,7 +905,7 @@ const timelineCheckboxStyle: React.CSSProperties = {
   width: 15,
   height: 15,
   margin: 0,
-  accentColor: "#475569",
+  accentColor: "#19a8ff",
   cursor: "pointer",
 };
 

@@ -5,8 +5,8 @@ import {
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   getColumnHeight,
   getColumnWidth,
+  getKanbanColumnDisplayColor,
   hexToRgba,
-  normalizeKanbanColumnItemColor,
   type KanbanCard,
   type KanbanColumn,
 } from "./shared";
@@ -65,7 +65,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   subtext,
   text,
   laneBackground,
-  laneBorder,
+  laneBorder: _laneBorder,
   laneShadow,
   draggingColumnID,
   dragOverColumnID,
@@ -90,11 +90,13 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   const columnWidth = getColumnWidth(column);
   const minimumColumnHeight = Math.max(KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2, minimumColumnHeightPx ?? 0);
   const columnHeight = Math.max(getColumnHeight(column), minimumColumnHeight);
-  const columnColor = normalizeKanbanColumnItemColor(column.item_color);
+  const columnColor = getKanbanColumnDisplayColor(column);
   const columnDropActive = dragOverColumnID === column.column_id;
   const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
-  const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
-  const columnFrame = `linear-gradient(135deg, ${hexToRgba(columnColor, 0.70)} 0%, rgba(92, 238, 255, 0.76) 42%, rgba(183, 124, 255, 0.76) 78%, rgba(255,255,255,0.88) 100%)`;
+  const columnGlow = `0 14px 30px ${hexToRgba(columnColor, 0.16)}, 8px 8px 22px rgba(174,174,192,0.20), -7px -7px 18px rgba(255,255,255,0.86)`;
+  const baseColumnShadow = laneShadow === "none" ? columnGlow : `${columnGlow}, ${laneShadow}`;
+  const columnShadow = insertionShadow ? `${insertionShadow}, ${baseColumnShadow}` : baseColumnShadow;
+  const columnFrame = `linear-gradient(135deg, ${hexToRgba(columnColor, 0.82)} 0%, ${hexToRgba(columnColor, 0.38)} 34%, rgba(92, 238, 255, 0.58) 58%, rgba(183, 124, 255, 0.58) 82%, rgba(255,255,255,0.88) 100%)`;
 
   return (
     <section
@@ -119,8 +121,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         width: columnWidth,
         height: columnHeight,
         minHeight: minimumColumnHeight,
-        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.14)}, ${laneBackground} 72px, rgba(255,255,255,0.54)) padding-box, ${columnFrame} border-box`,
-        border: `1px solid ${laneBorder}`,
+        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.24)} 0%, ${hexToRgba(columnColor, 0.10)} 126px, ${laneBackground} 54%, rgba(255,255,255,0.62) 100%) padding-box, ${columnFrame} border-box`,
+        border: "1px solid transparent",
         borderRadius: 16,
         boxShadow: columnShadow,
         display: "grid",
@@ -142,7 +144,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.28)}`, background: `linear-gradient(90deg, ${hexToRgba(columnColor, 0.20)}, rgba(255,255,255,0.70) 48%, rgba(245,243,255,0.58))`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)", cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.34)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.24)}, rgba(255,255,255,0.76) 46%, ${hexToRgba(columnColor, 0.10)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (

@@ -12,7 +12,8 @@ const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_NODE_RAIL_WHITE = "#ffffff";
 const HOME_NODE_RAIL_TEXT = "#111827";
 const HOME_NODE_RAIL_MUTED = "rgba(15, 23, 42, 0.58)";
-const HOME_NODE_RAIL_SCROLL = "rgba(100, 116, 139, 0.56)";
+const HOME_SCROLL_LIGHT = "rgba(203, 213, 225, 0.82)";
+const HOME_NODE_RAIL_SCROLL = HOME_SCROLL_LIGHT;
 const HOME_KEY_COLUMN_RADIUS = 16;
 const HOME_KEY_ELEVATED_RADIUS = 11;
 const HOME_KEY_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)";
@@ -282,6 +283,8 @@ export const sidebarNavStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 5,
   overflow: "auto",
+  scrollbarColor: `${HOME_SCROLL_LIGHT} transparent`,
+  ["--mango-home-scroll-accent" as string]: HOME_SCROLL_LIGHT,
 };
 
 export const sidebarSectionStyle: React.CSSProperties = {
@@ -613,6 +616,7 @@ export const nodeInboxListStyle: React.CSSProperties = {
   overflowY: "auto",
   padding: "2px 2px 6px 0",
   scrollbarColor: `${HOME_NODE_RAIL_SCROLL} transparent`,
+  ["--mango-home-scroll-accent" as string]: HOME_NODE_RAIL_SCROLL,
 };
 
 export const nodeInboxOtherListStyle: React.CSSProperties = {
@@ -731,6 +735,8 @@ export const myLogicGatesListStyle: React.CSSProperties = {
   gap: 10,
   overflowY: "auto",
   paddingRight: 2,
+  scrollbarColor: `${HOME_SCROLL_LIGHT} transparent`,
+  ["--mango-home-scroll-accent" as string]: HOME_SCROLL_LIGHT,
 };
 
 export const myLogicGateGroupStyle: React.CSSProperties = {
@@ -831,6 +837,8 @@ export const allLogicGateRowsStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 2,
   paddingRight: 2,
+  scrollbarColor: `${HOME_SCROLL_LIGHT} transparent`,
+  ["--mango-home-scroll-accent" as string]: HOME_SCROLL_LIGHT,
 };
 
 export function logicGateTreeRowStyle(depth: number, selected: boolean, isDropTarget: boolean): React.CSSProperties {

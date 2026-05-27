@@ -7,9 +7,9 @@ import {
 import { KANBAN_EDGE_FRAME } from "./KanbanContentModel";
 
 const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-    <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="none" stroke={color} strokeWidth="1.35" />
-    <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.15" />
+  <svg aria-hidden="true" width="19" height="19" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+    <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="rgba(255,255,255,0.58)" stroke={color} strokeWidth="1.45" />
+    <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.18" />
   </svg>
 );
 
@@ -72,7 +72,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
-  const cardSurfaceStop = cardBackground.includes("gradient") ? "rgba(255,255,255,0.86)" : cardBackground;
+  const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
 
   return (
     <article
@@ -93,15 +93,15 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         borderRadius: 11,
         background: isIssue
           ? `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,241,242,0.74) 48%, rgba(254,249,195,0.60)) padding-box, ${KANBAN_EDGE_FRAME} border-box`
-          : `linear-gradient(90deg, ${hexToRgba(color, 0.13)}, rgba(255,255,255,0.90) 46px, ${cardSurfaceStop}) padding-box, linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.82 : 0.58)}, rgba(255,255,255,0.78)) border-box`,
+          : `linear-gradient(135deg, rgba(255,255,255,0.98), rgba(255,255,255,0.94) 42%, ${hexToRgba(color, 0.09)} 100%) padding-box, ${cardFrame} border-box`,
         color: isIssue ? "#111111" : text,
-        padding: "8px 9px 8px 13px",
-        minHeight: 58,
+        padding: "9px 10px 9px 15px",
+        minHeight: 60,
         cursor: editingTitle ? "text" : "grab",
         outline: "none",
         overflow: "hidden",
         boxShadow: [
-          "4px 4px 12px rgba(174, 174, 192, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.80), inset 1px 1px 0 rgba(255,255,255,0.86)",
+          `4px 4px 12px rgba(174, 174, 192, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.84), 0 8px 18px ${hexToRgba(color, 0.10)}, inset 1px 1px 0 rgba(255,255,255,0.88)`,
           selected ? `0 0 0 1px ${color}, 0 0 12px ${hexToRgba(color, 0.28)}, inset 0 0 0 1px ${hexToRgba(color, 0.16)}` : "",
           highlighted && !selected ? `0 0 0 1px ${color} inset, 0 0 10px ${hexToRgba(color, 0.22)}` : "",
           dragBefore ? `0 -3px 0 ${accent}` : "",
@@ -109,11 +109,11 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         ].filter(Boolean).join(", ") || undefined,
         transition: "box-shadow 150ms ease, transform 150ms ease, background 150ms ease",
       }}
-    >
+      >
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}
       <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
-      <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
-        <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
+        <span title="Node" style={{ width: 20, height: 20, marginTop: 0, display: "grid", placeItems: "center" }}>
           <NodeDocumentIcon color={color} />
         </span>
         {editingTitle ? (
@@ -145,14 +145,14 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
               color: isIssue ? "#111111" : text,
               font: "inherit",
               fontSize: 12,
-              fontWeight: 500,
+              fontWeight: 700,
               lineHeight: 1.25,
               padding: "1px 4px",
               outline: "none",
             }}
           />
         ) : (
-          <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
         )}
       </div>
       {description && (

@@ -17,11 +17,24 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 10000;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#475569";
 export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
-export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#808080";
-export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#64748b";
-export const KANBAN_LOGIC_GATE_VERIFY_COLOR = "#64748b";
-export const KANBAN_LOGIC_GATE_DONE_COLOR = "#64748b";
-export const KANBAN_ISSUE_CARD_COLOR = "#64748b";
+export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#6f7b8a";
+export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#f08a24";
+export const KANBAN_LOGIC_GATE_VERIFY_COLOR = "#19a8ff";
+export const KANBAN_LOGIC_GATE_DONE_COLOR = "#19c879";
+export const KANBAN_ISSUE_CARD_COLOR = "#7c6ee6";
+
+const KANBAN_COLUMN_ITEM_COLOR_SET = new Set([
+  "#334155",
+  "#475569",
+  "#64748b",
+  "#808080",
+  KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_ISSUE_CARD_COLOR,
+].map((color) => color.toLowerCase()));
 
 export type KanbanDragPreviewItem = {
   label: string;
@@ -203,11 +216,24 @@ export function isKanbanBoardDropItemType(value: unknown): value is "node" {
 }
 
 export function isKanbanColumnItemColor(value: unknown): value is string {
-  return typeof value === "string" && ["#334155", "#475569", "#64748b", "#808080"].includes(value.trim().toLowerCase());
+  return typeof value === "string" && KANBAN_COLUMN_ITEM_COLOR_SET.has(value.trim().toLowerCase());
 }
 
 export function normalizeKanbanColumnItemColor(value: unknown): string {
   return isKanbanColumnItemColor(value) ? value.trim().toLowerCase() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
+}
+
+export function getKanbanStatusColumnColor(title: string): string | null {
+  const normalized = title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  if (normalized === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
+  if (normalized === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+  if (normalized === "verify" || normalized === "verification") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+  if (normalized === "done" || normalized === "complete" || normalized === "completed") return KANBAN_LOGIC_GATE_DONE_COLOR;
+  return null;
+}
+
+export function getKanbanColumnDisplayColor(column: Pick<KanbanColumn, "title" | "item_color">): string {
+  return getKanbanStatusColumnColor(column.title) ?? normalizeKanbanColumnItemColor(column.item_color);
 }
 
 export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title" | "logic_gate_id">): string {
@@ -826,7 +852,7 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
-  const palette = ["#475569", "#64748b", "#475569", "#334155"];
+  const palette = [KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
   const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -836,13 +862,15 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
 }
 
 export function getKanbanCardColorRailStyle(color: string): React.CSSProperties {
+  const cleanColor = isKanbanColumnItemColor(color) ? color : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
   return {
     position: "absolute",
     top: 0,
     bottom: 0,
     left: 0,
-    width: 5,
-    background: isKanbanColumnItemColor(color) ? color : KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+    width: 6,
+    background: `linear-gradient(180deg, ${hexToRgba(cleanColor, 0.96)}, ${hexToRgba(cleanColor, 0.58)})`,
+    boxShadow: `0 0 12px ${hexToRgba(cleanColor, 0.22)}`,
     pointerEvents: "none",
   };
 }
