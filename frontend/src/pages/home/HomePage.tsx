@@ -112,6 +112,20 @@ type QueuedArchiveBatch = {
   messageIDs: string[];
 };
 
+type MailboxCountOverrides = Record<string, Partial<Record<Extract<EmailMailbox, "primary">, number>>>;
+
+function mailCountKey(companyID: string, viewID: HomeViewID): string {
+  return `${companyID.trim()}\x1f${sharedInboxIDForHomeView(viewID)}`;
+}
+
+function messageHasInboxLabel(message: EmailMessage): boolean {
+  return [...(message.folders ?? []), ...(message.folder_ids ?? [])].some((folder) => {
+    let token = folder.trim().toLowerCase();
+    while (token.startsWith("\\")) token = token.slice(1);
+    return token === "inbox";
+  });
+}
+
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
@@ -119,6 +133,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const notificationSummary = useNotificationSummary(companyID);
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
+  const [mailboxCountOverrides, setMailboxCountOverrides] = useState<MailboxCountOverrides>({});
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
@@ -136,6 +151,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [nextPageToken, setNextPageToken] = useState("");
+  const [loadedMessageListKey, setLoadedMessageListKey] = useState("");
   const [newSharedInboxName, setNewSharedInboxName] = useState("");
   const [compose, setCompose] = useState<ComposeState>(emptyCompose);
   const [loadingStatus, setLoadingStatus] = useState(true);
@@ -194,6 +210,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
+  const foldersRef = useRef<EmailFolder[]>([]);
   const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
   const mailboxRef = useRef<EmailMailbox>("primary");
   const nextPageTokenRef = useRef("");
@@ -324,6 +341,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     });
   }, [messages]);
   useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+  useEffect(() => {
     mailboxRef.current = mailbox;
   }, [mailbox]);
   useEffect(() => {
@@ -347,6 +367,48 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   useEffect(() => {
     hideNavigationRef.current = hideNavigation;
   }, [hideNavigation]);
+  const setPrimaryMailboxCountOverride = useCallback((key: string, count: number | undefined) => {
+    const cleanKey = key.trim();
+    if (!cleanKey) return;
+    setMailboxCountOverrides((previous) => {
+      const currentEntry = previous[cleanKey] ?? {};
+      if (count === undefined) {
+        if (currentEntry.primary === undefined) return previous;
+        const { primary: _removed, ...restEntry } = currentEntry;
+        const next = { ...previous };
+        if (Object.keys(restEntry).length > 0) next[cleanKey] = restEntry;
+        else delete next[cleanKey];
+        return next;
+      }
+      const nextCount = Math.max(0, Math.floor(count));
+      if (currentEntry.primary === nextCount) return previous;
+      return {
+        ...previous,
+        [cleanKey]: {
+          ...currentEntry,
+          primary: nextCount,
+        },
+      };
+    });
+  }, []);
+  const adjustPrimaryMailboxCount = useCallback((key: string, delta: number) => {
+    const cleanKey = key.trim();
+    if (!cleanKey || delta === 0) return;
+    setMailboxCountOverrides((previous) => {
+      const currentEntry = previous[cleanKey] ?? {};
+      const baseCount = mailboxCountsFromFolders(foldersRef.current).primary ?? 0;
+      const currentCount = currentEntry.primary ?? baseCount;
+      const nextCount = Math.max(0, Math.floor(currentCount + delta));
+      if (currentEntry.primary === nextCount) return previous;
+      return {
+        ...previous,
+        [cleanKey]: {
+          ...currentEntry,
+          primary: nextCount,
+        },
+      };
+    });
+  }, []);
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -442,6 +504,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setStatus(next);
       if (!next.connected) {
         cancelPendingAutoArchiveMessages(Array.from(pendingAutoArchiveMessageIDsRef.current));
+        setMailboxCountOverrides({});
         setFolders([]);
         setSharedInboxes([]);
         setCompanyUsers([]);
@@ -464,6 +527,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setNotice("");
     cancelPendingAutoArchiveMessages(Array.from(pendingAutoArchiveMessageIDsRef.current));
     invalidateCommunicationsCache();
+    setMailboxCountOverrides({});
     setFolders([]);
     setMessages([]);
     setSelectedMessage(null);
@@ -590,6 +654,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
     if (!status?.connected) return;
     if (isInboxMatrixViewID(activeViewID)) {
+      setLoadedMessageListKey("");
       setMessages([]);
       setSelectedMessage(null);
       setSelectedMessageID("");
@@ -600,6 +665,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       return;
     }
     if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail) {
+      setLoadedMessageListKey("");
       setMessages([]);
       setSelectedMessage(null);
       setSelectedMessageID("");
@@ -619,6 +685,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       return;
     }
     messageRequestKeyRef.current = requestKey;
+    setLoadedMessageListKey("");
     clearPrefetchedMessagePage();
     const requestSeq = messageRequestSeqRef.current + 1;
     messageRequestSeqRef.current = requestSeq;
@@ -637,6 +704,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (messageRequestSeqRef.current !== requestSeq) return;
       setMessages(page.messages ?? []);
       setNextPageToken(page.next_page_token ?? "");
+      setLoadedMessageListKey(requestKey);
       const currentSelectedMessageID = selectedMessageIDRef.current;
       if (currentSelectedMessageID && !(page.messages ?? []).some((message) => message.id === currentSelectedMessageID)) {
         setSelectedMessageID("");
@@ -836,10 +904,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         sharedInboxID: batch.sharedInboxID,
         messageIDs: batch.messageIDs,
       });
-      return result?.failed ?? [];
+      return { batch, result };
     }))
-      .then((failuresByBatch) => {
-        const failures = failuresByBatch.flat();
+      .then((resultsByBatch) => {
+        const failures = resultsByBatch.flatMap((item) => item.result?.failed ?? []);
+        for (const item of resultsByBatch) {
+          const failedIDs = new Set(cleanIDList((item.result?.failed ?? []).map((failure) => failure.message_id)));
+          const archivedIDs = cleanIDList(item.result?.messageIDs ?? item.batch.messageIDs).filter((id) => !failedIDs.has(id));
+          adjustPrimaryMailboxCount(`${item.batch.companyID}\x1f${item.batch.sharedInboxID ?? ""}`, -archivedIDs.length);
+        }
         if (failures.length > 0) {
           setError(failures.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failures.length} messages.`);
           scheduleMessageListRefresh(0);
@@ -854,7 +927,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(archiveError, "Failed to archive scrolled messages"));
         scheduleMessageListRefresh(0);
       });
-  }, [handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh]);
+  }, [adjustPrimaryMailboxCount, handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh]);
   const queueArchiveMessages = useCallback((messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
@@ -1254,6 +1327,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     const ids = cleanIDList(messageIDs);
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     if (ids.length === 0) return;
+    const countKey = mailCountKey(companyID, activeViewIDRef.current);
+    const currentMailbox = mailboxRef.current;
+    const inboxIDSet = new Set(ids.filter((id) => {
+      if (currentMailbox === "primary") return true;
+      return messagesRef.current.some((message) => message.id === id && messageHasInboxLabel(message));
+    }));
     cancelPendingAutoArchiveMessages(ids);
     setBusy("archive");
     setError("");
@@ -1261,6 +1340,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     removeMessagesFromVisibleMailList(ids);
     try {
       const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
+      const archivedIDs = cleanIDList(result?.messageIDs ?? ids);
+      const archivedInboxCount = archivedIDs.reduce((count, id) => count + (inboxIDSet.has(id) ? 1 : 0), 0);
+      adjustPrimaryMailboxCount(countKey, -archivedInboxCount);
       const failed = result?.failed ?? [];
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
@@ -1278,18 +1360,20 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     if (ids.length === 0) return;
+    const countKey = mailCountKey(companyID, activeViewIDRef.current);
     cancelPendingAutoArchiveMessages(ids);
     setBusy("unarchive");
     setError("");
     setNotice("");
     try {
       await unarchiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
+      adjustPrimaryMailboxCount(countKey, ids.length);
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -1306,7 +1390,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
     if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
@@ -1779,12 +1863,19 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    const countKey = mailCountKey(companyID, activeViewIDRef.current);
+    const currentMailbox = mailboxRef.current;
+    const deletedInboxCount = ids.reduce((count, id) => {
+      if (currentMailbox === "primary") return count + 1;
+      return count + (messagesRef.current.some((message) => message.id === id && messageHasInboxLabel(message)) ? 1 : 0);
+    }, 0);
     cancelPendingAutoArchiveMessages(ids);
     setBusy("delete");
     setError("");
     try {
       const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
       await deleteHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
+      adjustPrimaryMailboxCount(countKey, -deletedInboxCount);
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -1800,7 +1891,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
   const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
     setBusy("my-logic-gates");
     setError("");
@@ -2384,10 +2475,45 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const activeViewLabel = getHomeViewLabel(activeViewID, sharedInboxes);
   const isArchivableListView = isArchivableHomeViewID(activeViewID);
   const isArchiveMailbox = isArchivableListView && mailbox === "archive";
-  const listViewLabel = activeViewID.startsWith("shared:") ? activeViewLabel : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
+  const listViewLabel = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:")
+    ? activeViewLabel
+    : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
-  const mailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
+  const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+  const baseMailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
+  const currentMailboxCountKey = mailCountKey(companyID, activeViewID);
+  const primaryMailboxCountOverride = mailboxCountOverrides[currentMailboxCountKey]?.primary;
+  const mailboxCounts = useMemo(() => ({
+    ...baseMailboxCounts,
+    primary: primaryMailboxCountOverride ?? baseMailboxCounts.primary,
+  }), [baseMailboxCounts, primaryMailboxCountOverride]);
+  useEffect(() => {
+    if (baseMailboxCounts.primary === undefined || primaryMailboxCountOverride === undefined) return;
+    if (baseMailboxCounts.primary === primaryMailboxCountOverride) setPrimaryMailboxCountOverride(currentMailboxCountKey, undefined);
+  }, [baseMailboxCounts.primary, currentMailboxCountKey, primaryMailboxCountOverride, setPrimaryMailboxCountOverride]);
+  useEffect(() => {
+    if (!status?.connected || !isArchivableListView || mailbox !== "primary" || searchQuery.trim() || unreadOnly) return;
+    if (loadedMessageListKey !== activeMessageListKey) return;
+    if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail || loadingMessages || loadingMoreMessages || nextPageToken) return;
+    setPrimaryMailboxCountOverride(currentMailboxCountKey, messages.length);
+  }, [
+    activeSharedInboxBlocksEmail,
+    activeSharedInboxNeedsEmail,
+    activeMessageListKey,
+    currentMailboxCountKey,
+    isArchivableListView,
+    loadedMessageListKey,
+    loadingMessages,
+    loadingMoreMessages,
+    mailbox,
+    messages.length,
+    nextPageToken,
+    searchQuery,
+    setPrimaryMailboxCountOverride,
+    status?.connected,
+    unreadOnly,
+  ]);
   useEffect(() => {
     if (!status?.connected || isInboxMatrixView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
