@@ -115,6 +115,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	var req struct {
 		CompanyID          string                                     `json:"company_id"`
 		LogicGateID        string                                     `json:"logic_gate_id"`
+		NodeID             string                                     `json:"node_id"`
 		NewLogicGateHeader string                                     `json:"new_logic_gate_header"`
 		Target             store.CommunicationsTriageConversionTarget `json:"target"`
 		Status             string                                     `json:"status"`
@@ -133,6 +134,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		ActorUserID:        actorUserID,
 		IdempotencyKey:     idempotencyKey,
 		LogicGateID:        req.LogicGateID,
+		NodeID:             req.NodeID,
 		NewLogicGateHeader: req.NewLogicGateHeader,
 		Target:             req.Target,
 		Status:             req.Status,
@@ -152,11 +154,16 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	if !requireCompanyAccess(w, r, conversionInput.CompanyID) {
 		return
 	}
-	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingLogicGate {
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingLogicGate ||
+		conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingNode {
 		userID := s.entityPermissionActorUserID(r, conversionInput.CompanyID)
 		if !s.requireKanbanLogicGateEffectiveAccess(w, conversionInput.CompanyID, userID, conversionInput.LogicGateID, store.EntityPermissionEdit) {
 			return
 		}
+	}
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingNode &&
+		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeNode, conversionInput.NodeID, "node_not_found") {
+		return
 	}
 
 	for _, messageID := range conversionInput.MessageIDs {

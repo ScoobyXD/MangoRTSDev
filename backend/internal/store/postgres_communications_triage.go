@@ -192,6 +192,22 @@ returning company_id::text, logic_gate_id::text, header, created_timestamp`, log
 		input.LogicGateID = logicGate.LogicGateID
 		input.Target.LogicGateID = logicGate.LogicGateID
 		createdLogicGate = true
+	case CommunicationsEmailConversionTargetExistingNode:
+		err := tx.QueryRowContext(ctx, `
+select company_id::text, logic_gate_id::text, header, created_timestamp
+from logic_gates
+where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).Scan(
+			&logicGate.CompanyID,
+			&logicGate.LogicGateID,
+			&logicGate.Header,
+			&logicGate.CreatedTimestamp,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 	default:
 		return CommunicationsTriageConversionResult{}, ErrInvalid
 	}
@@ -218,6 +234,21 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 		if err := rebuildEffectiveResourceAccessForResourceTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, input.LogicGateID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+	}
+	if input.Target.Mode == CommunicationsEmailConversionTargetExistingNode {
+		result, err := r.attachCommunicationsTriageItemsToExistingNodeTx(ctx, tx, input, logicGate)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		events, err := r.appendDomainEventsTx(ctx, tx, communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.Events = events
+		if err := tx.Commit(); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		return result, nil
 	}
 	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 	if err != nil {
@@ -418,6 +449,120 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 	}
 	return result, nil
 }
+
+func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, logicGate domain.LogicGate) (CommunicationsTriageConversionResult, error) {
+	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
+select company_id::text, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
+from kanban_boards
+where company_id=$1 and board_id=$2`, input.CompanyID, assignment.CompatibilityBoardID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	updateResult, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Priority)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	if affected, err := updateResult.RowsAffected(); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	} else if affected == 0 {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
+
+	result := CommunicationsTriageConversionResult{
+		Target:    input.Target,
+		LogicGate: logicGate,
+		Board:     board,
+	}
+	result.Target.Header = logicGate.Header
+	for _, messageID := range input.MessageIDs {
+		var rawMessage []byte
+		if err := tx.QueryRowContext(ctx, `
+select message
+from communications_triage_items
+where user_id=$1 and message_id=$2
+for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		} else if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+
+		var message domain.EmailMessageSnapshot
+		if err := json.Unmarshal(rawMessage, &message); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		message = normalizeEmailMessageSnapshot(message)
+		rawMessage, err = json.Marshal(message)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+
+		placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
+insert into communications_email_node_attachments (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, now(), now())
+on conflict (company_id, user_id, message_id, node_id)
+do update set
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+			input.CompanyID, input.UserID, messageID, input.NodeID, card.BoardID, card.CardID, input.LogicGateID, string(rawMessage)))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC()); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from communications_triage_items
+where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		provenance := CommunicationsEmailConversionProvenance{
+			CompanyID:   placement.CompanyID,
+			UserID:      placement.UserID,
+			MessageID:   placement.MessageID,
+			ThreadID:    strings.TrimSpace(message.ThreadID),
+			NodeID:      placement.NodeID,
+			BoardID:     placement.BoardID,
+			CardID:      placement.CardID,
+			LogicGateID: placement.LogicGateID,
+		}
+		result.Nodes = append(result.Nodes, node)
+		result.Cards = append(result.Cards, card)
+		result.Assignments = append(result.Assignments, assignment)
+		result.EmailPlacements = append(result.EmailPlacements, placement)
+		result.EmailProvenance = append(result.EmailProvenance, provenance)
+		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	return result, nil
+}
+
 func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)
@@ -436,11 +581,20 @@ func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID strin
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 	}
 	rows, err := r.db.Query(`
-select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id, logic_gate_id::text, created_timestamp, updated_timestamp
-from communications_email_nodes
-where user_id=$1
-  and company_id=$2
-  and message_id in (`+strings.Join(placeholders, ",")+`)
+select company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id, created_timestamp, updated_timestamp
+from (
+  select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp
+  from communications_email_nodes
+  where user_id=$1
+    and company_id=$2
+    and message_id in (`+strings.Join(placeholders, ",")+`)
+  union all
+  select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp
+  from communications_email_node_attachments
+  where user_id=$1
+    and company_id=$2
+    and message_id in (`+strings.Join(placeholders, ",")+`)
+) placements
 order by created_timestamp desc, message_id asc, logic_gate_id asc`, args...)
 	if err != nil {
 		return nil, err

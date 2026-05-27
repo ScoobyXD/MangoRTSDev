@@ -158,6 +158,10 @@ func emailNodeLinkKey(companyID, boardID, cardID string) string {
 	return companyID + ":" + boardID + ":" + cardID
 }
 
+func emailNodeAttachmentLinkKey(companyID, userID, messageID, nodeID string) string {
+	return companyID + ":" + userID + ":" + messageID + ":" + nodeID
+}
+
 func logicGateShortcutKey(userID, companyID, logicGateID string) string {
 	return userID + ":" + companyID + ":" + logicGateID
 }

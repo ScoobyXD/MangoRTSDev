@@ -550,11 +550,13 @@ type CompanyExplorerRelationshipDeleteResult struct {
 const (
 	CommunicationsEmailConversionTargetExistingLogicGate = "existing_logic_gate"
 	CommunicationsEmailConversionTargetNewLogicGate      = "new_logic_gate"
+	CommunicationsEmailConversionTargetExistingNode      = "existing_node"
 )
 
 type CommunicationsTriageConversionTarget struct {
 	Mode        string `json:"mode"`
 	LogicGateID string `json:"logic_gate_id,omitempty"`
+	NodeID      string `json:"node_id,omitempty"`
 	Header      string `json:"header,omitempty"`
 }
 
@@ -577,6 +579,7 @@ type CommunicationsTriageConversionInput struct {
 	MessageIDs         []string
 	Target             CommunicationsTriageConversionTarget
 	LogicGateID        string
+	NodeID             string
 	NewLogicGateHeader string
 	Status             string
 	ColumnID           string
