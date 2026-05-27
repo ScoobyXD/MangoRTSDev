@@ -1,7 +1,7 @@
 import React from "react";
 import type { EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { formatAddressList, formatMessageDate, mailboxLabel } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, formatAddressList, formatMessageDate, mailboxLabel } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
   accountEmailStyle,
@@ -76,10 +76,9 @@ function MailboxActionContent({ label, count }: { label: string; count?: number 
   );
 }
 
-function collectScrolledOutMessageIDs(container: HTMLDivElement, archiveThresholdTop = 0): string[] {
+function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
   if (container.scrollTop <= 0) return [];
-  const containerTop = container.getBoundingClientRect().top;
-  const thresholdTop = containerTop + Math.max(0, archiveThresholdTop);
+  const thresholdTop = container.getBoundingClientRect().top;
   const ids: string[] = [];
   container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
     if (row.getBoundingClientRect().bottom > thresholdTop + 1) return;
@@ -498,7 +497,7 @@ export function HomeMailWorkspace({
               const target = event.currentTarget;
               if (autoArchiveEnabled) {
                 scheduleArchiveVisuals();
-                const scrolledOutIDs = collectScrolledOutMessageIDs(target, archiveGuideTop);
+                const scrolledOutIDs = collectScrolledOutMessageIDs(target);
                 if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
               }
               const tailReserve = autoArchiveEnabled && messages.length > 0 ? target.clientHeight : 0;
@@ -514,7 +513,7 @@ export function HomeMailWorkspace({
               const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
               const hovered = hoveredMessageID === message.id;
               const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
-              const draggable = triageView && mailbox === "primary";
+              const draggable = triageView && canDragTriageMessageFromMailbox(mailbox);
               const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === message.id;
               const starHighlighted = message.starred || mailbox === "starred" || starHovered;

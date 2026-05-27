@@ -1135,6 +1135,11 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessageQuery, error) {
 	switch query.Mailbox {
 	case "", "all":
+		if connection.Provider == "google" {
+			query.SearchQueryNative = gmailAllSearch(query.Query, query.Unread)
+			query.Query = ""
+			query.Unread = nil
+		}
 		return query, nil
 	case "primary":
 		if connection.Provider == "google" {
@@ -1157,6 +1162,11 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 	case "starred":
 		starred := true
 		query.Starred = &starred
+		if connection.Provider == "google" {
+			query.SearchQueryNative = gmailUserSearch(query.Query, query.Unread)
+			query.Query = ""
+			query.Unread = nil
+		}
 		return query, nil
 	case "archive":
 		if connection.Provider == "google" {
@@ -1207,19 +1217,24 @@ func (s *Server) applyRequiredSystemFolderMailbox(ctx context.Context, connectio
 	return query, nil
 }
 
+func gmailAllSearch(userQuery string, unread *bool) string {
+	return gmailSearch([]string{"in:anywhere"}, userQuery, unread)
+}
+
+func gmailUserSearch(userQuery string, unread *bool) string {
+	return gmailSearch(nil, userQuery, unread)
+}
+
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	parts := []string{"category:primary", "in:inbox"}
-	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
-		parts = append(parts, trimmed)
-	}
-	if unread != nil && *unread {
-		parts = append(parts, "is:unread")
-	}
-	return strings.Join(parts, " ")
+	return gmailSearch([]string{"category:primary", "in:inbox"}, userQuery, unread)
 }
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {
-	parts := []string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}
+	return gmailSearch([]string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}, userQuery, unread)
+}
+
+func gmailSearch(base []string, userQuery string, unread *bool) string {
+	parts := append([]string{}, base...)
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
 		parts = append(parts, trimmed)
 	}
@@ -1383,7 +1398,7 @@ func isGmailSystemFolderToken(token string) bool {
 		return true
 	}
 	switch token {
-	case "all", "all_mail", "all mail", "chat", "draft", "drafts", "important", "inbox", "muted", "sent", "snoozed", "spam", "starred", "trash", "unread":
+	case "all", "all_mail", "all mail", "chat", "draft", "drafts", "important", "inbox", "muted", "sent", "snoozed", "spam", "trash", "unread":
 		return true
 	default:
 		return false
