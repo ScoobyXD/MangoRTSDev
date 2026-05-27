@@ -2310,11 +2310,12 @@ function notificationCountForInboxGroup(summary: NotificationSummary, role: Noti
   }, 0);
 }
 
-function notificationCountForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string): number {
+function notificationCountForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string, role?: NotificationRaciRole): number {
   const cleanNodeID = nodeID.trim();
   if (!summary || !cleanNodeID || !group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return 0;
   return (summary.logic_gate_counts ?? []).reduce((count, item) => {
     if (item.logic_gate_id !== group.logicGateID || item.node_id?.trim() !== cleanNodeID) return count;
+    if (role && item.role !== role) return count;
     return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
   }, 0);
 }
@@ -3537,6 +3538,8 @@ export function LogicGateInboxNodeGroupCard({
             title="Show notifications"
             aria-label="Show notifications"
             style={logicGateInboxGroupNotificationButtonStyle(notificationRole)}
+            draggable={false}
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => onOpenNotifications?.(event)}
             onDoubleClick={(event) => event.stopPropagation()}
           >
@@ -3564,7 +3567,7 @@ export function LogicGateInboxNodeGroupCard({
         {nodeRows.map((row) => {
           const node = nodeByID.get(row.nodeID);
           if (!node) return null;
-          const nodeNotificationCount = notificationCountForInboxNode(notificationSummary, group, row.nodeID);
+          const nodeNotificationCount = notificationCountForInboxNode(notificationSummary, group, row.nodeID, notificationRole);
           return (
             <LogicGateInboxNodeRow
               key={row.nodeID}
@@ -3743,12 +3746,14 @@ export function LogicGateInboxNodeRow({
       <span style={logicGateInboxNodeGuideStyle} />
       <span style={logicGateInboxNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
       <span style={logicGateInboxNodeTitleStyle(hasUnreadNotification)}>{nodeTitle(node)}</span>
-      {notificationCount > 0 && (
+      {notificationCount > 0 && onOpenNotifications && (
         <button
           type="button"
           title={`${formatInboxNotificationCount(notificationCount)} unread notifications`}
           aria-label="Show node notifications"
           style={logicGateInboxNodeNotificationButtonStyle(notificationRole ?? "")}
+          draggable={false}
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();

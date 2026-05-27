@@ -94,14 +94,29 @@ export function NotificationPopover({
       >
         <div style={notificationPopoverHeaderStyle}>
           <span>{title}</span>
-          <button
-            type="button"
-            style={notificationPopoverClearButtonStyle}
-            disabled={loading || items.length === 0}
-            onClick={onClear}
-          >
-            Clear All
-          </button>
+          <span style={notificationPopoverHeaderActionsStyle}>
+            <button
+              type="button"
+              style={notificationPopoverClearButtonStyle}
+              disabled={loading || items.length === 0}
+              onClick={onClear}
+            >
+              Clear All
+            </button>
+            <button
+              type="button"
+              title="Close notifications"
+              aria-label="Close notifications"
+              style={notificationPopoverCloseButtonStyle}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onClose();
+              }}
+            >
+              X
+            </button>
+          </span>
         </div>
         {loading ? (
           <div style={notificationPopoverEmptyStyle}>Loading</div>
@@ -187,16 +202,27 @@ const notificationPopoverStyle: React.CSSProperties = {
 };
 
 const notificationPopoverHeaderStyle: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 8,
   padding: "5px 12px 8px",
+  background: "linear-gradient(145deg, rgba(255,255,255,0.86), rgba(245,248,252,0.76))",
   color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
   fontWeight: 800,
   textTransform: "uppercase",
   letterSpacing: 0,
+};
+
+const notificationPopoverHeaderActionsStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  flex: "0 0 auto",
 };
 
 const notificationPopoverClearButtonStyle: React.CSSProperties = {
@@ -211,6 +237,23 @@ const notificationPopoverClearButtonStyle: React.CSSProperties = {
   lineHeight: 1,
   padding: "4px 7px",
   textTransform: "none",
+};
+
+const notificationPopoverCloseButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.24)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 900,
+  lineHeight: 1,
+  padding: 0,
 };
 
 function notificationPopoverItemStyle(selected: boolean, seen: boolean): React.CSSProperties {
