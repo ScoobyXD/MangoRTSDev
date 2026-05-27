@@ -72,6 +72,35 @@ import {
 
 const scopedRootCreationKeys = new Set<string>();
 const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
+const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set(["logic gates by function", "logic gates by person"]);
+
+function normalizeExplorerFolderName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function shouldHideMainExplorerRootFolder(row: ExplorerTreeNode): boolean {
+  return row.kind === "folder"
+    && row.folderKind === "logic_gate"
+    && !row.parentFolderID
+    && HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES.has(normalizeExplorerFolderName(row.label));
+}
+
+function hideMainExplorerRootFolders(rows: ExplorerTreeNode[]): ExplorerTreeNode[] {
+  const filtered: ExplorerTreeNode[] = [];
+  let hiddenDepth: number | null = null;
+  for (const row of rows) {
+    if (hiddenDepth !== null) {
+      if (row.depth > hiddenDepth) continue;
+      hiddenDepth = null;
+    }
+    if (shouldHideMainExplorerRootFolder(row)) {
+      hiddenDepth = row.depth;
+      continue;
+    }
+    filtered.push(row);
+  }
+  return filtered;
+}
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
   let current = element.parentElement;
@@ -271,7 +300,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const baseTreeRows = useMemo(() => (
     scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
-      : fullTreeRows
+      : hideMainExplorerRootFolders(fullTreeRows)
   ), [fullTreeRows, scopedExplorerActive, scopedRootFolder]);
   const explorerSearchText = explorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
@@ -289,7 +318,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
-      : rows;
+      : hideMainExplorerRootFolders(rows);
   }, [folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: explorerSearchQuery })

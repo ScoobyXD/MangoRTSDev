@@ -59,6 +59,7 @@ type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
 type ArchiveProgressByMessageID = Record<string, number>;
 
 const ARCHIVE_GUIDE_FALLBACK_TOP = 176;
+const ARCHIVE_TAIL_SPACER_MIN_HEIGHT = 260;
 
 function formatMailboxCount(count: number | undefined): string {
   if (typeof count !== "number" || !Number.isFinite(count)) return "";
@@ -75,12 +76,13 @@ function MailboxActionContent({ label, count }: { label: string; count?: number 
   );
 }
 
-function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
+function collectScrolledOutMessageIDs(container: HTMLDivElement, archiveThresholdTop = 0): string[] {
   if (container.scrollTop <= 0) return [];
   const containerTop = container.getBoundingClientRect().top;
+  const thresholdTop = containerTop + Math.max(0, archiveThresholdTop);
   const ids: string[] = [];
   container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
-    if (row.getBoundingClientRect().bottom > containerTop + 1) return;
+    if (row.getBoundingClientRect().bottom > thresholdTop + 1) return;
     const messageID = row.dataset.homeMailMessageId?.trim();
     if (messageID) ids.push(messageID);
   });
@@ -247,6 +249,7 @@ export function HomeMailWorkspace({
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
   const [archiveGuideTop, setArchiveGuideTop] = React.useState(ARCHIVE_GUIDE_FALLBACK_TOP);
+  const [archiveTailSpacerHeight, setArchiveTailSpacerHeight] = React.useState(ARCHIVE_TAIL_SPACER_MIN_HEIGHT);
   const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
   const archiveVisualFrameRef = React.useRef<number | null>(null);
   const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
@@ -259,6 +262,8 @@ export function HomeMailWorkspace({
     }
     const nextGuideTop = measureArchiveGuideTop(list);
     setArchiveGuideTop((current) => Math.abs(current - nextGuideTop) < 0.5 ? current : nextGuideTop);
+    const nextSpacerHeight = Math.max(ARCHIVE_TAIL_SPACER_MIN_HEIGHT, list.clientHeight + 24);
+    setArchiveTailSpacerHeight((current) => Math.abs(current - nextSpacerHeight) < 1 ? current : nextSpacerHeight);
     const containerTop = list.getBoundingClientRect().top;
     const nextProgress: ArchiveProgressByMessageID = {};
     list.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
@@ -493,7 +498,7 @@ export function HomeMailWorkspace({
               const target = event.currentTarget;
               if (autoArchiveEnabled) {
                 scheduleArchiveVisuals();
-                const scrolledOutIDs = collectScrolledOutMessageIDs(target);
+                const scrolledOutIDs = collectScrolledOutMessageIDs(target, archiveGuideTop);
                 if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
               }
               const tailReserve = autoArchiveEnabled && messages.length > 0 ? target.clientHeight : 0;
@@ -582,7 +587,13 @@ export function HomeMailWorkspace({
               );
             })}
             {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
-            {autoArchiveEnabled && messages.length > 0 && <div aria-hidden="true" data-home-mail-auto-archive-spacer="true" style={mailAutoArchiveTailSpacerStyle} />}
+            {autoArchiveEnabled && messages.length > 0 && (
+              <div
+                aria-hidden="true"
+                data-home-mail-auto-archive-spacer="true"
+                style={mailAutoArchiveTailSpacerStyle(archiveTailSpacerHeight)}
+              />
+            )}
           </div>
         </div>
       </section>
