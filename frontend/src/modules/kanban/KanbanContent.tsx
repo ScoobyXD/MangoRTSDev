@@ -32,7 +32,7 @@ import {
   toggleKanbanCardIssueCommand,
   type KanbanCommandContext,
 } from "./kanbanCommands";
-import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls } from "./KanbanArenaGrouping";
+import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls, type ArenaGroupMenuID } from "./KanbanArenaGrouping";
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
 import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
@@ -150,7 +150,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
-  const [arenaGroupMenuOpen, setArenaGroupMenuOpen] = useState<"x" | "y" | null>(null);
+  const [arenaGroupMenuOpen, setArenaGroupMenuOpen] = useState<ArenaGroupMenuID | null>(null);
   const [arenaXGroupBy, setArenaXGroupBy] = useState<KanbanGroupField>("status");
   const [arenaYGroupBy, setArenaYGroupBy] = useState<KanbanGroupField>("person");
   const [arenaXSortDirection, setArenaXSortDirection] = useState<KanbanGroupSortDirection>("asc");

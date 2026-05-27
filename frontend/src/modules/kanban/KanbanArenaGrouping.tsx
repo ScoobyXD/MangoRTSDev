@@ -25,18 +25,18 @@ import {
   KANBAN_SURFACE,
 } from "./KanbanContentModel";
 
-type AxisID = "x" | "y";
+export type ArenaGroupMenuID = "toolbar-x" | "toolbar-y" | "board-x" | "board-y";
 
 type ArenaGroupSelectProps = {
   value: KanbanGroupField;
   onChange: (value: KanbanGroupField) => void;
   label: "X-Axis" | "Y-axis";
-  axis: AxisID;
+  menuID: ArenaGroupMenuID;
   sortDirection: KanbanGroupSortDirection;
   onToggleSortDirection: () => void;
   layout?: "inline" | "compact";
   menuOpen: boolean;
-  onSetMenuOpen: (axis: AxisID | null) => void;
+  onSetMenuOpen: (menuID: ArenaGroupMenuID | null) => void;
   isDark: boolean;
   line: string;
   cardBackground: string;
@@ -47,7 +47,7 @@ function ArenaGroupSelect({
   value,
   onChange,
   label,
-  axis,
+  menuID,
   sortDirection,
   onToggleSortDirection,
   layout = "inline",
@@ -97,7 +97,7 @@ function ArenaGroupSelect({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
-        onClick={() => onSetMenuOpen(menuOpen ? null : axis)}
+        onClick={() => onSetMenuOpen(menuOpen ? null : menuID)}
         style={{
           width: "100%",
           minHeight: 28,
@@ -238,8 +238,8 @@ export function KanbanArenaGroupingControls({
   yGroupBy: KanbanGroupField;
   xSortDirection: KanbanGroupSortDirection;
   ySortDirection: KanbanGroupSortDirection;
-  menuOpen: AxisID | null;
-  onSetMenuOpen: (axis: AxisID | null) => void;
+  menuOpen: ArenaGroupMenuID | null;
+  onSetMenuOpen: (menuID: ArenaGroupMenuID | null) => void;
   onSetXGroupBy: (value: KanbanGroupField) => void;
   onSetYGroupBy: (value: KanbanGroupField) => void;
   onToggleXSortDirection: () => void;
@@ -271,8 +271,8 @@ export function KanbanArenaGroupingControls({
       >
         Group
       </button>
-      <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" axis="y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} menuOpen={menuOpen === "y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
-      <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" axis="x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} menuOpen={menuOpen === "x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+      <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" menuID="toolbar-y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} menuOpen={menuOpen === "toolbar-y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+      <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" menuID="toolbar-x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} menuOpen={menuOpen === "toolbar-x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
     </div>
   );
 }
@@ -300,8 +300,8 @@ export function KanbanArenaGroupedBoard({
   xGroupBy: KanbanGroupField;
   ySortDirection: KanbanGroupSortDirection;
   xSortDirection: KanbanGroupSortDirection;
-  menuOpen: AxisID | null;
-  onSetMenuOpen: (axis: AxisID | null) => void;
+  menuOpen: ArenaGroupMenuID | null;
+  onSetMenuOpen: (menuID: ArenaGroupMenuID | null) => void;
   onSetYGroupBy: (value: KanbanGroupField) => void;
   onSetXGroupBy: (value: KanbanGroupField) => void;
   onToggleYSortDirection: () => void;
@@ -331,12 +331,12 @@ export function KanbanArenaGroupedBoard({
       }}
     >
       <div style={{ position: "sticky", left: 0, zIndex: 7, border: `1px solid ${glassBorder}`, borderTopLeftRadius: 8, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8 }}>
-        <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" axis="y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} layout="compact" menuOpen={menuOpen === "y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+        <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" menuID="board-y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} layout="compact" menuOpen={menuOpen === "board-y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
       </div>
       {groupedBoard.columns.map((column, columnIndex) => (
         <div key={column.key} style={{ border: `1px solid ${glassBorder}`, borderLeft: columnIndex === 0 ? "none" : undefined, borderTopRightRadius: columnIndex === groupedBoard.columns.length - 1 ? 8 : 0, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8, minWidth: 0 }}>
           {columnIndex === 0 ? (
-            <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" axis="x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} layout="compact" menuOpen={menuOpen === "x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+            <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" menuID="board-x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} layout="compact" menuOpen={menuOpen === "board-x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
           ) : (
             <div style={{ minHeight: 44 }} />
           )}
