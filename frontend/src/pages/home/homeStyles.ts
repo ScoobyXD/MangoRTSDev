@@ -1751,16 +1751,38 @@ export const mailMessageListFrameStyle: React.CSSProperties = {
 export function mailAutoArchiveGuideStyle(top: number): React.CSSProperties {
   return {
     position: "absolute",
-    top,
+    top: Math.max(0, top - 16),
     left: 12,
     right: 14,
-    zIndex: 2,
-    height: 1,
+    zIndex: 4,
+    height: 17,
     pointerEvents: "none",
-    background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.56) 12%, rgba(100, 116, 139, 0.56) 88%, transparent)",
-    boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 -12px 22px rgba(148, 163, 184, 0.12)",
+    display: "grid",
+    gridTemplateRows: "12px 1px",
+    gap: 4,
+    alignItems: "center",
   };
 }
+
+export const mailAutoArchiveGuideLabelStyle: React.CSSProperties = {
+  justifySelf: "center",
+  height: 12,
+  padding: "0 6px",
+  borderRadius: 6,
+  background: "rgba(248, 250, 252, 0.92)",
+  color: "rgba(100, 116, 139, 0.9)",
+  fontSize: 9,
+  fontWeight: 600,
+  lineHeight: "12px",
+  letterSpacing: 0,
+};
+
+export const mailAutoArchiveGuideLineStyle: React.CSSProperties = {
+  width: "100%",
+  height: 1,
+  background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.62) 12%, rgba(100, 116, 139, 0.62) 88%, transparent)",
+  boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 -12px 22px rgba(148, 163, 184, 0.16)",
+};
 
 export const mailAutoArchiveTailSpacerStyle: React.CSSProperties = {
   minHeight: 180,
