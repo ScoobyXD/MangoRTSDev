@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type React from "react";
+import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import {
   KANBAN_MODULE_TOP_CLEARANCE_PX,
   getKanbanBoardDisplayTitle,
@@ -53,6 +54,7 @@ type KanbanBoardSidebarProps = {
   onCreateNewBoardView: () => void;
   onSelectBoard: (boardID: string) => void;
   onCollapseToTab?: () => void;
+  timelineDragEntity?: { kind: "logic_gate"; id: string; label: string };
 };
 
 export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
@@ -86,6 +88,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   onCreateNewBoardView: _onCreateNewBoardView,
   onSelectBoard,
   onCollapseToTab,
+  timelineDragEntity,
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
@@ -134,6 +137,18 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         <button
           type="button"
           title={boardTitleReadOnly ? activeBoardTitle : "Rename Kanban board"}
+          draggable={!!timelineDragEntity}
+          onDragStart={(event) => {
+            if (!timelineDragEntity) return;
+            event.dataTransfer.effectAllowed = "copy";
+            event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify({
+              kind: timelineDragEntity.kind,
+              itemID: timelineDragEntity.id,
+              itemType: timelineDragEntity.kind,
+              sourceTreeID: `logic-gate-${timelineDragEntity.id}`,
+            }));
+            event.dataTransfer.setData("text/plain", timelineDragEntity.label);
+          }}
           onClick={() => {
             if (boardTitleReadOnly) return;
             onSetBoardTitleDraft(activeBoardTitle);

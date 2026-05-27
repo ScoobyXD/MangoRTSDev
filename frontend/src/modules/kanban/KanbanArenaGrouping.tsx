@@ -25,7 +25,7 @@ import {
   KANBAN_SURFACE,
 } from "./KanbanContentModel";
 
-export type ArenaGroupMenuID = "toolbar-x" | "toolbar-y" | "board-x" | "board-y";
+export type ArenaGroupMenuID = "toolbar-x" | "toolbar-y";
 
 type ArenaGroupSelectProps = {
   value: KanbanGroupField;
@@ -34,7 +34,6 @@ type ArenaGroupSelectProps = {
   menuID: ArenaGroupMenuID;
   sortDirection: KanbanGroupSortDirection;
   onToggleSortDirection: () => void;
-  layout?: "inline" | "compact";
   menuOpen: boolean;
   onSetMenuOpen: (menuID: ArenaGroupMenuID | null) => void;
   isDark: boolean;
@@ -50,7 +49,6 @@ function ArenaGroupSelect({
   menuID,
   sortDirection,
   onToggleSortDirection,
-  layout = "inline",
   menuOpen,
   onSetMenuOpen,
   isDark,
@@ -63,7 +61,6 @@ function ArenaGroupSelect({
   const selectedBackground = isDark ? "rgba(100, 116, 139, 0.18)" : `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`;
   const hoveredBackground = "rgba(100, 116, 139, 0.14)";
   const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
-  const compact = layout === "compact";
   const sortButton = (
     <button
       className="mango-elevated-action"
@@ -71,17 +68,16 @@ function ArenaGroupSelect({
       title={`${label} sort ${sortDirection === "asc" ? "ascending" : "descending"}`}
       onClick={onToggleSortDirection}
       style={{
-        height: compact ? 20 : 28,
-        minWidth: compact ? 44 : undefined,
+        height: 28,
         border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`,
-        borderRadius: compact ? 7 : 8,
+        borderRadius: 8,
         background: isDark ? cardBackground : KANBAN_SURFACE,
         color: text,
         font: "inherit",
-        fontSize: compact ? 9 : 10.5,
+        fontSize: 10.5,
         fontWeight: 500,
         cursor: "pointer",
-        padding: compact ? "0 5px" : "0 8px",
+        padding: "0 8px",
         textAlign: "center",
         boxShadow: isDark ? "none" : KANBAN_SHADOW,
       }}
@@ -112,7 +108,7 @@ function ArenaGroupSelect({
           font: "inherit",
           fontSize: 11,
           fontWeight: 500,
-          padding: compact ? "4px 6px" : "4px 8px",
+          padding: "4px 8px",
           cursor: "pointer",
           textAlign: "left",
           boxShadow: isDark ? (menuOpen ? "0 0 0 2px rgba(100, 116, 139, 0.14)" : "none") : KANBAN_SHADOW,
@@ -191,18 +187,6 @@ function ArenaGroupSelect({
     </span>
   );
 
-  if (compact) {
-    return (
-      <div data-arena-group-controls="true" style={{ display: "grid", gap: 4, minWidth: 0 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, color: text, opacity: 0.72 }}>{label}</span>
-        <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 4, minWidth: 0 }}>
-          {selectButton}
-          {sortButton}
-        </span>
-      </div>
-    );
-  }
-
   return (
     <div data-arena-group-controls="true" style={{ display: "grid", gridTemplateColumns: "52px minmax(0, 160px) auto", alignItems: "center", gap: 8, minWidth: 0 }}>
       <span style={{ color: text, opacity: 0.72, fontSize: 10.5, fontWeight: 700, textAlign: "right" }}>{label}</span>
@@ -279,36 +263,12 @@ export function KanbanArenaGroupingControls({
 
 export function KanbanArenaGroupedBoard({
   groupedBoard,
-  yGroupBy,
-  xGroupBy,
-  ySortDirection,
-  xSortDirection,
-  menuOpen,
-  onSetMenuOpen,
-  onSetYGroupBy,
-  onSetXGroupBy,
-  onToggleYSortDirection,
-  onToggleXSortDirection,
   isDark,
-  line,
-  cardBackground,
   text,
   renderCard,
 }: {
   groupedBoard: KanbanGroupedBoardLayout;
-  yGroupBy: KanbanGroupField;
-  xGroupBy: KanbanGroupField;
-  ySortDirection: KanbanGroupSortDirection;
-  xSortDirection: KanbanGroupSortDirection;
-  menuOpen: ArenaGroupMenuID | null;
-  onSetMenuOpen: (menuID: ArenaGroupMenuID | null) => void;
-  onSetYGroupBy: (value: KanbanGroupField) => void;
-  onSetXGroupBy: (value: KanbanGroupField) => void;
-  onToggleYSortDirection: () => void;
-  onToggleXSortDirection: () => void;
   isDark: boolean;
-  line: string;
-  cardBackground: string;
   text: string;
   renderCard: (card: KanbanCard) => React.ReactNode;
 }) {
@@ -330,17 +290,10 @@ export function KanbanArenaGroupedBoard({
         alignItems: "stretch",
       }}
     >
-      <div style={{ position: "sticky", left: 0, zIndex: 7, border: `1px solid ${glassBorder}`, borderTopLeftRadius: 8, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8 }}>
-        <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" menuID="board-y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} layout="compact" menuOpen={menuOpen === "board-y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
-      </div>
+      <div aria-hidden="true" style={{ position: "sticky", left: 0, zIndex: 7, border: `1px solid ${glassBorder}`, borderTopLeftRadius: 8, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8 }} />
       {groupedBoard.columns.map((column, columnIndex) => (
         <div key={column.key} style={{ border: `1px solid ${glassBorder}`, borderLeft: columnIndex === 0 ? "none" : undefined, borderTopRightRadius: columnIndex === groupedBoard.columns.length - 1 ? 8 : 0, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8, minWidth: 0 }}>
-          {columnIndex === 0 ? (
-            <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" menuID="board-x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} layout="compact" menuOpen={menuOpen === "board-x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
-          ) : (
-            <div style={{ minHeight: 44 }} />
-          )}
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{column.label}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{column.label}</div>
         </div>
       ))}
       {groupedBoard.rows.flatMap((row, rowIndex) => [

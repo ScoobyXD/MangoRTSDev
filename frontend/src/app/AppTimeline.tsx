@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import { getExplorerDropPayloadItems } from "../modules/company-explorer/treePresentation";
+import { EXPLORER_ENTITY_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared";
 import FrameRightClickMenu from "./framerightclickmenu";
 import {
   APP_TIMELINE_STEP_MINUTES,
@@ -462,16 +463,21 @@ function useTimelineMetrics(range: Pick<AppTimelineDay, "startMinute" | "endMinu
 }
 
 function hasExplorerTimelineDrag(dataTransfer: DataTransfer): boolean {
-  return Array.from(dataTransfer.types).includes(EXPLORER_DRAG_MIME);
+  const types = Array.from(dataTransfer.types);
+  return types.includes(EXPLORER_DRAG_MIME) || types.includes(EXPLORER_ENTITY_DRAG_MIME);
 }
 
 function timelineDropsFromDataTransfer(dataTransfer: DataTransfer): AppTimelineDropInput[] {
+  const nodeItems = parseExplorerEntityDragItems(dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
+  const nodeLabelByID = new Map(nodeItems.map((item) => [item.nodeID, item.label]));
   const payload = readExplorerDragPayload(dataTransfer);
-  if (!payload) return [];
+  if (!payload) {
+    return nodeItems.map((item) => ({ kind: "node", entityID: item.nodeID, label: item.label }));
+  }
   const droppedText = dataTransfer.getData("text/plain").trim();
 
   if (payload.kind === "node" && payload.itemID) {
-    return [{ kind: "node", entityID: payload.itemID, label: droppedText || payload.itemID }];
+    return [{ kind: "node", entityID: payload.itemID, label: nodeLabelByID.get(payload.itemID) || droppedText || payload.itemID }];
   }
   if (payload.kind === "logic_gate" && payload.itemID) {
     return [{ kind: "logic_gate", entityID: payload.itemID, label: droppedText || payload.itemID }];
@@ -483,7 +489,7 @@ function timelineDropsFromDataTransfer(dataTransfer: DataTransfer): AppTimelineD
   return items.map((item) => ({
     kind: item.itemType === "node" ? "node" : "logic_gate",
     entityID: item.itemID,
-    label: singleLabel || (item.itemType === "node" ? "Node" : "Logic Gate"),
+    label: item.itemType === "node" ? (nodeLabelByID.get(item.itemID) || singleLabel || "Node") : (singleLabel || "Logic Gate"),
   }));
 }
 
