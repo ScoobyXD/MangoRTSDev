@@ -111,41 +111,151 @@ const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
 const COMPANY_SEARCH_LIMIT = 100;
 
 const panelStyle: React.CSSProperties = {
-  minHeight: "100vh",
+  width: "100vw",
+  height: "100vh",
   display: "grid",
   placeItems: "center",
-  background: "#ffffff",
+  padding: "clamp(18px, 5vh, 42px) 16px",
+  overflowY: "auto",
+  background:
+    "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(242,245,250,0.92) 42%, rgba(232,237,246,0.96) 100%)",
   color: "#111827",
   fontFamily: "var(--mango-font-family)",
 };
 
 const formStyle: React.CSSProperties = {
-  width: "min(420px, calc(100vw - 32px))",
+  width: "100%",
+  maxWidth: 456,
   display: "grid",
-  gap: 12,
-  padding: 18,
-  border: "1px solid rgba(100, 116, 139, 0.35)",
-  background: "#ffffff",
+  gap: 16,
+  padding: 20,
+  border: "1px solid rgba(255, 255, 255, 0.84)",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.9) 100%)",
   borderRadius: 8,
-  boxShadow: "0 12px 34px rgba(15, 23, 42, 0.12)",
+  boxShadow: "12px 12px 30px rgba(174, 174, 192, 0.30), -10px -10px 24px rgba(255, 255, 255, 0.96), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
+  backdropFilter: "blur(16px) saturate(1.08)",
+  WebkitBackdropFilter: "blur(16px) saturate(1.08)",
 };
 
 const inputStyle: React.CSSProperties = {
-  height: 38,
-  border: "1px solid rgba(100, 116, 139, 0.35)",
-  borderRadius: 6,
-  padding: "0 10px",
+  width: "100%",
+  minWidth: 0,
+  height: 42,
+  border: "1px solid rgba(255, 255, 255, 0.82)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
+  color: "#111827",
   font: "inherit",
+  fontSize: 13,
+  fontWeight: 520,
+  outline: "none",
+  padding: "0 12px",
+  boxShadow: "inset 3px 3px 7px rgba(174, 174, 192, 0.22), inset -3px -3px 7px rgba(255, 255, 255, 0.92), 0 0 0 1px rgba(100, 116, 139, 0.08)",
 };
 
 const buttonStyle: React.CSSProperties = {
-  height: 38,
-  border: "1px solid #334155",
-  borderRadius: 6,
+  minHeight: 42,
+  border: "1px solid rgba(51, 65, 85, 0.86)",
+  borderRadius: 8,
   background: "var(--mango-gradient)",
-  color: "#111827",
+  color: "#ffffff",
   cursor: "pointer",
-  fontWeight: 600,
+  font: "inherit",
+  fontSize: 13,
+  fontWeight: 760,
+  letterSpacing: 0,
+  padding: "0 14px",
+  boxShadow: "7px 7px 16px rgba(174, 174, 192, 0.30), -5px -5px 13px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.16)",
+};
+
+const authHeaderStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 11,
+};
+
+const authTitleRowStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  minWidth: 0,
+};
+
+const authTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#111827",
+  fontSize: 15,
+  fontWeight: 760,
+  letterSpacing: 0,
+  lineHeight: 1.1,
+};
+
+const authAccentRailStyle: React.CSSProperties = {
+  height: 5,
+  borderRadius: 999,
+  background: "var(--mango-brand-gradient)",
+  boxShadow: "0 9px 20px rgba(255, 136, 32, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.42)",
+};
+
+const authFormStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const authFieldStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  minWidth: 0,
+};
+
+const authFieldLabelStyle: React.CSSProperties = {
+  color: "rgba(15, 23, 42, 0.68)",
+  fontSize: 11,
+  fontWeight: 760,
+  letterSpacing: 0,
+};
+
+const authActionRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const authErrorStyle: React.CSSProperties = {
+  color: "#be123c",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1.4,
+  border: "1px solid rgba(225, 29, 72, 0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(255, 241, 242, 0.96), rgba(255, 247, 237, 0.72))",
+  padding: "9px 10px",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)",
+};
+
+const authInfoMessageStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 650,
+  lineHeight: 1.4,
+  border: "1px solid rgba(100, 116, 139, 0.18)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(241, 245, 249, 0.72))",
+  padding: "9px 10px",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)",
+};
+
+const authSuccessMessageStyle: React.CSSProperties = {
+  color: "#047857",
+  fontSize: 12,
+  fontWeight: 760,
+  lineHeight: 1.4,
+  border: "1px solid rgba(5, 150, 105, 0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(224, 242, 254, 0.72))",
+  padding: "9px 10px",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)",
 };
 
 export default function AuthGate() {
@@ -516,6 +626,39 @@ function CompanySearchSelect({
   );
 }
 
+type AuthTextFieldProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "className" | "style"> & {
+  label: string;
+};
+
+function AuthTextField({ label, id, ...inputProps }: AuthTextFieldProps) {
+  const generatedID = React.useId();
+  const inputID = id ?? generatedID;
+  return (
+    <label style={authFieldStyle} htmlFor={inputID}>
+      <span style={authFieldLabelStyle}>{label}</span>
+      <input id={inputID} className="mango-auth-input" style={inputStyle} {...inputProps} />
+    </label>
+  );
+}
+
+type AuthButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className" | "style">;
+
+function AuthPrimaryButton({ children, ...buttonProps }: AuthButtonProps) {
+  return (
+    <button className="mango-auth-primary" style={buttonStyle} {...buttonProps}>
+      {children}
+    </button>
+  );
+}
+
+function AuthSecondaryButton({ children, ...buttonProps }: AuthButtonProps) {
+  return (
+    <button className="mango-auth-secondary" style={linkButtonStyle} {...buttonProps}>
+      {children}
+    </button>
+  );
+}
+
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -523,7 +666,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
   const [busy, setBusy] = useState(false);
   return (
     <AuthPanel title="MangoRTS" error={error}>
-      <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
+      <form style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true);
         setError("");
@@ -542,13 +685,13 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
           setBusy(false);
         }
       }}>
-        <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
-        <input style={inputStyle} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" />
-        <button style={buttonStyle} disabled={busy}>{busy ? "Signing in" : "Sign in"}</button>
+        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
+        <AuthTextField label="Password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" />
+        <AuthPrimaryButton disabled={busy}>{busy ? "Signing in" : "Sign in"}</AuthPrimaryButton>
       </form>
-      <div style={{ display: "flex", gap: 10, justifyContent: "space-between", fontSize: 12 }}>
-        <button style={linkButtonStyle} onClick={() => onNavigate("/accept-invite")}>Accept invite</button>
-        <button style={linkButtonStyle} onClick={() => onNavigate("/forgot-password")}>Forgot password</button>
+      <div style={authActionRowStyle}>
+        <AuthSecondaryButton type="button" onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
+        <AuthSecondaryButton type="button" onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
       </div>
     </AuthPanel>
   );
@@ -567,7 +710,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
   const showPasswordStep = !passwordStepComplete && !hasStoredToken();
   return (
     <AuthPanel title="Accept Invite" error={error}>
-      <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
+      <form style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true);
         setError("");
@@ -628,14 +771,14 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           setBusy(false);
         }
       }}>
-        <input style={inputStyle} value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" />
-        <input style={inputStyle} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" />
-        {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />}
-        {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary or current password" autoComplete="current-password" />}
-        {showPasswordStep && <input style={inputStyle} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
-        <button style={buttonStyle} disabled={busy}>{busy ? "Accepting" : "Accept invite"}</button>
+        <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />
+        <AuthTextField label="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" />
+        {showPasswordStep && !pendingChallenge && <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />}
+        {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary or current password" autoComplete="current-password" />}
+        {showPasswordStep && <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
+        <AuthPrimaryButton disabled={busy}>{busy ? "Accepting" : "Accept invite"}</AuthPrimaryButton>
       </form>
-      <button style={linkButtonStyle} onClick={() => onNavigate("/login")}>Back to login</button>
+      <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
     </AuthPanel>
   );
 }
@@ -652,7 +795,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
   const [busy, setBusy] = useState(false);
   return (
     <AuthPanel title="Forgot Password" error={error}>
-      <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
+      <form style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setError("");
         setSuccess("");
@@ -669,12 +812,12 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
           setBusy(false);
         }
       }}>
-        <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
-        <button style={buttonStyle} disabled={busy}>{busy ? "Sending" : "Send reset code"}</button>
+        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
+        <AuthPrimaryButton disabled={busy}>{busy ? "Sending" : "Send reset code"}</AuthPrimaryButton>
       </form>
-      {message && <div style={{ fontSize: 12 }}>{message}</div>}
+      {message && <div style={authInfoMessageStyle}>{message}</div>}
       {codeEntryOpen && (
-        <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
+        <form style={authFormStyle} onSubmit={async (event) => {
           event.preventDefault();
           setError("");
           setSuccess("");
@@ -694,16 +837,13 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
             setBusy(false);
           }
         }}>
-          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>
-            Enter reset code in here
-            <input style={inputStyle} value={code} onChange={(event) => setCode(event.target.value)} placeholder="Reset code" autoComplete="one-time-code" />
-          </label>
-          <input style={inputStyle} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
-          <button style={buttonStyle} disabled={busy}>{busy ? "Submitting" : "Submit"}</button>
+          <AuthTextField label="Reset code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="Reset code" autoComplete="one-time-code" />
+          <AuthTextField label="New password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+          <AuthPrimaryButton disabled={busy}>{busy ? "Submitting" : "Submit"}</AuthPrimaryButton>
         </form>
       )}
-      {success && <div style={successMessageStyle}>{success}</div>}
-      <button style={linkButtonStyle} onClick={() => onNavigate("/login")}>Back to login</button>
+      {success && <div style={authSuccessMessageStyle}>{success}</div>}
+      <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
     </AuthPanel>
   );
 }
@@ -1232,11 +1372,18 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
 }
 
 function AuthPanel({ title, error, children }: { title: string; error?: string; children: React.ReactNode }) {
+  const heading = title === "MangoRTS" ? "Sign in" : title;
   return (
     <div style={panelStyle}>
       <div style={formStyle}>
-        <h1 style={{ margin: 0, lineHeight: 1 }}>{title === "MangoRTS" ? <MangoWordmark size={28} weight={500} /> : title}</h1>
-        {error && <div style={{ color: "#b00020", fontSize: 12 }}>{error}</div>}
+        <div style={authHeaderStyle}>
+          <div style={authTitleRowStyle}>
+            <MangoWordmark size={28} weight={680} />
+            <h1 style={authTitleStyle}>{heading}</h1>
+          </div>
+          <div style={authAccentRailStyle} />
+        </div>
+        {error && <div role="alert" style={authErrorStyle}>{error}</div>}
         {children}
       </div>
     </div>
@@ -1278,12 +1425,21 @@ function logoutAndNavigate(navigate: (path: string) => void): void {
 }
 
 const linkButtonStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
+  minHeight: 34,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.88) 0%, rgba(246, 247, 251, 0.82) 100%)",
   color: "#334155",
   cursor: "pointer",
   font: "inherit",
-  padding: 0,
+  fontSize: 12,
+  fontWeight: 720,
+  letterSpacing: 0,
+  padding: "0 12px",
+  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.22), -5px -5px 12px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
 };
 
 const smallButtonStyle: React.CSSProperties = {

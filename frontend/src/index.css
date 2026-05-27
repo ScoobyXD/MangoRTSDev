@@ -47,6 +47,56 @@ button, input, textarea, select {
   font-style: normal;
 }
 
+.mango-auth-input,
+.mango-auth-primary,
+.mango-auth-secondary {
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease, color 150ms ease, filter 150ms ease;
+}
+
+.mango-auth-input::placeholder {
+  color: rgba(71, 85, 105, 0.48);
+}
+
+.mango-auth-input:focus {
+  border-color: rgba(92, 238, 255, 0.76) !important;
+  box-shadow:
+    0 0 0 3px rgba(92, 238, 255, 0.15),
+    0 0 18px rgba(183, 124, 255, 0.16),
+    inset 2px 2px 6px rgba(174, 174, 192, 0.18),
+    inset -2px -2px 6px rgba(255, 255, 255, 0.9) !important;
+}
+
+.mango-auth-primary:not(:disabled):hover,
+.mango-auth-secondary:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.mango-auth-primary:not(:disabled):hover {
+  filter: saturate(1.08) brightness(1.04);
+  box-shadow:
+    9px 9px 19px rgba(174, 174, 192, 0.34),
+    -6px -6px 15px rgba(255, 255, 255, 0.94),
+    0 0 18px rgba(71, 85, 105, 0.24),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.18) !important;
+}
+
+.mango-auth-secondary:not(:disabled):hover {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(230, 252, 255, 0.58) 46%, rgba(247, 239, 255, 0.66)) padding-box,
+    linear-gradient(135deg, rgba(92, 238, 255, 0.9), rgba(128, 216, 255, 0.76) 34%, rgba(183, 124, 255, 0.82) 72%, rgba(255, 255, 255, 0.86)) border-box !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 9px 22px rgba(15, 23, 42, 0.12),
+    0 0 15px rgba(183, 124, 255, 0.2),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.86) !important;
+}
+
+.mango-auth-primary:disabled,
+.mango-auth-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 /* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */
 .company-explorer-scroll {
   --company-explorer-scroll-accent: rgb(71, 85, 105);
