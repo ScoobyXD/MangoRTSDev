@@ -49,6 +49,7 @@ type IdentityRepository interface {
 	GetAuthUserByEmail(email string) (domain.User, error)
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
+	AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error)
 	CreateCompany(name string) (domain.Company, error)
 	ListCompanies(query string, limit int) ([]domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)

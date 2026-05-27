@@ -348,6 +348,9 @@ export default function AuthGate() {
     if (normalizedPath === "/accept-invite") {
       return <AcceptInvitePage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
     }
+    if (normalizedPath === "/complete-account") {
+      return <CompleteAccountPage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
+    }
     if (normalizedPath === "/forgot-password") {
       return <ForgotPasswordPage onNavigate={navigate} />;
     }
@@ -707,7 +710,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
           const result = await loginWithPassword(email, password);
           if (result.status === "new_password_required") {
             onChallenge(result);
-            onNavigate("/accept-invite");
+            onNavigate("/complete-account");
             return;
           }
           await onAuthenticated();
@@ -726,6 +729,50 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
         <AuthSecondaryButton type="button" onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
         <AuthSecondaryButton type="button" onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
       </div>
+    </AuthPanel>
+  );
+}
+
+function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!pendingChallenge) {
+    return (
+      <AuthPanel title="Complete Account" error={error}>
+        <div style={authInfoMessageStyle}>Sign in with your temporary password first.</div>
+        <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
+      </AuthPanel>
+    );
+  }
+
+  return (
+    <AuthPanel title="Complete Account" error={error}>
+      <form style={authFormStyle} onSubmit={async (event) => {
+        event.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+          if (!newPassword.trim()) {
+            throw new Error("Enter a new password.");
+          }
+          await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
+          onChallenge(null);
+          await onAuthenticated();
+          onNavigate("/home");
+        } catch (completeError) {
+          console.error("Account completion failed", completeError);
+          setError(formatAuthError(completeError, "Account completion failed"));
+        } finally {
+          setBusy(false);
+        }
+      }}>
+        <div style={authInfoMessageStyle}>Account setup for {pendingChallenge.username}.</div>
+        <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+        <AuthPrimaryButton disabled={busy}>{busy ? "Completing" : "Complete account"}</AuthPrimaryButton>
+      </form>
+      <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
     </AuthPanel>
   );
 }

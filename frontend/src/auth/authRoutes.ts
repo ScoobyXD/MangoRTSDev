@@ -1,4 +1,4 @@
-export const AUTH_PATHS = new Set(["/login", "/accept-invite", "/forgot-password", "/reset-password"]);
+export const AUTH_PATHS = new Set(["/login", "/accept-invite", "/complete-account", "/forgot-password", "/reset-password"]);
 
 const LEGACY_AUTHENTICATED_PATHS = new Map([
   ["/admin/users", "/settings"],
@@ -14,7 +14,7 @@ export function nextPathForAuthState(pathname: string, authenticated: boolean): 
   const path = normalizePath(pathname);
   if (!authenticated && !isAuthPath(path)) return "/login";
   if (authenticated && LEGACY_AUTHENTICATED_PATHS.has(path)) return LEGACY_AUTHENTICATED_PATHS.get(path) ?? path;
-  if (authenticated && path === "/login") return "/home";
+  if (authenticated && (path === "/login" || path === "/complete-account")) return "/home";
   return path;
 }
 

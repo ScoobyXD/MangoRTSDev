@@ -26,6 +26,11 @@ type AuthEmailSender interface {
 	SendSignupConfirmation(ctx context.Context, email, companyName string) error
 }
 
+type BootstrapDevAdminConfig struct {
+	Emails      []string
+	CompanyName string
+}
+
 type Server struct {
 	repo                        store.Repository
 	hub                         *workspaceEventHub
@@ -49,6 +54,7 @@ type Server struct {
 	cognitoAdmin                CognitoAdminClient
 	emailSender                 AuthEmailSender
 	appBaseURL                  string
+	bootstrapDevAdmin           BootstrapDevAdminConfig
 	nylasClient                 NylasClient
 	nylasConfig                 NylasConfig
 	maxBodyBytes                int64
@@ -63,6 +69,7 @@ type ServerOptions struct {
 	CognitoAdmin                  CognitoAdminClient
 	EmailSender                   AuthEmailSender
 	AppBaseURL                    string
+	BootstrapDevAdmin             BootstrapDevAdminConfig
 	NylasClient                   NylasClient
 	NylasConfig                   NylasConfig
 	MaxRequestBodyBytes           int64
@@ -77,6 +84,27 @@ type ServerOptions struct {
 
 func NewServer(repo store.Repository) *Server {
 	return NewServerWithOptions(repo, ServerOptions{})
+}
+
+func normalizeBootstrapDevAdminConfig(config BootstrapDevAdminConfig) BootstrapDevAdminConfig {
+	seen := make(map[string]bool, len(config.Emails))
+	emails := make([]string, 0, len(config.Emails))
+	for _, email := range config.Emails {
+		normalized := strings.ToLower(strings.TrimSpace(email))
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		emails = append(emails, normalized)
+	}
+	companyName := strings.TrimSpace(config.CompanyName)
+	if companyName == "" {
+		companyName = "MangoRTS Bootstrap"
+	}
+	return BootstrapDevAdminConfig{
+		Emails:      emails,
+		CompanyName: companyName,
+	}
 }
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
@@ -117,6 +145,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		cognitoAdmin:                options.CognitoAdmin,
 		emailSender:                 options.EmailSender,
 		appBaseURL:                  strings.TrimSpace(options.AppBaseURL),
+		bootstrapDevAdmin:           normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
 		nylasClient:                 options.NylasClient,
 		nylasConfig:                 options.NylasConfig,
 		maxBodyBytes:                options.MaxRequestBodyBytes,

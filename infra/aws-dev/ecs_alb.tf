@@ -108,6 +108,8 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "MANGORTS_APP_URL", value = "https://${local.app_domain}" },
           { name = "MANGORTS_API_URL", value = "https://${local.api_domain}" },
           { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
+          { name = "MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS", value = var.bootstrap_dev_admin_emails },
+          { name = "MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", value = var.bootstrap_dev_company_name },
           { name = "DB_HOST", value = var.existing_db_host },
           { name = "DB_PORT", value = tostring(var.existing_db_port) },
           { name = "DB_NAME", value = var.existing_db_name },

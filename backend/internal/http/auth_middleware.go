@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"net/http"
@@ -68,6 +69,21 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
 				return
 			}
+			if len(memberships) == 0 {
+				bootstrapped, err := s.maybeBootstrapDevAdmin(claims)
+				if err != nil {
+					log.Printf("failed to bootstrap dev admin email=%s subject=%s: %v", claims.Email, claims.Subject, err)
+					writeError(w, http.StatusInternalServerError, "failed_to_bootstrap_dev_admin")
+					return
+				}
+				if bootstrapped {
+					memberships, err = s.repo.ListUserMemberships(user.UserID)
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
+						return
+					}
+				}
+			}
 			actor = ActorContext{
 				Claims:      claims,
 				User:        user,
@@ -104,6 +120,33 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, actorContextKey{}, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) maybeBootstrapDevAdmin(claims auth.Claims) (bool, error) {
+	config := s.bootstrapDevAdmin
+	email := normalizeEmailForCompare(claims.Email)
+	if email == "" || len(config.Emails) == 0 {
+		return false, nil
+	}
+	allowed := false
+	for _, candidate := range config.Emails {
+		if candidate == email {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return false, nil
+	}
+	company, err := s.repo.CreateCompany(config.CompanyName)
+	if err != nil {
+		return false, err
+	}
+	if _, err := s.repo.AddCompanyMembership(claims.Subject, company.CompanyID, domain.RoleDevAdmin); err != nil {
+		return false, err
+	}
+	log.Printf("bootstrapped dev admin email=%s subject=%s company_id=%s", email, claims.Subject, company.CompanyID)
+	return true, nil
 }
 
 func isPublicAuthEndpoint(path string) bool {

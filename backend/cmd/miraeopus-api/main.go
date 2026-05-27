@@ -23,10 +23,14 @@ func main() {
 	repo, workspaceFanout, cleanup := buildRepository()
 	defer cleanup()
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
-		AuthValidator:        buildAuthValidator(),
-		CognitoAdmin:         buildCognitoAdminClient(),
-		EmailSender:          buildEmailSender(),
-		AppBaseURL:           strings.TrimSpace(os.Getenv("MANGORTS_APP_URL")),
+		AuthValidator: buildAuthValidator(),
+		CognitoAdmin:  buildCognitoAdminClient(),
+		EmailSender:   buildEmailSender(),
+		AppBaseURL:    strings.TrimSpace(os.Getenv("MANGORTS_APP_URL")),
+		BootstrapDevAdmin: httpapi.BootstrapDevAdminConfig{
+			Emails:      splitScopes(os.Getenv("MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS")),
+			CompanyName: getenvDefault("MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", "MangoRTS Bootstrap"),
+		},
 		NylasClient:          buildNylasClient(),
 		NylasConfig:          buildNylasConfig(),
 		WorkspaceEventFanout: workspaceFanout,
