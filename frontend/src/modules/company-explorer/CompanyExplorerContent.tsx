@@ -127,6 +127,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   selectionTargetFrameIDs,
   scopedRootFolderKind,
   scopedRootFolderName = "",
+  externalSearchQuery,
+  onSearchResultSelect,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -173,6 +175,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const effectiveExplorerSearchQuery = externalSearchQuery ?? explorerSearchQuery;
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -302,7 +305,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(fullTreeRows)
   ), [fullTreeRows, scopedExplorerActive, scopedRootFolder]);
-  const explorerSearchText = explorerSearchQuery.trim();
+  const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
@@ -321,11 +324,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       : hideMainExplorerRootFolders(rows);
   }, [folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder]);
   const explorerSearchViewRows = useMemo(() => (
-    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: explorerSearchQuery })
-  ), [allExpandedSearchTreeRows, explorerSearchQuery]);
+    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
+  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
   const explorerSearchResults = useMemo(() => (
-    buildExplorerSearchResults({ rows: allExpandedSearchTreeRows, selectedRowID: "", query: explorerSearchQuery, limit: 1 })
-  ), [allExpandedSearchTreeRows, explorerSearchQuery]);
+    buildExplorerSearchResults({ rows: allExpandedSearchTreeRows, selectedRowID: "", query: effectiveExplorerSearchQuery, limit: 1 })
+  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
   const treeRows = explorerSearchActive ? explorerSearchViewRows : baseTreeRows;
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);
@@ -1147,9 +1150,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setSelectionAnchorTreeID(row.id);
     focusTreeRow(row, { selectionIntent: "activate" });
     emitExplorerEntityActivation(row);
+    onSearchResultSelect?.();
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = row.id;
-  }, [emitExplorerEntityActivation, expandTreeIDs, focusTreeRow]);
+  }, [emitExplorerEntityActivation, expandTreeIDs, focusTreeRow, onSearchResultSelect]);
 
   useEffect(() => {
     const rowID = pendingScrollTreeIDRef.current;
@@ -1604,7 +1608,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         expanded={expanded}
         selectedTreeID={selectedTreeID}
         selectedTreeIDs={selectedTreeIDs}
-        explorerSearchQuery={explorerSearchQuery}
+        explorerSearchQuery={effectiveExplorerSearchQuery}
         explorerSearchActive={explorerSearchActive}
         explorerSearchResult={explorerSearchResults[0] ?? null}
         draggingTreeID={draggingTreeID}

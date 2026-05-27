@@ -53,10 +53,11 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
 export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
+const SIDEBAR_EXPLORER_SEARCH_WIDGET_ID = "app-sidebar-explorer-search";
 const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-function";
 const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
-const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v1";
+const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
 const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
@@ -248,9 +249,11 @@ export function AppSidebar({
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
   const notificationSummary = useNotificationSummary(companyID);
-  const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", true);
-  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", false);
-  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", false);
+  const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
+  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", true);
+  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", true);
+  const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const [explorerSearchOpen, setExplorerSearchOpen] = useState(false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -905,6 +908,13 @@ export function AppSidebar({
       </div>
 
       <section style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
+        <AppSidebarExplorerSearch
+          query={explorerSearchQuery}
+          open={explorerSearchOpen}
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          onQueryChange={setExplorerSearchQuery}
+          onOpenChange={setExplorerSearchOpen}
+        />
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
@@ -1331,6 +1341,78 @@ const SharedInboxAssignedEmailIcon: React.FC = () => (
   </svg>
 );
 
+function AppSidebarExplorerSearch({
+  query,
+  open,
+  selectionTargetFrameIDs,
+  onQueryChange,
+  onOpenChange,
+}: {
+  query: string;
+  open: boolean;
+  selectionTargetFrameIDs: string[];
+  onQueryChange: (query: string) => void;
+  onOpenChange: (open: boolean) => void;
+}): React.ReactElement {
+  const trimmedQuery = query.trim();
+  const dropdownOpen = open && trimmedQuery.length > 0;
+  return (
+    <div
+      style={appSidebarExplorerSearchBlockStyle}
+      onBlur={(event) => {
+        const currentTarget = event.currentTarget;
+        window.requestAnimationFrame(() => {
+          if (!currentTarget.contains(document.activeElement)) onOpenChange(false);
+        });
+      }}
+    >
+      <div data-frame-interactive="true" style={appSidebarExplorerSearchShellStyle(dropdownOpen)}>
+        <input
+          aria-label="Search Explorer"
+          value={query}
+          onFocus={() => {
+            if (trimmedQuery) onOpenChange(true);
+          }}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            onQueryChange(nextQuery);
+            onOpenChange(nextQuery.trim().length > 0);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onQueryChange("");
+              onOpenChange(false);
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder="Search Explorer"
+          style={appSidebarExplorerSearchInputStyle}
+        />
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={appSidebarExplorerSearchIconStyle}>
+          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+      {dropdownOpen && (
+        <div className="app-sidebar-elevated-dropdown company-explorer-scroll" style={appSidebarExplorerSearchDropdownStyle}>
+          <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerSearchFallbackStyle} />}>
+            <SidebarCompanyExplorerContent
+              accent={SIDEBAR_ACTIVE_TEXT}
+              widgetId={SIDEBAR_EXPLORER_SEARCH_WIDGET_ID}
+              theme="light"
+              hideTopControls
+              externalSearchQuery={query}
+              selectionTargetFrameIDs={selectionTargetFrameIDs}
+              onSearchResultSelect={() => onOpenChange(false)}
+            />
+          </React.Suspense>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppSidebarScopedExplorerSection({
   label,
   open,
@@ -1673,6 +1755,75 @@ const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
   minWidth: 0,
   padding: "2px 3px 14px",
   borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
+};
+
+const appSidebarExplorerSearchBlockStyle: React.CSSProperties = {
+  position: "relative",
+  zIndex: 40,
+  minWidth: 0,
+};
+
+function appSidebarExplorerSearchShellStyle(open: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    display: "block",
+    minWidth: 0,
+    height: 36,
+    border: `1px solid ${open ? "transparent" : "rgba(255, 255, 255, 0.78)"}`,
+    borderRadius: SIDEBAR_ELEVATED_RADIUS,
+    background: open
+      ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`
+      : "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
+    boxShadow: open
+      ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`
+      : "5px 5px 12px rgba(174, 174, 192, 0.22), -5px -5px 12px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease",
+  };
+}
+
+const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  boxSizing: "border-box",
+  border: "none",
+  borderRadius: SIDEBAR_ELEVATED_RADIUS,
+  background: "transparent",
+  color: SIDEBAR_ACTIVE_TEXT,
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 650,
+  padding: "0 32px 0 11px",
+  outline: "none",
+};
+
+const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 10,
+  top: 11,
+  color: "rgba(15, 23, 42, 0.58)",
+  pointerEvents: "none",
+};
+
+const appSidebarExplorerSearchDropdownStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: "calc(100% + 7px)",
+  zIndex: 80,
+  height: "min(340px, calc(100vh - 150px))",
+  minHeight: 180,
+  minWidth: 0,
+  overflow: "hidden",
+  border: "1px solid transparent",
+  borderRadius: SIDEBAR_ELEVATED_RADIUS,
+  background: `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`,
+  boxShadow: `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`,
+};
+
+const appSidebarExplorerSearchFallbackStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  background: "transparent",
 };
 
 const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
