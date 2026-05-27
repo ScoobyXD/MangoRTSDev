@@ -28,6 +28,9 @@ const HOME_KEY_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 2
 const HOME_KEY_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
 const HOME_MAIL_UNREAD_EDGE = "#38bdf8";
 const HOME_MAIL_UNREAD_EDGE_FRAME = "linear-gradient(#38bdf8, #38bdf8)";
+const HOME_MAIL_STAR_YELLOW = "#facc15";
+const HOME_MAIL_STAR_EDGE_FRAME = "linear-gradient(135deg, #facc15 0%, #fde68a 45%, #f59e0b 100%)";
+const HOME_MAIL_STAR_EDGE_SHADOW = "0 0 0 2px rgba(250, 204, 21, 0.28), 0 0 28px rgba(250, 204, 21, 0.46), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const HOME_NODE_ICON_BLUE = "#19a8ff";
 const HOME_NODE_ICON_BLUE_SOFT = "rgba(25, 168, 255, 0.12)";
 const HOME_LOGIC_GATE_GREEN = "#19f07a";
@@ -1795,15 +1798,16 @@ export const loadingMoreStyle: React.CSSProperties = {
   fontSize: 11,
 };
 
-export function messageRowStyle(active: boolean, unread: boolean, hovered = false): React.CSSProperties {
-  const framed = active || hovered;
+export function messageRowStyle(active: boolean, unread: boolean, hovered = false, pendingStarred = false): React.CSSProperties {
+  const framed = active || hovered || pendingStarred;
+  const surface = active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE;
   return {
     display: "grid",
     gap: 4,
     minHeight: 78,
     border: `1px solid ${framed ? "transparent" : HOME_KEY_SOFT_BORDER}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
-    background: framed ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
+    background: framed ? `${surface} padding-box, ${pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
     cursor: "pointer",
     color: "#111827",
     font: "inherit",
@@ -1812,20 +1816,23 @@ export function messageRowStyle(active: boolean, unread: boolean, hovered = fals
     padding: 9,
     textAlign: "left",
     minWidth: 0,
-    boxShadow: framed ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
+    boxShadow: pendingStarred
+      ? `${HOME_KEY_RAISED_SHADOW}, ${HOME_MAIL_STAR_EDGE_SHADOW}`
+      : framed ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
     letterSpacing: 0,
-    transform: hovered ? "translateY(-2px)" : "translateY(0)",
-    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease",
+    transform: pendingStarred ? "translateY(-1px)" : hovered ? "translateY(-2px)" : "translateY(0)",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, opacity 120ms ease",
+    animation: pendingStarred ? "mango-mail-star-row 420ms ease-out both" : undefined,
   };
 }
 
-export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false, autoArchiveProgress = 0): React.CSSProperties {
-  const framed = active || hovered;
+export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false, autoArchiveProgress = 0, pendingStarred = false): React.CSSProperties {
+  const framed = active || hovered || pendingStarred;
   const outlined = framed || unread;
-  const frameBackground = unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
+  const frameBackground = pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
   const archiveProgress = Math.max(pendingAutoArchive ? 1 : 0, Math.min(1, Math.max(0, autoArchiveProgress)));
-  const archiveVisualActive = archiveProgress > 0.01;
-  const borderColor = pendingAutoArchive && unread ? HOME_MAIL_UNREAD_EDGE : outlined ? "transparent" : archiveVisualActive ? "rgba(148, 163, 184, 0.22)" : HOME_KEY_SOFT_BORDER;
+  const archiveVisualActive = !pendingStarred && archiveProgress > 0.01;
+  const borderColor = pendingStarred || outlined ? "transparent" : archiveVisualActive ? "rgba(148, 163, 184, 0.22)" : HOME_KEY_SOFT_BORDER;
   const archiveShadowAlpha = 0.12 + archiveProgress * 0.14;
   return {
     display: "grid",
@@ -1847,15 +1854,18 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     padding: "10px 10px 9px",
     textAlign: "left",
     minWidth: 0,
-    boxShadow: framed
+    boxShadow: pendingStarred
+      ? `${HOME_KEY_RAISED_SHADOW}, ${HOME_MAIL_STAR_EDGE_SHADOW}`
+      : framed
       ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
       : archiveVisualActive
         ? `inset 0 0 0 1px rgba(148, 163, 184, ${archiveShadowAlpha}), inset 0 0 ${Math.round(10 + archiveProgress * 18)}px rgba(100, 116, 139, ${0.04 + archiveProgress * 0.08})`
         : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
     filter: archiveVisualActive ? `grayscale(${Math.round(archiveProgress * 78)}%) saturate(${Math.max(0.54, 1 - archiveProgress * 0.46).toFixed(2)})` : undefined,
     letterSpacing: 0,
-    transform: hovered ? "translateY(-2px)" : "translateY(0)",
-    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease, filter 120ms ease",
+    transform: pendingStarred ? "translateY(-1px)" : hovered ? "translateY(-2px)" : "translateY(0)",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease, filter 120ms ease, opacity 120ms ease",
+    animation: pendingStarred ? "mango-mail-star-row 420ms ease-out both" : undefined,
   };
 }
 
@@ -1924,7 +1934,7 @@ export const triageMessageMetaStyle: React.CSSProperties = {
   minWidth: 94,
 };
 
-export function messageStarButtonStyle(highlighted: boolean, hovered = false): React.CSSProperties {
+export function messageStarButtonStyle(highlighted: boolean, hovered = false, flaring = false): React.CSSProperties {
   return {
     ...mailPanelSmallButtonStyle,
     width: 28,
@@ -1933,13 +1943,16 @@ export function messageStarButtonStyle(highlighted: boolean, hovered = false): R
     padding: 0,
     display: "grid",
     placeItems: "center",
-    color: highlighted ? "#facc15" : "rgba(15, 23, 42, 0.45)",
-    border: `1px solid ${highlighted ? "rgba(250, 204, 21, 0.45)" : HOME_KEY_SOFT_BORDER}`,
+    color: highlighted ? HOME_MAIL_STAR_YELLOW : "rgba(15, 23, 42, 0.45)",
+    border: `1px solid ${highlighted ? "rgba(250, 204, 21, 0.65)" : HOME_KEY_SOFT_BORDER}`,
     background: HOME_KEY_SURFACE,
-    boxShadow: hovered
+    boxShadow: flaring
+      ? "5px 5px 12px rgba(174, 174, 192, 0.3), -5px -5px 12px rgba(255, 255, 255, 0.96), 0 0 0 4px rgba(250, 204, 21, 0.22), 0 0 18px rgba(250, 204, 21, 0.52), inset 1px 1px 0 rgba(255, 255, 255, 0.92)"
+      : hovered
       ? "5px 5px 12px rgba(174, 174, 192, 0.3), -5px -5px 12px rgba(255, 255, 255, 0.94), 0 0 0 3px rgba(250, 204, 21, 0.14), inset 1px 1px 0 rgba(255, 255, 255, 0.9)"
       : "4px 4px 9px rgba(174, 174, 192, 0.24), -4px -4px 9px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
-    transform: hovered ? "translateY(-1px)" : "translateY(0)",
+    transform: flaring ? "translateY(-1px) scale(1.06)" : hovered ? "translateY(-1px)" : "translateY(0)",
+    animation: flaring ? "mango-mail-star-button 420ms ease-out both" : undefined,
   };
 }
 
