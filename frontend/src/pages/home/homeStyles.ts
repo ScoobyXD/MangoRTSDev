@@ -12,7 +12,6 @@ const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
 const HOME_NODE_RAIL_WHITE = "#ffffff";
 const HOME_NODE_RAIL_TEXT = "#111827";
 const HOME_NODE_RAIL_MUTED = "rgba(15, 23, 42, 0.58)";
-const HOME_NODE_RAIL_BORDER = "rgba(148, 163, 184, 0.28)";
 const HOME_NODE_RAIL_SCROLL = "rgba(100, 116, 139, 0.56)";
 const HOME_KEY_COLUMN_RADIUS = 16;
 const HOME_KEY_ELEVATED_RADIUS = 11;
@@ -651,40 +650,42 @@ export const nodeInboxGroupCountStyle: React.CSSProperties = {
 
 export const nodeInboxGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
-  gap: 7,
+  gridTemplateColumns: "repeat(auto-fill, minmax(82px, 1fr))",
+  gap: 8,
 };
 
 export type NodeInboxTileTone = "orange" | "light";
 
-export function nodeInboxTileStyle(selected: boolean, tone: NodeInboxTileTone = "orange"): React.CSSProperties {
-  const lightTone = tone === "light";
+export function nodeInboxTileStyle(selected: boolean, _tone: NodeInboxTileTone = "orange"): React.CSSProperties {
   return {
     position: "relative",
-    minHeight: 68,
+    minHeight: 74,
     display: "grid",
     alignContent: "center",
     justifyItems: "center",
-    gap: 5,
-    border: `1px solid ${selected ? HOME_NODE_ICON_BLUE : lightTone ? HOME_NODE_RAIL_BORDER : "rgba(25, 168, 255, 0.50)"}`,
+    gap: 6,
+    border: "1px solid transparent",
     borderRadius: 7,
-    background: selected ? HOME_NODE_ICON_BLUE_SOFT : HOME_NODE_RAIL_WHITE,
+    background: `${selected ? HOME_NODE_ICON_BLUE_SOFT : HOME_NODE_RAIL_WHITE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`,
     color: HOME_NODE_RAIL_TEXT,
     cursor: "grab",
     font: "inherit",
-    padding: "7px 6px",
+    padding: "8px 7px",
     minWidth: 0,
-    boxShadow: selected ? `0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT}` : "0 1px 0 rgba(255, 255, 255, 0.9) inset",
+    boxShadow: selected
+      ? `${HOME_KEY_EDGE_FRAME_SHADOW}, 0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT}`
+      : "0 0 0 1px rgba(120, 224, 255, 0.10), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
   };
 }
 
 export const nodeInboxTileIconStyle: React.CSSProperties = {
-  width: 22,
-  height: 22,
+  width: 30,
+  height: 30,
   display: "grid",
   placeItems: "center",
   borderRadius: 6,
   background: "transparent",
+  transform: "scale(1.35)",
 };
 
 export function nodeInboxTileTextStyle(_tone: NodeInboxTileTone = "orange"): React.CSSProperties {
@@ -698,7 +699,7 @@ export function nodeInboxTileTextStyle(_tone: NodeInboxTileTone = "orange"): Rea
     overflowWrap: "anywhere",
     textAlign: "center",
     color: HOME_NODE_RAIL_TEXT,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 800,
     lineHeight: 1.15,
   };
@@ -1766,11 +1767,12 @@ export const mailAutoArchiveGuideLineStyle: React.CSSProperties = {
   boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 -12px 22px rgba(148, 163, 184, 0.16)",
 };
 
-export const mailAutoArchiveTailSpacerStyle: React.CSSProperties = {
-  minHeight: 180,
-  height: "100%",
-  pointerEvents: "none",
-};
+export function mailAutoArchiveTailSpacerStyle(height: number): React.CSSProperties {
+  return {
+    minHeight: Math.max(260, Math.round(height)),
+    pointerEvents: "none",
+  };
+}
 
 export const loadingMoreStyle: React.CSSProperties = {
   minHeight: 28,
