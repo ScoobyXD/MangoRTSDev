@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -66,6 +67,7 @@ import {
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
+  serializeExplorerEntityDragPayload,
   shouldRefreshKanbanBoardForNodeStatusChange,
   sortColumns,
   sortKanbanBoards,
@@ -1550,6 +1552,35 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     });
   }, [accent, cards, columnColorByID]);
 
+  const setCardNodeCopyDragData = useCallback((dataTransfer: DataTransfer, cardIDs: string[]) => {
+    const byCardID = new Map(cardsRef.current.map((item) => [item.card_id, item]));
+    const seenNodeIDs = new Set<string>();
+    const items: ExplorerEntityDragItem[] = [];
+    for (const cardID of cardIDs) {
+      const card = byCardID.get(cardID);
+      const nodeID = card?.node_id.trim() ?? "";
+      if (!card || !nodeID || seenNodeIDs.has(nodeID)) continue;
+      seenNodeIDs.add(nodeID);
+      items.push({ nodeID, label: card.node_title.trim() || nodeID });
+    }
+    if (items.length === 0) return;
+
+    const explorerPayload = items.length === 1
+      ? { kind: "node" as const, itemID: items[0].nodeID, itemType: "node" as const, sourceTreeID: `node-${items[0].nodeID}` }
+      : {
+        kind: "batch" as const,
+        itemType: "node" as const,
+        items: items.map((item) => ({ itemID: item.nodeID, itemType: "node" as const, treeID: `node-${item.nodeID}` })),
+      };
+    const entityPayload = items.length === 1
+      ? { itemType: "node" as const, nodeID: items[0].nodeID, label: items[0].label }
+      : { itemType: "node_batch" as const, nodes: items };
+
+    dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(explorerPayload));
+    dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload(entityPayload));
+    dataTransfer.setData("text/plain", items.length === 1 ? items[0].label : `${items.length} nodes`);
+  }, []);
+
   const renderCard = (card: KanbanCard): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
     const selected = selectedCardIDs.has(card.card_id);
@@ -1616,8 +1647,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           }
           setCardContextMenu(null);
           setColumnContextMenu(null);
-          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.effectAllowed = "copyMove";
           event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: dragCardIDs[0], cardIDs: dragCardIDs, sourceColumnID: card.column_id }));
+          setCardNodeCopyDragData(event.dataTransfer, dragCardIDs);
           attachStackedDragPreview(event.dataTransfer, getCardDragPreviewItems(dragCardIDs), color, "Kanban cards");
         }}
         onDragEnd={() => setDragOverCard(null)}
@@ -1704,6 +1736,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onSaveCurrentBoardView={() => void saveCurrentBoardView()}
         onCreateNewBoardView={() => void createNewBoardView()}
         onCollapseToTab={arenaMode ? onCollapseArenaToTab : undefined}
+        timelineDragEntity={activeLogicGateID ? { kind: "logic_gate", id: activeLogicGateID, label: activeBoardTitle } : undefined}
         onSelectBoard={(nextBoardID) => {
           setSelectedCardIDs(new Set());
           setSelectionAnchorCardID("");
@@ -1725,7 +1758,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
-        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} yGroupBy={arenaYGroupBy} xGroupBy={arenaXGroupBy} ySortDirection={arenaYSortDirection} xSortDirection={arenaXSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetYGroupBy={selectArenaYGroupBy} onSetXGroupBy={setArenaXGroupBy} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} renderCard={renderCard} /> : (
+        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} /> : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
