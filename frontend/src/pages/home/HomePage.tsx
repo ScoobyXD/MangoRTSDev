@@ -58,7 +58,6 @@ import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanB
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
-import type { NotificationItem } from "../../modules/notifications/notificationsApi";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -2050,10 +2049,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       .filter((id) => nodeByID.has(id));
     return selectedNodeIDs.length > 0 ? selectedNodeIDs : [cleanNodeID];
   }, [nodeByID, selectedNodeRowIDs]);
-  const openNodeEditorOverlay = useCallback((node: NodeRecord) => {
+  const openNodeEditorOverlay = useCallback((node: NodeRecord, informationID?: string) => {
     const nodeID = node.node_id.trim();
     if (!nodeID) return;
-    setNodeEditorOverlay({ nodeID, nodeTitle: nodeTitle(node) });
+    const cleanInformationID = informationID?.trim() ?? "";
+    setNodeEditorOverlay({
+      nodeID,
+      nodeTitle: nodeTitle(node),
+      focusInformationID: cleanInformationID || undefined,
+      focusRequestID: cleanInformationID ? Date.now() : undefined,
+    });
   }, []);
   const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
@@ -2080,27 +2085,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (onNavigate) onNavigate("/logic-gate-arena");
     else window.location.assign("/logic-gate-arena");
   }, [companyID, onNavigate]);
-  const openMentionNotificationTarget = useCallback((notification: NotificationItem) => {
-    const informationID = notification.information_id?.trim() ?? "";
-    const rawNodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
-    const node = rawNodeID ? nodeByID.get(rawNodeID) : undefined;
-    const rawLogicGateID = notification.logic_gate_id?.trim()
-      || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "")
-      || "";
-    if (notification.entity_type === "logic_gate" && rawLogicGateID) {
-      const gate = logicGateByID.get(rawLogicGateID);
-      openLogicGateArena(rawLogicGateID, gate?.header?.trim() || notification.title || rawLogicGateID, rawNodeID, informationID);
-      return;
-    }
-    if (rawNodeID) {
-      setNodeEditorOverlay({
-        nodeID: rawNodeID,
-        nodeTitle: node ? nodeTitle(node) : notification.title || rawNodeID,
-        focusInformationID: informationID || undefined,
-        focusRequestID: Date.now(),
-      });
-    }
-  }, [logicGateByID, nodeByID, openLogicGateArena]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -2647,7 +2631,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
               busy={busy}
               notificationSummary={notificationSummary}
               onSelectView={selectHomeView}
-              onOpenMentionNotification={openMentionNotificationTarget}
               onNewSharedInboxNameChange={setNewSharedInboxName}
               onSubmitSharedInbox={submitSharedInbox}
               onCreateSharedInbox={createSharedInboxFolder}

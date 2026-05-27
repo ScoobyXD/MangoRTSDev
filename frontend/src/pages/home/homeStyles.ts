@@ -1146,20 +1146,6 @@ function inboxNotificationRoleColors(role: string): { background: string; border
       return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#334155" };
   }
 }
-export const logicGateInboxGroupCountStyle: React.CSSProperties = {
-  minWidth: 21,
-  height: 18,
-  display: "grid",
-  placeItems: "center",
-  border: `1px solid ${HOME_BLACK_SOFT}`,
-  borderRadius: 4,
-  background: "rgba(255, 255, 255, 0.78)",
-  color: "rgba(15, 23, 42, 0.62)",
-  fontSize: 10,
-  fontWeight: 800,
-  lineHeight: 1,
-};
-
 export const logicGateInboxGroupDisclosureStyle: React.CSSProperties = {
   width: 20,
   height: 18,

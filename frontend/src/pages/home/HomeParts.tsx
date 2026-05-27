@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { NotificationPopover } from "../../app/NotificationPopover";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -11,14 +12,13 @@ import { resolveExplorerClickSelection } from "../../modules/company-explorer/tr
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationClearInput, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
-import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
+import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildRaciRoleInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -724,7 +724,6 @@ export function HomeSidebar({
   busy,
   notificationSummary,
   onSelectView,
-  onOpenMentionNotification,
   onNewSharedInboxNameChange,
   onSubmitSharedInbox,
   onCreateSharedInbox,
@@ -741,7 +740,6 @@ export function HomeSidebar({
   busy: string;
   notificationSummary: NotificationSummary;
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
-  onOpenMentionNotification: (notification: NotificationItem) => void;
   onNewSharedInboxNameChange: (value: string) => void;
   onSubmitSharedInbox: (event: React.FormEvent<HTMLFormElement>) => void;
   onCreateSharedInbox: (parentFolderID: string, name?: string, accountEmail?: string) => Promise<CommunicationsSharedInbox | null>;
@@ -761,14 +759,12 @@ export function HomeSidebar({
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
-  const [mentionNotificationMenu, setMentionNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
-  const mentionUnreadCount = notificationCountForType(notificationSummary, "mention.created");
   const raciInboxNotificationCount = (role: RaciInboxRole): number => (
     notificationCountForRole(notificationSummary, role === "responsible" ? "r_inbox" : "aci_inbox", role)
   );
@@ -969,56 +965,6 @@ export function HomeSidebar({
     event.preventDefault();
     void moveSharedFolder(sourceFolderID, "", "inside");
   }, [canDropSharedFolder, draggingSharedFolderID, moveSharedFolder]);
-
-  const openMentionNotifications = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const companyID = getActiveCompanyID();
-    const nextMenu: InboxNotificationMenuState = {
-      x: event.clientX,
-      y: event.clientY,
-      title: "@ Mentions",
-      loading: true,
-      error: "",
-      items: [],
-      clearInput: { companyID, type: "mention.created" },
-    };
-    setMentionNotificationMenu(nextMenu);
-    fetchNotifications({ companyID, type: "mention.created", unreadOnly: true, limit: 100 })
-      .then((items) => {
-        setMentionNotificationMenu((current) => (
-          current?.x === nextMenu.x && current?.y === nextMenu.y
-            ? { ...current, loading: false, items }
-            : current
-        ));
-      })
-      .catch((error) => {
-        setMentionNotificationMenu((current) => (
-          current?.x === nextMenu.x && current?.y === nextMenu.y
-            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load @ mentions" }
-            : current
-        ));
-      });
-  }, []);
-
-  const openMentionNotificationTarget = useCallback((notification: NotificationItem) => {
-    const notificationID = notification.notification_id.trim();
-    if (notificationID) {
-      setMentionNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
-      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear @ mention notification", error));
-    }
-    setMentionNotificationMenu(null);
-    onOpenMentionNotification(notification);
-  }, [onOpenMentionNotification]);
-
-  const clearMentionNotifications = useCallback((menu: InboxNotificationMenuState) => {
-    if (menu.loading || menu.items.length === 0) return;
-    setMentionNotificationMenu((current) => current ? { ...current, items: [] } : current);
-    void markNotificationsRead(menu.clearInput ?? { companyID: getActiveCompanyID(), type: "mention.created" }).catch((error) => {
-      console.error("Failed to clear @ mention notifications", error);
-      setMentionNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
-    });
-  }, []);
 
   const renderSharedRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
@@ -1227,12 +1173,6 @@ export function HomeSidebar({
             />
           );
         })}
-        <HomeNavButton
-          label="@ Mentions"
-          active={mentionNotificationMenu !== null}
-          meta={<span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(mentionUnreadCount)}</span>}
-          onClick={openMentionNotifications}
-        />
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
@@ -1303,7 +1243,6 @@ export function HomeSidebar({
           onSubmit={submitSharedEmailDialog}
         />
       )}
-      <InboxNotificationMenu menu={mentionNotificationMenu} onClose={() => setMentionNotificationMenu(null)} onOpen={openMentionNotificationTarget} onClear={clearMentionNotifications} />
     </aside>
   );
 }
@@ -2194,7 +2133,7 @@ export function NodeInboxRail({
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onCreateNode: () => void;
 }) {
@@ -2321,7 +2260,7 @@ export function MyNodeTile({
   nodeByID: Map<string, NodeRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
   tone?: "orange" | "light";
@@ -2385,15 +2324,6 @@ function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | u
   return undefined;
 }
 
-function notificationCountForType(summary: NotificationSummary, type: string): number {
-  const cleanType = type.trim();
-  if (!cleanType) return 0;
-  return (summary.type_counts ?? []).reduce((count, item) => {
-    if (item.type !== cleanType) return count;
-    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
-  }, 0);
-}
-
 function notificationCountForRole(summary: NotificationSummary, surface: string, role: NotificationRaciRole): number {
   return (summary.role_counts ?? []).reduce((count, item) => {
     if (item.surface !== surface || item.role !== role) return count;
@@ -2416,6 +2346,15 @@ function logicGateInboxGroupNotificationButtonStyle(role: NotificationRaciRole):
   };
 }
 
+function logicGateInboxNodeNotificationButtonStyle(role: string): React.CSSProperties {
+  return {
+    ...logicGateInboxNodeNotificationStyle(role),
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: "0 4px",
+  };
+}
+
 type InboxNotificationMenuState = {
   x: number;
   y: number;
@@ -2423,33 +2362,18 @@ type InboxNotificationMenuState = {
   loading: boolean;
   error: string;
   items: NotificationItem[];
-  clearInput?: NotificationClearInput;
+  seenNotificationIDs: string[];
 };
 
 function inboxNotificationMatchesGroup(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): boolean {
-  if (item.type === "mention.created") return false;
   if (item.role !== role || item.logic_gate_id !== group.logicGateID) return false;
   const nodeID = item.node_id?.trim() ?? "";
   return !nodeID || group.nodeIDs.includes(nodeID);
 }
 
-function formatInboxNotificationTimestamp(value: string): string {
-  return formatNotificationTimestamp(value);
-}
-
-function InboxNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {
-  const showEntityIcon = notification.type === "mention.created"
-    && (notification.entity_type === "node" || notification.entity_type === "logic_gate");
-  return (
-    <span style={inboxNotificationMenuTitleStyle}>
-      {showEntityIcon && (
-        <span style={inboxNotificationMenuTitleIconStyle}>
-          <ExplorerRowIcon kind={notification.entity_type === "node" ? "node" : "logic_gate"} />
-        </span>
-      )}
-      <span style={inboxNotificationMenuTitleTextStyle}>{notification.title}</span>
-    </span>
-  );
+function inboxNotificationMatchesNode(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string): boolean {
+  const cleanNodeID = nodeID.trim();
+  return cleanNodeID !== "" && inboxNotificationMatchesGroup(item, role, group) && item.node_id?.trim() === cleanNodeID;
 }
 
 function InboxNotificationMenu({
@@ -2465,143 +2389,20 @@ function InboxNotificationMenu({
 }) {
   if (!menu) return null;
   return (
-    <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
-      <div style={inboxNotificationMenuStyle}>
-        <div style={inboxNotificationMenuHeaderStyle}>
-          <span>{menu.title}</span>
-          <button
-            type="button"
-            style={inboxNotificationMenuClearButtonStyle}
-            disabled={menu.loading || menu.items.length === 0}
-            onClick={() => onClear(menu)}
-          >
-            Clear
-          </button>
-        </div>
-        {menu.loading ? (
-          <div style={inboxNotificationMenuEmptyStyle}>Loading</div>
-        ) : menu.error ? (
-          <div style={inboxNotificationMenuErrorStyle}>{menu.error}</div>
-        ) : menu.items.length === 0 ? (
-          <div style={inboxNotificationMenuEmptyStyle}>No unread notifications</div>
-        ) : menu.items.map((notification) => (
-          <button
-            key={notification.notification_id}
-            type="button"
-            style={inboxNotificationMenuItemStyle}
-            onClick={() => onOpen(notification)}
-          >
-            <InboxNotificationTitle notification={notification} />
-            {notification.body_preview && <span style={inboxNotificationMenuBodyStyle}>{notification.body_preview}</span>}
-            <span style={inboxNotificationMenuMetaStyle}>{formatInboxNotificationTimestamp(notification.created_timestamp)}</span>
-          </button>
-        ))}
-      </div>
-    </FrameRightClickMenu>
+    <NotificationPopover
+      x={menu.x}
+      y={menu.y}
+      title={menu.title}
+      loading={menu.loading}
+      error={menu.error}
+      items={menu.items}
+      seenNotificationIDs={new Set(menu.seenNotificationIDs)}
+      onClose={onClose}
+      onOpen={onOpen}
+      onClear={() => onClear(menu)}
+    />
   );
 }
-
-const inboxNotificationMenuStyle: React.CSSProperties = {
-  width: 300,
-  maxHeight: 360,
-  display: "grid",
-  alignContent: "start",
-  overflowY: "auto",
-  padding: "6px 0",
-};
-
-const inboxNotificationMenuHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 8,
-  padding: "5px 12px 8px",
-  color: "rgba(15, 23, 42, 0.68)",
-  fontSize: 11,
-  fontWeight: 800,
-  textTransform: "uppercase",
-  letterSpacing: 0,
-};
-
-const inboxNotificationMenuClearButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(100, 116, 139, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  lineHeight: 1,
-  padding: "4px 7px",
-  textTransform: "none",
-};
-
-const inboxNotificationMenuItemStyle: React.CSSProperties = {
-  width: "100%",
-  display: "grid",
-  gap: 3,
-  border: "none",
-  background: "transparent",
-  color: "#111827",
-  cursor: "pointer",
-  font: "inherit",
-  textAlign: "left",
-  padding: "8px 12px",
-};
-
-const inboxNotificationMenuTitleStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 5,
-  overflow: "hidden",
-  fontSize: 12,
-  fontWeight: 750,
-};
-
-const inboxNotificationMenuTitleIconStyle: React.CSSProperties = {
-  width: 15,
-  height: 15,
-  flex: "0 0 auto",
-  display: "grid",
-  placeItems: "center",
-};
-
-const inboxNotificationMenuTitleTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const inboxNotificationMenuBodyStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "rgba(15, 23, 42, 0.62)",
-  fontSize: 11,
-  fontWeight: 500,
-};
-
-const inboxNotificationMenuMetaStyle: React.CSSProperties = {
-  color: "rgba(15, 23, 42, 0.45)",
-  fontSize: 10,
-  fontWeight: 700,
-};
-
-const inboxNotificationMenuEmptyStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  color: "rgba(15, 23, 42, 0.55)",
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-const inboxNotificationMenuErrorStyle: React.CSSProperties = {
-  ...inboxNotificationMenuEmptyStyle,
-  color: "#8b123f",
-};
 
 const mentionNotificationBadgeStyle: React.CSSProperties = {
   minWidth: 22,
@@ -2659,8 +2460,8 @@ export function RaciRoleInboxMatrix({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string, informationID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
@@ -2710,6 +2511,7 @@ export function RaciRoleInboxMatrix({
       loading: true,
       error: "",
       items: [],
+      seenNotificationIDs: [],
     };
     setNotificationMenu(nextMenu);
     fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
@@ -2729,26 +2531,62 @@ export function RaciRoleInboxMatrix({
         ));
       });
   }, []);
+  const openNodeNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const node = nodeByID.get(nodeID);
+    const nextMenu: InboxNotificationMenuState = {
+      x: event.clientX,
+      y: event.clientY,
+      title: `${node ? nodeTitle(node) : "Node"} notifications`,
+      loading: true,
+      error: "",
+      items: [],
+      seenNotificationIDs: [],
+    };
+    setNotificationMenu(nextMenu);
+    fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
+      .then((items) => {
+        const filtered = items.filter((item) => inboxNotificationMatchesNode(item, role, group, nodeID));
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items: filtered }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            : current
+        ));
+      });
+  }, [nodeByID]);
   const openNotificationTarget = useCallback((notification: NotificationItem) => {
     const notificationID = notification.notification_id.trim();
     if (notificationID) {
-      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      setNotificationMenu((current) => {
+        if (!current) return current;
+        const seen = new Set(current.seenNotificationIDs);
+        seen.add(notificationID);
+        return { ...current, seenNotificationIDs: Array.from(seen) };
+      });
       void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
     }
-    setNotificationMenu(null);
+    const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
     const node = nodeID ? nodeByID.get(nodeID) : undefined;
     if (node) {
-      onOpenNode(node);
+      onOpenNode(node, informationID || undefined);
       return;
     }
-    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
+    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID, informationID || undefined);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
   const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
-    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
     void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
@@ -2758,7 +2596,6 @@ export function RaciRoleInboxMatrix({
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
-    setNotificationMenu(null);
     setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
   }, []);
 
@@ -2848,6 +2685,7 @@ export function RaciRoleInboxMatrix({
                             notificationCount={notificationCountForInboxGroup(notificationSummary, notificationRole, group)}
                             notificationRole={notificationRole}
                             onOpenNotifications={(event) => openGroupNotifications(event, notificationRole, group)}
+                            onOpenNodeNotifications={(event, nodeID) => openNodeNotifications(event, notificationRole, group, nodeID)}
                             groupColor={statusColor}
                             resizeKey={resizeKey}
                             heightPx={groupHeights[resizeKey]}
@@ -2939,8 +2777,8 @@ export function AciInboxMatrix({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string, informationID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
@@ -2988,6 +2826,7 @@ export function AciInboxMatrix({
       loading: true,
       error: "",
       items: [],
+      seenNotificationIDs: [],
     };
     setNotificationMenu(nextMenu);
     fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
@@ -3007,26 +2846,62 @@ export function AciInboxMatrix({
         ));
       });
   }, []);
+  const openNodeNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const node = nodeByID.get(nodeID);
+    const nextMenu: InboxNotificationMenuState = {
+      x: event.clientX,
+      y: event.clientY,
+      title: `${node ? nodeTitle(node) : "Node"} notifications`,
+      loading: true,
+      error: "",
+      items: [],
+      seenNotificationIDs: [],
+    };
+    setNotificationMenu(nextMenu);
+    fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
+      .then((items) => {
+        const filtered = items.filter((item) => inboxNotificationMatchesNode(item, role, group, nodeID));
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items: filtered }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            : current
+        ));
+      });
+  }, [nodeByID]);
   const openNotificationTarget = useCallback((notification: NotificationItem) => {
     const notificationID = notification.notification_id.trim();
     if (notificationID) {
-      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      setNotificationMenu((current) => {
+        if (!current) return current;
+        const seen = new Set(current.seenNotificationIDs);
+        seen.add(notificationID);
+        return { ...current, seenNotificationIDs: Array.from(seen) };
+      });
       void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
     }
-    setNotificationMenu(null);
+    const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
     const node = nodeID ? nodeByID.get(nodeID) : undefined;
     if (node) {
-      onOpenNode(node);
+      onOpenNode(node, informationID || undefined);
       return;
     }
-    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
+    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID, informationID || undefined);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
   const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
-    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
     void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
@@ -3036,7 +2911,6 @@ export function AciInboxMatrix({
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
-    setNotificationMenu(null);
     setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
   }, []);
 
@@ -3125,6 +2999,7 @@ export function AciInboxMatrix({
                             notificationCount={notificationRole ? notificationCountForInboxGroup(notificationSummary, notificationRole, group) : 0}
                             notificationRole={notificationRole}
                             onOpenNotifications={notificationRole ? (event) => openGroupNotifications(event, notificationRole, group) : undefined}
+                            onOpenNodeNotifications={notificationRole ? (event, nodeID) => openNodeNotifications(event, notificationRole, group, nodeID) : undefined}
                             resizeKey={resizeKey}
                             heightPx={groupHeights[resizeKey]}
                             onStartResize={startGroupResize}
@@ -3215,8 +3090,8 @@ export function ResponsibleInboxMatrix({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string, informationID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
@@ -3264,6 +3139,7 @@ export function ResponsibleInboxMatrix({
       loading: true,
       error: "",
       items: [],
+      seenNotificationIDs: [],
     };
     setNotificationMenu(nextMenu);
     fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
@@ -3283,26 +3159,62 @@ export function ResponsibleInboxMatrix({
         ));
       });
   }, []);
+  const openNodeNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const node = nodeByID.get(nodeID);
+    const nextMenu: InboxNotificationMenuState = {
+      x: event.clientX,
+      y: event.clientY,
+      title: `${node ? nodeTitle(node) : "Node"} notifications`,
+      loading: true,
+      error: "",
+      items: [],
+      seenNotificationIDs: [],
+    };
+    setNotificationMenu(nextMenu);
+    fetchNotifications({ companyID: getActiveCompanyID(), unreadOnly: true, limit: 100 })
+      .then((items) => {
+        const filtered = items.filter((item) => inboxNotificationMatchesNode(item, role, group, nodeID));
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items: filtered }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            : current
+        ));
+      });
+  }, [nodeByID]);
   const openNotificationTarget = useCallback((notification: NotificationItem) => {
     const notificationID = notification.notification_id.trim();
     if (notificationID) {
-      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      setNotificationMenu((current) => {
+        if (!current) return current;
+        const seen = new Set(current.seenNotificationIDs);
+        seen.add(notificationID);
+        return { ...current, seenNotificationIDs: Array.from(seen) };
+      });
       void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
     }
-    setNotificationMenu(null);
+    const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
     const node = nodeID ? nodeByID.get(nodeID) : undefined;
     if (node) {
-      onOpenNode(node);
+      onOpenNode(node, informationID || undefined);
       return;
     }
-    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID);
+    if (logicGateID) onOpenLogicGate(logicGateID, notification.title || logicGateID, nodeID, informationID || undefined);
   }, [nodeByID, onOpenLogicGate, onOpenNode]);
   const clearGroupNotifications = useCallback((menu: InboxNotificationMenuState) => {
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
-    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
     void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
@@ -3312,7 +3224,6 @@ export function ResponsibleInboxMatrix({
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
-    setNotificationMenu(null);
     setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
   }, []);
 
@@ -3402,6 +3313,7 @@ export function ResponsibleInboxMatrix({
                             notificationCount={notificationCountForInboxGroup(notificationSummary, "responsible", group)}
                             notificationRole="responsible"
                             onOpenNotifications={(event) => openGroupNotifications(event, "responsible", group)}
+                            onOpenNodeNotifications={(event, nodeID) => openNodeNotifications(event, "responsible", group, nodeID)}
                             groupColor={statusColor}
                             resizeKey={resizeKey}
                             heightPx={groupHeights[resizeKey]}
@@ -3481,6 +3393,7 @@ export function LogicGateInboxNodeGroupCard({
   notificationCount = 0,
   notificationRole,
   onOpenNotifications,
+  onOpenNodeNotifications,
   groupColor,
   canRemoveNode,
   onRemovePlacement,
@@ -3503,8 +3416,8 @@ export function LogicGateInboxNodeGroupCard({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate?: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string, informationID?: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt?: (logicGateID: string, x: number, y: number) => void;
@@ -3518,6 +3431,7 @@ export function LogicGateInboxNodeGroupCard({
   notificationCount?: number;
   notificationRole?: NotificationRaciRole;
   onOpenNotifications?: (event: React.MouseEvent) => void;
+  onOpenNodeNotifications?: (event: React.MouseEvent, nodeID: string) => void;
   groupColor?: string;
   canRemoveNode?: (nodeID: string) => boolean;
   onRemovePlacement?: (nodeID: string) => void;
@@ -3629,7 +3543,6 @@ export function LogicGateInboxNodeGroupCard({
             {formatInboxNotificationCount(notificationCount)}
           </button>
         )}
-        <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
         {onToggleCollapsed && (
           <button
             type="button"
@@ -3669,6 +3582,7 @@ export function LogicGateInboxNodeGroupCard({
               hasUnreadNotification={nodeNotificationCount > 0}
               notificationCount={nodeNotificationCount}
               notificationRole={notificationRole}
+              onOpenNotifications={onOpenNodeNotifications}
             />
           );
         })}
@@ -3776,6 +3690,7 @@ export function LogicGateInboxNodeRow({
   hasUnreadNotification = false,
   notificationCount = 0,
   notificationRole,
+  onOpenNotifications,
 }: {
   node: NodeRecord;
   depth?: number;
@@ -3784,13 +3699,14 @@ export function LogicGateInboxNodeRow({
   nodeByID: Map<string, NodeRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onOpenNode: (node: NodeRecord) => void;
+  onOpenNode: (node: NodeRecord, informationID?: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenPinContextMenu?: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
   onRemovePlacement?: (nodeID: string) => void;
   hasUnreadNotification?: boolean;
   notificationCount?: number;
   notificationRole?: NotificationRaciRole;
+  onOpenNotifications?: (event: React.MouseEvent, nodeID: string) => void;
 }) {
   const nodeID = node.node_id;
   const [hovered, setHovered] = useState(false);
@@ -3828,9 +3744,20 @@ export function LogicGateInboxNodeRow({
       <span style={logicGateInboxNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
       <span style={logicGateInboxNodeTitleStyle(hasUnreadNotification)}>{nodeTitle(node)}</span>
       {notificationCount > 0 && (
-        <span title={`${formatInboxNotificationCount(notificationCount)} unread notifications`} style={logicGateInboxNodeNotificationStyle(notificationRole ?? "")}>
+        <button
+          type="button"
+          title={`${formatInboxNotificationCount(notificationCount)} unread notifications`}
+          aria-label="Show node notifications"
+          style={logicGateInboxNodeNotificationButtonStyle(notificationRole ?? "")}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenNotifications?.(event, nodeID);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
           {formatInboxNotificationCount(notificationCount)}
-        </span>
+        </button>
       )}
       {onRemovePlacement && (
         <button

@@ -288,7 +288,7 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			count.Count++
 			typeCounts[item.Type] = count
 		}
-		if item.Type != domain.NotificationEventMentionCreated && (item.Surface != "" || item.Role != "") {
+		if item.Surface != "" || item.Role != "" {
 			key := item.Surface + "\x00" + item.Role
 			count := roleCounts[key]
 			if count.Count == 0 {
@@ -302,7 +302,7 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			count.Count = len(roleTargets[key])
 			roleCounts[key] = count
 		}
-		if item.Type != domain.NotificationEventMentionCreated && item.LogicGateID != "" && item.Role != "" {
+		if item.LogicGateID != "" && item.Role != "" {
 			key := item.LogicGateID + "\x00" + item.NodeID + "\x00" + item.Role
 			count := logicGateCounts[key]
 			if count.Count == 0 {

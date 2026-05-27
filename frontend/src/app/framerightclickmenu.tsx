@@ -6,10 +6,11 @@ export interface FrameRightClickMenuProps {
   x: number;
   y: number;
   onClose: () => void;
+  closeOnOutside?: boolean;
 }
 
 // Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
-const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose }) => {
+const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
@@ -25,6 +26,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
 
   // Use capture so nested modules that stop propagation still let menus close on outside clicks.
   useEffect(() => {
+    if (!closeOnOutside) return;
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     };
@@ -33,7 +35,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
       clearTimeout(timer);
       window.removeEventListener("mousedown", handler, true);
     };
-  }, [onClose]);
+  }, [closeOnOutside, onClose]);
 
   return createPortal(
     <div

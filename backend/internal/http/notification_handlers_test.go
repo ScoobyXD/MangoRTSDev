@@ -423,6 +423,14 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{
+		CompanyID:         companyID,
+		NodeID:            node.NodeID,
+		AssigneeUserID:    &mentioned.UserID,
+		AssigneeUserIDSet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
 
 	commentBody, _ := json.Marshal(map[string]any{
@@ -462,6 +470,12 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(payload.Notifications[0].Title, "Author User") {
 		t.Fatalf("notification title = %q, want author label", payload.Notifications[0].Title)
 	}
+	if !strings.Contains(payload.Notifications[0].Title, "has mentioned you in Review packet") {
+		t.Fatalf("notification title = %q, want mention target format", payload.Notifications[0].Title)
+	}
+	if payload.Notifications[0].Surface != domain.NotificationSurfaceRInbox || payload.Notifications[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("notification routing = %+v, want responsible node mention", payload.Notifications[0])
+	}
 	if payload.Notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
 		t.Fatalf("notification information id = %q, want chat information id", payload.Notifications[0].InformationID)
 	}
@@ -480,8 +494,11 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
 		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
 	}
-	if len(summary.RoleCounts) != 0 || len(summary.LogicGateCounts) != 0 {
-		t.Fatalf("mention summary routing counts = roles %+v logic gates %+v, want none", summary.RoleCounts, summary.LogicGateCounts)
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("mention summary role counts = %+v, want responsible mention", summary.RoleCounts)
+	}
+	if len(summary.LogicGateCounts) != 0 {
+		t.Fatalf("mention summary logic gate counts = %+v, want none for node without logic gate", summary.LogicGateCounts)
 	}
 }
 
@@ -574,6 +591,16 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleAccountable,
+			UserID: mentioned.UserID,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, mentioned.UserID)
 
 	infoBody, _ := json.Marshal(map[string]any{
@@ -608,6 +635,9 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	}
 	if item := payload.Notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
 		t.Fatalf("mention notification = %+v, want logic gate mention", item)
+	}
+	if item := payload.Notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.LogicGateRaciRoleAccountable || item.LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("logic gate mention routing = %+v, want accountable logic gate", item)
 	}
 }
 
