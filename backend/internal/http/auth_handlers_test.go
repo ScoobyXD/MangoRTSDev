@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	authpkg "miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -13,13 +14,25 @@ import (
 )
 
 type recordingCognitoAdmin struct {
-	emails  []string
-	deleted []string
+	emails             []string
+	temporaryPasswords []string
+	deleted            []string
+	createErr          error
+	status             string
 }
 
-func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string) error {
+func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string) (authpkg.CognitoAdminCreateUserResult, error) {
 	c.emails = append(c.emails, email)
-	return nil
+	if c.createErr != nil {
+		return authpkg.CognitoAdminCreateUserResult{}, c.createErr
+	}
+	status := c.status
+	if status == "" {
+		status = "created"
+	}
+	password := "TempPassw0rd!"
+	c.temporaryPasswords = append(c.temporaryPasswords, password)
+	return authpkg.CognitoAdminCreateUserResult{Status: status, TemporaryPassword: password}, nil
 }
 
 func (c *recordingCognitoAdmin) AdminDeleteUser(_ context.Context, username string) error {
@@ -30,6 +43,13 @@ func (c *recordingCognitoAdmin) AdminDeleteUser(_ context.Context, username stri
 type recordingEmailSender struct {
 	signupEmails    []string
 	signupCompanies []string
+	inviteEmails    []authpkg.InvitationEmailInput
+	inviteErr       error
+}
+
+func (s *recordingEmailSender) SendInvitation(_ context.Context, input authpkg.InvitationEmailInput) error {
+	s.inviteEmails = append(s.inviteEmails, input)
+	return s.inviteErr
 }
 
 func (s *recordingEmailSender) SendSignupConfirmation(_ context.Context, email, companyName string) error {
@@ -197,8 +217,137 @@ func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.CognitoInviteStatus != "sent" {
-		t.Fatalf("cognito status = %q, want sent", payload.CognitoInviteStatus)
+	if payload.CognitoInviteStatus != "created" {
+		t.Fatalf("cognito status = %q, want created", payload.CognitoInviteStatus)
+	}
+	if len(cognito.temporaryPasswords) != 1 || cognito.temporaryPasswords[0] == "" {
+		t.Fatalf("temporary passwords = %v, want one generated password", cognito.temporaryPasswords)
+	}
+}
+
+func TestCreateInvitationSendsMangoOwnedInviteEmail(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	repo.EnsureCompany(companyID, "Acme Systems")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	cognito := &recordingCognitoAdmin{}
+	emailSender := &recordingEmailSender{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
+		EmailSender:   emailSender,
+		AppBaseURL:    "https://app.example.com/home",
+	}).Routes()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/invitations",
+		strings.NewReader(`{"company_id":"`+companyID+`","email":"new@example.com","role":"company_user"}`),
+	)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		InviteEmailStatus string `json:"invite_email_status"`
+		AcceptURL         string `json:"accept_url"`
+		Invitation        struct {
+			Token             string `json:"token"`
+			InviteEmailStatus string `json:"invite_email_status"`
+		} `json:"invitation"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.InviteEmailStatus != "sent" || payload.Invitation.InviteEmailStatus != "sent" {
+		t.Fatalf("invite email statuses = %q/%q, want sent", payload.InviteEmailStatus, payload.Invitation.InviteEmailStatus)
+	}
+	if len(emailSender.inviteEmails) != 1 {
+		t.Fatalf("invite emails = %d, want 1", len(emailSender.inviteEmails))
+	}
+	sent := emailSender.inviteEmails[0]
+	if sent.Email != "new@example.com" || sent.CompanyName != "Acme Systems" {
+		t.Fatalf("invite email = %+v, want target email and company", sent)
+	}
+	if len(cognito.temporaryPasswords) != 1 || sent.TemporaryPassword == "" || sent.TemporaryPassword != cognito.temporaryPasswords[0] {
+		t.Fatalf("invite temporary password = %q, cognito passwords=%v", sent.TemporaryPassword, cognito.temporaryPasswords)
+	}
+	if !strings.HasPrefix(sent.AcceptURL, "https://app.example.com/accept-invite?") || !strings.Contains(sent.AcceptURL, "token=") {
+		t.Fatalf("accept url = %q, want app accept-invite link with token", sent.AcceptURL)
+	}
+	if payload.AcceptURL != sent.AcceptURL || payload.Invitation.Token == "" {
+		t.Fatalf("response accept_url/token = %q/%q, want dev fallback token and email URL", payload.AcceptURL, payload.Invitation.Token)
+	}
+}
+
+func TestCreateInvitationPersistsInviteEmailFailure(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	repo.EnsureCompany(companyID, "Acme Systems")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	emailSender := &recordingEmailSender{inviteErr: errors.New("ses unavailable")}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  &recordingCognitoAdmin{},
+		EmailSender:   emailSender,
+	}).Routes()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/invitations",
+		strings.NewReader(`{"company_id":"`+companyID+`","email":"new@example.com","role":"company_user"}`),
+	)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		InviteEmailStatus string `json:"invite_email_status"`
+		DeliveryOK        bool   `json:"delivery_ok"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.InviteEmailStatus != "failed" || payload.DeliveryOK {
+		t.Fatalf("invite delivery = %q ok=%t, want failed false", payload.InviteEmailStatus, payload.DeliveryOK)
+	}
+	items, err := repo.ListCompanyUserOnboarding(companyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var invitee *domain.CompanyUserOnboarding
+	for i := range items {
+		if items[i].Email == "new@example.com" {
+			invitee = &items[i]
+			break
+		}
+	}
+	if invitee == nil || invitee.InviteEmailStatus != "failed" || !strings.Contains(invitee.InviteEmailError, "ses unavailable") {
+		t.Fatalf("onboarding = %+v, want persisted invite email failure", items)
 	}
 }
 

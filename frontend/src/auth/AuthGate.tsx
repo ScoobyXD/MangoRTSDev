@@ -70,6 +70,22 @@ type CompanyUser = {
   role: string;
 };
 
+type CompanyUserOnboarding = {
+  company_id: string;
+  email: string;
+  role: string;
+  user_id?: string;
+  display_name?: string;
+  invitation_id?: string;
+  invitation_status: string;
+  cognito_status: string;
+  invite_email_status: string;
+  invite_email_error?: string;
+  invite_accepted: boolean;
+  google_connection_status: "connected" | "not_connected" | "reauth_required" | string;
+  google_connection_account_email?: string;
+};
+
 type CompanyUserGroup = {
   company_id: string;
   group_id: string;
@@ -101,6 +117,31 @@ type SettingsSelectOption = {
   value: string;
   label: string;
   detail?: string;
+};
+
+type CommunicationsStatus = {
+  configured: boolean;
+  connected: boolean;
+  status: "connected" | "disconnected" | "reauth_required" | string;
+  connection?: {
+    provider?: string;
+    account_email?: string;
+    status?: string;
+  };
+};
+
+type InviteCreateResponse = {
+  invitation: {
+    token?: string;
+    cognito_status?: string;
+    invite_email_status?: string;
+    invite_email_error?: string;
+  };
+  cognito_invite_status?: string;
+  cognito_user_status?: string;
+  invite_email_status?: string;
+  invite_email_error?: string;
+  delivery_ok?: boolean;
 };
 
 const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
@@ -320,6 +361,10 @@ export default function AuthGate() {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
   }
 
+  if (normalizedPath === "/connect-google") {
+    return <ConnectGooglePage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+  }
+
   if (normalizedPath === "/logic-gate-arena") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
   }
@@ -343,13 +388,18 @@ function normalizeEmailInput(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function inviteStatusMessage(status?: string): string {
-  switch (status) {
-    case "sent":
-      return "Cognito temporary password email sent.";
-    default:
-      return "Mango invite created, but Cognito email was not configured.";
+function inviteStatusMessage(payload: InviteCreateResponse): string {
+  const cognitoStatus = payload.cognito_user_status || payload.cognito_invite_status || payload.invitation.cognito_status || "not_configured";
+  const emailStatus = payload.invite_email_status || payload.invitation.invite_email_status || "not_configured";
+  if (emailStatus === "sent") {
+    if (cognitoStatus === "existing_mango_user") return "Invite email sent. The user can accept with their existing Mango password.";
+    return "Invite email sent with the accept link and temporary password.";
   }
+  if (emailStatus === "failed") {
+    return "Mango created the invite and Cognito user, but the invite email failed. Check backend email configuration and resend.";
+  }
+  if (cognitoStatus === "failed") return "Mango created the invite, but Cognito user creation failed.";
+  return "Mango invite created. Invite email delivery is not configured.";
 }
 
 function formatInviteError(error: unknown): string {
@@ -682,15 +732,35 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
 
 function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const params = new URLSearchParams(window.location.search);
-  const [token, setToken] = useState(params.get("token") ?? "");
+  const initialToken = params.get("token") ?? "";
+  const tokenFromURL = Boolean(initialToken.trim());
+  const [token, setToken] = useState(initialToken);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState(pendingChallenge?.username ?? "");
+  const [invitedEmail, setInvitedEmail] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordStepComplete, setPasswordStepComplete] = useState(() => hasStoredToken());
   const showPasswordStep = !passwordStepComplete && !hasStoredToken();
+  useEffect(() => {
+    if (!tokenFromURL || !token.trim()) return;
+    let cancelled = false;
+    validateInvitationToken(token)
+      .then((invitation) => {
+        if (cancelled) return;
+        const normalized = normalizeEmailInput(invitation.email);
+        setInvitedEmail(normalized);
+        setEmail((previous) => previous.trim() || normalized);
+      })
+      .catch(() => {
+        if (!cancelled) setInvitedEmail("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, tokenFromURL]);
   return (
     <AuthPanel title="Accept Invite" error={error}>
       <form style={authFormStyle} onSubmit={async (event) => {
@@ -746,7 +816,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           }
           await acceptInvitation(token, displayName);
           await onAuthenticated();
-          onNavigate("/home");
+          onNavigate("/connect-google");
         } catch (inviteError) {
           console.error("Invite acceptance failed", inviteError);
           setError(formatAuthError(inviteError, "Invite acceptance failed"));
@@ -754,10 +824,11 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           setBusy(false);
         }
       }}>
-        <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />
+        {tokenFromURL && invitedEmail && <div style={authInfoMessageStyle}>Invitation for {invitedEmail}.</div>}
+        {!tokenFromURL && <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />}
         <AuthTextField label="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" />
         {showPasswordStep && !pendingChallenge && <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />}
-        {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary or current password" autoComplete="current-password" />}
+        {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary password from invite email" autoComplete="current-password" />}
         {showPasswordStep && <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
         <AuthPrimaryButton disabled={busy}>{busy ? "Accepting" : "Accept invite"}</AuthPrimaryButton>
       </form>
@@ -831,6 +902,66 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
   );
 }
 
+function ConnectGooglePage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+  const [status, setStatus] = useState<CommunicationsStatus | null>(null);
+  const [error, setError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("nylas_error")?.trim() ?? "";
+    return code ? formatAuthError(new Error(code), "Google connection failed") : "";
+  });
+  const [busy, setBusy] = useState(false);
+  const googleConnected = status?.connected && status.connection?.provider === "google" && status.status === "connected";
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetchJSON<CommunicationsStatus>("/v1/communications/status")
+      .then((payload) => {
+        if (cancelled) return;
+        setStatus(payload);
+        if (payload.connected && payload.connection?.provider === "google" && payload.status === "connected") onNavigate("/home");
+      })
+      .catch((statusError) => {
+        if (!cancelled) setError(formatAuthError(statusError, "Could not load Google connection status"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onNavigate]);
+
+  const startGoogleConnection = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({ provider: "google", account_email: normalizeEmailInput(me.user.email) });
+      const payload = await apiFetchJSON<{ auth_url: string }>(`/v1/communications/auth-url?${query.toString()}`);
+      window.location.assign(payload.auth_url);
+    } catch (connectError) {
+      setError(formatAuthError(connectError, "Could not start Google connection"));
+      setBusy(false);
+    }
+  };
+
+  const unavailable = status && !status.configured;
+  return (
+    <AuthPanel title="Connect Google" error={error}>
+      <div style={authFormStyle}>
+        <div style={authInfoMessageStyle}>
+          {googleConnected ? "Google connected." : unavailable ? "Google connection is not configured for this environment." : "Connect Google to finish Mango onboarding."}
+        </div>
+        {!unavailable && !googleConnected && (
+          <AuthPrimaryButton type="button" disabled={busy} onClick={() => void startGoogleConnection()}>
+            {busy ? "Connecting" : status?.status === "reauth_required" ? "Reconnect Google" : "Connect Google"}
+          </AuthPrimaryButton>
+        )}
+        <div style={authActionRowStyle}>
+          <AuthSecondaryButton type="button" onClick={() => onNavigate("/home")}>Continue</AuthSecondaryButton>
+          <AuthSecondaryButton type="button" onClick={onLogout}>Logout</AuthSecondaryButton>
+        </div>
+      </div>
+    </AuthPanel>
+  );
+}
+
 function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void; embedded?: boolean }) {
   const membershipOptions = useMemo<CompanyOption[]>(
     () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || "Company", role: item.role })),
@@ -851,10 +982,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? null;
   const canManageSelectedCompany = Boolean(companyID) && (me.is_dev_admin || selectedCompany?.role === "company_admin");
   const [users, setUsers] = useState<CompanyUser[]>([]);
+  const [onboarding, setOnboarding] = useState<CompanyUserOnboarding[]>([]);
   const [inviteCompanyID, setInviteCompanyID] = useState(() => companyID);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("company_user");
-  const [inviteToken, setInviteToken] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
   const [createdCompanyNotice, setCreatedCompanyNotice] = useState<Company | null>(null);
@@ -913,6 +1044,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const load = useCallback(async () => {
     if (!companyID || !canManageSelectedCompany) {
       setUsers([]);
+      setOnboarding([]);
       setUserGroups([]);
       setUserGroupMembers([]);
       setSelectedUserGroupID("");
@@ -920,11 +1052,13 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     }
     setError("");
     try {
-      const [usersPayload, groupsPayload] = await Promise.all([
+      const [usersPayload, onboardingPayload, groupsPayload] = await Promise.all([
         apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
+        apiFetchJSON<{ onboarding: CompanyUserOnboarding[] }>(`/v1/companies/${encodeURIComponent(companyID)}/onboarding`),
         apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
       ]);
       setUsers(usersPayload.users ?? []);
+      setOnboarding(onboardingPayload.onboarding ?? []);
       setUserGroups(groupsPayload.groups ?? []);
       setUserGroupMembers(groupsPayload.members ?? []);
       setSelectedUserGroupID((previous) => (groupsPayload.groups ?? []).some((group) => group.group_id === previous) ? previous : (groupsPayload.groups ?? [])[0]?.group_id ?? "");
@@ -1112,7 +1246,6 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             const targetCompanyID = me.is_dev_admin ? inviteCompanyID : companyID;
             setError("");
             setInviteMessage("");
-            setInviteToken("");
             if (!targetCompanyID) {
               setError("Invite company required");
               return;
@@ -1122,12 +1255,11 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               return;
             }
             try {
-              const payload = await apiFetchJSON<{ invitation: { token?: string }; cognito_invite_status?: string }>("/v1/invitations", {
+              const payload = await apiFetchJSON<InviteCreateResponse>("/v1/invitations", {
                 method: "POST",
                 body: JSON.stringify({ company_id: targetCompanyID, email: normalizedInviteEmail, role: inviteRole }),
               });
-              setInviteToken(payload.invitation.token ?? "");
-              setInviteMessage(inviteStatusMessage(payload.cognito_invite_status));
+              setInviteMessage(inviteStatusMessage(payload));
               setInviteEmail("");
               await load();
             } catch (inviteError) {
@@ -1155,8 +1287,8 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             <SettingsSelect value={inviteRole} options={INVITE_ROLE_OPTIONS} onChange={setInviteRole} ariaLabel="User role" />
             <button style={settingsPrimaryButtonStyle}>Invite user</button>
           </form>
-          {inviteToken && <div style={settingsTokenStyle}>Invite token: {inviteToken}</div>}
           {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
+          <div style={settingsInfoTextStyle}>Dev note: while the Google app is in Testing mode, add invited Google accounts as Google Audience test users before they connect Google.</div>
         </section>}
         <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
           <div style={settingsProfileHeaderStyle}>
@@ -1207,6 +1339,25 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           {passwordMessage && <div style={successMessageStyle}>{passwordMessage}</div>}
         </section>
       </div>
+      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
+        <div style={settingsSectionHeaderRowStyle}>
+          <h2 style={sectionTitleStyle}>Onboarding</h2>
+          <span style={settingsSectionScopeStyle}>{activeCompanyLabel}</span>
+        </div>
+        <div style={{ display: "grid", gap: 4 }}>
+          {onboarding.length === 0 && <div style={settingsInfoTextStyle}>No onboarding activity in this company scope.</div>}
+          {onboarding.map((item) => (
+            <div key={`${item.email}:${item.user_id ?? item.invitation_id ?? ""}`} style={onboardingRowStyle}>
+              <span style={{ minWidth: 0, overflowWrap: "anywhere", fontWeight: 600 }}>{onboardingUserLabel(item)}</span>
+              <span>{item.role}</span>
+              <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {onboardingStatusLabels(item).map((label) => <span key={label} style={statusChipStyle}>{label}</span>)}
+              </span>
+              {item.invite_email_error && <span style={{ gridColumn: "1 / -1", ...settingsErrorSmallStyle }}>{item.invite_email_error}</span>}
+            </div>
+          ))}
+        </div>
+      </section>}
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <div style={settingsSectionHeaderRowStyle}>
           <h2 style={sectionTitleStyle}>Company Users</h2>
@@ -1653,11 +1804,6 @@ const settingsSubsectionTitleStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-const settingsTokenStyle: React.CSSProperties = {
-  ...settingsInfoTextStyle,
-  overflowWrap: "anywhere",
-};
-
 const settingsSectionHeaderRowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "baseline",
@@ -1741,6 +1887,26 @@ const userRowStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto auto",
 };
 
+const onboardingRowStyle: React.CSSProperties = {
+  ...rowStyle,
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
+  alignItems: "start",
+  padding: "7px 0",
+};
+
+const statusChipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 22,
+  border: "1px solid rgba(100, 116, 139, 0.26)",
+  borderRadius: 6,
+  background: "#f8fafc",
+  color: "#000000",
+  fontSize: 11,
+  fontWeight: 600,
+  padding: "2px 7px",
+};
+
 const dangerButtonStyle: React.CSSProperties = {
   borderColor: "#64748b",
   color: "#000000",
@@ -1789,4 +1955,28 @@ function companyUserLabel(user: CompanyUser): string {
   const name = (user.display_name ?? "").trim();
   if (name && user.email) return `${name} <${user.email}>`;
   return name || user.email || user.user_id;
+}
+
+function onboardingUserLabel(item: CompanyUserOnboarding): string {
+  const name = item.display_name?.trim() ?? "";
+  if (name && item.email) return `${name} <${item.email}>`;
+  return item.email || item.user_id || item.invitation_id || "User";
+}
+
+function onboardingStatusLabels(item: CompanyUserOnboarding): string[] {
+  const labels: string[] = [];
+  if (item.invitation_status === "pending") labels.push("Invited");
+  if (item.cognito_status === "created" || item.cognito_status === "resent" || item.cognito_status === "existing_mango_user") {
+    labels.push("Cognito user created");
+  } else if (item.cognito_status === "failed") {
+    labels.push("Cognito failed");
+  }
+  if (item.invite_email_status === "sent") labels.push("Invite email sent");
+  else if (item.invite_email_status === "failed") labels.push("Invite email failed");
+  else if (item.invite_email_status === "not_configured") labels.push("Invite email not configured");
+  if (item.invite_accepted || item.invitation_status === "accepted") labels.push("Invite accepted");
+  if (item.google_connection_status === "connected") labels.push("Google connected");
+  else if (item.google_connection_status === "reauth_required") labels.push("Google connection invalid / expired");
+  else labels.push("Google not connected");
+  return labels;
 }

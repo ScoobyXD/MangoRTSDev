@@ -39,7 +39,7 @@ func (c NylasConfig) IsConfigured() bool {
 		strings.TrimSpace(c.StateSecret) != ""
 }
 
-func (c NylasConfig) HostedAuthURL(provider, state string) (string, error) {
+func (c NylasConfig) HostedAuthURL(provider, state, loginHint string) (string, error) {
 	provider = normalizeCommunicationsProvider(provider)
 	if provider == "" {
 		return "", errInvalidNylasProvider
@@ -56,6 +56,9 @@ func (c NylasConfig) HostedAuthURL(provider, state string) (string, error) {
 	query.Set("provider", provider)
 	query.Set("state", state)
 	query.Set("scope", strings.Join(c.ScopesForProvider(provider), " "))
+	if hint := strings.TrimSpace(strings.ToLower(loginHint)); hint != "" {
+		query.Set("login_hint", hint)
+	}
 	base.RawQuery = query.Encode()
 	return base.String(), nil
 }
@@ -71,6 +74,7 @@ func (c NylasConfig) ScopesForProvider(provider string) []string {
 			"https://www.googleapis.com/auth/gmail.modify",
 			"https://www.googleapis.com/auth/gmail.send",
 			"https://www.googleapis.com/auth/gmail.labels",
+			"https://www.googleapis.com/auth/calendar",
 		}
 	case "microsoft":
 		if len(c.MicrosoftScopes) > 0 {
@@ -115,7 +119,7 @@ func normalizeGoogleScope(scope string) string {
 		return scope
 	case strings.HasPrefix(scope, "/"):
 		return googleScopePrefix + strings.TrimPrefix(scope, "/")
-	case strings.HasPrefix(scope, "gmail."), strings.HasPrefix(scope, "userinfo."):
+	case strings.HasPrefix(scope, "gmail."), strings.HasPrefix(scope, "userinfo."), strings.HasPrefix(scope, "calendar"):
 		return googleScopePrefix + scope
 	default:
 		return scope

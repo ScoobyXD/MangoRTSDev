@@ -197,6 +197,9 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	if parsed.Query().Get("client_id") != "client-id" || parsed.Query().Get("provider") != "google" {
 		t.Fatalf("auth url query = %s", parsed.RawQuery)
 	}
+	if parsed.Query().Get("login_hint") != "user@example.com" {
+		t.Fatalf("login_hint = %q, want user@example.com", parsed.Query().Get("login_hint"))
+	}
 	if scope := parsed.Query().Get("scope"); !strings.Contains(scope, "https://www.googleapis.com/auth/userinfo.email") || strings.Contains(scope, " userinfo.email ") {
 		t.Fatalf("scope = %q, want fully-qualified Google scopes", scope)
 	}
@@ -213,7 +216,7 @@ func TestNylasGoogleScopesNormalizeShorthandEnvValues(t *testing.T) {
 	t.Parallel()
 
 	config := NylasConfig{
-		GoogleScopes: []string{"openid", "userinfo.email", "gmail.modify", "gmail.send", "gmail.labels", "gmail.send"},
+		GoogleScopes: []string{"openid", "userinfo.email", "gmail.modify", "gmail.send", "gmail.labels", "calendar", "gmail.send"},
 	}
 	scopes := strings.Join(config.ScopesForProvider("google"), " ")
 	if strings.Contains(scopes, "openid") || strings.Contains(scopes, " userinfo.email ") {
@@ -224,6 +227,7 @@ func TestNylasGoogleScopesNormalizeShorthandEnvValues(t *testing.T) {
 		"https://www.googleapis.com/auth/gmail.modify",
 		"https://www.googleapis.com/auth/gmail.send",
 		"https://www.googleapis.com/auth/gmail.labels",
+		"https://www.googleapis.com/auth/calendar",
 	} {
 		if !strings.Contains(scopes, want) {
 			t.Fatalf("scopes = %q, missing %q", scopes, want)

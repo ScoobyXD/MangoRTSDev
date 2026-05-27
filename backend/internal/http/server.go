@@ -8,6 +8,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -16,11 +17,12 @@ type AuthTokenValidator interface {
 }
 
 type CognitoAdminClient interface {
-	AdminCreateUser(ctx context.Context, email string) error
+	AdminCreateUser(ctx context.Context, email string) (auth.CognitoAdminCreateUserResult, error)
 	AdminDeleteUser(ctx context.Context, username string) error
 }
 
 type AuthEmailSender interface {
+	SendInvitation(ctx context.Context, input auth.InvitationEmailInput) error
 	SendSignupConfirmation(ctx context.Context, email, companyName string) error
 }
 
@@ -46,6 +48,7 @@ type Server struct {
 	authCache                   *authMembershipCache
 	cognitoAdmin                CognitoAdminClient
 	emailSender                 AuthEmailSender
+	appBaseURL                  string
 	nylasClient                 NylasClient
 	nylasConfig                 NylasConfig
 	maxBodyBytes                int64
@@ -59,6 +62,7 @@ type ServerOptions struct {
 	AuthMembershipCacheMaxEntries int
 	CognitoAdmin                  CognitoAdminClient
 	EmailSender                   AuthEmailSender
+	AppBaseURL                    string
 	NylasClient                   NylasClient
 	NylasConfig                   NylasConfig
 	MaxRequestBodyBytes           int64
@@ -112,6 +116,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		authCache:                   newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
 		cognitoAdmin:                options.CognitoAdmin,
 		emailSender:                 options.EmailSender,
+		appBaseURL:                  strings.TrimSpace(options.AppBaseURL),
 		nylasClient:                 options.NylasClient,
 		nylasConfig:                 options.NylasConfig,
 		maxBodyBytes:                options.MaxRequestBodyBytes,

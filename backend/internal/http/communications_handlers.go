@@ -95,7 +95,7 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_state")
 		return
 	}
-	authURL, err := s.nylasConfig.HostedAuthURL(provider, state)
+	authURL, err := s.nylasConfig.HostedAuthURL(provider, state, accountEmail)
 	if errors.Is(err, errInvalidNylasProvider) {
 		writeError(w, http.StatusBadRequest, "invalid_email_provider")
 		return

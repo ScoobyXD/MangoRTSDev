@@ -24,8 +24,12 @@ func TestCognitoAdminCreateUserSendsInitialInvite(t *testing.T) {
 		HTTPClient: &http.Client{Transport: transport},
 	}
 
-	if err := client.AdminCreateUser(context.Background(), "USER@EXAMPLE.COM"); err != nil {
+	result, err := client.AdminCreateUser(context.Background(), "USER@EXAMPLE.COM")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Status != "created" || result.TemporaryPassword == "" {
+		t.Fatalf("result = %+v, want created status and temporary password", result)
 	}
 	if len(transport.requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(transport.requests))
@@ -33,8 +37,11 @@ func TestCognitoAdminCreateUserSendsInitialInvite(t *testing.T) {
 	if username := stringField(t, transport.requests[0], "Username"); username != "user@example.com" {
 		t.Fatalf("Username = %q, want lowercased email", username)
 	}
-	if action := stringField(t, transport.requests[0], "MessageAction"); action != "" {
-		t.Fatalf("MessageAction = %q, want unset", action)
+	if action := stringField(t, transport.requests[0], "MessageAction"); action != "SUPPRESS" {
+		t.Fatalf("MessageAction = %q, want SUPPRESS", action)
+	}
+	if password := stringField(t, transport.requests[0], "TemporaryPassword"); password == "" {
+		t.Fatal("TemporaryPassword is empty")
 	}
 }
 
@@ -54,17 +61,24 @@ func TestCognitoAdminCreateUserResendsExistingInvite(t *testing.T) {
 		HTTPClient: &http.Client{Transport: transport},
 	}
 
-	if err := client.AdminCreateUser(context.Background(), "user@example.com"); err != nil {
+	result, err := client.AdminCreateUser(context.Background(), "user@example.com")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Status != "resent" || result.TemporaryPassword == "" {
+		t.Fatalf("result = %+v, want resent status and temporary password", result)
 	}
 	if len(transport.requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(transport.requests))
 	}
-	if action := stringField(t, transport.requests[0], "MessageAction"); action != "" {
-		t.Fatalf("first MessageAction = %q, want unset", action)
+	if action := stringField(t, transport.requests[0], "MessageAction"); action != "SUPPRESS" {
+		t.Fatalf("first MessageAction = %q, want SUPPRESS", action)
 	}
 	if action := stringField(t, transport.requests[1], "MessageAction"); action != "RESEND" {
 		t.Fatalf("second MessageAction = %q, want RESEND", action)
+	}
+	if password := stringField(t, transport.requests[1], "TemporaryPassword"); password == "" {
+		t.Fatal("second TemporaryPassword is empty")
 	}
 }
 

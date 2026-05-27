@@ -29,6 +29,54 @@ func normalizeInvitableRole(role string) (string, bool) {
 	return normalized, true
 }
 
+func normalizeInvitationCognitoStatus(status string) string {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "", "not_started":
+		return "not_started"
+	case "not_configured":
+		return "not_configured"
+	case "created":
+		return "created"
+	case "resent":
+		return "resent"
+	case "existing_mango_user":
+		return "existing_mango_user"
+	case "failed":
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func normalizeInvitationEmailStatus(status string) string {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "", "not_started":
+		return "not_started"
+	case "not_configured":
+		return "not_configured"
+	case "sent":
+		return "sent"
+	case "failed":
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func googleConnectionStatus(connection domain.UserEmailConnection) string {
+	if strings.TrimSpace(strings.ToLower(connection.Provider)) != "google" {
+		return "not_connected"
+	}
+	switch normalizeEmailConnectionStatus(connection.Status) {
+	case "connected":
+		return "connected"
+	case "reauth_required":
+		return "reauth_required"
+	default:
+		return "not_connected"
+	}
+}
+
 func newInvitationToken() (string, string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
