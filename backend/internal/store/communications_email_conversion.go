@@ -14,22 +14,29 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.NewLogicGateHeader = strings.TrimSpace(input.NewLogicGateHeader)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.MessageIDs = normalizeUniqueStrings(input.MessageIDs, CommunicationsTriageBatchMaxItems)
 	input.Target.Mode = normalizeCommunicationsEmailConversionTargetMode(input.Target.Mode)
 	input.Target.LogicGateID = strings.TrimSpace(input.Target.LogicGateID)
+	input.Target.NodeID = strings.TrimSpace(input.Target.NodeID)
 	input.Target.Header = strings.TrimSpace(input.Target.Header)
 
 	if input.Target.LogicGateID == "" {
 		input.Target.LogicGateID = input.LogicGateID
+	}
+	if input.Target.NodeID == "" {
+		input.Target.NodeID = input.NodeID
 	}
 	if input.Target.Header == "" {
 		input.Target.Header = input.NewLogicGateHeader
 	}
 	if input.Target.Mode == "" {
 		switch {
+		case input.Target.NodeID != "":
+			input.Target.Mode = CommunicationsEmailConversionTargetExistingNode
 		case input.Target.LogicGateID != "":
 			input.Target.Mode = CommunicationsEmailConversionTargetExistingLogicGate
 		case input.Target.Header != "":
@@ -61,12 +68,21 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 			return CommunicationsTriageConversionInput{}, ErrInvalid
 		}
 		input.LogicGateID = input.Target.LogicGateID
+		input.NodeID = ""
+		input.NewLogicGateHeader = ""
+	case CommunicationsEmailConversionTargetExistingNode:
+		if input.Target.NodeID == "" || input.Target.LogicGateID == "" {
+			return CommunicationsTriageConversionInput{}, ErrInvalid
+		}
+		input.LogicGateID = input.Target.LogicGateID
+		input.NodeID = input.Target.NodeID
 		input.NewLogicGateHeader = ""
 	case CommunicationsEmailConversionTargetNewLogicGate:
 		if input.Target.Header == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid
 		}
 		input.LogicGateID = ""
+		input.NodeID = ""
 		input.NewLogicGateHeader = input.Target.Header
 	default:
 		return CommunicationsTriageConversionInput{}, ErrInvalid
@@ -83,6 +99,8 @@ func normalizeCommunicationsEmailConversionTargetMode(mode string) string {
 		return CommunicationsEmailConversionTargetExistingLogicGate
 	case "new", "new_logic_gate":
 		return CommunicationsEmailConversionTargetNewLogicGate
+	case "node", "existing_node":
+		return CommunicationsEmailConversionTargetExistingNode
 	default:
 		return "invalid"
 	}
@@ -93,6 +111,7 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 	if result.CreatedLogicGate {
 		inputs = append(inputs, logicGateCreatedWorkspaceEventInput(result.LogicGate, meta))
 	}
+	createsNodes := result.Target.Mode != CommunicationsEmailConversionTargetExistingNode
 	for index, node := range result.Nodes {
 		var folderItem domain.CompanyExplorerFolderItem
 		if index < len(result.FolderItems) {
@@ -111,14 +130,16 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 			provenance = result.EmailProvenance[index]
 		}
 		inputs = append(inputs, emailConvertedWorkspaceEventInput(provenance, assignment, node, meta))
-		if folderItem.CompanyID != "" {
+		if createsNodes && folderItem.CompanyID != "" {
 			inputs = append(inputs, folderItemAssignedWorkspaceEventInput(folderItem, meta))
 		}
-		inputs = append(inputs, nodeCreatedWorkspaceEventInputWithMetadata(node, meta))
-		if assignment.CompanyID != "" {
+		if createsNodes {
+			inputs = append(inputs, nodeCreatedWorkspaceEventInputWithMetadata(node, meta))
+		}
+		if createsNodes && assignment.CompanyID != "" {
 			inputs = append(inputs, workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentSavedEventType, assignment, node, meta))
 		}
-		if card.CompanyID != "" {
+		if createsNodes && card.CompanyID != "" {
 			inputs = append(inputs, kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_upserted", card, true, meta))
 		}
 		inputs = append(inputs, nodeUpdatedWorkspaceEventInputWithMetadata(node, meta))

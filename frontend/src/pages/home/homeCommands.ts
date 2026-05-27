@@ -711,6 +711,7 @@ export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
   logicGateID: string;
+  nodeID?: string;
   messageIDs: string[];
   priority: number;
   convertTriageMessagesToLogicGate?: HomeConvertTriageMessagesToLogicGate;
@@ -726,12 +727,13 @@ export async function convertMessagesToLogicGateCommand(args: {
   invalidateCommunications?: typeof defaultInvalidateCommunicationsCache;
 }): Promise<HomeTriageConversionCommandResult | null> {
   const logicGateID = args.logicGateID.trim();
+  const nodeID = args.nodeID?.trim() ?? "";
   const messageIDs = cleanIDList(args.messageIDs);
   if (!logicGateID || messageIDs.length === 0) return null;
 
   const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
   const convertTriageMessagesToLogicGate = args.convertTriageMessagesToLogicGate ?? defaultConvertTriageMessagesToLogicGate;
-  const result = await convertTriageMessagesToLogicGate({ companyID: args.companyID, logicGateID, messageIDs, priority });
+  const result = await convertTriageMessagesToLogicGate({ companyID: args.companyID, logicGateID, nodeID, messageIDs, priority });
   const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);
   const boardLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
 

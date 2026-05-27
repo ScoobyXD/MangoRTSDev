@@ -150,6 +150,98 @@ func TestMemoryEmailConversionCommandCanCreateNewLogicGate(t *testing.T) {
 	}
 }
 
+func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111106"
+	repo.EnsureCompany(companyID, "Email Conversion Company")
+	user, logicGate := setupEmailConversionUserAndGate(t, repo, companyID)
+	node, err := repo.CreateNode(companyID, "Existing customer node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	initialPriority := 4
+	assignmentResult, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Priority:    &initialPriority,
+		PrioritySet: true,
+		Status:      "pending",
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
+	}
+	afterSequence := int64(0)
+	if len(baselineEvents) > 0 {
+		afterSequence = baselineEvents[len(baselineEvents)-1].Sequence
+	}
+	message := domain.EmailMessageSnapshot{ID: "message-existing-node", ThreadID: "thread-existing-node", Subject: "Attach this email"}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+
+	priority := 2
+	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:      user.UserID,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Target: CommunicationsTriageConversionTarget{
+			Mode:        CommunicationsEmailConversionTargetExistingNode,
+			LogicGateID: logicGate.LogicGateID,
+			NodeID:      node.NodeID,
+		},
+		MessageIDs:  []string{message.ID},
+		Priority:    &priority,
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems existing node: %v", err)
+	}
+	if result.Target.Mode != CommunicationsEmailConversionTargetExistingNode || result.Target.NodeID != node.NodeID {
+		t.Fatalf("target = %+v, want existing node %s", result.Target, node.NodeID)
+	}
+	if len(result.Nodes) != 1 || result.Nodes[0].NodeID != node.NodeID {
+		t.Fatalf("result nodes = %+v, want existing node", result.Nodes)
+	}
+	if result.Nodes[0].Priority == nil || *result.Nodes[0].Priority != priority {
+		t.Fatalf("node priority = %+v, want %d", result.Nodes[0].Priority, priority)
+	}
+	if len(result.FolderItems) != 0 {
+		t.Fatalf("folder items = %+v, want none for existing node attachment", result.FolderItems)
+	}
+	if len(result.Cards) != 1 || result.Cards[0].CardID != assignmentResult.Card.CardID {
+		t.Fatalf("cards = %+v, want existing assignment card %s", result.Cards, assignmentResult.Card.CardID)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
+	if err != nil || len(placements) != 1 || placements[0].NodeID != node.NodeID || placements[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("email placements = %+v err=%v", placements, err)
+	}
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("email projections = %+v err=%v", projections, err)
+	}
+	nodes, err := repo.ListNodes(companyID)
+	if err != nil || len(nodes) != 1 || nodes[0].NodeID != node.NodeID {
+		t.Fatalf("nodes after attach = %+v err=%v, want no created node", nodes, err)
+	}
+	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
+	if err != nil || len(triageItems) != 0 {
+		t.Fatalf("triage items after attach = %+v err=%v, want deleted", triageItems, err)
+	}
+	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	if gotTypes, wantTypes := domainEventTypes(durable), []string{WorkItemEmailConvertedEventType, "node_updated"}; !reflect.DeepEqual(gotTypes, wantTypes) {
+		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	}
+}
+
 func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 	errAppend := errors.New("append failed")
 

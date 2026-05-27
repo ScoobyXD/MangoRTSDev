@@ -696,6 +696,7 @@ export async function fetchCommunicationsWorkspacePanel(companyID: string): Prom
 export async function convertTriageMessagesToLogicGate(input: {
   companyID: string;
   logicGateID: string;
+  nodeID?: string;
   messageIDs: string[];
   priority: number;
 }): Promise<{
@@ -705,6 +706,7 @@ export async function convertTriageMessagesToLogicGate(input: {
   folder_items?: CompanyExplorerFolderItem[];
   deleted_message_ids: string[];
 }> {
+  const cleanNodeID = input.nodeID?.trim() ?? "";
   const result = await apiFetchJSON<{
     board: KanbanBoard;
     cards: KanbanCard[];
@@ -716,6 +718,10 @@ export async function convertTriageMessagesToLogicGate(input: {
     body: JSON.stringify({
       company_id: input.companyID,
       logic_gate_id: input.logicGateID,
+      node_id: cleanNodeID || undefined,
+      target: cleanNodeID
+        ? { mode: "existing_node", logic_gate_id: input.logicGateID, node_id: cleanNodeID }
+        : { mode: "existing_logic_gate", logic_gate_id: input.logicGateID },
       message_ids: cleanIDs(input.messageIDs),
       priority: input.priority,
     }),
