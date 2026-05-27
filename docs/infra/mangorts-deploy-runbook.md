@@ -22,7 +22,7 @@ This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OI
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
 9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `ORIGIN_VERIFY_SECRET`.
 10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below. Realtime inbox updates require a Nylas webhook destination and webhook secret after the first deploy exposes the webhook URL.
-11. Apply database schema/migrations from a machine that can reach the DB, then seed the dev company membership after the first Cognito user exists.
+11. Apply database schema/migrations from a machine that can reach the DB, then bootstrap the first dev admin. Prefer setting `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` for the first deploy, signing in once, and clearing it after the dev admin can invite users. The older manual fallback is to seed the dev company membership after the first Cognito user exists.
 
 ## GitHub Configuration
 
@@ -47,6 +47,8 @@ Required variables:
 - `TF_EXISTING_DB_SECURITY_GROUP_ID`
 - `TF_DEV_COMPANY_ID`
 - `TF_COGNITO_DOMAIN_PREFIX`
+- `TF_EMAIL_FROM_ADDRESS` once SES sender verification is ready
+- `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` for first deploy only, then clear it
 
 For ECS networking, use one of these:
 
@@ -140,7 +142,7 @@ It performs:
 - The dev site no longer has a CloudFront Basic Auth gate. Public pages load normally; app data remains protected by Cognito and backend company-membership authorization.
 - CloudFront still sends a private origin-verification header to the ALB so direct origin requests are rejected.
 - The dev company ID is intentionally hardcoded as `11111111-1111-1111-1111-111111111111` until tenant onboarding and company selection exist.
-- Before real company onboarding, seed Cognito user membership against the hardcoded dev company ID so authenticated API calls pass company authorization.
+- Before real company onboarding, either use `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` once or seed Cognito user membership against the hardcoded dev company ID so authenticated API calls pass company authorization.
 - Replace the hardcoded dev company flow with backend-driven tenant discovery before onboarding external companies.
 
 ## Dev Database Drift Note

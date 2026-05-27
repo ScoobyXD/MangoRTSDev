@@ -16,6 +16,17 @@ The frontend uses custom React pages, Cognito Identity Provider API calls for si
 
 The app does not use Cognito Managed Login / Hosted UI. Local development keeps auth disabled unless `VITE_AUTH_MODE=cognito` is set.
 
+## Bootstrap Dev Admin Flow
+
+The first dev admin is not created through the normal company invitation flow, because no Mango admin exists yet.
+
+1. Create the first Cognito user from AWS Console or CLI.
+2. Set `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` to that email for the first backend deploy, or seed `company_memberships` with `backend/db/seed_dev_auth_membership.sql`.
+3. The user signs in with the Cognito temporary password.
+4. If Cognito returns `NEW_PASSWORD_REQUIRED`, the frontend sends the user to `/complete-account` to set a permanent password without requiring a Mango invite token.
+5. On the first authenticated backend request, an allowlisted bootstrap email with no memberships is granted `dev_admin` against a bootstrap company.
+6. Remove `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` after the first dev admin can invite other users through Settings.
+
 ## Admin Visibility
 
 Settings includes onboarding status for each company user or pending invitation:
@@ -92,5 +103,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 
 - `MANGORTS_APP_URL`: frontend base URL used to build `/accept-invite?token=...` links.
 - `MANGORTS_EMAIL_FROM`: verified SES sender address for invitation and signup confirmation emails.
+- `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS`: optional comma- or space-separated first-admin allowlist. Use only for initial bootstrap, then clear it.
+- `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME`: optional company name for the temporary bootstrap company.
 
 Tokens are kept in `sessionStorage` for this MVP. This avoids persistent local storage, but a future secure cookie/session layer is still the preferred production hardening path.

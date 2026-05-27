@@ -74,6 +74,9 @@ jobs:
           TF_EXISTING_DB_SECURITY_GROUP_ID: ${{ vars.TF_EXISTING_DB_SECURITY_GROUP_ID }}
           TF_DEV_COMPANY_ID: ${{ vars.TF_DEV_COMPANY_ID }}
           TF_COGNITO_DOMAIN_PREFIX: ${{ vars.TF_COGNITO_DOMAIN_PREFIX }}
+          TF_EMAIL_FROM_ADDRESS: ${{ vars.TF_EMAIL_FROM_ADDRESS || '' }}
+          TF_BOOTSTRAP_DEV_ADMIN_EMAILS: ${{ vars.TF_BOOTSTRAP_DEV_ADMIN_EMAILS || '' }}
+          TF_BOOTSTRAP_DEV_COMPANY_NAME: ${{ vars.TF_BOOTSTRAP_DEV_COMPANY_NAME || 'MangoRTS Bootstrap' }}
           TF_NYLAS_CLIENT_ID: ${{ vars.TF_NYLAS_CLIENT_ID || '' }}
           TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
           TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
@@ -161,6 +164,9 @@ jobs:
           deploy_revision = $(json_string "$GITHUB_SHA")
           dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
           cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
+          email_from_address = $(json_string "$TF_EMAIL_FROM_ADDRESS")
+          bootstrap_dev_admin_emails = $(json_string "$TF_BOOTSTRAP_DEV_ADMIN_EMAILS")
+          bootstrap_dev_company_name = $(json_string "$TF_BOOTSTRAP_DEV_COMPANY_NAME")
           nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
           nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
           nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")

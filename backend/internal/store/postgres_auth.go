@@ -144,6 +144,61 @@ func (r *PostgresRepo) UserHasCompanyAccess(cognitoSubject, companyID string) (b
 	return ok, err
 }
 
+func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
+	cognitoSubject = strings.TrimSpace(cognitoSubject)
+	companyID = strings.TrimSpace(companyID)
+	normalizedRole, ok := normalizeRole(role)
+	if cognitoSubject == "" || companyID == "" || !ok {
+		return domain.CompanyMembership{}, ErrInvalid
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	defer tx.Rollback()
+
+	var membership domain.CompanyMembership
+	err = tx.QueryRowContext(ctx,
+		`with target_user as (
+		   select user_id
+		   from users
+		   where cognito_subject = $1
+		 ), upserted as (
+		   insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
+		   select $2::uuid, user_id, $3, now(), now()
+		   from target_user
+		   on conflict (company_id, user_id) do update set
+		     role = excluded.role,
+		     updated_timestamp = now()
+		   returning company_id, user_id, role, created_timestamp, updated_timestamp
+		 )
+		 select upserted.company_id, companies.name, upserted.user_id, upserted.role, upserted.created_timestamp, upserted.updated_timestamp
+		 from upserted
+		 join companies on companies.company_id = upserted.company_id`,
+		cognitoSubject,
+		companyID,
+		normalizedRole,
+	).Scan(&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role, &membership.CreatedTimestamp, &membership.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyMembership{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if err := recomputeCompanyAdminEffectiveAccessForUserTx(ctx, tx, membership.UserID); err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if err := recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx, tx, companyID, membership.UserID); err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	return membership, nil
+}
+
 func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

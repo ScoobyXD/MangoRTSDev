@@ -156,6 +156,18 @@ variable "email_from_address" {
   default     = ""
 }
 
+variable "bootstrap_dev_admin_emails" {
+  description = "Comma- or space-separated Cognito emails that may be auto-granted dev_admin on first backend login. Leave empty after bootstrap."
+  type        = string
+  default     = ""
+}
+
+variable "bootstrap_dev_company_name" {
+  description = "Company name used when bootstrap_dev_admin_emails creates the first dev_admin membership."
+  type        = string
+  default     = "MangoRTS Bootstrap"
+}
+
 variable "nylas_client_id" {
   description = "Nylas application client/application ID for Hosted OAuth. Leave empty to disable Communications email integration."
   type        = string

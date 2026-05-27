@@ -91,6 +91,44 @@ func TestAuthMiddlewareRejectsNonMemberCompany(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareBootstrapsAllowedDevAdmin(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "first-dev-admin-subject"
+	const email = "first-admin@example.com"
+
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		BootstrapDevAdmin: BootstrapDevAdminConfig{
+			Emails:      []string{email},
+			CompanyName: "MangoRTS Bootstrap",
+		},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, email))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		IsDevAdmin  bool                       `json:"is_dev_admin"`
+		Memberships []domain.CompanyMembership `json:"memberships"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.IsDevAdmin {
+		t.Fatal("is_dev_admin = false, want true")
+	}
+	if len(payload.Memberships) != 1 || payload.Memberships[0].Role != domain.RoleDevAdmin {
+		t.Fatalf("memberships = %+v, want one dev_admin membership", payload.Memberships)
+	}
+}
+
 func TestAuthMiddlewareAllowsDevAdminAcrossCompanies(t *testing.T) {
 	t.Parallel()
 
