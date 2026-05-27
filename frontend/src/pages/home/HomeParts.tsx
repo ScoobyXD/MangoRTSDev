@@ -112,10 +112,11 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
   );
 }
 
-export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate, onRequestDelete }: {
+export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate, onRequestDelete }: {
   menu: { x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null;
   companyUsers: CompanyUser[];
   logicGates: LogicGateRecord[];
+  nodeByID: Map<string, NodeRecord>;
   busy: boolean;
   onClose: () => void;
   onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => void;
@@ -136,6 +137,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
     logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
     || a.logic_gate_id.localeCompare(b.logic_gate_id)
   )), [logicGates]);
+  const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
 
   useEffect(() => {
     setAssignee("__no_change__");
@@ -183,6 +185,17 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
     fontSize: 12,
     fontWeight: 800,
   };
+  const pinSelectedTargets = () => {
+    if (busy) return;
+    for (const id of menu.ids) {
+      requestAppSidebarPin({
+        kind: menu.kind,
+        id,
+        label: menu.kind === "node" ? nodeTitle(nodeByID.get(id)) : logicGateTitle(logicGateByID.get(id)),
+      });
+    }
+    onClose();
+  };
 
   return (
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
@@ -209,6 +222,14 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose
           <strong style={{ fontSize: 12, color: "#111827" }}>{title}</strong>
           <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#334155", font: "inherit", fontWeight: 800 }}>x</button>
         </div>
+        <button
+          type="button"
+          disabled={busy}
+          style={actionButtonStyle}
+          onClick={pinSelectedTargets}
+        >
+          Pin {menu.kind === "node" ? "Node" : "Logic Gate"}
+        </button>
         {menu.kind === "node" ? (
           <>
             <label style={labelStyle}>

@@ -12,7 +12,6 @@ const MAX_EDITOR_IMAGE_HEIGHT_PX = 1_600;
 const MAX_COMPRESSED_IMAGE_EDGE_PX = 4_096;
 const MIN_EDITOR_IMAGE_WIDTH_PX = 48;
 const MIN_EDITOR_IMAGE_HEIGHT_PX = 36;
-const EDITOR_IMAGE_INLINE_TEXT_GAP_PX = 12;
 export const EDITOR_IMAGE_MAX_WIDTH_INSET_PX = 32;
 export const DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX = 4;
 
@@ -44,7 +43,7 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   const frame = ownerDocument.createElement("span");
   frame.setAttribute(EDITOR_IMAGE_NODE_ATTRIBUTE, "true");
   frame.setAttribute(EDITOR_IMAGE_ID_ATTRIBUTE, data.id?.trim() || createEditorImageID());
-  frame.setAttribute(EDITOR_IMAGE_WRAP_ATTRIBUTE, "true");
+  frame.setAttribute(EDITOR_IMAGE_WRAP_ATTRIBUTE, "false");
   frame.setAttribute("contenteditable", "false");
   applyEditorImageFloatLayout(frame, data.floatSide ?? "left", data.marginLeft ?? 0);
   applyEditorImageFrameSize(frame, data.width, data.height);
@@ -201,7 +200,7 @@ export function estimateEditorDocumentBytes(value: string): number {
 }
 
 export function readEditorImageFloatSide(source: HTMLElement): EditorImageFloatSide {
-  return source.style.float === "right" ? "right" : "left";
+  return source.style.float === "right" || source.style.marginLeft === "auto" ? "right" : "left";
 }
 
 export function readEditorImageInlineOffset(source: HTMLElement): number {
@@ -213,14 +212,16 @@ export function readEditorImageInlineOffset(source: HTMLElement): number {
 
 export function applyEditorImageFloatLayout(frame: HTMLElement, floatSide: EditorImageFloatSide, inlineOffset: number) {
   const offset = clampImageOffset(inlineOffset);
-  frame.style.float = floatSide;
+  frame.style.float = "none";
+  frame.style.clear = "both";
+  frame.style.display = "block";
   if (floatSide === "right") {
-    frame.style.marginLeft = `${EDITOR_IMAGE_INLINE_TEXT_GAP_PX}px`;
+    frame.style.marginLeft = "auto";
     frame.style.marginRight = `${offset}px`;
     return;
   }
   frame.style.marginLeft = `${offset}px`;
-  frame.style.marginRight = `${EDITOR_IMAGE_INLINE_TEXT_GAP_PX}px`;
+  frame.style.marginRight = "0";
 }
 
 export function getEditorImageHorizontalLimit(containerWidth: number, imageWidth: number): number {

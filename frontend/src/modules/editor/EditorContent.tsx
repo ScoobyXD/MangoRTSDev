@@ -1818,7 +1818,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           />
         )}
         {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "permissions" && (
-          <div style={{ position: "absolute", top: documentTopPx, left: 12, right: 12, bottom: 12, zIndex: 2, pointerEvents: "auto", minHeight: 0 }}>
+          <div className="mango-editor-hover-highlight" style={{ position: "absolute", top: documentTopPx, left: 12, right: 12, bottom: 12, zIndex: 2, pointerEvents: "auto", minHeight: 0 }}>
             <EntityPermissionsPanel
               requestJSON={requestJSON}
               companyID={companyID}

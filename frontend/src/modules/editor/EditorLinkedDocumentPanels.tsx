@@ -227,7 +227,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   return (
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
-        <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
+        <div className="mango-editor-hover-highlight" style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
           <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: titleTextColor, cursor: canEdit ? "text" : "default", overflowWrap: "anywhere", wordBreak: "break-word" }}>
             <span>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
             <span
@@ -276,6 +276,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
           </div>
           {nodePresetFields && (
             <div
+              className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
@@ -560,6 +561,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
           )}
           {logicGateRaciFields && (
             <div
+              className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 176px), 1fr))",
@@ -597,7 +599,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       )}
 
       {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
-        <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
+        <section className="mango-editor-hover-highlight" style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
           <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0, color: accent }}>Metadata</div>
           <div style={{ display: "grid", gap: 4 }}>
             {linkedNodeMetadataRows.map((row) => (
@@ -611,7 +613,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       )}
 
       {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
-        <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
+        <section className="mango-editor-hover-highlight" style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
           <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0, color: accent }}>History</div>
           <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
             {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}

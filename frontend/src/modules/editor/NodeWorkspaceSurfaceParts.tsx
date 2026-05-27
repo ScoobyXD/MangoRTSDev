@@ -853,6 +853,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   return (
     <div
       ref={wrapperRef}
+      className="mango-editor-hover-highlight"
       style={{
         position: "relative",
         width: "100%",
@@ -957,7 +958,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       )}
       <div
         ref={editorRef}
-        className="editor-document-scroll"
+        className="editor-document-scroll mango-editor-hover-highlight"
         data-node-text-block-id={blockID}
         role="textbox"
         aria-label="Node text block"

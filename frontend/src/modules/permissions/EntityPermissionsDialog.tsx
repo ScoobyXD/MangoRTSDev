@@ -169,6 +169,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const assignmentCount = accessBySubject.size;
   const effectiveReadOnly = readOnly || !serverCanEditPermissions;
   const controlsDisabled = busy || effectiveReadOnly;
+  const canSetAllToNoAccess = entityType === "node" || entityType === "logic_gate";
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
     if (effectiveReadOnly) return;
@@ -188,6 +189,22 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       next.delete(key);
       return next;
     });
+  };
+
+  const setAllToNoAccess = () => {
+    if (effectiveReadOnly) return;
+    const next = new Map<PermissionSelectionKey, ResourceAccessLevel>();
+    for (const group of groups) {
+      const groupID = group.group_id.trim();
+      if (groupID) next.set(`group:${groupID}` as PermissionSelectionKey, "no_access");
+    }
+    for (const user of users) {
+      const userID = user.user_id.trim();
+      if (!userID || companyUserRoleForcesAdmin(user.role)) continue;
+      next.set(`user:${userID}` as PermissionSelectionKey, "no_access");
+    }
+    setSaved(false);
+    setAccessBySubject(next);
   };
 
   const save = async () => {
@@ -283,6 +300,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
       <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{"Clear grants"}</button>
+      {canSetAllToNoAccess && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={setAllToNoAccess} disabled={controlsDisabled}>Set All to No Access</button>}
       {onClose && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
       <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
@@ -292,7 +310,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   );
 
   return (
-    <div style={containerStyle}>
+    <div className="mango-editor-hover-highlight" style={containerStyle}>
       <div style={permissionHeaderStyle}>
         <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
           <h2 style={permissionTitleStyle}>Permissions</h2>

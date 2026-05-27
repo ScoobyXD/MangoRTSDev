@@ -2848,6 +2848,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         menu={bulkEditMenu}
         companyUsers={companyUsers}
         logicGates={logicGates}
+        nodeByID={nodeByID}
         busy={busy === "bulk-node-edit" || busy === "bulk-logic-gate-edit"}
         onClose={() => setBulkEditMenu(null)}
         onApplyNodePatch={(nodeIDs, patch) => { void applyBulkNodePatch(nodeIDs, patch); }}
