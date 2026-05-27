@@ -2450,26 +2450,24 @@ function filterInboxGroupMapForUnread(groupsByCell: Map<string, InboxLogicGateNo
 }
 
 function InboxMatrixUnreadToggle({ unreadOnly, onChange }: { unreadOnly: boolean; onChange: (value: boolean) => void }) {
-  const buttonStyle = (active: boolean): React.CSSProperties => ({
+  const labelStyle = (active: boolean): React.CSSProperties => ({
     position: "relative",
     zIndex: 1,
-    height: 24,
-    minWidth: 0,
-    border: "none",
-    borderRadius: 6,
-    background: "transparent",
     color: active ? "#334155" : "#64748b",
-    cursor: "pointer",
-    font: "inherit",
+    display: "grid",
+    placeItems: "center",
     fontSize: 11,
     fontWeight: 800,
-    padding: "0 8px",
+    lineHeight: 1,
     transition: "color 160ms ease",
   });
   return (
-    <div
-      role="group"
-      aria-label="Matrix notification filter"
+    <button
+      type="button"
+      role="switch"
+      aria-checked={unreadOnly}
+      aria-label={unreadOnly ? "Showing unread matrix nodes" : "Showing all matrix nodes"}
+      onClick={() => onChange(!unreadOnly)}
       style={{
         position: "relative",
         height: 28,
@@ -2483,6 +2481,10 @@ function InboxMatrixUnreadToggle({ unreadOnly, onChange }: { unreadOnly: boolean
         borderRadius: 8,
         background: "rgba(255, 255, 255, 0.56)",
         boxSizing: "border-box",
+        color: "#334155",
+        cursor: "pointer",
+        font: "inherit",
+        appearance: "none",
       }}
     >
       <span
@@ -2502,11 +2504,24 @@ function InboxMatrixUnreadToggle({ unreadOnly, onChange }: { unreadOnly: boolean
           boxSizing: "border-box",
         }}
       />
-      <button type="button" aria-pressed={!unreadOnly} style={buttonStyle(!unreadOnly)} onClick={() => onChange(false)}>All</button>
-      <button type="button" aria-pressed={unreadOnly} style={buttonStyle(unreadOnly)} onClick={() => onChange(true)}>Unread</button>
-    </div>
+      <span style={labelStyle(!unreadOnly)}>All</span>
+      <span style={labelStyle(unreadOnly)}>Unread</span>
+    </button>
   );
 }
+
+const inboxMatrixHeaderControlsStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  minWidth: 202,
+  flex: "0 0 auto",
+};
+
+const inboxMatrixHeaderMetaStyle: React.CSSProperties = {
+  ...logicGateRaciMetaStyle,
+  minWidth: 72,
+};
 
 function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | undefined {
   if (role === "accountable" || role === "consulted" || role === "informed") return role;
@@ -2821,9 +2836,9 @@ export function RaciRoleInboxMatrix({
       <div style={logicGateRaciMatrixSurfaceStyle}>
         <div style={logicGateRaciHeaderStyle}>
           <h2 style={panelTitleStyle}>{section.title}</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <div style={inboxMatrixHeaderControlsStyle}>
             <InboxMatrixUnreadToggle unreadOnly={unreadOnly} onChange={setUnreadOnly} />
-            <div style={logicGateRaciMetaStyle}>
+            <div style={inboxMatrixHeaderMetaStyle}>
               {placedCount > 0 && <span>{placedCount} active</span>}
               {loading && <span>Loading</span>}
             </div>
