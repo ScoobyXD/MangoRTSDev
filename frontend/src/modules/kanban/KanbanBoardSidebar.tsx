@@ -26,7 +26,8 @@ type KanbanBoardSidebarProps = {
   activeBoardTitle: string;
   boardID: string;
   boardTitleDraft: string;
-  boardSearchQuery: string;
+  contentSearchQuery: string;
+  contentSearchPlaceholder: string;
   allBoardsOpen: boolean;
   boardsLoading: boolean;
   filteredBoardRowsLength: number;
@@ -42,7 +43,7 @@ type KanbanBoardSidebarProps = {
   headerLeftPaddingPx?: number;
   topClearancePx?: number;
   onSetBoardTitleDraft: React.Dispatch<React.SetStateAction<string>>;
-  onSetBoardSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  onSetContentSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   onSetEditingBoardTitle: React.Dispatch<React.SetStateAction<boolean>>;
   onToggleAllBoards: () => void;
   onCloseAllBoards: () => void;
@@ -58,7 +59,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   activeBoardTitle,
   boardID,
   boardTitleDraft,
-  boardSearchQuery,
+  contentSearchQuery,
+  contentSearchPlaceholder,
   allBoardsOpen,
   boardsLoading,
   filteredBoardRowsLength,
@@ -74,7 +76,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   headerLeftPaddingPx = 162,
   topClearancePx = KANBAN_MODULE_TOP_CLEARANCE_PX,
   onSetBoardTitleDraft,
-  onSetBoardSearchQuery,
+  onSetContentSearchQuery,
   onSetEditingBoardTitle,
   onToggleAllBoards,
   onCloseAllBoards,
@@ -87,7 +89,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
-  const boardPickerOpen = allBoardsOpen || boardSearchQuery.trim().length > 0;
+  const boardPickerOpen = allBoardsOpen;
 
   useEffect(() => {
     if (!boardPickerOpen) return;
@@ -144,10 +146,10 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       )}
       <label style={{ position: "relative", minWidth: 0, height: 25, display: "block" }}>
         <input
-          aria-label="Search Kanban boards"
-          value={boardSearchQuery}
-          onChange={(event) => onSetBoardSearchQuery(event.target.value)}
-          placeholder="Search boards"
+          aria-label="Search current Kanban content"
+          value={contentSearchQuery}
+          onChange={(event) => onSetContentSearchQuery(event.target.value)}
+          placeholder={contentSearchPlaceholder}
           style={{ width: "100%", height: "100%", boxSizing: "border-box", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_ACTIVE_SURFACE, color: text, fontSize: 11, fontWeight: 600, padding: "0 28px 0 8px", outline: "none", boxShadow: isDark ? "none" : "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
         />
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: subtext, pointerEvents: "none" }}>

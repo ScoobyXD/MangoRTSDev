@@ -346,12 +346,34 @@ button, input, textarea, select {
   transform: translateY(-1px);
 }
 
+.mango-editor-hover-highlight {
+  transition: box-shadow 170ms ease, outline-color 170ms ease, transform 170ms ease;
+}
+
+.mango-editor-hover-highlight:hover,
+.mango-editor-hover-highlight:focus-within {
+  outline: 1px solid rgba(92, 238, 255, 0.34);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 1px rgba(183, 124, 255, 0.12),
+    0 0 18px rgba(92, 238, 255, 0.12),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.52);
+}
+
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
 .editor-document-scroll {
   --editor-document-scroll-accent: rgb(71, 85, 105);
   --editor-document-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--editor-document-scroll-accent) transparent;
+  transition: box-shadow 170ms ease, outline-color 170ms ease;
+}
+
+.editor-document-scroll:hover,
+.editor-document-scroll:focus-within {
+  box-shadow:
+    inset 0 0 0 1px rgba(92, 238, 255, 0.28),
+    inset 0 0 22px rgba(92, 238, 255, 0.08);
 }
 
 .editor-document-scroll::-webkit-scrollbar {
@@ -385,6 +407,9 @@ button, input, textarea, select {
 }
 
 .editor-document-scroll span[data-mango-editor-image="true"] {
+  display: block;
+  float: none !important;
+  clear: both;
   max-width: calc(100% - 32px);
   min-width: 48px;
   min-height: 36px;

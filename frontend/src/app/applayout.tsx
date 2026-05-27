@@ -1196,6 +1196,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     borderRadius: isHomeView ? 0 : PAGE_SURFACE_RADIUS,
     boxShadow: isHomeView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
   };
+  const dockTabMenuTab = dockTabMenu ? dockTabs.find((tab) => tab.id === dockTabMenu.id) ?? null : null;
+  const dockTabMenuSidebarKind = dockTabMenuTab?.kind === "logic_gate_arena" ? "logic_gate" : dockTabMenuTab?.kind;
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
@@ -1557,6 +1559,23 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           <button style={menuBtnBase} onClick={() => { toggleDockTabPinned(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
             {dockTabs.find((tab) => tab.id === dockTabMenu.id)?.pinned ? "Unpin tab" : "Pin tab"}
           </button>
+          {dockTabMenuTab && dockTabMenuSidebarKind && (
+            <button
+              style={menuBtnBase}
+              onClick={() => {
+                addSidebarPins([{
+                  id: dockTabMenuTab.entityID,
+                  kind: dockTabMenuSidebarKind,
+                  label: dockTabMenuTab.label,
+                  addedAt: Date.now(),
+                }]);
+                closeMenus();
+              }}
+              {...hoverHandlers}
+            >
+              Send to pin section
+            </button>
+          )}
           <button style={{ ...menuBtnBase, color: "#334155" }} onClick={() => { deleteDockTab(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
             Delete tab
           </button>

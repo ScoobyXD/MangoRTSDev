@@ -147,7 +147,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [activeLogicGateID, setActiveLogicGateID] = useState(initialLogicGateID);
   const [activeLogicGateLabel, setActiveLogicGateLabel] = useState("");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
-  const [boardSearchQuery, setBoardSearchQuery] = useState("");
+  const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
   const [arenaGroupMenuOpen, setArenaGroupMenuOpen] = useState<"x" | "y" | null>(null);
   const [arenaXGroupBy, setArenaXGroupBy] = useState<KanbanGroupField>("status");
@@ -354,22 +354,52 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
-  const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return new Map((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
   }, [apiBase, cards, columns, companyID, nodeGraphRevision]);
+  const normalizedContentSearchQuery = contentSearchQuery.trim().toLowerCase();
+  const searchedCards = useMemo(() => {
+    if (!normalizedContentSearchQuery) return cards;
+    const columnTitleByID = new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()]));
+    const matchingColumnIDs = new Set(orderedColumns
+      .filter((column) => column.column_id.toLowerCase().includes(normalizedContentSearchQuery) || column.title.toLowerCase().includes(normalizedContentSearchQuery))
+      .map((column) => column.column_id));
+    return cards.filter((card) => {
+      if (matchingColumnIDs.has(card.column_id)) return true;
+      const node = arenaNodeByID.get(card.node_id);
+      const fields = [
+        card.node_title,
+        card.description_snapshot,
+        card.node_id,
+        card.card_id,
+        card.logic_gate_id ?? "",
+        card.is_issue ? "issue" : "",
+        columnTitleByID.get(card.column_id) ?? "",
+        node?.title ?? "",
+        node?.status ?? "",
+        node?.status_color ?? "",
+        node?.due_date ?? "",
+        node?.priority != null ? String(node.priority) : "",
+        node?.assignee_user_id ?? "",
+        node?.assignee_name ?? "",
+        node?.assignee_email ?? "",
+      ];
+      return fields.some((field) => field.trim().toLowerCase().includes(normalizedContentSearchQuery));
+    });
+  }, [arenaNodeByID, cards, normalizedContentSearchQuery, orderedColumns]);
+  const cardsByColumn = useMemo(() => groupCardsByColumn(searchedCards), [searchedCards]);
   const arenaGroupedBoard = useMemo(() => buildKanbanGroupedBoardLayout({
     columns: orderedColumns,
-    cards,
+    cards: searchedCards,
     xGroupBy: arenaXGroupBy,
     yGroupBy: arenaYGroupBy,
     xSortDirection: arenaXSortDirection,
     ySortDirection: arenaYSortDirection,
     nodeByID: arenaNodeByID,
     userByID: arenaUserByID,
-  }), [arenaNodeByID, arenaUserByID, arenaXGroupBy, arenaXSortDirection, arenaYGroupBy, arenaYSortDirection, cards, orderedColumns]);
+  }), [arenaNodeByID, arenaUserByID, arenaXGroupBy, arenaXSortDirection, arenaYGroupBy, arenaYSortDirection, searchedCards, orderedColumns]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
@@ -386,11 +416,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       updated_timestamp: "",
     }, ...orderedBoards];
   }, [activeBoard, activeLogicGateID, activeLogicGateLabel, boardID, companyID, orderedBoards]);
-  const filteredBoardRows = useMemo(() => {
-    const query = boardSearchQuery.trim().toLowerCase();
-    if (!query) return boardRows;
-    return boardRows.filter((board) => getKanbanBoardDisplayTitle(board).toLowerCase().includes(query));
-  }, [boardRows, boardSearchQuery]);
+  const filteredBoardRows = boardRows;
   const boardFolderLabelByID = useMemo(() => {
     const folderByID = new Map(explorerFolders.map((folder) => [folder.folder_id, folder]));
     const folderPathLabel = (folderID: string): string => {
@@ -1646,7 +1672,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         activeBoardTitle={activeBoardTitle}
         boardID={boardID}
         boardTitleDraft={boardTitleDraft}
-        boardSearchQuery={boardSearchQuery}
+        contentSearchQuery={contentSearchQuery}
+        contentSearchPlaceholder={activeBoardIsLogicGate ? "Search this Logic Gate" : "Search this board"}
         allBoardsOpen={allBoardsOpen}
         boardsLoading={boardsLoading}
         filteredBoardRowsLength={filteredBoardRows.length}
@@ -1662,7 +1689,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         headerLeftPaddingPx={boardHeaderLeftPaddingPx}
         topClearancePx={topClearancePx}
         onSetBoardTitleDraft={setBoardTitleDraft}
-        onSetBoardSearchQuery={setBoardSearchQuery}
+        onSetContentSearchQuery={setContentSearchQuery}
         onSetEditingBoardTitle={setEditingBoardTitle}
         onToggleAllBoards={() => {
           setAllBoardsOpen((open) => !open);
@@ -1670,7 +1697,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }}
         onCloseAllBoards={() => {
           setAllBoardsOpen(false);
-          setBoardSearchQuery("");
         }}
         onCommitBoardTitle={(title) => void commitBoardTitle(title)}
         onRefreshBoards={() => void refreshBoards()}
@@ -1686,7 +1712,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           activeBoardIDRef.current = nextBoardID;
           setActiveBoardID(nextBoardID);
           setAllBoardsOpen(false);
-          setBoardSearchQuery("");
+          setContentSearchQuery("");
           const selectedBoard = boardRows.find((board) => board.board_id === nextBoardID);
           const selectedLogicGateID = selectedBoard?.logic_gate_id ?? logicGateIDFromKanbanBoardID(nextBoardID);
           setActiveLogicGateID(selectedLogicGateID);

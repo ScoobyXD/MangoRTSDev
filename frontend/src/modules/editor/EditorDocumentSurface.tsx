@@ -113,7 +113,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
 
     <div
       ref={documentRef}
-      className="editor-document-scroll"
+      className="editor-document-scroll mango-editor-hover-highlight"
       role="textbox"
       aria-label="Linked document editor"
       aria-multiline="true"

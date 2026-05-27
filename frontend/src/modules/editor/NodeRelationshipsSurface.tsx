@@ -366,7 +366,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   return (
     <div
       ref={rootRef}
-      className="editor-document-scroll"
+      className="editor-document-scroll mango-editor-hover-highlight"
       onWheel={(event) => event.stopPropagation()}
       style={{
         position: "absolute",
