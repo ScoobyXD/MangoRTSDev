@@ -155,40 +155,23 @@ const inputStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   minHeight: 42,
-  border: "1px solid rgba(51, 65, 85, 0.86)",
+  border: "1px solid transparent",
   borderRadius: 8,
-  background: "var(--mango-gradient)",
-  color: "#ffffff",
+  background:
+    "linear-gradient(145deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 248, 252, 0.92) 100%) padding-box, linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%) border-box",
+  color: "#111827",
   cursor: "pointer",
   font: "inherit",
   fontSize: 13,
   fontWeight: 760,
   letterSpacing: 0,
   padding: "0 14px",
-  boxShadow: "7px 7px 16px rgba(174, 174, 192, 0.30), -5px -5px 13px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.16)",
+  boxShadow: "7px 7px 16px rgba(174, 174, 192, 0.28), -5px -5px 13px rgba(255, 255, 255, 0.94), 0 0 15px rgba(183, 124, 255, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
 };
 
 const authHeaderStyle: React.CSSProperties = {
   display: "grid",
   gap: 11,
-};
-
-const authTitleRowStyle: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-  minWidth: 0,
-};
-
-const authTitleStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#111827",
-  fontSize: 15,
-  fontWeight: 760,
-  letterSpacing: 0,
-  lineHeight: 1.1,
 };
 
 const authAccentRailStyle: React.CSSProperties = {
@@ -1371,16 +1354,12 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   );
 }
 
-function AuthPanel({ title, error, children }: { title: string; error?: string; children: React.ReactNode }) {
-  const heading = title === "MangoRTS" ? "Sign in" : title;
+function AuthPanel({ error, children }: { title: string; error?: string; children: React.ReactNode }) {
   return (
     <div style={panelStyle}>
       <div style={formStyle}>
         <div style={authHeaderStyle}>
-          <div style={authTitleRowStyle}>
-            <MangoWordmark size={28} weight={680} />
-            <h1 style={authTitleStyle}>{heading}</h1>
-          </div>
+          <MangoWordmark size={28} weight={680} />
           <div style={authAccentRailStyle} />
         </div>
         {error && <div role="alert" style={authErrorStyle}>{error}</div>}

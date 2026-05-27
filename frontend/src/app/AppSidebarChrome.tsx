@@ -1703,8 +1703,7 @@ const appSidebarSectionTitleStyle: React.CSSProperties = {
   padding: "0 6px",
   color: "#111111",
   fontSize: 12,
-  fontWeight: 800,
-  textTransform: "uppercase",
+  fontWeight: 650,
   letterSpacing: 0,
 };
 
@@ -1916,7 +1915,7 @@ function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSPro
     color: "inherit",
     cursor: "pointer",
     font: "inherit",
-    fontSize: floating ? 11.5 : 12,
+    fontSize: floating ? 13 : 12,
     fontWeight: floating ? 650 : 500,
     lineHeight: 1.1,
     letterSpacing: 0,
@@ -2161,7 +2160,7 @@ const appSidebarPinButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   fontSize: 11.5,
-  fontWeight: 800,
+  fontWeight: 600,
   padding: "0 8px",
   textAlign: "left",
   boxShadow: "0 0 0 1px rgba(120, 224, 255, 0.10), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",

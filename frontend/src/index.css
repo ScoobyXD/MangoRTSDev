@@ -73,11 +73,14 @@ button, input, textarea, select {
 
 .mango-auth-primary:not(:disabled):hover {
   filter: saturate(1.08) brightness(1.04);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(230, 252, 255, 0.56) 46%, rgba(247, 239, 255, 0.66)) padding-box,
+    linear-gradient(135deg, rgba(92, 238, 255, 0.95), rgba(128, 216, 255, 0.84) 34%, rgba(183, 124, 255, 0.9) 72%, rgba(255, 255, 255, 0.86)) border-box !important;
   box-shadow:
     9px 9px 19px rgba(174, 174, 192, 0.34),
     -6px -6px 15px rgba(255, 255, 255, 0.94),
-    0 0 18px rgba(71, 85, 105, 0.24),
-    inset 1px 1px 0 rgba(255, 255, 255, 0.18) !important;
+    0 0 17px rgba(183, 124, 255, 0.24),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.9) !important;
 }
 
 .mango-auth-secondary:not(:disabled):hover {

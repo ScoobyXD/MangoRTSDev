@@ -585,8 +585,9 @@ export const nodeInboxRailHeaderStyle: React.CSSProperties = {
 export const nodeInboxPanelTitleStyle: React.CSSProperties = {
   margin: 0,
   color: HOME_NODE_RAIL_TEXT,
-  fontSize: 14,
-  fontWeight: 800,
+  fontFamily: "var(--mango-font-family)",
+  fontSize: 16,
+  fontWeight: 650,
   lineHeight: 1.1,
 };
 
@@ -631,8 +632,9 @@ export const nodeInboxFolderLabelStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   color: HOME_NODE_RAIL_TEXT,
-  fontSize: 10,
-  fontWeight: 800,
+  fontFamily: "var(--mango-font-family)",
+  fontSize: 12,
+  fontWeight: 600,
 };
 
 export const nodeInboxGroupCountStyle: React.CSSProperties = {
@@ -650,7 +652,7 @@ export const nodeInboxGroupCountStyle: React.CSSProperties = {
 
 export const nodeInboxGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(82px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
   gap: 8,
 };
 
@@ -659,33 +661,35 @@ export type NodeInboxTileTone = "orange" | "light";
 export function nodeInboxTileStyle(selected: boolean, _tone: NodeInboxTileTone = "orange"): React.CSSProperties {
   return {
     position: "relative",
-    minHeight: 74,
+    minHeight: 82,
     display: "grid",
     alignContent: "center",
     justifyItems: "center",
-    gap: 6,
+    gap: 7,
     border: "1px solid transparent",
-    borderRadius: 7,
-    background: `${selected ? HOME_NODE_ICON_BLUE_SOFT : HOME_NODE_RAIL_WHITE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`,
+    borderRadius: 8,
+    background: selected
+      ? `linear-gradient(145deg, #ffffff 0%, #f8fbff 100%) padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box`
+      : "linear-gradient(145deg, #ffffff 0%, #fbfcff 100%) padding-box, linear-gradient(145deg, rgba(255,255,255,0.96), rgba(226,232,240,0.58)) border-box",
     color: HOME_NODE_RAIL_TEXT,
     cursor: "grab",
     font: "inherit",
-    padding: "8px 7px",
+    padding: "9px 8px",
     minWidth: 0,
     boxShadow: selected
-      ? `${HOME_KEY_EDGE_FRAME_SHADOW}, 0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT}`
-      : "0 0 0 1px rgba(120, 224, 255, 0.10), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
+      ? `${HOME_KEY_EDGE_FRAME_SHADOW}, 8px 8px 18px rgba(174, 174, 192, 0.24), -6px -6px 14px rgba(255, 255, 255, 0.94), 0 0 0 2px ${HOME_NODE_ICON_BLUE_SOFT}`
+      : "6px 6px 14px rgba(174, 174, 192, 0.24), -6px -6px 14px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
   };
 }
 
 export const nodeInboxTileIconStyle: React.CSSProperties = {
-  width: 30,
-  height: 30,
+  width: 38,
+  height: 38,
   display: "grid",
   placeItems: "center",
-  borderRadius: 6,
+  borderRadius: 8,
   background: "transparent",
-  transform: "scale(1.35)",
+  transform: "scale(1.58)",
 };
 
 export function nodeInboxTileTextStyle(_tone: NodeInboxTileTone = "orange"): React.CSSProperties {
@@ -699,7 +703,8 @@ export function nodeInboxTileTextStyle(_tone: NodeInboxTileTone = "orange"): Rea
     overflowWrap: "anywhere",
     textAlign: "center",
     color: HOME_NODE_RAIL_TEXT,
-    fontSize: 11,
+    fontFamily: "var(--mango-font-family)",
+    fontSize: 11.5,
     fontWeight: 800,
     lineHeight: 1.15,
   };
