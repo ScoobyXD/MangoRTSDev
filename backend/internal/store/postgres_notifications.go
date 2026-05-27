@@ -276,7 +276,6 @@ from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
-  and notification_type <> 'mention.created'
   and (btrim(surface) <> '' or btrim(role) <> '')`+notificationRecipientVisibilityWhereSQL+`
 group by surface, role
 order by surface asc, role asc`, input.UserID, input.CompanyID)
@@ -324,7 +323,6 @@ from notifications
 where recipient_user_id=$1::uuid
   and read_timestamp is null
   and ($2 = '' or company_id = nullif($2, '')::uuid)
-  and notification_type <> 'mention.created'
   and btrim(logic_gate_id) <> ''
   and btrim(role) <> ''`+notificationRecipientVisibilityWhereSQL+`
 group by logic_gate_id, node_id, role

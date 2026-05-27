@@ -4,6 +4,7 @@ import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
+import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
@@ -23,7 +24,6 @@ import {
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
-import { formatNotificationTimestamp } from "../modules/notifications/notificationTime";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import {
@@ -139,6 +139,7 @@ type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
   loading: boolean;
   error: string;
   items: NotificationItem[];
+  seenNotificationIDs: string[];
 };
 
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
@@ -284,10 +285,6 @@ export function AppSidebar({
     }, {}),
     [notificationSummary],
   );
-  const mentionNotificationCount = useMemo(
-    () => notificationSummaryTypeCount(notificationSummary, "mention.created"),
-    [notificationSummary],
-  );
   const myTriageNotificationCount = useMemo(
     () => mailUnreadCounts.myTriage,
     [mailUnreadCounts.myTriage],
@@ -315,7 +312,6 @@ export function AppSidebar({
   }, [companyID]);
 
   const openMailBadgeView = useCallback((view: HomeSidebarView) => {
-    setNotificationMenu(null);
     onPageSelect("home");
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
@@ -335,6 +331,7 @@ export function AppSidebar({
       loading: true,
       error: "",
       items: [],
+      seenNotificationIDs: [],
     };
     setNotificationMenu(nextMenu);
     fetchNotifications({ companyID, type: filter.type, unreadOnly: true, limit: 100 })
@@ -358,7 +355,7 @@ export function AppSidebar({
   const clearNotificationMenu = useCallback(() => {
     const menu = notificationMenu;
     if (!menu || menu.loading || menu.items.length === 0) return;
-    setNotificationMenu((current) => current ? { ...current, items: [] } : current);
+    setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
     void markNotificationsRead({
       companyID,
       type: menu.type,
@@ -373,10 +370,14 @@ export function AppSidebar({
   const openNotificationTarget = useCallback((notification: NotificationItem) => {
     const notificationID = notification.notification_id.trim();
     if (notificationID) {
-      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      setNotificationMenu((current) => {
+        if (!current) return current;
+        const seen = new Set(current.seenNotificationIDs);
+        seen.add(notificationID);
+        return { ...current, seenNotificationIDs: Array.from(seen) };
+      });
       void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
     }
-    setNotificationMenu(null);
 
     const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
@@ -421,10 +422,17 @@ export function AppSidebar({
       });
       return;
     }
-    if (notification.surface === "aci_inbox" || notification.surface === "r_inbox") openMailBadgeView(homeSidebarViewForRaciNotification(notification.surface, notification.role));
-    else if (notification.surface === "shared_triage") openMailBadgeView("shared-root");
-    else openMailBadgeView("my-triage");
-  }, [companyID, openMailBadgeView]);
+    if (notification.surface === "aci_inbox" || notification.surface === "r_inbox") {
+      onPageSelect("home");
+      onHomeViewSelect(homeSidebarViewForRaciNotification(notification.surface, notification.role));
+    } else if (notification.surface === "shared_triage") {
+      onPageSelect("home");
+      onHomeViewSelect("shared-root");
+    } else {
+      onPageSelect("home");
+      onHomeViewSelect("my-triage");
+    }
+  }, [companyID, onHomeViewSelect, onPageSelect]);
 
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {
@@ -980,20 +988,6 @@ export function AppSidebar({
             onClick={() => onHomeViewSelect(view.viewID)}
           />
         ))}
-        <AppSidebarButton
-          label="@ Mentions"
-          active={notificationMenu?.type === "mention.created"}
-          elevated
-          trailing={<SidebarNotificationBadges badges={[{
-            key: "mentions",
-            count: mentionNotificationCount,
-            tone: "mention",
-            title: "Unread mention notifications",
-            showZero: true,
-            onClick: (event) => openNotificationMenu(event, { title: "@ Mentions", type: "mention.created" }),
-          }]} />}
-          onClick={(event) => openNotificationMenu(event, { title: "@ Mentions", type: "mention.created" })}
-        />
       </section>
 
       <section
@@ -1194,39 +1188,19 @@ export function AppSidebar({
         />
       )}
       {notificationMenu && (
-        <FrameRightClickMenu x={notificationMenu.x} y={notificationMenu.y} onClose={() => setNotificationMenu(null)}>
-          <div style={appSidebarNotificationMenuStyle}>
-            <div style={appSidebarNotificationMenuHeaderStyle}>
-              <span>{notificationMenu.title}</span>
-              <button
-                type="button"
-                style={appSidebarNotificationMenuClearButtonStyle}
-                disabled={notificationMenu.loading || notificationMenu.items.length === 0}
-                onClick={clearNotificationMenu}
-              >
-                Clear
-              </button>
-            </div>
-            {notificationMenu.loading ? (
-              <div style={appSidebarNotificationMenuEmptyStyle}>Loading</div>
-            ) : notificationMenu.error ? (
-              <div style={appSidebarNotificationMenuErrorStyle}>{notificationMenu.error}</div>
-            ) : notificationMenu.items.length === 0 ? (
-              <div style={appSidebarNotificationMenuEmptyStyle}>No unread notifications</div>
-            ) : notificationMenu.items.map((notification) => (
-              <button
-                key={notification.notification_id}
-                type="button"
-                style={appSidebarNotificationMenuItemStyle}
-                onClick={() => openNotificationTarget(notification)}
-              >
-                <SidebarNotificationTitle notification={notification} />
-                {notification.body_preview && <span style={appSidebarNotificationMenuBodyStyle}>{notification.body_preview}</span>}
-                <span style={appSidebarNotificationMenuMetaStyle}>{formatSidebarNotificationTimestamp(notification.created_timestamp)}</span>
-              </button>
-            ))}
-          </div>
-        </FrameRightClickMenu>
+        <NotificationPopover
+          x={notificationMenu.x}
+          y={notificationMenu.y}
+          title={notificationMenu.title}
+          loading={notificationMenu.loading}
+          error={notificationMenu.error}
+          items={notificationMenu.items}
+          seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
+          width={280}
+          onClose={() => setNotificationMenu(null)}
+          onOpen={openNotificationTarget}
+          onClear={clearNotificationMenu}
+        />
       )}
       {pinContextMenu && (
         <FrameRightClickMenu x={pinContextMenu.x} y={pinContextMenu.y} onClose={() => setPinContextMenu(null)}>
@@ -1246,7 +1220,7 @@ export function AppSidebar({
   );
 }
 
-type SidebarNotificationBadgeTone = NotificationRaciRole | "aci" | "mail" | "mention";
+type SidebarNotificationBadgeTone = NotificationRaciRole | "aci" | "mail";
 
 type SidebarNotificationBadge = {
   key: string;
@@ -1263,16 +1237,7 @@ function notificationSummaryRoleCount(summary: NotificationSummary, surface: Not
   ), 0);
 }
 
-function notificationSummaryTypeCount(summary: NotificationSummary, type: string): number {
-  const cleanType = type.trim();
-  if (!cleanType) return 0;
-  return (summary.type_counts ?? []).reduce((count, item) => (
-    item.type === cleanType ? count + normalizeSidebarNotificationCount(item.count) : count
-  ), 0);
-}
-
 function sidebarNotificationMatchesFilter(item: NotificationItem, filter: SidebarNotificationMenuFilter): boolean {
-  if (item.type === "mention.created" && filter.type !== "mention.created") return false;
   if (filter.type && item.type !== filter.type) return false;
   if (filter.surface && item.surface !== filter.surface) return false;
   if (filter.role && item.role !== filter.role) return false;
@@ -1310,25 +1275,6 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
 function formatSidebarNotificationCount(count: number): string {
   const normalized = normalizeSidebarNotificationCount(count);
   return normalized > 99 ? "99+" : String(normalized);
-}
-
-function formatSidebarNotificationTimestamp(value: string): string {
-  return formatNotificationTimestamp(value);
-}
-
-function SidebarNotificationTitle({ notification }: { notification: NotificationItem }): React.ReactElement {
-  const showEntityIcon = notification.type === "mention.created"
-    && (notification.entity_type === "node" || notification.entity_type === "logic_gate");
-  return (
-    <span style={appSidebarNotificationMenuTitleStyle}>
-      {showEntityIcon && (
-        <span style={appSidebarNotificationMenuTitleIconStyle}>
-          <ExplorerRowIcon kind={notification.entity_type === "node" ? "node" : "logic_gate"} />
-        </span>
-      )}
-      <span style={appSidebarNotificationMenuTitleTextStyle}>{notification.title}</span>
-    </span>
-  );
 }
 
 function AppSidebarButton({
@@ -1888,8 +1834,6 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#fffaf3", border: "rgba(255, 136, 32, 0.30)", color: "#c2410c" };
     case "aci":
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
-    case "mention":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
     case "mail":
     default:
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
@@ -2167,108 +2111,6 @@ const appSidebarContextMenuButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   textAlign: "left",
   padding: "0 12px",
-};
-
-const appSidebarNotificationMenuStyle: React.CSSProperties = {
-  width: 280,
-  maxHeight: 360,
-  display: "grid",
-  alignContent: "start",
-  overflowY: "auto",
-  padding: "6px 0",
-};
-
-const appSidebarNotificationMenuHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 8,
-  padding: "5px 12px 8px",
-  color: "rgba(15, 23, 42, 0.68)",
-  fontSize: 11,
-  fontWeight: 800,
-  textTransform: "uppercase",
-  letterSpacing: 0,
-};
-
-const appSidebarNotificationMenuClearButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(100, 116, 139, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  lineHeight: 1,
-  padding: "4px 7px",
-  textTransform: "none",
-};
-
-const appSidebarNotificationMenuItemStyle: React.CSSProperties = {
-  width: "100%",
-  display: "grid",
-  gap: 3,
-  border: "none",
-  background: "transparent",
-  color: "#111827",
-  cursor: "pointer",
-  font: "inherit",
-  textAlign: "left",
-  padding: "8px 12px",
-};
-
-const appSidebarNotificationMenuTitleStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 5,
-  overflow: "hidden",
-  fontSize: 12,
-  fontWeight: 750,
-};
-
-const appSidebarNotificationMenuTitleIconStyle: React.CSSProperties = {
-  width: 15,
-  height: 15,
-  flex: "0 0 auto",
-  display: "grid",
-  placeItems: "center",
-};
-
-const appSidebarNotificationMenuTitleTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const appSidebarNotificationMenuBodyStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "rgba(15, 23, 42, 0.62)",
-  fontSize: 11,
-  fontWeight: 500,
-};
-
-const appSidebarNotificationMenuMetaStyle: React.CSSProperties = {
-  color: "rgba(15, 23, 42, 0.45)",
-  fontSize: 10,
-  fontWeight: 700,
-};
-
-const appSidebarNotificationMenuEmptyStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  color: "rgba(15, 23, 42, 0.55)",
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-const appSidebarNotificationMenuErrorStyle: React.CSSProperties = {
-  ...appSidebarNotificationMenuEmptyStyle,
-  color: "#8b123f",
 };
 
 const appSidebarPinListStyle: React.CSSProperties = {
