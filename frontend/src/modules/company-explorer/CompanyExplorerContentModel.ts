@@ -92,6 +92,8 @@ export type CompanyExplorerContentProps = {
   selectionTargetFrameIDs?: string[];
   scopedRootFolderKind?: CompanyExplorerFolderKind;
   scopedRootFolderName?: string;
+  externalSearchQuery?: string;
+  onSearchResultSelect?: () => void;
 };
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
