@@ -761,6 +761,42 @@ func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
 	}
 }
 
+func TestCommunicationsAllMailboxUsesGmailNativeSearch(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=all&q=invoice&unread=true", "", token, http.StatusOK)
+	if nylas.lastQuery.SearchQueryNative != "in:anywhere invoice is:unread" {
+		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
+	}
+	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
+		t.Fatalf("query = %+v, want Gmail-native all-mail search only", nylas.lastQuery)
+	}
+}
+
 func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	t.Parallel()
 
@@ -792,8 +828,11 @@ func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	if nylas.lastQuery.Starred == nil || !*nylas.lastQuery.Starred {
 		t.Fatalf("starred = %v, want true", nylas.lastQuery.Starred)
 	}
-	if nylas.lastQuery.Query != "invoice" || nylas.lastQuery.Unread == nil || !*nylas.lastQuery.Unread {
-		t.Fatalf("query = %+v, want normal query and unread filters preserved", nylas.lastQuery)
+	if nylas.lastQuery.SearchQueryNative != "invoice is:unread" {
+		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
+	}
+	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
+		t.Fatalf("query = %+v, want Gmail-native starred search only", nylas.lastQuery)
 	}
 }
 
@@ -817,7 +856,7 @@ func TestCommunicationsArchiveMessageRemovesGmailInboxLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}},
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "STARRED", "Label_123"}},
 	}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
@@ -827,7 +866,7 @@ func TestCommunicationsArchiveMessageRemovesGmailInboxLabel(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive", "", token, http.StatusOK)
-	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123"; got != want {
+	if got, want := strings.Join(nylas.update.Folders, ","), "STARRED,Label_123"; got != want {
 		t.Fatalf("folders = %q, want %q", got, want)
 	}
 	raw, err := json.Marshal(NylasMessageUpdate{Folders: []string{}})

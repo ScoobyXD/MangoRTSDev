@@ -68,7 +68,7 @@ import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResize
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -111,7 +111,8 @@ type QueuedArchiveBatch = {
   messageIDs: string[];
 };
 
-type MailboxCountOverrides = Record<string, Partial<Record<Extract<EmailMailbox, "primary">, number>>>;
+type MailboxCountOverrideKey = Extract<EmailMailbox, "primary" | "starred">;
+type MailboxCountOverrides = Record<string, Partial<Record<MailboxCountOverrideKey, number>>>;
 
 function mailCountKey(companyID: string, viewID: HomeViewID): string {
   return `${companyID.trim()}\x1f${sharedInboxIDForHomeView(viewID)}`;
@@ -405,48 +406,61 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   useEffect(() => {
     hideNavigationRef.current = hideNavigation;
   }, [hideNavigation]);
-  const setPrimaryMailboxCountOverride = useCallback((key: string, count: number | undefined) => {
+  const setMailboxCountOverride = useCallback((key: string, mailboxKey: MailboxCountOverrideKey, count: number | undefined) => {
     const cleanKey = key.trim();
     if (!cleanKey) return;
     setMailboxCountOverrides((previous) => {
       const currentEntry = previous[cleanKey] ?? {};
       if (count === undefined) {
-        if (currentEntry.primary === undefined) return previous;
-        const { primary: _removed, ...restEntry } = currentEntry;
+        if (currentEntry[mailboxKey] === undefined) return previous;
+        const restEntry = { ...currentEntry };
+        delete restEntry[mailboxKey];
         const next = { ...previous };
         if (Object.keys(restEntry).length > 0) next[cleanKey] = restEntry;
         else delete next[cleanKey];
         return next;
       }
       const nextCount = Math.max(0, Math.floor(count));
-      if (currentEntry.primary === nextCount) return previous;
+      if (currentEntry[mailboxKey] === nextCount) return previous;
       return {
         ...previous,
         [cleanKey]: {
           ...currentEntry,
-          primary: nextCount,
+          [mailboxKey]: nextCount,
+        },
+      };
+    });
+  }, []);
+  const setPrimaryMailboxCountOverride = useCallback((key: string, count: number | undefined) => {
+    setMailboxCountOverride(key, "primary", count);
+  }, [setMailboxCountOverride]);
+  const setStarredMailboxCountOverride = useCallback((key: string, count: number | undefined) => {
+    setMailboxCountOverride(key, "starred", count);
+  }, [setMailboxCountOverride]);
+  const adjustMailboxCount = useCallback((key: string, mailboxKey: MailboxCountOverrideKey, delta: number) => {
+    const cleanKey = key.trim();
+    if (!cleanKey || delta === 0) return;
+    setMailboxCountOverrides((previous) => {
+      const currentEntry = previous[cleanKey] ?? {};
+      const baseCount = mailboxCountsFromFolders(foldersRef.current)[mailboxKey] ?? 0;
+      const currentCount = currentEntry[mailboxKey] ?? baseCount;
+      const nextCount = Math.max(0, Math.floor(currentCount + delta));
+      if (currentEntry[mailboxKey] === nextCount) return previous;
+      return {
+        ...previous,
+        [cleanKey]: {
+          ...currentEntry,
+          [mailboxKey]: nextCount,
         },
       };
     });
   }, []);
   const adjustPrimaryMailboxCount = useCallback((key: string, delta: number) => {
-    const cleanKey = key.trim();
-    if (!cleanKey || delta === 0) return;
-    setMailboxCountOverrides((previous) => {
-      const currentEntry = previous[cleanKey] ?? {};
-      const baseCount = mailboxCountsFromFolders(foldersRef.current).primary ?? 0;
-      const currentCount = currentEntry.primary ?? baseCount;
-      const nextCount = Math.max(0, Math.floor(currentCount + delta));
-      if (currentEntry.primary === nextCount) return previous;
-      return {
-        ...previous,
-        [cleanKey]: {
-          ...currentEntry,
-          primary: nextCount,
-        },
-      };
-    });
-  }, []);
+    adjustMailboxCount(key, "primary", delta);
+  }, [adjustMailboxCount]);
+  const adjustStarredMailboxCount = useCallback((key: string, delta: number) => {
+    adjustMailboxCount(key, "starred", delta);
+  }, [adjustMailboxCount]);
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -1317,10 +1331,22 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       });
     }
   }, [currentMessageListParams]);
+  const moveStarredMessageToStarredTab = useCallback((messageID: string) => {
+    if (!messageID.trim() || mailboxRef.current === "starred") return false;
+    cancelPendingAutoArchiveMessages([messageID]);
+    removeMessagesFromVisibleMailList([messageID], { preserveScrollAnchor: true });
+    return true;
+  }, [cancelPendingAutoArchiveMessages, removeMessagesFromVisibleMailList]);
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
     if (!selectedMessage) return;
+    const starredDelta = update.starred !== undefined && update.starred !== selectedMessage.starred
+      ? (update.starred ? 1 : -1)
+      : 0;
+    const countKey = mailCountKey(companyID, activeViewIDRef.current);
     setBusy("message");
     setError("");
+    if (starredDelta !== 0) adjustStarredMailboxCount(countKey, starredDelta);
+    const movedToStarredTab = update.starred === true && moveStarredMessageToStarredTab(selectedMessage.id);
     try {
       const commandResult = await updateHomeMailMessageCommand({
         companyID,
@@ -1333,10 +1359,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (update.unread === false) locallyReadMessageIDsRef.current.add(updated.id);
       if (update.unread === true) locallyReadMessageIDsRef.current.delete(updated.id);
       const normalized = update.unread === undefined ? updated : { ...updated, unread: update.unread };
-      applyUpdatedMessageToCurrentView(normalized);
+      const routedToStarred = update.starred === true && (movedToStarredTab || moveStarredMessageToStarredTab(normalized.id));
+      if (!routedToStarred) {
+        applyUpdatedMessageToCurrentView(normalized);
+      }
       if (update.folders) await loadMessages();
+      if (starredDelta !== 0) void loadFolders();
     } catch (updateError) {
+      if (starredDelta !== 0) adjustStarredMailboxCount(countKey, -starredDelta);
       setError(formatError(updateError, "Failed to update message"));
+      if (movedToStarredTab) scheduleMessageListRefresh(0);
     } finally {
       setBusy("");
     }
@@ -1346,7 +1378,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!messageID) return;
     const nextStarred = !message.starred;
     const optimistic = { ...message, starred: nextStarred };
-    applyUpdatedMessageToCurrentView(optimistic);
+    const countKey = mailCountKey(companyID, activeViewIDRef.current);
+    const starredDelta = nextStarred ? 1 : -1;
+    adjustStarredMailboxCount(countKey, starredDelta);
+    const routedOptimistic = nextStarred && moveStarredMessageToStarredTab(messageID);
+    if (!routedOptimistic) {
+      applyUpdatedMessageToCurrentView(optimistic);
+    }
     void updateHomeMailMessageCommand({
       companyID,
       sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
@@ -1355,10 +1393,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     })
       .then((result) => {
         if (!result) return;
-        applyUpdatedMessageToCurrentView({ ...result.message, starred: nextStarred });
+        const updated = { ...result.message, starred: nextStarred };
+        const routedToStarred = nextStarred && (routedOptimistic || moveStarredMessageToStarredTab(updated.id));
+        if (!routedToStarred) {
+          applyUpdatedMessageToCurrentView(updated);
+        }
         void loadFolders();
       })
       .catch((starError) => {
+        adjustStarredMailboxCount(countKey, -starredDelta);
         invalidateEmailMessageCache(messageID);
         if (isEmailAccessExpiredError(starError)) {
           void handleEmailAccessExpired(starError);
@@ -1367,7 +1410,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(starError, "Failed to update message star"));
         scheduleMessageListRefresh();
       });
-  }, [applyUpdatedMessageToCurrentView, companyID, handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh]);
+  }, [adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, companyID, handleEmailAccessExpired, loadFolders, moveStarredMessageToStarredTab, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -1877,7 +1920,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }, [selectedMessageIDs]);
   const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLElement>) => {
     const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
-    if (!triageView || mailboxRef.current === "archive") return;
+    if (!triageView || !canDragTriageMessageFromMailbox(mailboxRef.current)) return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
@@ -2608,15 +2651,22 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
   const baseMailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
   const currentMailboxCountKey = mailCountKey(companyID, activeViewID);
-  const primaryMailboxCountOverride = mailboxCountOverrides[currentMailboxCountKey]?.primary;
+  const currentMailboxCountOverrides = mailboxCountOverrides[currentMailboxCountKey] ?? {};
+  const primaryMailboxCountOverride = currentMailboxCountOverrides.primary;
+  const starredMailboxCountOverride = currentMailboxCountOverrides.starred;
   const mailboxCounts = useMemo(() => ({
     ...baseMailboxCounts,
     primary: primaryMailboxCountOverride ?? baseMailboxCounts.primary,
-  }), [baseMailboxCounts, primaryMailboxCountOverride]);
+    starred: starredMailboxCountOverride ?? baseMailboxCounts.starred,
+  }), [baseMailboxCounts, primaryMailboxCountOverride, starredMailboxCountOverride]);
   useEffect(() => {
     if (baseMailboxCounts.primary === undefined || primaryMailboxCountOverride === undefined) return;
     if (baseMailboxCounts.primary === primaryMailboxCountOverride) setPrimaryMailboxCountOverride(currentMailboxCountKey, undefined);
   }, [baseMailboxCounts.primary, currentMailboxCountKey, primaryMailboxCountOverride, setPrimaryMailboxCountOverride]);
+  useEffect(() => {
+    if (baseMailboxCounts.starred === undefined || starredMailboxCountOverride === undefined) return;
+    if (baseMailboxCounts.starred === starredMailboxCountOverride) setStarredMailboxCountOverride(currentMailboxCountKey, undefined);
+  }, [baseMailboxCounts.starred, currentMailboxCountKey, setStarredMailboxCountOverride, starredMailboxCountOverride]);
   useEffect(() => {
     if (!status?.connected || !isArchivableListView || mailbox !== "primary" || searchQuery.trim() || unreadOnly) return;
     if (loadedMessageListKey !== activeMessageListKey) return;

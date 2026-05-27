@@ -986,6 +986,10 @@ export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {
   return isArchivableHomeViewID(viewID) ? "primary" : "all";
 }
 
+export function canDragTriageMessageFromMailbox(mailbox: EmailMailbox): boolean {
+  return mailbox === "primary" || mailbox === "starred" || mailbox === "all" || mailbox === "archive";
+}
+
 export function messageListFilterKey(companyID: string, viewID: HomeViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
   return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
 }
