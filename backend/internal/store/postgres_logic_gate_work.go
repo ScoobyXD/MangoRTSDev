@@ -45,14 +45,16 @@ select
   case
     when assignment.is_issue then 'Issue'
     when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
+    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
     when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
     else 'Pending'
   end as status,
   case
     when assignment.is_issue then '#ffd400'
     when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $3
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then $4
-    else $5
+    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $4
+    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then $5
+    else $6
   end as status_color,
   n.due_date::text,
   n.priority,
@@ -85,12 +87,13 @@ order by
   case
     when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('pending', 'p') then 1
     when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 2
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 3
+    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 3
+    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 4
     else 1
   end asc,
   assignment.position asc,
   assignment.created_timestamp asc,
-  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultInProgressColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
+  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultInProgressColor, KanbanDefaultVerifyColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
 	}

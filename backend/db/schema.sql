@@ -864,7 +864,8 @@ cross join (
   values
     ('Pending', 1000, '#808080'),
     ('In Progress', 2000, '#ff9500'),
-    ('Done', 3000, '#39ff14')
+    ('Verify', 3000, '#00aaff'),
+    ('Done', 4000, '#39ff14')
 ) as defaults(title, position, color)
 where not exists (
   select 1

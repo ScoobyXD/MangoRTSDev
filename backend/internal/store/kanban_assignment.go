@@ -135,6 +135,8 @@ func NormalizeLogicGateAssignmentStatusTitle(status string) string {
 		return "Pending"
 	case "in progress", "inprogress", "ip":
 		return "In Progress"
+	case "verify", "verification", "v":
+		return "Verify"
 	case "done", "d":
 		return "Done"
 	default:

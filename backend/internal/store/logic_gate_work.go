@@ -10,6 +10,7 @@ import (
 const (
 	LogicGateWorkStatusPending    = "pending"
 	LogicGateWorkStatusInProgress = "in_progress"
+	LogicGateWorkStatusVerify     = "verify"
 	LogicGateWorkStatusDone       = "done"
 )
 
@@ -23,7 +24,8 @@ type logicGateWorkStatusSpec struct {
 var logicGateWorkStatusSpecs = []logicGateWorkStatusSpec{
 	{Key: LogicGateWorkStatusPending, Title: "Pending", Color: KanbanDefaultPendingColor, Position: 1000},
 	{Key: LogicGateWorkStatusInProgress, Title: "In Progress", Color: KanbanDefaultInProgressColor, Position: 2000},
-	{Key: LogicGateWorkStatusDone, Title: "Done", Color: KanbanDefaultDoneColor, Position: 3000},
+	{Key: LogicGateWorkStatusVerify, Title: "Verify", Color: KanbanDefaultVerifyColor, Position: 3000},
+	{Key: LogicGateWorkStatusDone, Title: "Done", Color: KanbanDefaultDoneColor, Position: 4000},
 }
 
 func NormalizeLogicGateWorkStatusKey(status string) (string, bool) {
@@ -38,6 +40,8 @@ func NormalizeLogicGateWorkStatusKey(status string) (string, bool) {
 		return LogicGateWorkStatusPending, true
 	case "in progress", "inprogress", "ip":
 		return LogicGateWorkStatusInProgress, true
+	case "verify", "verification", "v":
+		return LogicGateWorkStatusVerify, true
 	case "done", "d":
 		return LogicGateWorkStatusDone, true
 	default:

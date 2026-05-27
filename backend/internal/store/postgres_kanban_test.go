@@ -77,6 +77,9 @@ func TestEnsureLogicGateKanbanBoardSQL_DefaultColumnsAreConflictSafe(t *testing.
 	if columnInsertCount != 1 {
 		t.Fatalf("default column insert count = %d, want 1 set-based insert", columnInsertCount)
 	}
+	if normalized := strings.ToLower(strings.Join(strings.Fields(strings.Join(exec.queries, " ")), " ")); !strings.Contains(normalized, "('verify', 3000") || !strings.Contains(normalized, "('done', 4000") {
+		t.Fatalf("default column SQL does not put Verify between In Progress and Done: %s", normalized)
+	}
 }
 
 func TestNodeLogicGateAssignmentMigrationBackfillsAndGuardsLegacyCards(t *testing.T) {
