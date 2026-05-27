@@ -13,7 +13,9 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -339,23 +341,46 @@ func signV4(req *http.Request, body []byte, creds awsCredentials, region, servic
 		req.Header.Set("X-Amz-Security-Token", creds.SessionToken)
 	}
 
-	host := req.URL.Host
-	canonicalHeaders := "content-type:" + strings.TrimSpace(req.Header.Get("Content-Type")) + "\n" +
-		"host:" + host + "\n" +
-		"x-amz-date:" + amzDate + "\n"
-	signedHeaders := "content-type;host;x-amz-date"
-	if creds.SessionToken != "" {
-		canonicalHeaders += "x-amz-security-token:" + creds.SessionToken + "\n"
-		signedHeaders += ";x-amz-security-token"
+	type signedHeader struct {
+		name  string
+		value string
 	}
-	canonicalHeaders += "x-amz-target:" + strings.TrimSpace(req.Header.Get("X-Amz-Target")) + "\n"
-	signedHeaders += ";x-amz-target"
+	headers := []signedHeader{
+		{name: "host", value: req.URL.Host},
+		{name: "x-amz-date", value: amzDate},
+	}
+	if contentType := strings.TrimSpace(req.Header.Get("Content-Type")); contentType != "" {
+		headers = append(headers, signedHeader{name: "content-type", value: contentType})
+	}
+	if creds.SessionToken != "" {
+		headers = append(headers, signedHeader{name: "x-amz-security-token", value: strings.TrimSpace(creds.SessionToken)})
+	}
+	if target := strings.TrimSpace(req.Header.Get("X-Amz-Target")); target != "" {
+		headers = append(headers, signedHeader{name: "x-amz-target", value: target})
+	}
+	sort.Slice(headers, func(i, j int) bool {
+		return headers[i].name < headers[j].name
+	})
+	var canonicalHeaders strings.Builder
+	signedHeaderNames := make([]string, 0, len(headers))
+	for _, header := range headers {
+		canonicalHeaders.WriteString(header.name)
+		canonicalHeaders.WriteByte(':')
+		canonicalHeaders.WriteString(header.value)
+		canonicalHeaders.WriteByte('\n')
+		signedHeaderNames = append(signedHeaderNames, header.name)
+	}
+	signedHeaders := strings.Join(signedHeaderNames, ";")
+	canonicalURI := req.URL.EscapedPath()
+	if canonicalURI == "" {
+		canonicalURI = "/"
+	}
 
 	canonicalRequest := strings.Join([]string{
 		req.Method,
-		"/",
-		"",
-		canonicalHeaders,
+		canonicalURI,
+		canonicalQueryString(req.URL.Query()),
+		canonicalHeaders.String(),
 		signedHeaders,
 		payloadHash,
 	}, "\n")
@@ -368,6 +393,29 @@ func signV4(req *http.Request, body []byte, creds awsCredentials, region, servic
 	}, "\n")
 	signature := hex.EncodeToString(hmacSHA256(signingKey(creds.SecretAccessKey, dateStamp, region, service), []byte(stringToSign)))
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+creds.AccessKeyID+"/"+scope+", SignedHeaders="+signedHeaders+", Signature="+signature)
+}
+
+func canonicalQueryString(values url.Values) string {
+	if len(values) == 0 {
+		return ""
+	}
+	parts := make([]string, 0)
+	for key, items := range values {
+		encodedKey := awsQueryEscape(key)
+		if len(items) == 0 {
+			parts = append(parts, encodedKey+"=")
+			continue
+		}
+		for _, value := range items {
+			parts = append(parts, encodedKey+"="+awsQueryEscape(value))
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "&")
+}
+
+func awsQueryEscape(value string) string {
+	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
 
 func sha256Hex(value []byte) string {

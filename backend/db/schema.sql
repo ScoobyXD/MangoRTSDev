@@ -112,6 +112,11 @@ create table if not exists invitations (
   status text not null default 'pending',
   invited_by_user_id uuid not null,
   accepted_by_user_id uuid,
+  cognito_status text not null default 'not_started',
+  cognito_error text not null default '',
+  invite_email_status text not null default 'not_started',
+  invite_email_error text not null default '',
+  invite_email_sent_timestamp timestamptz,
   expires_timestamp timestamptz not null,
   accepted_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
@@ -121,6 +126,8 @@ create table if not exists invitations (
   constraint invitations_token_hash_nonblank_chk check (btrim(token_hash) <> ''),
   constraint invitations_role_chk check (role in ('company_admin', 'company_user')),
   constraint invitations_status_chk check (status in ('pending', 'accepted', 'revoked')),
+  constraint invitations_cognito_status_chk check (cognito_status in ('not_started', 'not_configured', 'created', 'resent', 'existing_mango_user', 'failed')),
+  constraint invitations_invite_email_status_chk check (invite_email_status in ('not_started', 'not_configured', 'sent', 'failed')),
   primary key (invitation_id),
   unique (token_hash),
   foreign key (invited_by_user_id) references users (user_id),
@@ -133,6 +140,9 @@ create index if not exists idx_invitations_company_email_status
 create unique index if not exists idx_invitations_one_pending_company_email
   on invitations(company_id, email)
   where status = 'pending';
+
+create index if not exists idx_invitations_company_status_updated
+  on invitations(company_id, status, updated_timestamp desc);
 
 create table if not exists user_email_connections (
   user_id uuid not null,
@@ -152,6 +162,27 @@ create table if not exists user_email_connections (
 
 create unique index if not exists idx_user_email_connections_grant_id
   on user_email_connections(grant_id);
+
+create table if not exists auth_external_identity_deletions (
+  provider text not null,
+  external_subject text not null,
+  user_id uuid,
+  email text not null default '',
+  status text not null default 'pending',
+  attempts integer not null default 0,
+  last_error text not null default '',
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  completed_timestamp timestamptz,
+  primary key (provider, external_subject),
+  constraint auth_external_identity_deletions_provider_chk check (provider in ('cognito')),
+  constraint auth_external_identity_deletions_subject_nonblank_chk check (btrim(external_subject) <> ''),
+  constraint auth_external_identity_deletions_status_chk check (status in ('pending', 'completed')),
+  constraint auth_external_identity_deletions_attempts_chk check (attempts >= 0)
+);
+
+create index if not exists idx_auth_external_identity_deletions_pending
+  on auth_external_identity_deletions(updated_timestamp) where status = 'pending';
 
 create table if not exists communications_triage_items (
   user_id uuid not null,

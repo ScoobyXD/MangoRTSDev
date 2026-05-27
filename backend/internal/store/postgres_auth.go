@@ -293,17 +293,76 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) postgresTableExists(tableName string) (bool, error) {
+	tableName = strings.TrimSpace(tableName)
+	if tableName == "" {
+		return false, ErrInvalid
+	}
+	var exists bool
+	err := r.db.QueryRow(`select to_regclass($1) is not null`, "public."+tableName).Scan(&exists)
+	return exists, err
+}
+
+func (r *PostgresRepo) postgresColumnExists(tableName, columnName string) (bool, error) {
+	tableName = strings.TrimSpace(tableName)
+	columnName = strings.TrimSpace(columnName)
+	if tableName == "" || columnName == "" {
+		return false, ErrInvalid
+	}
+	var exists bool
+	err := r.db.QueryRow(
+		`select exists(
+		   select 1
+		   from information_schema.columns
+		   where table_schema = 'public'
+		     and table_name = $1
+		     and column_name = $2
+		 )`,
+		tableName,
+		columnName,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.CompanyUserOnboarding, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		return nil, ErrInvalid
 	}
 
+	hasEmailConnections, err := r.postgresTableExists("user_email_connections")
+	if err != nil {
+		return nil, err
+	}
+	hasInvitationDeliveryStatus, err := r.postgresColumnExists("invitations", "cognito_status")
+	if err != nil {
+		return nil, err
+	}
+	latestInvitationDeliveryColumns := `i.cognito_status,
+		     i.invite_email_status, i.invite_email_error, i.invite_email_sent_timestamp,`
+	if !hasInvitationDeliveryStatus {
+		latestInvitationDeliveryColumns = `'not_started'::text as cognito_status,
+		     'not_started'::text as invite_email_status, ''::text as invite_email_error, null::timestamptz as invite_email_sent_timestamp,`
+	}
+	connectionJoin := ""
+	connectionStatus := `'not_connected'::text`
+	connectionAccountEmail := `''::text`
+	memberUpdatedTimestamp := `greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp))`
+	if hasEmailConnections {
+		connectionJoin = `left join user_email_connections connection on connection.user_id = u.user_id`
+		connectionStatus = `case
+		       when connection.provider = 'google' and connection.status = 'connected' then 'connected'
+		       when connection.provider = 'google' and connection.status = 'reauth_required' then 'reauth_required'
+		       else 'not_connected'
+		     end`
+		connectionAccountEmail = `case when connection.provider = 'google' then connection.account_email else '' end`
+		memberUpdatedTimestamp = `greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp), coalesce(connection.updated_timestamp, cm.updated_timestamp))`
+	}
+
 	rows, err := r.db.Query(
 		`with latest_invitation as (
 		   select distinct on (i.company_id, i.email)
-		     i.invitation_id::text as invitation_id, i.company_id, i.email, i.role, i.status, i.cognito_status,
-		     i.invite_email_status, i.invite_email_error, i.invite_email_sent_timestamp,
+		     i.invitation_id::text as invitation_id, i.company_id, i.email, i.role, i.status, `+latestInvitationDeliveryColumns+`
 		     i.accepted_by_user_id, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
 		   from invitations i
 		   where i.company_id = $1
@@ -316,19 +375,15 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 		     coalesce(li.invite_email_status, 'not_started') as invite_email_status,
 		     coalesce(li.invite_email_error, '') as invite_email_error,
 		     li.invite_email_sent_timestamp,
-		     (li.status = 'accepted') as invite_accepted,
-		     case
-		       when connection.provider = 'google' and connection.status = 'connected' then 'connected'
-		       when connection.provider = 'google' and connection.status = 'reauth_required' then 'reauth_required'
-		       else 'not_connected'
-		     end as google_connection_status,
-		     case when connection.provider = 'google' then connection.account_email else '' end as google_connection_account_email,
+		     coalesce(li.status = 'accepted', false) as invite_accepted,
+		     `+connectionStatus+` as google_connection_status,
+		     `+connectionAccountEmail+` as google_connection_account_email,
 		     cm.created_timestamp,
-		     greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp), coalesce(connection.updated_timestamp, cm.updated_timestamp)) as updated_timestamp
+		     `+memberUpdatedTimestamp+` as updated_timestamp
 		   from company_memberships cm
 		   join users u on u.user_id = cm.user_id
 		   left join latest_invitation li on li.company_id = cm.company_id and li.email = lower(u.email)
-		   left join user_email_connections connection on connection.user_id = u.user_id
+		   `+connectionJoin+`
 		   where cm.company_id = $1
 		 ), pending_invite_rows as (
 		   select li.company_id, li.email, li.role, null::text as user_id, ''::text as display_name,

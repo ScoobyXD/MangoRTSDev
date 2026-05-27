@@ -85,6 +85,9 @@ from company_user_groups
 where company_id=$1
 order by coalesce(parent_group_id::text, ''), position asc, created_timestamp asc, group_id asc`, companyID)
 	if err != nil {
+		if isPostgresUndefinedTable(err, "company_user_groups") {
+			return []domain.CompanyUserGroup{}, nil
+		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -367,6 +370,9 @@ order by member.group_id::text asc,
          lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), member.user_id::text)) asc,
          member.user_id::text asc`, companyID)
 	if err != nil {
+		if isPostgresUndefinedTable(err, "company_user_group_members") {
+			return []domain.CompanyUserGroupMember{}, nil
+		}
 		return nil, err
 	}
 	defer rows.Close()

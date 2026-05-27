@@ -407,8 +407,13 @@ function friendlyApiError(code: string): string {
   switch (code) {
     case "failed_to_create_cognito_user":
       return "Mango created the invite, but Cognito did not create the user. Check backend logs, AWS credentials, and onboarding status, then resend.";
+    case "failed_to_list_company_users":
+      return "Company users could not be loaded. Run pending database migrations, then refresh.";
     case "failed_to_list_onboarding":
       return "User onboarding status could not be loaded.";
+    case "failed_to_list_user_groups":
+    case "failed_to_list_user_group_members":
+      return "User groups could not be loaded. Run pending database migrations, then refresh.";
     case "invitation_email_mismatch":
       return "This Mango invite token belongs to a different email address.";
     case "invitation_token_required":

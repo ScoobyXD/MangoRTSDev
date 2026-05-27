@@ -1095,23 +1095,49 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
       setUserGroups([]);
       setUserGroupMembers([]);
       setSelectedUserGroupID("");
+      setError("");
       return;
     }
     setError("");
-    try {
-      const [usersPayload, onboardingPayload, groupsPayload] = await Promise.all([
-        apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
-        apiFetchJSON<{ onboarding: CompanyUserOnboarding[] }>(`/v1/companies/${encodeURIComponent(companyID)}/onboarding`),
-        apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
-      ]);
-      setUsers(usersPayload.users ?? []);
-      setOnboarding(onboardingPayload.onboarding ?? []);
-      setUserGroups(groupsPayload.groups ?? []);
-      setUserGroupMembers(groupsPayload.members ?? []);
-      setSelectedUserGroupID((previous) => (groupsPayload.groups ?? []).some((group) => group.group_id === previous) ? previous : (groupsPayload.groups ?? [])[0]?.group_id ?? "");
-    } catch {
-      setError("Failed to load users");
+    const [usersResult, onboardingResult, groupsResult] = await Promise.allSettled([
+      apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
+      apiFetchJSON<{ onboarding: CompanyUserOnboarding[] }>(`/v1/companies/${encodeURIComponent(companyID)}/onboarding`),
+      apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
+    ]);
+    if (usersResult.status === "rejected") {
+      console.error("Company users load failed", usersResult.reason);
+      setUsers([]);
+      setOnboarding([]);
+      setUserGroups([]);
+      setUserGroupMembers([]);
+      setSelectedUserGroupID("");
+      setError(formatAuthError(usersResult.reason, "Failed to load users"));
+      return;
     }
+    setUsers(usersResult.value.users ?? []);
+
+    const warnings: string[] = [];
+    if (onboardingResult.status === "fulfilled") {
+      setOnboarding(onboardingResult.value.onboarding ?? []);
+    } else {
+      console.error("User onboarding load failed", onboardingResult.reason);
+      setOnboarding([]);
+      warnings.push("User onboarding status could not be loaded.");
+    }
+
+    if (groupsResult.status === "fulfilled") {
+      const groups = groupsResult.value.groups ?? [];
+      setUserGroups(groups);
+      setUserGroupMembers(groupsResult.value.members ?? []);
+      setSelectedUserGroupID((previous) => groups.some((group) => group.group_id === previous) ? previous : groups[0]?.group_id ?? "");
+    } else {
+      console.error("User groups load failed", groupsResult.reason);
+      setUserGroups([]);
+      setUserGroupMembers([]);
+      setSelectedUserGroupID("");
+      warnings.push("User groups could not be loaded. Run pending database migrations, then refresh.");
+    }
+    setError(warnings.join(" "));
   }, [canManageSelectedCompany, companyID]);
 
   useEffect(() => { void loadCompanyOptions(""); }, [loadCompanyOptions]);

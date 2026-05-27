@@ -19,7 +19,9 @@ select to_regclass('public.nodes') as nodes,
        to_regclass('public.logic_gates') as logic_gates,
        to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table,
        to_regclass('public.company_explorer_folders') as company_explorer_folders,
-       to_regclass('public.communications_shared_inbox_raci_assignments') as communications_shared_inbox_raci_assignments;
+       to_regclass('public.communications_shared_inbox_raci_assignments') as communications_shared_inbox_raci_assignments,
+       to_regclass('public.user_email_connections') as user_email_connections,
+       to_regclass('public.auth_external_identity_deletions') as auth_external_identity_deletions;
 
 select conname
 from pg_constraint
@@ -64,6 +66,30 @@ begin
   end if;
   if to_regclass('public.communications_shared_inbox_raci_assignments') is null then
     raise exception 'missing table communications_shared_inbox_raci_assignments; run apply_db_migrations';
+  end if;
+  if to_regclass('public.user_email_connections') is null then
+    raise exception 'missing table user_email_connections; run apply_db_migrations';
+  end if;
+  if to_regclass('public.auth_external_identity_deletions') is null then
+    raise exception 'missing table auth_external_identity_deletions; run apply_db_migrations';
+  end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'invitations'
+      and column_name = 'cognito_status'
+  ) then
+    raise exception 'missing column invitations.cognito_status; run apply_db_migrations';
+  end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'invitations'
+      and column_name = 'invite_email_status'
+  ) then
+    raise exception 'missing column invitations.invite_email_status; run apply_db_migrations';
   end if;
 end $$;
 '@

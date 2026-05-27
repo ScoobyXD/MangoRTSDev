@@ -115,6 +115,7 @@ func (s *Server) handleCompanyOnboardingSubresource(w http.ResponseWriter, r *ht
 	}
 	items, err := s.repo.ListCompanyUserOnboarding(companyID)
 	if err != nil {
+		log.Printf("failed to list company user onboarding company_id=%s: %v", companyID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_onboarding")
 		return
 	}
@@ -132,6 +133,7 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		}
 		users, err := s.repo.ListCompanyUsers(companyID)
 		if err != nil {
+			log.Printf("failed to list company users company_id=%s: %v", companyID, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_users")
 			return
 		}
@@ -218,11 +220,13 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			}
 			groups, err := s.repo.ListCompanyUserGroups(companyID)
 			if err != nil {
+				log.Printf("failed to list company user groups company_id=%s: %v", companyID, err)
 				writeError(w, http.StatusInternalServerError, "failed_to_list_user_groups")
 				return
 			}
 			members, err := s.repo.ListCompanyUserGroupMembers(companyID)
 			if err != nil {
+				log.Printf("failed to list company user group members company_id=%s: %v", companyID, err)
 				writeError(w, http.StatusInternalServerError, "failed_to_list_user_group_members")
 				return
 			}
