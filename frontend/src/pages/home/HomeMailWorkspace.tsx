@@ -94,12 +94,11 @@ function clampArchiveGuideTop(container: HTMLDivElement, top: number): number {
 
 function measureArchiveGuideTop(container: HTMLDivElement): number {
   const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"));
-  if (rows.length >= 3) {
-    const secondBottom = rows[1].offsetTop + rows[1].offsetHeight;
-    return clampArchiveGuideTop(container, secondBottom + (rows[2].offsetTop - secondBottom) / 2);
+  if (rows.length >= 2) {
+    const firstBottom = rows[0].offsetTop + rows[0].offsetHeight;
+    return clampArchiveGuideTop(container, firstBottom + (rows[1].offsetTop - firstBottom) / 2);
   }
-  if (rows.length >= 2) return clampArchiveGuideTop(container, rows[1].offsetTop + rows[1].offsetHeight);
-  if (rows.length === 1) return clampArchiveGuideTop(container, rows[0].offsetTop + rows[0].offsetHeight * 2 + 10);
+  if (rows.length === 1) return clampArchiveGuideTop(container, rows[0].offsetTop + rows[0].offsetHeight + 10);
   return clampArchiveGuideTop(container, ARCHIVE_GUIDE_FALLBACK_TOP);
 }
 
