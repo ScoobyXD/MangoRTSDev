@@ -21,6 +21,8 @@ import { aciCellKey, buildAciInboxGroupsByCell, buildRaciRoleInboxGroupsByCell, 
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
+const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
+const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
@@ -328,12 +330,33 @@ type InboxNodeDropInput = {
   nodeIDs: string[];
   priority: InboxPriority;
   status?: ResponsibleInboxStatus;
+  fromLogicGateID?: string;
 };
 
 type InboxCellCreateInput = {
   priority: InboxPriority;
   status?: ResponsibleInboxStatus;
   creatorRaciRole?: LogicGateRaciRole;
+};
+
+type InboxCellNodeDropInput = InboxCellCreateInput & {
+  nodeIDs: string[];
+  fromLogicGateID?: string;
+};
+
+type InboxCellLogicGateDropInput = InboxCellCreateInput & {
+  logicGateIDs: string[];
+  nodeIDsByLogicGateID?: Record<string, string[]>;
+};
+
+type InboxNodeDragPayload = {
+  nodeIDs: string[];
+  fromLogicGateID?: string;
+};
+
+type InboxLogicGateDragPayload = {
+  logicGateIDs: string[];
+  nodeIDsByLogicGateID?: Record<string, string[]>;
 };
 
 type InboxGroupResizeState = {
@@ -348,6 +371,69 @@ type InboxGroupResizeState = {
 function clampInboxGroupHeight(heightPx: number): number {
   if (!Number.isFinite(heightPx)) return HOME_INBOX_GROUP_MIN_HEIGHT_PX;
   return Math.max(HOME_INBOX_GROUP_MIN_HEIGHT_PX, Math.min(HOME_INBOX_GROUP_MAX_HEIGHT_PX, Math.round(heightPx)));
+}
+
+function safeParseInboxDragPayload<T>(dataTransfer: DataTransfer, mime: string): T | null {
+  try {
+    const raw = dataTransfer.getData(mime);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function setInboxNodeDragPayload(dataTransfer: DataTransfer, nodeIDs: string[], fromLogicGateID?: string): void {
+  const ids = cleanIDList(nodeIDs);
+  if (ids.length === 0) return;
+  const cleanLogicGateID = fromLogicGateID?.trim() ?? "";
+  const payload: InboxNodeDragPayload = {
+    nodeIDs: ids,
+    fromLogicGateID: cleanLogicGateID || undefined,
+  };
+  dataTransfer.setData(HOME_INBOX_NODE_DRAG_MIME, JSON.stringify(payload));
+}
+
+function readInboxNodeDragPayload(dataTransfer: DataTransfer): InboxNodeDragPayload | null {
+  const payload = safeParseInboxDragPayload<InboxNodeDragPayload>(dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
+  if (!payload) return null;
+  const nodeIDs = cleanIDList(Array.isArray(payload.nodeIDs) ? payload.nodeIDs : []);
+  if (nodeIDs.length === 0) return null;
+  const fromLogicGateID = typeof payload.fromLogicGateID === "string" ? payload.fromLogicGateID.trim() : "";
+  return { nodeIDs, fromLogicGateID: fromLogicGateID || undefined };
+}
+
+function setInboxLogicGateDragPayload(dataTransfer: DataTransfer, logicGateIDs: string[], nodeIDsByLogicGateID?: Record<string, string[]>): void {
+  const ids = cleanIDList(logicGateIDs);
+  if (ids.length === 0) return;
+  const cleanNodeIDsByGate: Record<string, string[]> = {};
+  for (const logicGateID of ids) {
+    const nodeIDs = cleanIDList(nodeIDsByLogicGateID?.[logicGateID] ?? []);
+    if (nodeIDs.length > 0) cleanNodeIDsByGate[logicGateID] = nodeIDs;
+  }
+  const payload: InboxLogicGateDragPayload = {
+    logicGateIDs: ids,
+    nodeIDsByLogicGateID: Object.keys(cleanNodeIDsByGate).length > 0 ? cleanNodeIDsByGate : undefined,
+  };
+  dataTransfer.setData(HOME_INBOX_LOGIC_GATE_DRAG_MIME, JSON.stringify(payload));
+}
+
+function readInboxLogicGateDragPayload(dataTransfer: DataTransfer): InboxLogicGateDragPayload | null {
+  const payload = safeParseInboxDragPayload<InboxLogicGateDragPayload>(dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME);
+  if (!payload) return null;
+  const logicGateIDs = cleanIDList(Array.isArray(payload.logicGateIDs) ? payload.logicGateIDs : []);
+  if (logicGateIDs.length === 0) return null;
+  const nodeIDsByLogicGateID: Record<string, string[]> = {};
+  if (payload.nodeIDsByLogicGateID && typeof payload.nodeIDsByLogicGateID === "object") {
+    for (const logicGateID of logicGateIDs) {
+      const nodeIDs = cleanIDList(payload.nodeIDsByLogicGateID[logicGateID] ?? []);
+      if (nodeIDs.length > 0) nodeIDsByLogicGateID[logicGateID] = nodeIDs;
+    }
+  }
+  return {
+    logicGateIDs,
+    nodeIDsByLogicGateID: Object.keys(nodeIDsByLogicGateID).length > 0 ? nodeIDsByLogicGateID : undefined,
+  };
 }
 
 function inboxGroupHeightsStorageKey(viewID: InboxMatrixViewID): string {
@@ -2320,6 +2406,65 @@ function notificationCountForInboxNode(summary: NotificationSummary | undefined,
   }, 0);
 }
 
+function filterInboxGroupsForUnread(groups: InboxLogicGateNodeGroup[], summary: NotificationSummary, role: NotificationRaciRole): InboxLogicGateNodeGroup[] {
+  return groups.reduce<InboxLogicGateNodeGroup[]>((out, group) => {
+    const groupUnread = notificationCountForInboxGroup(summary, role, group);
+    if (groupUnread <= 0) return out;
+    out.push({
+      ...group,
+      nodeIDs: group.nodeIDs.filter((nodeID) => notificationCountForInboxNode(summary, group, nodeID, role) > 0),
+    });
+    return out;
+  }, []);
+}
+
+function filterInboxGroupMapForUnread(groupsByCell: Map<string, InboxLogicGateNodeGroup[]>, summary: NotificationSummary, role: NotificationRaciRole, unreadOnly: boolean): Map<string, InboxLogicGateNodeGroup[]> {
+  if (!unreadOnly) return groupsByCell;
+  const filtered = new Map<string, InboxLogicGateNodeGroup[]>();
+  for (const [cellKey, groups] of groupsByCell.entries()) {
+    const unreadGroups = filterInboxGroupsForUnread(groups, summary, role);
+    if (unreadGroups.length > 0) filtered.set(cellKey, unreadGroups);
+  }
+  return filtered;
+}
+
+function InboxMatrixUnreadToggle({ unreadOnly, onChange }: { unreadOnly: boolean; onChange: (value: boolean) => void }) {
+  const buttonStyle = (active: boolean): React.CSSProperties => ({
+    height: 24,
+    minWidth: 54,
+    border: active ? "1px solid rgba(71, 85, 105, 0.38)" : "1px solid transparent",
+    borderRadius: 6,
+    background: active ? "#ffffff" : "transparent",
+    color: active ? "#334155" : "#64748b",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 11,
+    fontWeight: 800,
+    padding: "0 8px",
+    boxShadow: active ? "0 3px 8px rgba(15, 23, 42, 0.10)" : "none",
+  });
+  return (
+    <div
+      role="group"
+      aria-label="Matrix notification filter"
+      style={{
+        height: 28,
+        display: "inline-grid",
+        gridTemplateColumns: "1fr 1fr",
+        alignItems: "center",
+        gap: 2,
+        padding: 2,
+        border: "1px solid rgba(100, 116, 139, 0.18)",
+        borderRadius: 8,
+        background: "rgba(255, 255, 255, 0.56)",
+      }}
+    >
+      <button type="button" style={buttonStyle(!unreadOnly)} onClick={() => onChange(false)}>All</button>
+      <button type="button" style={buttonStyle(unreadOnly)} onClick={() => onChange(true)}>Unread</button>
+    </div>
+  );
+}
+
 function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | undefined {
   if (role === "accountable" || role === "consulted" || role === "informed") return role;
   return undefined;
@@ -2433,6 +2578,7 @@ export function RaciRoleInboxMatrix({
   selectedRowIDs,
   selectedLogicGateRowIDs,
   getNodeDragIDs,
+  getLogicGateDragIDs,
   onSelectNode,
   onSelectLogicGate,
   onOpenNode,
@@ -2445,6 +2591,8 @@ export function RaciRoleInboxMatrix({
   onCreateLogicGateInCell,
   onCreateNodeInCell,
   onDropNodes,
+  onDropNodesInCell,
+  onDropLogicGates,
 }: {
   section: (typeof RACI_INBOX_SECTIONS)[number];
   loading: boolean;
@@ -2459,6 +2607,7 @@ export function RaciRoleInboxMatrix({
   selectedRowIDs: Set<string>;
   selectedLogicGateRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
+  getLogicGateDragIDs: (logicGateID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord, informationID?: string) => void;
@@ -2471,16 +2620,20 @@ export function RaciRoleInboxMatrix({
   onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
   onCreateNodeInCell: (input: InboxCellCreateInput) => void;
   onDropNodes: (input: InboxNodeDropInput) => void;
+  onDropNodesInCell: (input: InboxCellNodeDropInput) => void;
+  onDropLogicGates: (input: InboxCellLogicGateDropInput) => void;
 }) {
-  const cellLogicGateGroups = useMemo(() => buildRaciRoleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID, section.role), [currentUserID, logicGateByID, nodeByID, nodes, section.role]);
+  const allCellLogicGateGroups = useMemo(() => buildRaciRoleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID, section.role), [currentUserID, logicGateByID, nodeByID, nodes, section.role]);
   const { groupHeights, startGroupResize } = useInboxGroupCardHeights(section.viewID);
   const { collapsedGroupKeys, toggleCollapsedGroup } = useInboxGroupCollapsedState(section.viewID);
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [activeDropKey, setActiveDropKey] = useState("");
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
   const [cellContextMenu, setCellContextMenu] = useState<(InboxCellCreateInput & { x: number; y: number }) | null>(null);
   const creatorRaciRole = section.role === "other" ? undefined : section.role;
   const notificationRole: NotificationRaciRole = section.role;
+  const cellLogicGateGroups = useMemo(() => filterInboxGroupMapForUnread(allCellLogicGateGroups, notificationSummary, notificationRole, unreadOnly), [allCellLogicGateGroups, notificationRole, notificationSummary, unreadOnly]);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -2599,6 +2752,25 @@ export function RaciRoleInboxMatrix({
     setPinContextMenu(null);
     setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
   }, []);
+  const readCellDropPayload = useCallback((dataTransfer: DataTransfer) => {
+    const explorerPayload = readExplorerDragPayload(dataTransfer);
+    const matrixNodePayload = readInboxNodeDragPayload(dataTransfer);
+    const matrixLogicGatePayload = readInboxLogicGateDragPayload(dataTransfer);
+    const nodeIDs = cleanIDList([
+      ...nodeIDsFromExplorerPayload(explorerPayload, nodeFolders, nodeFolderItems),
+      ...(matrixNodePayload?.nodeIDs ?? []),
+    ]).filter((nodeID) => nodeByID.has(nodeID));
+    const logicGateIDs = cleanIDList([
+      ...logicGateIDsFromExplorerPayload(explorerPayload, [], []),
+      ...(matrixLogicGatePayload?.logicGateIDs ?? []),
+    ]).filter((logicGateID) => logicGateByID.has(logicGateID));
+    return {
+      nodeIDs,
+      logicGateIDs,
+      fromLogicGateID: matrixNodePayload?.fromLogicGateID,
+      nodeIDsByLogicGateID: matrixLogicGatePayload?.nodeIDsByLogicGateID,
+    };
+  }, [logicGateByID, nodeByID, nodeFolderItems, nodeFolders]);
 
   return (
     <>
@@ -2606,9 +2778,12 @@ export function RaciRoleInboxMatrix({
       <div style={logicGateRaciMatrixSurfaceStyle}>
         <div style={logicGateRaciHeaderStyle}>
           <h2 style={panelTitleStyle}>{section.title}</h2>
-          <div style={logicGateRaciMetaStyle}>
-            {placedCount > 0 && <span>{placedCount} active</span>}
-            {loading && <span>Loading</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <InboxMatrixUnreadToggle unreadOnly={unreadOnly} onChange={setUnreadOnly} />
+            <div style={logicGateRaciMetaStyle}>
+              {placedCount > 0 && <span>{placedCount} active</span>}
+              {loading && <span>Loading</span>}
+            </div>
           </div>
         </div>
         <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
@@ -2640,7 +2815,8 @@ export function RaciRoleInboxMatrix({
                   const cellKey = raciRoleCellKey(section.role, column.status, priority.value);
                   const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                   const statusColor = responsibleStatusColor(column.status);
-                  const cellStyle = logicGateRaciCellStyle(false);
+                  const cellDropKey = `cell:${cellKey}`;
+                  const cellStyle = logicGateRaciCellStyle(activeDropKey === cellDropKey);
                   return (
                     <div
                       key={cellKey}
@@ -2653,6 +2829,43 @@ export function RaciRoleInboxMatrix({
                         status: column.status,
                         creatorRaciRole,
                       })}
+                      onDragOver={(event) => {
+                        const drop = readCellDropPayload(event.dataTransfer);
+                        if (drop.nodeIDs.length === 0 && drop.logicGateIDs.length === 0) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = drop.logicGateIDs.length > 0 || drop.fromLogicGateID ? "move" : "copy";
+                        setActiveDropKey(cellDropKey);
+                      }}
+                      onDragLeave={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                          setActiveDropKey((current) => current === cellDropKey ? "" : current);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        const drop = readCellDropPayload(event.dataTransfer);
+                        setActiveDropKey((current) => current === cellDropKey ? "" : current);
+                        if (drop.nodeIDs.length === 0 && drop.logicGateIDs.length === 0) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (drop.logicGateIDs.length > 0) {
+                          onDropLogicGates({
+                            logicGateIDs: drop.logicGateIDs,
+                            priority: priority.value,
+                            status: column.status,
+                            creatorRaciRole,
+                            nodeIDsByLogicGateID: drop.nodeIDsByLogicGateID,
+                          });
+                        }
+                        if (drop.nodeIDs.length > 0) {
+                          onDropNodesInCell({
+                            nodeIDs: drop.nodeIDs,
+                            priority: priority.value,
+                            status: column.status,
+                            creatorRaciRole,
+                            fromLogicGateID: drop.fromLogicGateID,
+                          });
+                        }
+                      }}
                     >
                       {logicGateGroups.map((group) => {
                         const resizeKey = inboxGroupResizeKey(cellKey, group);
@@ -2660,6 +2873,7 @@ export function RaciRoleInboxMatrix({
                           <LogicGateInboxNodeGroupCard
                             key={group.logicGateID}
                             group={group}
+                            dragNodeIDs={(allCellLogicGateGroups.get(cellKey) ?? []).find((item) => item.logicGateID === group.logicGateID)?.nodeIDs ?? group.nodeIDs}
                             selectedRowIDs={selectedRowIDs}
                             selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
                             orderedLogicGateRowIDs={orderedLogicGateRowIDs}
@@ -2669,6 +2883,8 @@ export function RaciRoleInboxMatrix({
                             nodeFolders={nodeFolders}
                             nodeFolderItems={nodeFolderItems}
                             getNodeDragIDs={getNodeDragIDs}
+                            getLogicGateDragIDs={getLogicGateDragIDs}
+                            logicGateByID={logicGateByID}
                             onSelectNode={onSelectNode}
                             onSelectLogicGate={onSelectLogicGate}
                             onOpenNode={onOpenNode}
@@ -2679,7 +2895,7 @@ export function RaciRoleInboxMatrix({
                             onRequestDeleteLogicGate={onRequestDeleteLogicGate}
                             onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
-                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
+                            onDropNodes={(nodeIDs, fromLogicGateID) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status, fromLogicGateID })}
                             dropActive={activeDropKey === resizeKey}
                             onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
                             notificationSummary={notificationSummary}
@@ -3368,6 +3584,7 @@ export function ResponsibleInboxMatrix({
 
 export function LogicGateInboxNodeGroupCard({
   group,
+  dragNodeIDs,
   selectedRowIDs,
   selectedLogicGate = false,
   orderedLogicGateRowIDs = [],
@@ -3377,6 +3594,8 @@ export function LogicGateInboxNodeGroupCard({
   nodeFolders = [],
   nodeFolderItems = [],
   getNodeDragIDs,
+  getLogicGateDragIDs,
+  logicGateByID,
   onSelectNode,
   onSelectLogicGate,
   onOpenNode,
@@ -3406,6 +3625,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenPinContextMenu,
 }: {
   group: InboxLogicGateNodeGroup;
+  dragNodeIDs?: string[];
   selectedRowIDs: Set<string>;
   selectedLogicGate?: boolean;
   orderedLogicGateRowIDs?: string[];
@@ -3425,7 +3645,9 @@ export function LogicGateInboxNodeGroupCard({
   onRequestDeleteLogicGate?: (logicGateID: string) => void;
   onCreateLogicGate?: () => void;
   onCreateNode?: () => void;
-  onDropNodes?: (nodeIDs: string[]) => void;
+  getLogicGateDragIDs?: (logicGateID: string) => string[];
+  logicGateByID?: Map<string, LogicGateRecord>;
+  onDropNodes?: (nodeIDs: string[], fromLogicGateID?: string) => void;
   dropActive?: boolean;
   onDropActiveChange?: (active: boolean) => void;
   notificationSummary?: NotificationSummary;
@@ -3471,10 +3693,14 @@ export function LogicGateInboxNodeGroupCard({
     nodes: group.nodeIDs.map((nodeID) => nodeByID.get(nodeID)).filter((node): node is NodeRecord => Boolean(node)),
     relationships: nodeRelationships,
   }), [group.nodeIDs, nodeByID, nodeRelationships]);
-  const readDroppedNodeIDs = (dataTransfer: DataTransfer): string[] => {
-    if (!hasExplorerDrag(dataTransfer)) return [];
-    return nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
+  const readDroppedNodes = (dataTransfer: DataTransfer): InboxNodeDragPayload => {
+    const matrixPayload = readInboxNodeDragPayload(dataTransfer);
+    const explorerNodeIDs = hasExplorerDrag(dataTransfer)
+      ? nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
+      : [];
+    const nodeIDs = cleanIDList([...(matrixPayload?.nodeIDs ?? []), ...explorerNodeIDs])
       .filter((nodeID) => nodeByID.has(nodeID));
+    return { nodeIDs, fromLogicGateID: matrixPayload?.fromLogicGateID };
   };
   const openGroupContextMenu = (event: React.MouseEvent) => {
     if (!canOpenLogicGate) return;
@@ -3485,24 +3711,33 @@ export function LogicGateInboxNodeGroupCard({
   return (
     <div
       data-inbox-logic-gate-group-card="true"
+      draggable={canOpenLogicGate && !!getLogicGateDragIDs && !!logicGateByID}
       style={groupStyle}
       onContextMenu={openGroupContextMenu}
+      onDragStart={(event) => {
+        if (!canOpenLogicGate || !getLogicGateDragIDs || !logicGateByID) return;
+        const dragIDs = getLogicGateDragIDs(group.logicGateID);
+        setLogicGateDragData(event.dataTransfer, dragIDs, logicGateByID);
+        setInboxLogicGateDragPayload(event.dataTransfer, dragIDs, { [group.logicGateID]: dragNodeIDs ?? group.nodeIDs });
+      }}
       onDragOver={(event) => {
-        if (!canOpenLogicGate || !onDropNodes || readDroppedNodeIDs(event.dataTransfer).length === 0) return;
+        const drop = readDroppedNodes(event.dataTransfer);
+        if (!canOpenLogicGate || !onDropNodes || drop.nodeIDs.length === 0) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = drop.fromLogicGateID ? "move" : "copy";
         onDropActiveChange?.(true);
       }}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDropActiveChange?.(false);
       }}
       onDrop={(event) => {
-        const nodeIDs = readDroppedNodeIDs(event.dataTransfer);
+        const drop = readDroppedNodes(event.dataTransfer);
         onDropActiveChange?.(false);
-        if (!canOpenLogicGate || !onDropNodes || nodeIDs.length === 0) return;
+        if (!canOpenLogicGate || !onDropNodes || drop.nodeIDs.length === 0) return;
         event.preventDefault();
         event.stopPropagation();
-        onDropNodes(nodeIDs);
+        onDropNodes(drop.nodeIDs, drop.fromLogicGateID);
       }}
     >
       <div
@@ -3577,6 +3812,8 @@ export function LogicGateInboxNodeGroupCard({
               orderedRowIDs={orderedRowIDs}
               nodeByID={nodeByID}
               getNodeDragIDs={getNodeDragIDs}
+              sourceLogicGateID={group.logicGateID}
+              sourceGroupNodeIDs={group.nodeIDs}
               onSelectNode={onSelectNode}
               onOpenNode={onOpenNode}
               onOpenNodeBulkMenu={onOpenNodeBulkMenu}
@@ -3685,6 +3922,8 @@ export function LogicGateInboxNodeRow({
   orderedRowIDs,
   nodeByID,
   getNodeDragIDs,
+  sourceLogicGateID,
+  sourceGroupNodeIDs = [],
   onSelectNode,
   onOpenNode,
   onOpenNodeBulkMenu,
@@ -3701,6 +3940,8 @@ export function LogicGateInboxNodeRow({
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
+  sourceLogicGateID?: string;
+  sourceGroupNodeIDs?: string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord, informationID?: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
@@ -3717,6 +3958,7 @@ export function LogicGateInboxNodeRow({
     <div
       role="button"
       tabIndex={0}
+      data-inbox-node-row="true"
       draggable
       style={logicGateInboxNodeRowStyle(selected, hovered, hasUnreadNotification)}
       onPointerEnter={() => setHovered(true)}
@@ -3741,6 +3983,11 @@ export function LogicGateInboxNodeRow({
       onDragStart={(event) => {
         const dragIDs = getNodeDragIDs(nodeID);
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
+        const sourceIDs = new Set(sourceGroupNodeIDs);
+        const sourceLogicGateIDForDrag = sourceLogicGateID?.trim() ?? "";
+        const canUseSourceLogicGate = !!sourceLogicGateIDForDrag && dragIDs.every((dragID) => sourceIDs.has(dragID));
+        setInboxNodeDragPayload(event.dataTransfer, dragIDs, canUseSourceLogicGate ? sourceLogicGateIDForDrag : undefined);
+        event.stopPropagation();
       }}
     >
       <span style={logicGateInboxNodeGuideStyle} />

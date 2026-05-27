@@ -289,23 +289,44 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
   logicGateID: string;
+  fromLogicGateID?: string;
   nodeIDs: string[];
   priority: InboxPriority;
   status?: ResponsibleInboxStatus;
   nodeByID: Map<string, NodeRecord>;
   assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
+  moveLogicGateAssignment?: HomeBulkMoveLogicGateAssignment;
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
 }): Promise<NodeRecord[]> {
   const logicGateID = args.logicGateID.trim();
+  const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
   if (!logicGateID || nodeIDs.length === 0) return [];
 
   const assignNodeToLogicGateStatus = args.assignNodeToLogicGateStatus ?? defaultAssignNodeToLogicGateStatus;
+  const moveLogicGateAssignment = args.moveLogicGateAssignment ?? defaultMoveLogicGateAssignment;
   const priority = args.priority === 0 ? null : args.priority;
   return Promise.all(nodeIDs.map(async (nodeID) => {
     const node = args.nodeByID.get(nodeID);
     if (!node) return null;
     const status = args.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
+    if (fromLogicGateID) {
+      const result = await moveLogicGateAssignment({
+        apiBase: args.apiBase,
+        companyID: args.companyID,
+        logicGateID,
+        fromLogicGateID,
+        nodeID,
+        status,
+        priority,
+        position: 0,
+      });
+      args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
+      if (fromLogicGateID !== logicGateID) {
+        args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
+      }
+      return result.node;
+    }
     const result = await assignNodeToLogicGateStatus({
       apiBase: args.apiBase,
       companyID: args.companyID,
