@@ -95,7 +95,7 @@ function explorerFolderItem(folderID: string, itemID: string, itemType: "node" |
 test("Home view helpers map labels and mailboxes without changing backend mailbox names", () => {
   const shared = [sharedInbox("shared-a", "Team Triage", 1000)];
 
-  assert.equal(getHomeViewLabel("my-triage", shared), "Inbox");
+  assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
   assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
   assert.equal(getHomeViewLabel("aci-inbox", shared), "A Nodes");
@@ -330,7 +330,7 @@ test("home column sizing keeps generated grid tracks stable", () => {
   assert.deepEqual(resizeHomeInboxMatrixColumnsWithoutSidebar(widths, 2, -160, 780), [200, 400, 320, 450]);
 });
 
-test("home column sizing fits first-load widths into the available Inbox workspace", () => {
+test("home column sizing fits first-load widths into the available My Triage workspace", () => {
   const fitted = fitHomeColumnWidthsToAvailableWidth([220, 350, 360, 340], 1120, true);
 
   assert.deepEqual(fitted, [220, 310, 220, 340]);

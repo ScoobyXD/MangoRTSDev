@@ -926,7 +926,7 @@ export function getSharedInboxSiblingPosition(
 
 export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
   if (viewID === "primary") return "Primary";
-  if (viewID === "my-triage") return "Inbox";
+  if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Triage";
   const raciSection = raciInboxSectionForView(viewID);
   if (raciSection) return raciSection.title;
