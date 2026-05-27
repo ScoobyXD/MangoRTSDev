@@ -2293,7 +2293,7 @@ export function MyNodeTile({
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
       }}
     >
-      <span style={nodeInboxTileIconStyle}><ExplorerRowIcon kind="node" tone={tone === "light" ? "orange" : "inverse"} /></span>
+      <span style={nodeInboxTileIconStyle}><ExplorerRowIcon kind="node" /></span>
       <span style={nodeInboxTileTextStyle(tone)}>{nodeTitle(node)}</span>
     </button>
   );
