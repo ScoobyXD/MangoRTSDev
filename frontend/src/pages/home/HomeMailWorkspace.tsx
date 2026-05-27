@@ -13,6 +13,8 @@ import {
   inlineNoticeStyle,
   listHeaderStyle,
   loadingMoreStyle,
+  mailAutoArchiveGuideStyle,
+  mailAutoArchiveTailSpacerStyle,
   mailArchiveActionButtonStyle,
   mailArchiveActionCountStyle,
   mailArchiveActionLabelStyle,
@@ -22,6 +24,7 @@ import {
   mailListTitleStackStyle,
   mailListToolbarStyle,
   mailListPrimaryTitleStyle,
+  mailMessageListFrameStyle,
   mailPanelInputStyle,
   mailPanelPrimaryButtonStyle,
   mailPanelSearchButtonStyle,
@@ -51,6 +54,9 @@ import {
 
 type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred" | "archive">;
 type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
+type ArchiveProgressByMessageID = Record<string, number>;
+
+const ARCHIVE_GUIDE_FALLBACK_TOP = 176;
 
 function formatMailboxCount(count: number | undefined): string {
   if (typeof count !== "number" || !Number.isFinite(count)) return "";
@@ -77,6 +83,25 @@ function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
     if (messageID) ids.push(messageID);
   });
   return ids;
+}
+
+function clampArchiveGuideTop(container: HTMLDivElement, top: number): number {
+  const maxTop = Math.max(56, container.clientHeight - 24);
+  return Math.max(56, Math.min(maxTop, top));
+}
+
+function measureArchiveGuideTop(container: HTMLDivElement): number {
+  const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"));
+  if (rows.length >= 2) return clampArchiveGuideTop(container, rows[1].offsetTop + rows[1].offsetHeight);
+  if (rows.length === 1) return clampArchiveGuideTop(container, rows[0].offsetTop + rows[0].offsetHeight * 2 + 10);
+  return clampArchiveGuideTop(container, ARCHIVE_GUIDE_FALLBACK_TOP);
+}
+
+function archiveProgressMapsEqual(left: ArchiveProgressByMessageID, right: ArchiveProgressByMessageID): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
 }
 
 function StarIcon({ filled }: { filled: boolean }) {
@@ -216,6 +241,60 @@ export function HomeMailWorkspace({
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
+  const [archiveGuideTop, setArchiveGuideTop] = React.useState(ARCHIVE_GUIDE_FALLBACK_TOP);
+  const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
+  const archiveVisualFrameRef = React.useRef<number | null>(null);
+  const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
+
+  const updateArchiveVisuals = React.useCallback(() => {
+    const list = messageListRef.current;
+    if (!autoArchiveEnabled || !list) {
+      setArchiveProgressByMessageID((current) => Object.keys(current).length === 0 ? current : {});
+      return;
+    }
+    const nextGuideTop = measureArchiveGuideTop(list);
+    setArchiveGuideTop((current) => Math.abs(current - nextGuideTop) < 0.5 ? current : nextGuideTop);
+    const containerTop = list.getBoundingClientRect().top;
+    const nextProgress: ArchiveProgressByMessageID = {};
+    list.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
+      const messageID = row.dataset.homeMailMessageId?.trim();
+      if (!messageID) return;
+      const rect = row.getBoundingClientRect();
+      const rowCenter = rect.top + rect.height / 2 - containerTop;
+      const progress = Math.max(0, Math.min(1, (nextGuideTop - rowCenter) / Math.max(1, nextGuideTop)));
+      if (progress > 0.01) nextProgress[messageID] = Math.round(progress * 1000) / 1000;
+    });
+    setArchiveProgressByMessageID((current) => archiveProgressMapsEqual(current, nextProgress) ? current : nextProgress);
+  }, [autoArchiveEnabled, messageListRef]);
+
+  const scheduleArchiveVisuals = React.useCallback(() => {
+    if (archiveVisualFrameRef.current !== null) return;
+    archiveVisualFrameRef.current = window.requestAnimationFrame(() => {
+      archiveVisualFrameRef.current = null;
+      updateArchiveVisuals();
+    });
+  }, [updateArchiveVisuals]);
+
+  React.useLayoutEffect(() => {
+    updateArchiveVisuals();
+  }, [messages.length, autoArchiveEnabled, updateArchiveVisuals]);
+
+  React.useEffect(() => {
+    return () => {
+      if (archiveVisualFrameRef.current !== null) {
+        window.cancelAnimationFrame(archiveVisualFrameRef.current);
+        archiveVisualFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const list = messageListRef.current;
+    if (!autoArchiveEnabled || !list || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(scheduleArchiveVisuals);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [autoArchiveEnabled, messageListRef, scheduleArchiveVisuals]);
 
   if (unassignedSharedInbox) {
     return (
@@ -394,101 +473,107 @@ export function HomeMailWorkspace({
             </div>
           )}
         </div>
-        <div
-          className="mango-home-scroll"
-          ref={messageListRef}
-          style={messageListStyle}
-          onScroll={(event) => {
-            const target = event.currentTarget;
-            if (isArchivableListView && mailbox === "primary") {
-              const scrolledOutIDs = collectScrolledOutMessageIDs(target);
-              if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
-            }
-            const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-            const prefetchDistance = Math.max(800, target.clientHeight * 2);
-            if (remaining < prefetchDistance) onPrefetchMessages();
-            if (remaining < 160) onLoadMoreMessages();
-          }}
-        >
-          {messages.length === 0 && !loadingMessages ? (
-            <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
-          ) : messages.map((message) => {
-            const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
-            const hovered = hoveredMessageID === message.id;
-            const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
-            const draggable = triageView && mailbox === "primary";
-            const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
-            const starHovered = hoveredStarMessageID === message.id;
-            const starHighlighted = message.starred || mailbox === "starred" || starHovered;
-            return (
-              <div
-                key={message.id}
-                data-home-mail-message-id={message.id}
-                role="button"
-                tabIndex={0}
-                style={isArchivableListView
-                  ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered)
-                  : messageRowStyle(active, message.unread, hovered)}
-                draggable={draggable}
-                onPointerEnter={() => setHoveredMessageID(message.id)}
-                onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
-                onMouseDown={(event) => {
-                  if (!event.shiftKey) return;
-                  event.preventDefault();
-                  event.currentTarget.ownerDocument.getSelection()?.removeAllRanges();
-                }}
-                onClick={(event) => onSelectMessage(message, event)}
-                onKeyDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onSelectMessage(message, event);
-                }}
-                onContextMenu={(event) => onOpenContextMenu(message, event)}
-                onDragStart={(event) => onStartMessageDrag(message, event)}
-              >
-                {isArchivableListView ? (
-                  <>
-                    <MessagePlacementIcon message={message} active={active} />
-                    <span style={triageMessageContentStyle}>
-                      <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
-                      <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
+        <div style={mailMessageListFrameStyle}>
+          {autoArchiveEnabled && messages.length > 0 && <div aria-hidden="true" style={mailAutoArchiveGuideStyle(archiveGuideTop)} />}
+          <div
+            className="mango-home-scroll"
+            ref={messageListRef}
+            style={messageListStyle}
+            onScroll={(event) => {
+              const target = event.currentTarget;
+              if (autoArchiveEnabled) {
+                scheduleArchiveVisuals();
+                const scrolledOutIDs = collectScrolledOutMessageIDs(target);
+                if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
+              }
+              const tailReserve = autoArchiveEnabled && messages.length > 0 ? target.clientHeight : 0;
+              const remaining = target.scrollHeight - target.scrollTop - target.clientHeight - tailReserve;
+              const prefetchDistance = Math.max(800, target.clientHeight * 2);
+              if (remaining < prefetchDistance) onPrefetchMessages();
+              if (remaining < 160) onLoadMoreMessages();
+            }}
+          >
+            {messages.length === 0 && !loadingMessages ? (
+              <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
+            ) : messages.map((message) => {
+              const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
+              const hovered = hoveredMessageID === message.id;
+              const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
+              const draggable = triageView && mailbox === "primary";
+              const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
+              const starHovered = hoveredStarMessageID === message.id;
+              const starHighlighted = message.starred || mailbox === "starred" || starHovered;
+              return (
+                <div
+                  key={message.id}
+                  data-home-mail-message-id={message.id}
+                  role="button"
+                  tabIndex={0}
+                  style={isArchivableListView
+                    ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered, archiveProgressByMessageID[message.id] ?? 0)
+                    : messageRowStyle(active, message.unread, hovered)}
+                  draggable={draggable}
+                  onPointerEnter={() => setHoveredMessageID(message.id)}
+                  onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
+                  onMouseDown={(event) => {
+                    if (!event.shiftKey) return;
+                    event.preventDefault();
+                    event.currentTarget.ownerDocument.getSelection()?.removeAllRanges();
+                  }}
+                  onClick={(event) => onSelectMessage(message, event)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelectMessage(message, event);
+                  }}
+                  onContextMenu={(event) => onOpenContextMenu(message, event)}
+                  onDragStart={(event) => onStartMessageDrag(message, event)}
+                >
+                  {isArchivableListView ? (
+                    <>
+                      <MessagePlacementIcon message={message} active={active} />
+                      <span style={triageMessageContentStyle}>
+                        <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
+                        <span style={snippetStyle}>{message.snippet || ""}</span>
+                      </span>
+                      <span style={triageMessageMetaStyle}>
+                        <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                        <button
+                          type="button"
+                          aria-label={message.starred ? "Remove star" : "Star message"}
+                          title={message.starred ? "Remove star" : "Star message"}
+                          draggable={false}
+                          style={messageStarButtonStyle(starHighlighted, starHovered)}
+                          disabled={busy === "message"}
+                          onPointerEnter={() => setHoveredStarMessageID(message.id)}
+                          onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleMessageStar(message);
+                          }}
+                        >
+                          <StarIcon filled={starHighlighted} />
+                        </button>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={messageRowTopStyle}>
+                        <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <span>{formatMessageDate(message.date)}</span>
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
                       <span style={snippetStyle}>{message.snippet || ""}</span>
-                    </span>
-                    <span style={triageMessageMetaStyle}>
-                      <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
-                      <button
-                        type="button"
-                        aria-label={message.starred ? "Remove star" : "Star message"}
-                        title={message.starred ? "Remove star" : "Star message"}
-                        draggable={false}
-                        style={messageStarButtonStyle(starHighlighted, starHovered)}
-                        disabled={busy === "message"}
-                        onPointerEnter={() => setHoveredStarMessageID(message.id)}
-                        onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleMessageStar(message);
-                        }}
-                      >
-                        <StarIcon filled={starHighlighted} />
-                      </button>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span style={messageRowTopStyle}>
-                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
-                      <span>{formatMessageDate(message.date)}</span>
-                    </span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
-                    <span style={snippetStyle}>{message.snippet || ""}</span>
-                  </>
-                )}
-              </div>
-            );
-          })}
-          {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
+            {autoArchiveEnabled && messages.length > 0 && <div aria-hidden="true" data-home-mail-auto-archive-spacer="true" style={mailAutoArchiveTailSpacerStyle} />}
+          </div>
         </div>
       </section>
 
