@@ -4,6 +4,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestMemoryEffectiveAccessDirectUserGrant(t *testing.T) {
@@ -101,6 +102,42 @@ func TestMemoryEffectiveAccessGroupGrantAndNestedInheritance(t *testing.T) {
 	assertEffectiveAccess(t, repo, companyID, parentUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, childUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, true)
 	assertEffectiveAccess(t, repo, companyID, otherUser.UserID, EntityTypeNode, node.NodeID, EntityPermissionView, false)
+}
+
+func TestMemoryEffectiveAccessCompanyAdminPriorityBeatsNewerNoAccess(t *testing.T) {
+	now := time.Now().UTC()
+	companyID := "22222222-2222-4222-8222-222222222207"
+	userID := "22222222-2222-4222-8222-222222222208"
+	nodeID := "22222222-2222-4222-8222-222222222209"
+	facts := map[string]domain.EffectiveResourceAccess{}
+
+	addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
+		CompanyID:        companyID,
+		UserID:           userID,
+		ResourceType:     EntityTypeNode,
+		ResourceID:       nodeID,
+		AccessLevel:      EntityPermissionNoAccess,
+		SourceType:       effectiveAccessSourceDirectUserGrant,
+		SourceID:         "node:" + nodeID + ":user:" + userID,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	})
+	addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
+		CompanyID:        companyID,
+		UserID:           userID,
+		ResourceType:     EntityTypeNode,
+		ResourceID:       nodeID,
+		AccessLevel:      EntityPermissionAdmin,
+		SourceType:       effectiveAccessSourceCompanyAdmin,
+		SourceID:         "membership:" + companyID + ":" + userID,
+		CreatedTimestamp: now.Add(-time.Hour),
+		UpdatedTimestamp: now.Add(-time.Hour),
+	})
+
+	fact := facts[effectiveAccessKey(companyID, userID, EntityTypeNode, nodeID, effectiveAccessSourceCompanyAdmin, "membership:"+companyID+":"+userID)]
+	if fact.AccessLevel != EntityPermissionAdmin || fact.SourceType != effectiveAccessSourceCompanyAdmin {
+		t.Fatalf("effective fact = %+v, want company admin access to win", fact)
+	}
 }
 
 func TestMemoryEffectiveAccessRaciDoesNotOverridePermissions(t *testing.T) {

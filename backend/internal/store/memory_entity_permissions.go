@@ -321,8 +321,12 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			return nil, ErrInvalid
 		}
 		if subjectType == EntityPermissionSubjectUser {
-			if _, ok := r.memberships[membershipKey(companyID, subjectID)]; !ok {
+			membership, ok := r.memberships[membershipKey(companyID, subjectID)]
+			if !ok {
 				return nil, ErrAssigneeNotInCompany
+			}
+			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && permission == EntityPermissionNoAccess && domain.CanManageCompany(membership.Role) {
+				continue
 			}
 		} else if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
 			return nil, ErrNotFound

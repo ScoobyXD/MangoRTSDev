@@ -273,3 +273,69 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 		t.Fatalf("company admin can_edit_permissions = false, want true")
 	}
 }
+
+func TestEntityPermissionsEffectiveAccessReportsNoAccess(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111118"
+	repo.EnsureCompany(companyID, "Permission Effective No Access Co")
+
+	if _, err := repo.UpsertAuthUser("permission-effective-admin", "admin@example.com", "Admin User"); err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	targetUser, err := repo.UpsertAuthUser("permission-effective-target", "target@example.com", "Target User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser target: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-effective-admin", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-effective-target", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership target: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Effective no access gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   logicGate.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   targetUser.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", "permission-effective-admin", "admin@example.com"))
+	getRes := httptest.NewRecorder()
+	handler.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
+	}
+	var payload struct {
+		EffectiveAccess []struct {
+			UserID      string `json:"user_id"`
+			AccessLevel string `json:"access_level"`
+		} `json:"effective_access"`
+	}
+	if err := json.Unmarshal(getRes.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode permissions: %v", err)
+	}
+	for _, item := range payload.EffectiveAccess {
+		if item.UserID == targetUser.UserID {
+			if item.AccessLevel != store.EntityPermissionNoAccess {
+				t.Fatalf("target effective access = %q, want no_access", item.AccessLevel)
+			}
+			return
+		}
+	}
+	t.Fatalf("effective_access missing target user: %+v", payload.EffectiveAccess)
+}

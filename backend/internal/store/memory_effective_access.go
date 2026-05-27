@@ -825,6 +825,11 @@ func addEffectiveAccessFact(facts map[string]domain.EffectiveResourceAccess, now
 }
 
 func effectiveAccessFactWins(candidate, existing domain.EffectiveResourceAccess) bool {
+	candidateIsRoleAdmin := candidate.SourceType == effectiveAccessSourceCompanyAdmin
+	existingIsRoleAdmin := existing.SourceType == effectiveAccessSourceCompanyAdmin
+	if candidateIsRoleAdmin != existingIsRoleAdmin {
+		return candidateIsRoleAdmin
+	}
 	candidateTime := effectiveAccessFactWriteTime(candidate)
 	existingTime := effectiveAccessFactWriteTime(existing)
 	if !candidateTime.Equal(existingTime) {

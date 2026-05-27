@@ -194,10 +194,6 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const setAllToNoAccess = () => {
     if (effectiveReadOnly) return;
     const next = new Map<PermissionSelectionKey, ResourceAccessLevel>();
-    for (const group of groups) {
-      const groupID = group.group_id.trim();
-      if (groupID) next.set(`group:${groupID}` as PermissionSelectionKey, "no_access");
-    }
     for (const user of users) {
       const userID = user.user_id.trim();
       if (!userID || companyUserRoleForcesAdmin(user.role)) continue;
@@ -233,12 +229,16 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const renderAccessSelect = (
     key: PermissionSelectionKey,
-    options: { forcedAccessLevel?: ResourceAccessLevel | ""; effectiveAccessLevel?: ResourceAccessLevel | ""; allowCustom?: boolean } = {},
+    options: { forcedAccessLevel?: ResourceAccessLevel | ""; effectiveAccessLevel?: ResourceAccessLevel | ""; forceOverridesDirect?: boolean; allowCustom?: boolean } = {},
   ) => {
     const forcedAccessLevel = options.forcedAccessLevel ?? "";
     const directAccessLevel = accessBySubject.get(key) ?? "";
-    const displayAccessLevel = forcedAccessLevel || directAccessLevel || options.effectiveAccessLevel || "";
+    const effectiveAccessLevel = options.effectiveAccessLevel ?? "";
+    const displayAccessLevel = options.forceOverridesDirect
+      ? forcedAccessLevel || directAccessLevel || effectiveAccessLevel || ""
+      : directAccessLevel || effectiveAccessLevel || forcedAccessLevel || "";
     const value = options.allowCustom && !forcedAccessLevel && !directAccessLevel ? CUSTOM_GROUP_ACCESS : displayAccessLevel;
+    const forcedOnly = !!forcedAccessLevel && !directAccessLevel && (options.forceOverridesDirect || !effectiveAccessLevel || effectiveAccessLevel === forcedAccessLevel);
     return (
       <select
         value={value}
@@ -250,10 +250,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           setAccess(key, event.target.value as ResourceAccessLevel);
         }}
         style={permissionSelectStyle}
-        disabled={controlsDisabled || !!forcedAccessLevel}
+        disabled={controlsDisabled || (!!forcedAccessLevel && (options.forceOverridesDirect || !directAccessLevel))}
         aria-label="Access level"
       >
-        {forcedAccessLevel
+        {forcedOnly
           ? <option value={forcedAccessLevel}>{roleAccessLabel(forcedAccessLevel)}</option>
           : (
             <>
@@ -281,12 +281,14 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         {groupMembers.map((member) => {
           const userKey = `user:${member.user_id}` as PermissionSelectionKey;
           const user = usersByID.get(member.user_id);
-          const forcedAccessLevel = companyUserRoleForcesAdmin(user?.role) ? "admin" : groupAccessLevel;
+          const roleForcesAdmin = companyUserRoleForcesAdmin(user?.role);
+          const forcedAccessLevel = roleForcesAdmin ? "admin" : groupAccessLevel;
+          const forceOverridesDirect = !roleForcesAdmin && !!groupAccessLevel;
           return (
             <div key={`${group.group_id}:${member.user_id}`} style={{ ...permissionRowStyle, marginLeft: 18 }}>
               <span>{permissionUserLabel(member)}</span>
               <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user?.role)}</span>
-              {renderAccessSelect(userKey, { forcedAccessLevel, effectiveAccessLevel: effectiveAccessByUser.get(member.user_id) ?? "" })}
+              {renderAccessSelect(userKey, { forcedAccessLevel, effectiveAccessLevel: effectiveAccessByUser.get(member.user_id) ?? "", forceOverridesDirect })}
             </div>
           );
         })}
@@ -398,7 +400,7 @@ function roleAccessLabel(accessLevel: ResourceAccessLevel): string {
 }
 
 function companyUserRoleForcesAdmin(role: string | undefined): boolean {
-  return role === "dev_admin" || role === "company_admin";
+  return role === "dev_admin" || role === "company_admin" || role === "owner" || role === "admin";
 }
 
 function companyUserRoleLabel(role: string | undefined): string {
@@ -436,7 +438,7 @@ function effectiveAccessToMap(items: EntityEffectiveAccess[]): Map<string, Resou
     const userID = item.user_id?.trim();
     const accessLevel = item.access_level;
     if (!userID) continue;
-    if (accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
+    if (accessLevel !== "no_access" && accessLevel !== "view" && accessLevel !== "edit" && accessLevel !== "admin") continue;
     out.set(userID, accessLevel);
   }
   return out;

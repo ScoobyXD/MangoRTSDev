@@ -181,6 +181,37 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 			t.Fatalf("%s allowed = %v err = %v, want %v", tc.name, allowed, err, tc.want)
 		}
 	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: companyAdmin.UserID, AccessLevel: EntityPermissionNoAccess},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: devAdmin.UserID, AccessLevel: EntityPermissionNoAccess},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: EntityPermissionNoAccess},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions role admins no_access: %v", err)
+	}
+	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions role admins no_access: %v", err)
+	}
+	for _, permission := range permissions {
+		if permission.SubjectID == companyAdmin.UserID || permission.SubjectID == devAdmin.UserID {
+			t.Fatalf("role admin no_access grant was persisted: %+v", permission)
+		}
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, companyAdmin.UserID, EntityPermissionAdmin); err != nil || !allowed {
+		t.Fatalf("company admin after no_access input allowed = %v err = %v, want true", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, devAdmin.UserID, EntityPermissionAdmin); err != nil || !allowed {
+		t.Fatalf("dev admin after no_access input allowed = %v err = %v, want true", allowed, err)
+	}
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, blocked.UserID, EntityPermissionView); err != nil || allowed {
+		t.Fatalf("blocked after no_access input allowed = %v err = %v, want false", allowed, err)
+	}
 }
 
 func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
