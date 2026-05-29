@@ -3,6 +3,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import {
@@ -306,6 +307,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
+  const primaryAssignedLogicGateID = useMemo(() => {
+    const recentID = lastAssignedLogicGateID.trim();
+    if (recentID) return recentID;
+    for (const logicGateID of assignedLogicGateIDs) {
+      const cleanLogicGateID = logicGateID.trim();
+      if (cleanLogicGateID) return cleanLogicGateID;
+    }
+    return "";
+  }, [assignedLogicGateIDs, lastAssignedLogicGateID]);
   const assignLogicGateButtonLabel = hasAssignedLogicGate
     ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
     : "Assign to Logic Gate";
@@ -328,6 +338,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return items;
   }, [nodeID, unseenChanges]);
+
+  const goToAssignedLogicGate = useCallback(() => {
+    const logicGateID = primaryAssignedLogicGateID.trim();
+    if (!logicGateID) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: "editor",
+      kind: "logic_gate",
+      id: logicGateID,
+      label: assignedLogicGateLabel,
+      nodeID,
+      selectedTreeID: `logic-gate-${logicGateID}`,
+      changedAt: Date.now(),
+    });
+  }, [assignedLogicGateLabel, companyID, nodeID, primaryAssignedLogicGateID]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1336,6 +1361,32 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             >
               <ExplorerRowIcon kind="logic_gate" />
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignLogicGateButtonLabel}</span>
+            </button>
+          )}
+          {hasAssignedLogicGate && primaryAssignedLogicGateID && (
+            <button
+              type="button"
+              title={`Go to ${assignedLogicGateLabel}`}
+              onClick={goToAssignedLogicGate}
+              style={{
+                minHeight: 30,
+                borderRadius: 9,
+                border: "1px solid transparent",
+                background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+                color: accent,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                padding: "0 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: 0,
+                boxShadow: EDITOR_NEU_SHADOW,
+              }}
+            >
+              Go to Logic Gate
             </button>
           )}
         </div>
