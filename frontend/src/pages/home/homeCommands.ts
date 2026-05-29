@@ -310,7 +310,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
     const node = args.nodeByID.get(nodeID);
     if (!node) return null;
     const status = args.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
-    if (fromLogicGateID) {
+    if (fromLogicGateID && fromLogicGateID === logicGateID) {
       const result = await moveLogicGateAssignment({
         apiBase: args.apiBase,
         companyID: args.companyID,
@@ -338,6 +338,9 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
       position: 0,
     });
     args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
+    if (fromLogicGateID && fromLogicGateID !== logicGateID) {
+      args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
+    }
     return result.node;
   })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
 }
