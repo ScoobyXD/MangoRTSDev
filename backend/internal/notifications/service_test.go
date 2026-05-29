@@ -928,6 +928,90 @@ func TestReplayDomainEventsRetriesFailedProjectionWithoutAdvancingCheckpoint(t *
 	}
 }
 
+func TestReplayDomainEventsSkipsMissingSourceEntityAndAdvancesCheckpoint(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	service := NewService(repo)
+	companyID := "66666666-6666-4666-8666-666666666682"
+	repo.EnsureCompany(companyID, "Notification Stale Replay Co")
+
+	assignee := mustNotificationUser(t, repo, companyID, "stale-replay-assignee")
+	actor := mustNotificationUser(t, repo, companyID, "stale-replay-actor")
+	node, err := repo.CreateNode(companyID, "Replay After Stale Event")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   assignee.UserID,
+			AccessLevel: store.EntityPermissionView,
+			Permission:  store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
+		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
+	}
+
+	staleEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        store.WorkItemLogicGateAssignmentMovedEventType,
+		ActorUserID: actor.UserID,
+		Payload: map[string]any{
+			"logic_gate_id": "66666666-6666-4666-8666-666666666683",
+			"node_id":       node.NodeID,
+			"node_title":    node.Title,
+			"status":        "Verify",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent stale: %v", err)
+	}
+	validEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:   companyID,
+		StreamType:  "workspace",
+		StreamID:    companyID,
+		Type:        "node_updated",
+		ActorUserID: actor.UserID,
+		Payload: map[string]any{
+			"node_id":                 node.NodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+			"recipient_user_ids":      []string{assignee.UserID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent valid: %v", err)
+	}
+
+	result, items, err := service.ReplayDomainEvents(context.Background(), companyID, 10)
+	if err != nil {
+		t.Fatalf("ReplayDomainEvents: %v", err)
+	}
+	if result.ProcessedEvents != 2 || result.CreatedNotifications != 1 || len(items) != 1 {
+		t.Fatalf("result = %+v items=%+v, want stale event skipped and valid event notified", result, items)
+	}
+	if items[0].SourceEventID == staleEvent.EventID {
+		t.Fatalf("stale event produced notification: %+v", items[0])
+	}
+	if result.LastCheckpoint.EventID != validEvent.EventID || !result.LastCheckpoint.CreatedTimestamp.Equal(validEvent.CreatedTimestamp) {
+		t.Fatalf("checkpoint = %+v, want valid event %s at %s", result.LastCheckpoint, validEvent.EventID, validEvent.CreatedTimestamp)
+	}
+
+	again, _, err := service.ReplayDomainEvents(context.Background(), companyID, 10)
+	if err != nil {
+		t.Fatalf("second ReplayDomainEvents: %v", err)
+	}
+	if again.ProcessedEvents != 0 {
+		t.Fatalf("second replay processed %d events, want 0 after checkpoint advanced", again.ProcessedEvents)
+	}
+}
+
 func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
