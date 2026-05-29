@@ -949,8 +949,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 width: rect.width,
                 height: rect.height,
                 borderRadius: 6,
-                background: rect.active ? "linear-gradient(135deg, rgba(103, 232, 249, 0.58), rgba(221, 214, 254, 0.58))" : "linear-gradient(135deg, rgba(103, 232, 249, 0.34), rgba(221, 214, 254, 0.34))",
-                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 16px rgba(183,124,255,0.26)` : "none",
+                background: rect.active ? "linear-gradient(135deg, rgba(254, 240, 138, 0.76), rgba(253, 224, 71, 0.66))" : "linear-gradient(135deg, rgba(254, 240, 138, 0.54), rgba(253, 224, 71, 0.42))",
+                boxShadow: rect.active ? "0 0 0 1px rgba(202,138,4,0.56), 0 0 16px rgba(250,204,21,0.30)" : "none",
               }}
             />
           ))}

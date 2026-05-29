@@ -744,10 +744,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 176px), 1fr))",
-                columnGap: 10,
-                rowGap: 10,
-                maxWidth: "min(840px, 100%)",
+                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                columnGap: 8,
+                rowGap: 8,
+                maxWidth: "100%",
                 padding: "2px 0 8px",
                 borderBottom: `1px dashed ${ruleColor}`,
                 fontFamily: "var(--mango-font-family)",
@@ -884,20 +884,20 @@ function LogicGateRaciRoleEditor({
       style={{
         minWidth: 0,
         display: "grid",
-        gap: 8,
+        gap: 6,
         alignContent: "start",
         border: "1px solid transparent",
-        borderRadius: 14,
+        borderRadius: 12,
         background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
         boxShadow: "7px 7px 18px rgba(174,174,192,0.22), -7px -7px 18px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.86)",
-        padding: 9,
+        padding: 7,
       }}
     >
-      <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
-        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: roleAccent, boxShadow: `0 0 12px ${hexWithAlpha(roleAccent, "66")}` }} />
+      <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
+        <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: roleAccent, boxShadow: `0 0 12px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div style={{ minHeight: 34, display: "flex", flexWrap: "wrap", gap: 5, alignContent: "start" }}>
+      <div style={{ minHeight: 28, display: "flex", flexWrap: "wrap", gap: 4, alignContent: "start" }}>
         {assignments.length === 0 ? (
           <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11, fontWeight: 650 }}>No people</span>
         ) : assignments.map((assignment) => {
@@ -907,18 +907,18 @@ function LogicGateRaciRoleEditor({
             <span
               key={`${assignment.role}:${assignment.user_id}`}
               title={assignment.user_email || assignment.user_id}
-              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "18px minmax(0, 1fr) 16px" : "18px minmax(0, 1fr)", alignItems: "center", gap: 5, border: `1px solid ${hexWithAlpha(roleAccent, "30")}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px 2px 4px" : "2px 7px 2px 4px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "16px minmax(0, 1fr) 14px" : "16px minmax(0, 1fr)", alignItems: "center", gap: 4, border: `1px solid ${hexWithAlpha(roleAccent, "30")}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px" : "2px 6px 2px 3px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
-              <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 7.5, fontWeight: 900 }}>
+              <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 7, fontWeight: 900 }}>
                 {initialsForName(assignmentLabel || assignment.user_id)}
               </span>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
               {canEdit && (
                 <button
                   type="button"
                   aria-label={`Remove ${assignmentLabel} from ${label}`}
                   onClick={() => onRemoveUser(role, assignment.user_id)}
-                  style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 5, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
+                  style={{ width: 14, height: 14, display: "grid", placeItems: "center", border: "none", borderRadius: 5, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 10, fontWeight: 800 }}
                 >
                   x
                 </button>
@@ -957,7 +957,7 @@ function LogicGateRaciRoleEditor({
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 32, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "46")}`, borderRadius: 11, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "cc")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 750, padding: "5px 9px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 10px 22px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "4px 4px 12px rgba(174,174,192,0.20), -4px -4px 12px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 29, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "46")}`, borderRadius: 10, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "cc")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "4px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 10px 22px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "4px 4px 12px rgba(174,174,192,0.20), -4px -4px 12px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         />
         {canEdit && open && (
           <div
