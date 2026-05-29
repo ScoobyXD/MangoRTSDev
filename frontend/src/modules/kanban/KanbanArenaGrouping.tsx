@@ -1,6 +1,8 @@
 import React from "react";
 import {
+  KANBAN_CARD_DRAG_MIME,
   KANBAN_GROUP_FIELDS,
+  parseKanbanCardDragPayload,
   type KanbanCard,
   type KanbanGroupedBoardLayout,
   type KanbanGroupField,
@@ -23,6 +25,7 @@ import {
   KANBAN_SHADOW,
   KANBAN_SOFT_BORDER,
   KANBAN_SURFACE,
+  dataTransferIncludes,
 } from "./KanbanContentModel";
 
 export type ArenaGroupMenuID = "toolbar-x" | "toolbar-y";
@@ -261,17 +264,25 @@ export function KanbanArenaGroupingControls({
   );
 }
 
+export type KanbanArenaGroupedCellContext = {
+  columnKey: string;
+  rowKey: string;
+};
+
 export function KanbanArenaGroupedBoard({
   groupedBoard,
   isDark,
   text,
   renderCard,
+  onDropCardIDsToCell,
 }: {
   groupedBoard: KanbanGroupedBoardLayout;
   isDark: boolean;
   text: string;
-  renderCard: (card: KanbanCard) => React.ReactNode;
+  renderCard: (card: KanbanCard, groupedCell?: KanbanArenaGroupedCellContext) => React.ReactNode;
+  onDropCardIDsToCell?: (cardIDs: string[], columnKey: string, rowKey: string) => void;
 }) {
+  const [activeDropCellKey, setActiveDropCellKey] = React.useState("");
   const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
   const groupFrameBackground = ARENA_GROUP_FRAME_BACKGROUND;
   const groupFrameShadow = ARENA_GROUP_FRAME_SHADOW;
@@ -302,9 +313,32 @@ export function KanbanArenaGroupedBoard({
         </div>,
         ...groupedBoard.columns.map((column, columnIndex) => {
           const cell = column.cells.find((item) => item.rowKey === row.key) ?? { rowKey: row.key, cards: [] };
+          const cellKey = `cell:${column.key}:${row.key}`;
+          const activeDrop = activeDropCellKey === cellKey;
           return (
             <div
-              key={`cell:${column.key}:${row.key}`}
+              key={cellKey}
+              onDragOver={(event) => {
+                if (!onDropCardIDsToCell || !dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+                setActiveDropCellKey(cellKey);
+              }}
+              onDragLeave={(event) => {
+                const relatedTarget = event.relatedTarget;
+                if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+                setActiveDropCellKey((current) => (current === cellKey ? "" : current));
+              }}
+              onDrop={(event) => {
+                if (!onDropCardIDsToCell) return;
+                const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+                if (!cardPayload) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setActiveDropCellKey("");
+                onDropCardIDsToCell(cardPayload.cardIDs, column.key, row.key);
+              }}
               style={{
                 minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX,
                 display: "grid",
@@ -315,11 +349,11 @@ export function KanbanArenaGroupedBoard({
                 borderTop: rowIndex === 0 ? "none" : undefined,
                 borderBottomRightRadius: rowIndex === rowCount - 1 && columnIndex === groupedBoard.columns.length - 1 ? 8 : 0,
                 background: groupFrameBackground,
-                boxShadow: groupFrameShadow,
+                boxShadow: activeDrop ? `${groupFrameShadow}, inset 0 0 0 2px rgba(71, 85, 105, 0.34)` : groupFrameShadow,
                 padding: 8,
               }}
             >
-              {cell.cards.map((card) => renderCard(card))}
+              {cell.cards.map((card) => renderCard(card, { columnKey: column.key, rowKey: row.key }))}
             </div>
           );
         }),
