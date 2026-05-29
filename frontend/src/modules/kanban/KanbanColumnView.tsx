@@ -96,7 +96,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   const columnGlow = `0 14px 30px ${hexToRgba(columnColor, 0.16)}, 8px 8px 22px rgba(174,174,192,0.20), -7px -7px 18px rgba(255,255,255,0.86)`;
   const baseColumnShadow = laneShadow === "none" ? columnGlow : `${columnGlow}, ${laneShadow}`;
   const columnShadow = insertionShadow ? `${insertionShadow}, ${baseColumnShadow}` : baseColumnShadow;
-  const columnFrame = `linear-gradient(135deg, ${hexToRgba(columnColor, 0.82)} 0%, ${hexToRgba(columnColor, 0.38)} 34%, rgba(92, 238, 255, 0.58) 58%, rgba(183, 124, 255, 0.58) 82%, rgba(255,255,255,0.88) 100%)`;
+  const columnFrame = `linear-gradient(135deg, ${hexToRgba(columnColor, 0.86)} 0%, ${hexToRgba(columnColor, 0.54)} 46%, ${hexToRgba(columnColor, 0.24)} 78%, rgba(255,255,255,0.88) 100%)`;
+  const columnFill = `radial-gradient(circle at 12% 10%, ${hexToRgba(columnColor, 0.42)} 0%, ${hexToRgba(columnColor, 0.24)} 34%, transparent 62%), linear-gradient(160deg, ${hexToRgba(columnColor, 0.32)} 0%, ${hexToRgba(columnColor, 0.22)} 42%, ${laneBackground} 78%, ${hexToRgba(columnColor, 0.12)} 100%)`;
 
   return (
     <section
@@ -121,7 +122,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         width: columnWidth,
         height: columnHeight,
         minHeight: minimumColumnHeight,
-        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.24)} 0%, ${hexToRgba(columnColor, 0.10)} 126px, ${laneBackground} 54%, rgba(255,255,255,0.62) 100%) padding-box, ${columnFrame} border-box`,
+        background: `${columnFill} padding-box, ${columnFrame} border-box`,
         border: "1px solid transparent",
         borderRadius: 16,
         boxShadow: columnShadow,
@@ -144,7 +145,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.34)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.24)}, rgba(255,255,255,0.76) 46%, ${hexToRgba(columnColor, 0.10)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.38)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.36)}, rgba(255,255,255,0.80) 58%, ${hexToRgba(columnColor, 0.18)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (

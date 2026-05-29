@@ -79,7 +79,7 @@ import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetE
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { assignNodeToLogicGateStatus } from "../kanban/kanbanApi";
+import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import {
   createEditorCollaborationClientID,
@@ -1085,6 +1085,45 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     void updateNodePresetPatch({ assignee_user_id: value });
   }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
+  const commitNodeStatus = useCallback((statusKey: string, statusLabel: string, statusColor: string) => {
+    if (!linkedEntityCanEdit) return;
+    if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
+    const cleanStatusKey = statusKey.trim();
+    const cleanStatusLabel = statusLabel.trim() || cleanStatusKey;
+    const cleanStatusColor = statusColor.trim();
+    if (!cleanStatusKey) return;
+    const logicGateID = nodeLogicGateIDs.map((id) => id.trim()).find(Boolean) ?? "";
+    if (!logicGateID) {
+      void updateNodePresetPatch({ status: cleanStatusLabel, status_color: cleanStatusColor || null });
+      return;
+    }
+    const rawPriority = nodePriorityDraft.trim();
+    const parsedPriority = Number(rawPriority);
+    const priority = Number.isInteger(parsedPriority) && parsedPriority >= 1 && parsedPriority <= 5 ? parsedPriority : null;
+    setError("");
+    void moveLogicGateAssignment({
+      apiBase,
+      companyID,
+      logicGateID,
+      nodeID: linkedNodeID,
+      status: cleanStatusKey,
+      priority,
+      assigneePolicy: "first_responsible",
+    }).then((result) => {
+      setNodeStatus(result.node.status ?? cleanStatusLabel);
+      setNodeStatusColor(result.node.status_color ?? cleanStatusColor);
+      setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
+      setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
+      setNodeLogicGateIDs(result.node.logic_gate_ids ?? nodeLogicGateIDs);
+      syncNodeAssignee(result.node.assignee_user_id);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "failed_to_update_node_status");
+    });
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeLogicGateIDs, nodePriorityDraft, syncNodeAssignee, updateNodePresetPatch]);
+
   const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     setError("");
@@ -1764,6 +1803,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ruleColor={ruleColor}
             onSetIsEditingTitle={setIsEditingTitle}
             onUpdateTitle={updateNodeTitle}
+            onCommitNodeStatus={commitNodeStatus}
             onSetNodePriorityDraft={setNodePriorityDraft}
             onCommitNodePriorityDraft={commitNodePriorityDraft}
             onSetNodeAssigneeDraft={setNodeAssigneeDraft}

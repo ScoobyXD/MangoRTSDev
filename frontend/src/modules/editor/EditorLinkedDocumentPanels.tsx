@@ -3,11 +3,18 @@ import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import type { LogicGateRaciAssignment, LogicGateRaciRole } from "../logic-gate-map/shared";
 import {
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+} from "../kanban/shared";
+import {
   avatarBackgroundForName,
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_PANEL_SHADOW,
+  EDITOR_NEU_SHADOW,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
   initialsForName,
@@ -44,6 +51,7 @@ type EditorLinkedDocumentPanelsProps = {
   ruleColor: string;
   onSetIsEditingTitle: React.Dispatch<React.SetStateAction<boolean>>;
   onUpdateTitle: (nextTitle: string) => Promise<void>;
+  onCommitNodeStatus: (statusKey: string, statusLabel: string, statusColor: string) => void;
   onSetNodePriorityDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodePriorityDraft: (draft: string) => void;
   onSetNodeAssigneeDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -63,12 +71,28 @@ const NODE_PRIORITY_OPTIONS = [
   { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;
 
+type NodeStatusValue = "pending" | "in_progress" | "verify" | "done";
+
+const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string; storageStatus: string; color: string }> = [
+  { value: "pending", label: "pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
+  { value: "in_progress", label: "in progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
+  { value: "verify", label: "verify", storageStatus: "Verify", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
+  { value: "done", label: "done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
+];
+
 const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
   { role: "responsible", label: "Responsible" },
   { role: "accountable", label: "Accountable" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
 ];
+
+const RACI_ROLE_ACCENTS: Record<LogicGateRaciRole, string> = {
+  responsible: "#0891b2",
+  accountable: "#db2777",
+  consulted: "#7c3aed",
+  informed: "#059669",
+};
 
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
   const name = (user.display_name ?? "").trim();
@@ -101,9 +125,30 @@ function validHexColor(value: string): string {
   return /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : "";
 }
 
+function normalizeNodeStatusValue(value: string): NodeStatusValue | "" {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "pending" || normalized === "p") return "pending";
+  if (normalized === "in_progress" || normalized === "ip") return "in_progress";
+  if (normalized === "verify" || normalized === "verification" || normalized === "v") return "verify";
+  if (normalized === "done" || normalized === "d") return "done";
+  return "";
+}
+
 function hexWithAlpha(hex: string, alpha: string): string {
   const clean = validHexColor(hex);
   return clean ? `${clean}${alpha}` : "rgba(100,116,139,0.12)";
+}
+
+function focusEditableTitleAtEnd(element: HTMLElement | null) {
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  const selection = element.ownerDocument.getSelection();
+  if (!selection) return;
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function dateInputValueFromDraft(draft: string): string {
@@ -156,6 +201,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   ruleColor,
   onSetIsEditingTitle,
   onUpdateTitle,
+  onCommitNodeStatus,
   onSetNodePriorityDraft,
   onCommitNodePriorityDraft,
   onSetNodeAssigneeDraft,
@@ -165,7 +211,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onAddLogicGateRaciUser,
   onRemoveLogicGateRaciUser,
 }) => {
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [hoveredStatusValue, setHoveredStatusValue] = useState<NodeStatusValue | "">("");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const statusMenuRef = useRef<HTMLSpanElement | null>(null);
   const assigneeListID = useId();
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   const assigneeMenuRef = useRef<HTMLSpanElement | null>(null);
@@ -175,6 +224,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const priorityRequirementError = nodePresetFields?.priorityRequirementError ?? "";
   const priorityHasRequirementError = Boolean(priorityRequirementError);
   const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
+  const selectedStatus = NODE_STATUS_OPTIONS.find((option) => option.value === normalizeNodeStatusValue(nodePresetFields?.status ?? ""));
+  const displayStatusColor = selectedStatus?.color ?? statusColor;
+  const displayStatusLabel = selectedStatus?.label ?? (nodePresetFields?.status || "none");
   const assigneeMatches = useMemo(() => {
     const query = (nodePresetFields?.assigneeDraft ?? "").trim().toLowerCase();
     const matches = query
@@ -185,10 +237,28 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
   useEffect(() => {
     if (canEdit) return;
+    setStatusMenuOpen(false);
     setPriorityMenuOpen(false);
     setAssigneeMenuOpen(false);
     onSetIsEditingTitle(false);
   }, [canEdit, onSetIsEditingTitle]);
+
+  useEffect(() => {
+    if (!statusMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (statusMenuRef.current?.contains(event.target as Node)) return;
+      setStatusMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStatusMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [statusMenuOpen]);
 
   useEffect(() => {
     if (!priorityMenuOpen) return;
@@ -224,23 +294,54 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     };
   }, [assigneeMenuOpen]);
 
+  const beginTitleEditAtEnd = () => {
+    if (!canEdit) return;
+    if (!isEditingTitle) {
+      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+      onSetIsEditingTitle(true);
+    }
+    window.requestAnimationFrame(() => focusEditableTitleAtEnd(editingTitleRef.current));
+  };
+
   return (
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div className="mango-editor-hover-highlight" style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: titleTextColor, cursor: canEdit ? "text" : "default", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-            <span>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
+          <div
+            onMouseDown={(event) => {
+              if (!canEdit) return;
+              event.preventDefault();
+              event.stopPropagation();
+              beginTitleEditAtEnd();
+            }}
+            style={{
+              minWidth: 0,
+              maxWidth: "min(780px, 100%)",
+              display: "flex",
+              alignItems: "baseline",
+              gap: 6,
+              border: isEditingTitle ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+              borderRadius: 12,
+              background: isEditingTitle ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+              boxShadow: isEditingTitle ? "8px 8px 20px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.90), 0 0 18px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW,
+              padding: "7px 10px",
+              fontSize: 18,
+              fontWeight: 500,
+              letterSpacing: 0,
+              color: titleTextColor,
+              cursor: canEdit ? "text" : "default",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+            }}
+          >
+            <span style={{ flex: "0 0 auto" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>
             <span
               ref={editingTitleRef}
               contentEditable={canEdit && isEditingTitle}
               suppressContentEditableWarning
               onClick={(event) => {
                 event.stopPropagation();
-                if (!canEdit) return;
-                if (!isEditingTitle) {
-                  editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
-                  onSetIsEditingTitle(true);
-                }
+                beginTitleEditAtEnd();
               }}
               onInput={(event) => {
                 if (!canEdit) return;
@@ -269,7 +370,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   onSetIsEditingTitle(false);
                 }
               }}
-              style={{ outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}
+              style={{ minWidth: 0, flex: "1 1 auto", outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}
             >
               {linkedNodeTitle || "\u00A0"}
             </span>
@@ -294,24 +395,103 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
             >
               <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Status:</strong>
-                <span
-                  title={nodePresetFields.status || "None"}
-                  style={{
-                    minWidth: 0,
-                    justifySelf: "start",
-                    maxWidth: "100%",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    border: `1px solid ${statusColor || ruleColor}`,
-                    borderRadius: 6,
-                    padding: "1px 7px",
-                    color: statusColor || "inherit",
-                    background: statusColor ? hexWithAlpha(statusColor, "1f") : "transparent",
-                    fontWeight: 600,
-                  }}
-                >
-                  {nodePresetFields.status || "None"}
+                <span ref={statusMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 170px)" }}>
+                  <button
+                    type="button"
+                    title={displayStatusLabel}
+                    aria-haspopup="listbox"
+                    aria-expanded={canEdit && statusMenuOpen}
+                    disabled={!canEdit}
+                    onClick={() => {
+                      if (!canEdit) return;
+                      setStatusMenuOpen((open) => !open);
+                    }}
+                    style={{
+                      width: "100%",
+                      minHeight: 27,
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) 14px",
+                      alignItems: "center",
+                      gap: 7,
+                      border: `1px solid ${displayStatusColor || ruleColor}`,
+                      borderRadius: 9,
+                      background: displayStatusColor ? `linear-gradient(135deg, ${hexWithAlpha(displayStatusColor, "24")}, rgba(255,255,255,0.84))` : EDITOR_NEU_ACTIVE_SURFACE,
+                      color: displayStatusColor || "inherit",
+                      font: "inherit",
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      padding: "3px 8px",
+                      cursor: canEdit ? "pointer" : "default",
+                      opacity: canEdit ? 1 : 0.66,
+                      textAlign: "left",
+                      boxShadow: "3px 3px 8px rgba(174,174,192,0.16), -3px -3px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)",
+                    }}
+                  >
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayStatusLabel}</span>
+                    <span aria-hidden="true" style={{ width: 0, height: 0, borderLeft: "4px solid transparent", borderRight: "4px solid transparent", borderTop: "5px solid currentColor", justifySelf: "center", opacity: 0.8 }} />
+                  </button>
+                  {canEdit && statusMenuOpen && (
+                    <div
+                      role="listbox"
+                      aria-label="Status"
+                      onMouseLeave={() => setHoveredStatusValue("")}
+                      style={{
+                        position: "absolute",
+                        zIndex: 32,
+                        top: "calc(100% + 6px)",
+                        left: 0,
+                        width: "min(210px, 86vw)",
+                        padding: 6,
+                        border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                        borderRadius: 13,
+                        background: EDITOR_NEU_PANEL_BACKGROUND,
+                        boxShadow: EDITOR_NEU_PANEL_SHADOW,
+                        color: "#111827",
+                      }}
+                    >
+                      {NODE_STATUS_OPTIONS.map((option) => {
+                        const selected = option.value === selectedStatus?.value;
+                        const highlighted = hoveredStatusValue === option.value || selected;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onMouseEnter={() => setHoveredStatusValue(option.value)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              onCommitNodeStatus(option.value, option.storageStatus, option.color);
+                              setStatusMenuOpen(false);
+                              setHoveredStatusValue("");
+                            }}
+                            style={{
+                              width: "100%",
+                              minHeight: 32,
+                              display: "grid",
+                              gridTemplateColumns: "10px minmax(0, 1fr)",
+                              alignItems: "center",
+                              gap: 8,
+                              border: highlighted ? "1px solid transparent" : "1px solid transparent",
+                              borderRadius: 10,
+                              background: highlighted ? `linear-gradient(135deg, ${hexWithAlpha(option.color, "2e")}, rgba(255,255,255,0.88)) padding-box, linear-gradient(135deg, ${hexWithAlpha(option.color, "cc")}, rgba(255,255,255,0.88)) border-box` : "transparent",
+                              color: highlighted ? option.color : "#1f2937",
+                              cursor: "pointer",
+                              padding: "6px 8px",
+                              textAlign: "left",
+                              font: "inherit",
+                              fontSize: 11.5,
+                              fontWeight: highlighted ? 850 : 650,
+                              boxShadow: highlighted ? `0 9px 20px ${hexWithAlpha(option.color, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : undefined,
+                            }}
+                          >
+                            <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, background: option.color, boxShadow: `0 0 10px ${hexWithAlpha(option.color, "66")}` }} />
+                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </span>
               </div>
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
@@ -630,8 +810,8 @@ function LogicGateRaciRoleEditor({
   assignments,
   companyUsers,
   accent,
-  panelBackground: _panelBackground,
-  ruleColor: _ruleColor,
+  panelBackground,
+  ruleColor,
   canEdit,
   onAddUser,
   onRemoveUser,
@@ -652,6 +832,7 @@ function LogicGateRaciRoleEditor({
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const assignedIDs = useMemo(() => new Set(assignments.map((assignment) => assignment.user_id)), [assignments]);
+  const roleAccent = RACI_ROLE_ACCENTS[role];
   const matches = useMemo(() => {
     const query = draft.trim().toLowerCase();
     const candidates = companyUsers.filter((user) => !assignedIDs.has(user.user_id));
@@ -699,11 +880,26 @@ function LogicGateRaciRoleEditor({
   };
 
   return (
-    <div style={{ minWidth: 0, display: "grid", gap: 6, alignContent: "start" }}>
-      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</strong>
-      <div style={{ minHeight: 30, display: "flex", flexWrap: "wrap", gap: 4 }}>
+    <div
+      style={{
+        minWidth: 0,
+        display: "grid",
+        gap: 8,
+        alignContent: "start",
+        border: "1px solid transparent",
+        borderRadius: 14,
+        background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
+        boxShadow: "7px 7px 18px rgba(174,174,192,0.22), -7px -7px 18px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.86)",
+        padding: 9,
+      }}
+    >
+      <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
+        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: roleAccent, boxShadow: `0 0 12px ${hexWithAlpha(roleAccent, "66")}` }} />
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      </strong>
+      <div style={{ minHeight: 34, display: "flex", flexWrap: "wrap", gap: 5, alignContent: "start" }}>
         {assignments.length === 0 ? (
-          <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11 }}>No people</span>
+          <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11, fontWeight: 650 }}>No people</span>
         ) : assignments.map((assignment) => {
           const assignmentLabel = raciAssignmentLabel(assignment);
           const assignmentAccent = userAccentForName(assignmentLabel || assignment.user_id);
@@ -711,7 +907,7 @@ function LogicGateRaciRoleEditor({
             <span
               key={`${assignment.role}:${assignment.user_id}`}
               title={assignment.user_email || assignment.user_id}
-              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "18px minmax(0, 1fr) 16px" : "18px minmax(0, 1fr)", alignItems: "center", gap: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px 2px 4px" : "2px 7px 2px 4px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "18px minmax(0, 1fr) 16px" : "18px minmax(0, 1fr)", alignItems: "center", gap: 5, border: `1px solid ${hexWithAlpha(roleAccent, "30")}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px 2px 4px" : "2px 7px 2px 4px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
               <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 7.5, fontWeight: 900 }}>
                 {initialsForName(assignmentLabel || assignment.user_id)}
@@ -722,7 +918,7 @@ function LogicGateRaciRoleEditor({
                   type="button"
                   aria-label={`Remove ${assignmentLabel} from ${label}`}
                   onClick={() => onRemoveUser(role, assignment.user_id)}
-                  style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
+                  style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 5, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
                 >
                   x
                 </button>
@@ -761,14 +957,14 @@ function LogicGateRaciRoleEditor({
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 650, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 32, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "46")}`, borderRadius: 11, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "cc")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 750, padding: "5px 9px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 10px 22px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "4px 4px 12px rgba(174,174,192,0.20), -4px -4px 12px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         />
         {canEdit && open && (
           <div
             id={`${inputID}-options`}
             role="listbox"
             aria-label={`${label} people`}
-            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 6px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {matches.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>{companyUsers.length === assignedIDs.size ? "All people added" : "No matches"}</div>
@@ -785,7 +981,7 @@ function LogicGateRaciRoleEditor({
                   aria-selected={false}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => addUser(user.user_id)}
-                  style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit" }}
+                  style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}` }}
                 >
                   <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name || user.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
                     {initialsForName(name || user.user_id)}
