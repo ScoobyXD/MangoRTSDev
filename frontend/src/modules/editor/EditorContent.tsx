@@ -79,8 +79,7 @@ import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetE
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { getLogicGateArenaView, upsertKanbanCard } from "../kanban/kanbanApi";
-import { nextCardPosition } from "../kanban/shared";
+import { assignNodeToLogicGateStatus } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import {
   createEditorCollaborationClientID,
@@ -996,29 +995,28 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!linkedEntityCanEdit) return;
     const cleanLogicGateID = logicGateID.trim();
     if (!companyID || !linkedNodeID || linkedEntityKind !== "node" || !cleanLogicGateID) return;
-    const view = await getLogicGateArenaView(apiBase, companyID, cleanLogicGateID);
-    const pendingColumn = (view.columns ?? []).find((column) => column.title.trim().toLowerCase() === "pending") ?? view.columns?.[0];
-    if (!pendingColumn) throw new Error("logic_gate_pending_column_not_found");
-    await upsertKanbanCard({
+    const rawPriority = nodePriorityDraft.trim();
+    const parsedPriority = Number(rawPriority);
+    const priority = Number.isInteger(parsedPriority) && parsedPriority >= 1 && parsedPriority <= 5 ? parsedPriority : null;
+    const result = await assignNodeToLogicGateStatus({
       apiBase,
       companyID,
-      boardID: view.board.board_id,
-      columnID: pendingColumn.column_id,
+      logicGateID: cleanLogicGateID,
       nodeID: linkedNodeID,
+      status: "pending",
+      priority: priority ?? undefined,
       nodeTitle: linkedNodeTitle || linkedNodeID,
-      position: nextCardPosition(view.cards ?? [], pendingColumn.column_id),
     });
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-    const details = await getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID);
-    setNodeStatus(details.node.status ?? "");
-    setNodeStatusColor(details.node.status_color ?? "");
-    setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
-    setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
-    setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
-    syncNodeAssignee(details.node.assignee_user_id);
-    upsertNodeRelationshipGraphNode(apiBase, companyID, details.node);
+    setNodeStatus(result.node.status ?? "");
+    setNodeStatusColor(result.node.status_color ?? "");
+    setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
+    setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
+    setNodeLogicGateIDs(result.node.logic_gate_ids ?? []);
+    syncNodeAssignee(result.node.assignee_user_id);
+    upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodePriorityDraft, syncNodeAssignee]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedEntityCanEdit) return;

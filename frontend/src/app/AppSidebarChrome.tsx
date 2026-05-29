@@ -136,6 +136,7 @@ type SidebarNotificationMenuFilter = {
 
 type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
   requestID: number;
+  anchorTop: number;
   loading: boolean;
   error: string;
   items: NotificationItem[];
@@ -273,6 +274,7 @@ export function AppSidebar({
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const keyViewsSectionRef = useRef<HTMLElement | null>(null);
   const notificationMenuRequestRef = useRef(0);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
@@ -329,9 +331,13 @@ export function AppSidebar({
     event.stopPropagation();
     const requestID = notificationMenuRequestRef.current + 1;
     notificationMenuRequestRef.current = requestID;
+    const sectionRect = keyViewsSectionRef.current?.getBoundingClientRect();
+    const anchorRect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
+    const anchorTop = sectionRect && anchorRect ? Math.max(0, anchorRect.bottom - sectionRect.top + 5) : 0;
     const nextMenu: SidebarNotificationMenuState = {
       ...filter,
       requestID,
+      anchorTop,
       loading: true,
       error: "",
       items: [],
@@ -908,7 +914,7 @@ export function AppSidebar({
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
-      <section style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
+      <section ref={keyViewsSectionRef} style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
         <AppSidebarExplorerSearch
           query={explorerSearchQuery}
           open={explorerSearchOpen}
@@ -1000,17 +1006,19 @@ export function AppSidebar({
           />
         ))}
         {notificationMenu && (
-          <NotificationPopover
-            embedded
-            title={notificationMenu.title}
-            loading={notificationMenu.loading}
-            error={notificationMenu.error}
-            items={notificationMenu.items}
-            seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
-            onClose={() => setNotificationMenu(null)}
-            onOpen={openNotificationTarget}
-            onClear={clearNotificationMenu}
-          />
+          <div style={appSidebarNotificationPopoverOverlayStyle(notificationMenu.anchorTop)}>
+            <NotificationPopover
+              embedded
+              title={notificationMenu.title}
+              loading={notificationMenu.loading}
+              error={notificationMenu.error}
+              items={notificationMenu.items}
+              seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
+              onClose={() => setNotificationMenu(null)}
+              onOpen={openNotificationTarget}
+              onClear={clearNotificationMenu}
+            />
+          </div>
         )}
       </section>
 
@@ -1748,6 +1756,7 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
 };
 
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
+  position: "relative",
   flex: "0 0 auto",
   display: "grid",
   gap: 8,
@@ -1755,6 +1764,18 @@ const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
   padding: "2px 3px 14px",
   borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
 };
+
+function appSidebarNotificationPopoverOverlayStyle(top: number): React.CSSProperties {
+  return {
+    position: "absolute",
+    top,
+    left: 3,
+    right: 3,
+    zIndex: 120,
+    minWidth: 0,
+    pointerEvents: "auto",
+  };
+}
 
 const appSidebarExplorerSearchBlockStyle: React.CSSProperties = {
   position: "relative",
