@@ -717,7 +717,7 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&q=from%3Aops%40example.com&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:inbox from:ops@example.com is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions from:ops@example.com is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {

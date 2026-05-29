@@ -949,6 +949,8 @@ export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMa
   const inboxFolder = findEmailFolder(folders, ["inbox"]);
   const primaryCategoryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]);
   return {
+    // The Gmail primary list excludes Social and Promotions via native search,
+    // but folder metadata does not expose that exact filtered count.
     primary: emailFolderTotalCount(inboxFolder) ?? emailFolderTotalCount(primaryCategoryFolder),
     starred: emailFolderTotalCount(findEmailFolder(folders, ["starred", "flagged"])),
     archive: emailFolderTotalCount(findEmailFolder(folders, ["archive", "archives", "archived"])),

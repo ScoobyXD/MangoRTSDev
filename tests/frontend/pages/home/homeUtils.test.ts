@@ -114,7 +114,7 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
-test("mailbox count helper prefers the Inbox folder count for the primary tab", () => {
+test("mailbox count helper keeps the Inbox folder count for the primary tab", () => {
   const counts = mailboxCountsFromFolders([
     { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
     { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
