@@ -3267,7 +3267,7 @@ export function AciInboxMatrix({
                             onRequestDeleteLogicGate={onRequestDeleteLogicGate}
                             onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, creatorRaciRole: column.role })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
-                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
+                            onDropNodes={(nodeIDs, fromLogicGateID) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, fromLogicGateID })}
                             dropActive={activeDropKey === resizeKey}
                             onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
                             notificationSummary={notificationSummary}
@@ -3581,7 +3581,7 @@ export function ResponsibleInboxMatrix({
                             onRequestDeleteLogicGate={onRequestDeleteLogicGate}
                             onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole: "responsible" })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
-                            onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
+                            onDropNodes={(nodeIDs, fromLogicGateID) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status, fromLogicGateID })}
                             dropActive={activeDropKey === resizeKey}
                             onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
                             notificationSummary={notificationSummary}

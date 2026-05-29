@@ -164,6 +164,104 @@ test("Home node drop uses one work-item assignment command for status and priori
   assert.deepEqual(invalidatedBoards, ["logic-gate:gate-1"]);
 });
 
+test("Home matrix node drop assigns into a different Logic Gate instead of using same-gate move", async () => {
+  const nodes = new Map([
+    ["node-1", node("node-1", { title: "Cross gate node", status: "pending", logic_gate_ids: ["source-gate"] })],
+  ]);
+  const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
+  const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
+  const invalidatedBoards: string[] = [];
+  const assignNodeToLogicGateStatus: HomeDropAssignNodeToLogicGateStatus = async (input) => {
+    assignCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return {
+      card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-done" }),
+      node: { ...sourceNode, status: "Done", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
+    } satisfies LogicGateAssignmentCommandResult;
+  };
+  const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
+    moveCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode } satisfies LogicGateAssignmentCommandResult;
+  };
+
+  const updated = await dropNodesIntoInboxLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "target-gate",
+    fromLogicGateID: "source-gate",
+    nodeIDs: ["node-1"],
+    priority: 4,
+    status: "done",
+    nodeByID: nodes,
+    assignNodeToLogicGateStatus,
+    moveLogicGateAssignment,
+    invalidateKanbanBoardContents: (_apiBase, _companyID, boardID) => invalidatedBoards.push(boardID),
+  });
+
+  assert.equal(moveCalls.length, 0);
+  assert.equal(assignCalls.length, 1);
+  assert.deepEqual(assignCalls[0], {
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "target-gate",
+    nodeID: "node-1",
+    status: "done",
+    priority: 4,
+    nodeTitle: "Cross gate node",
+    position: 0,
+  });
+  assert.deepEqual(updated.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
+  assert.deepEqual(invalidatedBoards, ["logic-gate:target-gate", "logic-gate:source-gate"]);
+});
+
+test("Home matrix node drop keeps same Logic Gate status moves on the move endpoint", async () => {
+  const nodes = new Map([
+    ["node-1", node("node-1", { title: "Same gate node", status: "pending", logic_gate_ids: ["gate-1"] })],
+  ]);
+  const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
+  const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
+  const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
+    moveCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return {
+      card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "column-verify" }),
+      node: { ...sourceNode, status: "Verify", priority: input.priority } as NodeRecord,
+    } satisfies LogicGateAssignmentCommandResult;
+  };
+  const assignNodeToLogicGateStatus: HomeDropAssignNodeToLogicGateStatus = async (input) => {
+    assignCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode } satisfies LogicGateAssignmentCommandResult;
+  };
+
+  await dropNodesIntoInboxLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "gate-1",
+    fromLogicGateID: "gate-1",
+    nodeIDs: ["node-1"],
+    priority: 1,
+    status: "verify",
+    nodeByID: nodes,
+    assignNodeToLogicGateStatus,
+    moveLogicGateAssignment,
+  });
+
+  assert.equal(assignCalls.length, 0);
+  assert.equal(moveCalls.length, 1);
+  assert.deepEqual(moveCalls[0], {
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "gate-1",
+    fromLogicGateID: "gate-1",
+    nodeID: "node-1",
+    status: "verify",
+    priority: 1,
+    position: 0,
+  });
+});
+
 test("Home node drop dedupes selected nodes and falls back to each node status", async () => {
   const nodes = new Map([
     ["node-1", node("node-1", { status: "Done" })],
