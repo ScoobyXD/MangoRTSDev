@@ -946,10 +946,10 @@ export function mailboxLabel(mailbox: EmailMailbox): string {
 export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred" | "archive">, number>>;
 
 export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMap {
-  const primaryCategoryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]);
   const inboxFolder = findEmailFolder(folders, ["inbox"]);
+  const primaryCategoryFolder = findEmailFolder(folders, ["category:primary", "category:personal", "primary"]);
   return {
-    primary: emailFolderTotalCount(primaryCategoryFolder) ?? emailFolderTotalCount(inboxFolder),
+    primary: emailFolderTotalCount(inboxFolder) ?? emailFolderTotalCount(primaryCategoryFolder),
     starred: emailFolderTotalCount(findEmailFolder(folders, ["starred", "flagged"])),
     archive: emailFolderTotalCount(findEmailFolder(folders, ["archive", "archives", "archived"])),
   };

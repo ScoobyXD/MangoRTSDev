@@ -1226,7 +1226,7 @@ func gmailUserSearch(userQuery string, unread *bool) string {
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	return gmailSearch([]string{"category:primary", "in:inbox"}, userQuery, unread)
+	return gmailSearch([]string{"in:inbox"}, userQuery, unread)
 }
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {

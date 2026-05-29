@@ -114,7 +114,7 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
-test("mailbox count helper prefers Gmail Primary category count for the primary tab", () => {
+test("mailbox count helper prefers the Inbox folder count for the primary tab", () => {
   const counts = mailboxCountsFromFolders([
     { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
     { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
@@ -122,7 +122,7 @@ test("mailbox count helper prefers Gmail Primary category count for the primary 
     { id: "archive-folder", name: "Archive", attributes: ["\\Archive"], total_count: 9 },
   ]);
 
-  assert.deepEqual(counts, { primary: 12, starred: 4, archive: 9 });
+  assert.deepEqual(counts, { primary: 30, starred: 4, archive: 9 });
 });
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {
