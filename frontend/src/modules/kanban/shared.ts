@@ -193,6 +193,14 @@ export type KanbanGroupedBoardLayout = {
   rows: KanbanGroupedBoardRow[];
 };
 
+export type KanbanGroupDropAssignment = {
+  columnID?: string;
+  isIssue?: boolean;
+  assigneeUserID?: string | null;
+  priority?: number | null;
+  dueDate?: string | null;
+};
+
 export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string }> = [
   { value: "status", label: "Status" },
   { value: "person", label: "Person" },
@@ -720,6 +728,59 @@ export function getKanbanGroupValue(
   }
   const dueDate = node?.due_date?.trim();
   return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true };
+}
+
+function applyKanbanGroupDropField(target: KanbanGroupDropAssignment, field: KanbanGroupField, groupKey: string, columns: KanbanColumn[]): void {
+  if (field === "status") {
+    if (groupKey === "issue") {
+      target.isIssue = true;
+      return;
+    }
+    if (groupKey === "status:no-status") return;
+    const column = sortColumns(columns).find((item) => kanbanStatusGroupFromColumn(item).key === groupKey);
+    if (!column) return;
+    target.columnID = column.column_id;
+    target.isIssue = false;
+    return;
+  }
+  if (field === "person") {
+    if (groupKey === "person:unassigned") {
+      target.assigneeUserID = null;
+      return;
+    }
+    if (!groupKey.startsWith("person:")) return;
+    const assigneeUserID = groupKey.slice("person:".length).trim();
+    if (assigneeUserID) target.assigneeUserID = assigneeUserID;
+    return;
+  }
+  if (field === "priority") {
+    if (!groupKey.startsWith("priority:")) return;
+    const priority = Number(groupKey.slice("priority:".length));
+    if (!Number.isFinite(priority)) return;
+    const normalized = Math.max(0, Math.min(5, Math.round(priority)));
+    target.priority = normalized > 0 ? normalized : null;
+    return;
+  }
+  if (groupKey === "due:none") {
+    target.dueDate = null;
+    return;
+  }
+  if (groupKey.startsWith("due:")) {
+    target.dueDate = groupKey.slice("due:".length).trim() || null;
+  }
+}
+
+export function resolveKanbanGroupDropAssignment(args: {
+  columns: KanbanColumn[];
+  xGroupBy: KanbanGroupField;
+  xGroupKey: string;
+  yGroupBy: KanbanGroupField;
+  yGroupKey: string;
+}): KanbanGroupDropAssignment {
+  const assignment: KanbanGroupDropAssignment = {};
+  applyKanbanGroupDropField(assignment, args.xGroupBy, args.xGroupKey, args.columns);
+  applyKanbanGroupDropField(assignment, args.yGroupBy, args.yGroupKey, args.columns);
+  return assignment;
 }
 
 function addUniqueKanbanGroup(target: KanbanGroupedBoardRow[], seen: Set<string>, group: KanbanGroupedBoardRow): void {

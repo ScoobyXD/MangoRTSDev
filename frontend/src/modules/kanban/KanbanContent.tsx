@@ -13,6 +13,9 @@ import {
   invalidateKanbanBoardListCache,
   invalidateLogicGateArenaViewCache,
   listKanbanBoards,
+  moveKanbanCard,
+  moveLogicGateAssignment,
+  setLogicGateAssignmentIssue,
   updateKanbanBoard,
 } from "./kanbanApi";
 import {
@@ -33,7 +36,7 @@ import {
   toggleKanbanCardIssueCommand,
   type KanbanCommandContext,
 } from "./kanbanCommands";
-import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls, type ArenaGroupMenuID } from "./KanbanArenaGrouping";
+import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls, type ArenaGroupMenuID, type KanbanArenaGroupedCellContext } from "./KanbanArenaGrouping";
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
 import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
@@ -67,6 +70,7 @@ import {
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
+  resolveKanbanGroupDropAssignment,
   serializeExplorerEntityDragPayload,
   shouldRefreshKanbanBoardForNodeStatusChange,
   sortColumns,
@@ -131,6 +135,10 @@ type KanbanPriorityMenuState = {
   mode: "create" | "drop";
   items: ExplorerEntityDragItem[];
 };
+
+function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "board_id">, fallbackBoardID: string): string {
+  return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
+}
 
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
@@ -1192,6 +1200,130 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
+  const moveCardsToArenaGroupCell = useCallback(async (cardIDs: string[], columnGroupKey: string, rowGroupKey: string) => {
+    setDragOverCard(null);
+    setError("");
+    const uniqueCardIDs = Array.from(new Set(cardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
+    if (uniqueCardIDs.length === 0) return;
+    const cardByID = new Map(cardsRef.current.map((card) => [card.card_id, card]));
+    const targetCards = uniqueCardIDs
+      .map((cardID) => cardByID.get(cardID))
+      .filter((card): card is KanbanCard => Boolean(card));
+    if (targetCards.length === 0) return;
+
+    const assignment = resolveKanbanGroupDropAssignment({
+      columns: columnsRef.current,
+      xGroupBy: arenaXGroupBy,
+      xGroupKey: columnGroupKey,
+      yGroupBy: arenaYGroupBy,
+      yGroupKey: rowGroupKey,
+    });
+    const issueWasSet = Object.prototype.hasOwnProperty.call(assignment, "isIssue");
+    const priorityWasSet = Object.prototype.hasOwnProperty.call(assignment, "priority");
+    const assigneeWasSet = Object.prototype.hasOwnProperty.call(assignment, "assigneeUserID");
+    const dueDateWasSet = Object.prototype.hasOwnProperty.call(assignment, "dueDate");
+    const hasAnyAssignment = !!assignment.columnID || issueWasSet || priorityWasSet || assigneeWasSet || dueDateWasSet;
+    if (!hasAnyAssignment) return;
+    if (priorityWasSet && assignment.priority == null && targetCards.some((card) => logicGateIDForKanbanCard(card, boardID))) {
+      setError("Priority is required");
+      return;
+    }
+
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
+    let shouldRefresh = false;
+    try {
+      const savedCards: KanbanCard[] = [];
+      const updatedNodes = new Map<string, NodeRecord>();
+      const nextPositionByColumnID = new Map<string, number>();
+      const allocatePosition = (columnID: string): number => {
+        const next = nextPositionByColumnID.get(columnID) ?? nextCardPosition(cardsRef.current, columnID);
+        nextPositionByColumnID.set(columnID, next + 1000);
+        return next;
+      };
+
+      for (const card of targetCards) {
+        let savedCard = card;
+        let updatedNode: NodeRecord | null = null;
+        const logicGateID = logicGateIDForKanbanCard(card, boardID);
+        const targetColumnID = assignment.columnID ?? card.column_id;
+        const columnChanged = targetColumnID !== card.column_id;
+        const issueChanged = issueWasSet && Boolean(card.is_issue) !== Boolean(assignment.isIssue);
+        const position = columnChanged ? allocatePosition(targetColumnID) : undefined;
+
+        if (logicGateID) {
+          if (columnChanged || priorityWasSet) {
+            const result = await moveLogicGateAssignment({
+              apiBase,
+              companyID,
+              logicGateID,
+              nodeID: card.node_id,
+              columnID: targetColumnID,
+              position,
+              priority: priorityWasSet ? assignment.priority : undefined,
+            });
+            savedCard = result.card;
+            updatedNode = result.node;
+          }
+          if (issueChanged) {
+            const result = await setLogicGateAssignmentIssue({
+              apiBase,
+              companyID,
+              logicGateID,
+              nodeID: card.node_id,
+              isIssue: Boolean(assignment.isIssue),
+            });
+            savedCard = result.card;
+            updatedNode = result.node;
+          }
+        } else if (columnChanged || issueChanged) {
+          savedCard = await moveKanbanCard({
+            apiBase,
+            companyID,
+            boardID: card.board_id || boardID,
+            cardID: card.card_id,
+            columnID: columnChanged ? targetColumnID : undefined,
+            position,
+            isIssue: issueChanged ? Boolean(assignment.isIssue) : undefined,
+          });
+        }
+
+        const nodePatch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "due_date">> = {};
+        if (assigneeWasSet) nodePatch.assignee_user_id = assignment.assigneeUserID ?? null;
+        if (dueDateWasSet) nodePatch.due_date = assignment.dueDate ?? null;
+        if (priorityWasSet && !logicGateID) nodePatch.priority = assignment.priority ?? null;
+        if (Object.keys(nodePatch).length > 0) {
+          updatedNode = await requestJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(card.node_id)}`, {
+            method: "PUT",
+            json: { company_id: companyID, ...nodePatch },
+          });
+        }
+
+        savedCards.push(savedCard);
+        if (updatedNode) updatedNodes.set(updatedNode.node_id, updatedNode);
+      }
+
+      if (savedCards.length > 0) {
+        const savedCardByID = new Map(savedCards.map((card) => [card.card_id, card]));
+        applyCards((previous) => previous.map((card) => savedCardByID.get(card.card_id) ?? card));
+        syncNodeStatusesFromCards(savedCards);
+      }
+      if (updatedNodes.size > 0) {
+        for (const node of updatedNodes.values()) {
+          invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+          upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+        }
+        setNodeGraphRevision((revision) => revision + 1);
+      }
+    } catch {
+      setError("Grouped cell drop failed");
+      shouldRefresh = true;
+    } finally {
+      endMutation();
+    }
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [apiBase, applyCards, arenaXGroupBy, arenaYGroupBy, beginLocalBoardMutation, boardID, companyID, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
+
   const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
     const clickedCard = cards.find((card) => card.card_id === cardID);
     const next = buildKanbanCardSelectionUpdate({
@@ -1581,7 +1713,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     dataTransfer.setData("text/plain", items.length === 1 ? items[0].label : `${items.length} nodes`);
   }, []);
 
-  const renderCard = (card: KanbanCard): React.ReactNode => {
+  const renderCard = (card: KanbanCard, groupedCell?: KanbanArenaGroupedCellContext): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
     const selected = selectedCardIDs.has(card.card_id);
     const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
@@ -1668,7 +1800,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           if (cardPayload) {
             event.preventDefault();
             event.stopPropagation();
-            void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
+            if (groupedCell) {
+              void moveCardsToArenaGroupCell(cardPayload.cardIDs, groupedCell.columnKey, groupedCell.rowKey);
+            } else {
+              void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
+            }
             return;
           }
           const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
@@ -1758,7 +1894,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
-        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} /> : (
+        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} /> : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];

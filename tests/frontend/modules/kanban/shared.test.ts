@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, resolveKanbanGroupDropAssignment, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -254,6 +254,60 @@ test("grouped board layout keeps no due date after real due dates", () => {
   });
 
   assert.deepEqual(layout.rows.map((row) => row.label), ["2026-05-09", "2026-06-01", "No due date"]);
+});
+
+test("grouped board drop assignment resolves status and person cell properties", () => {
+  const columns = [
+    column({ column_id: "todo", title: "Todo", position: 1000 }),
+    column({ column_id: "done", title: "Done", position: 2000 }),
+  ];
+
+  assert.deepEqual(resolveKanbanGroupDropAssignment({
+    columns,
+    xGroupBy: "status",
+    xGroupKey: "status:done",
+    yGroupBy: "person",
+    yGroupKey: "person:user-jonathan",
+  }), {
+    columnID: "done",
+    isIssue: false,
+    assigneeUserID: "user-jonathan",
+  });
+
+  assert.deepEqual(resolveKanbanGroupDropAssignment({
+    columns,
+    xGroupBy: "status",
+    xGroupKey: "issue",
+    yGroupBy: "person",
+    yGroupKey: "person:unassigned",
+  }), {
+    isIssue: true,
+    assigneeUserID: null,
+  });
+});
+
+test("grouped board drop assignment resolves priority and due date cell properties", () => {
+  assert.deepEqual(resolveKanbanGroupDropAssignment({
+    columns: [column({ column_id: "todo", title: "Todo", position: 1000 })],
+    xGroupBy: "priority",
+    xGroupKey: "priority:3",
+    yGroupBy: "due_date",
+    yGroupKey: "due:2026-06-01",
+  }), {
+    priority: 3,
+    dueDate: "2026-06-01",
+  });
+
+  assert.deepEqual(resolveKanbanGroupDropAssignment({
+    columns: [column({ column_id: "todo", title: "Todo", position: 1000 })],
+    xGroupBy: "priority",
+    xGroupKey: "priority:0",
+    yGroupBy: "due_date",
+    yGroupKey: "due:none",
+  }), {
+    priority: null,
+    dueDate: null,
+  });
 });
 
 test("card selection helper supports ranges and additive toggles across columns", () => {

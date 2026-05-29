@@ -3871,7 +3871,7 @@ export function LogicGateInboxNodeGroupCard({
               nodeByID={nodeByID}
               getNodeDragIDs={getNodeDragIDs}
               sourceLogicGateID={group.logicGateID}
-              sourceGroupNodeIDs={group.nodeIDs}
+              sourceGroupNodeIDs={dragNodeIDs ?? group.nodeIDs}
               onSelectNode={onSelectNode}
               onOpenNode={onOpenNode}
               onOpenNodeBulkMenu={onOpenNodeBulkMenu}
