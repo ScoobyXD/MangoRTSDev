@@ -68,7 +68,7 @@ import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResize
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1818,6 +1818,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
+  const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
     const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID);
@@ -1898,6 +1899,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }), [assignedMyLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders, myLogicGateShortcuts]);
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
+  const activeRaciRoleLogicGates = useMemo(() => {
+    const role = activeRaciInboxSection?.role;
+    if (!currentUserID || !role || role === "other") return [];
+    return logicGates.filter((logicGate) => logicGateHasRaciRole(logicGate, role, currentUserID));
+  }, [activeRaciInboxSection?.role, currentUserID, logicGates]);
+  const activeRaciRoleLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
+    shortcuts: [],
+    assignedLogicGates: activeRaciRoleLogicGates,
+    logicGateByID,
+    folders: logicGateFolders,
+    folderItems: logicGateFolderItems,
+  }), [activeRaciRoleLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders]);
   const markMessageReadFromListSelection = useCallback((message: EmailMessage) => {
     const messageID = message.id.trim();
     if (!messageID || !message.unread) return;
@@ -2798,7 +2811,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
-  const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
   const layoutColumnWidths = isNarrow || isInboxMatrixView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
@@ -2922,13 +2934,19 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
               <NodeInboxRail
                 loading={loadingNodes}
                 nodeByID={nodeByID}
+                logicGateByID={logicGateByID}
                 allRows={visibleNodeRows}
                 myNodeGroups={myNodeGroups}
                 otherNodes={otherAssignedNodes}
+                myLogicGateGroups={activeRaciRoleLogicGateGroups}
+                inboxRole={activeRaciInboxSection?.role ?? "other"}
                 selectedRowIDs={selectedNodeRowIDs}
+                selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                 expandedRowIDs={nodeExpandedIDs}
                 search={nodeSearch}
+                busy={!!busy}
                 getNodeDragIDs={getNodeDragIDs}
+                getLogicGateDragIDs={getLogicGateDragIDs}
                 onSearchChange={setNodeSearch}
                 onToggleFolder={(rowID) => {
                   setNodeExpandedIDs((previous) => {
@@ -2940,8 +2958,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                 }}
                 onSelectRow={selectNodeRow}
                 onSelectNode={selectNodeMatrixCard}
+                onSelectLogicGate={selectLogicGateTreeID}
                 onOpenNode={openNodeEditorOverlay}
+                onOpenLogicGate={openLogicGateArena}
                 onOpenNodeBulkMenu={openNodeBulkEditMenu}
+                onRemoveLogicGateShortcut={removeShortcut}
+                onConvertMessages={convertMessagesToLogicGate}
+                onRequestDeleteLogicGate={requestDeleteLogicGateContext}
                 onCreateNode={() => { void createHomeNode(); }}
               />
             </>

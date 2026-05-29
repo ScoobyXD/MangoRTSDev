@@ -2218,43 +2218,84 @@ export function MyLogicGateTile({
 export function NodeInboxRail({
   loading,
   nodeByID,
+  logicGateByID,
   myNodeGroups,
   otherNodes,
+  myLogicGateGroups,
+  inboxRole,
   selectedRowIDs,
+  selectedLogicGateRowIDs,
+  busy,
   getNodeDragIDs,
+  getLogicGateDragIDs,
   onSelectNode,
+  onSelectLogicGate,
   onOpenNode,
+  onOpenLogicGate,
   onOpenNodeBulkMenu,
+  onRemoveLogicGateShortcut,
+  onConvertMessages,
+  onRequestDeleteLogicGate,
   onCreateNode,
 }: {
   loading: boolean;
   nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
   allRows: ExplorerTreeNode[];
   myNodeGroups: MyNodeGroup[];
   otherNodes: NodeRecord[];
+  myLogicGateGroups: MyLogicGateGroup[];
+  inboxRole: RaciInboxRole;
   selectedRowIDs: Set<string>;
+  selectedLogicGateRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
   search: string;
+  busy: boolean;
   getNodeDragIDs: (nodeID: string) => string[];
+  getLogicGateDragIDs: (logicGateID: string) => string[];
   onSearchChange: (value: string) => void;
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onSelectLogicGate: (treeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
+  onRemoveLogicGateShortcut: (logicGateID: string) => void;
+  onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
+  onRequestDeleteLogicGate: (logicGateID: string) => void;
   onCreateNode: () => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
   const otherNodeOrderedRowIDs = useMemo(() => otherNodes.map((node) => nodeTreeID(node.node_id)), [otherNodes]);
+  const myLogicGateOrderedRowIDs = useMemo(() => (
+    myLogicGateGroups.flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id)))
+  ), [myLogicGateGroups]);
   const railSplit = useRailTopResize(HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [triagePriorityMenu, setTriagePriorityMenu] = useState<TriageConversionPriorityMenuState | null>(null);
   const openCreateNodeMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
+    setTriagePriorityMenu(null);
     setCreateContextMenu({ x: event.clientX, y: event.clientY });
   }, []);
+  const selectInboxLogicGate = useCallback((logicGateID: string, event: React.MouseEvent) => {
+    onSelectLogicGate(logicGateTreeID(logicGateID), myLogicGateOrderedRowIDs, event);
+  }, [myLogicGateOrderedRowIDs, onSelectLogicGate]);
+  const requestTriageConversionPriority = useCallback((event: React.DragEvent<HTMLElement>, logicGateID: string, messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID || ids.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setCreateContextMenu(null);
+    setTriagePriorityMenu({ x: event.clientX, y: event.clientY, logicGateID: cleanLogicGateID, messageIDs: ids });
+  }, []);
+  const showRoleLogicGates = inboxRole !== "other";
 
   return (
     <>
@@ -2300,6 +2341,44 @@ export function NodeInboxRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
+      {showRoleLogicGates ? (
+      <section style={nodeInboxOtherSectionStyle}>
+        <div style={nodeInboxRailHeaderStyle}>
+          <h2 style={nodeInboxOtherPanelTitleStyle}>My Logic Gates</h2>
+          {loading && <span style={nodeInboxOtherMutedSmallStyle}>Loading</span>}
+        </div>
+        <div className="mango-home-scroll" style={myLogicGatesListStyle}>
+          {myLogicGateGroups.length === 0 && !loading ? (
+            <div style={nodeInboxOtherEmptyStyle}>No assigned Logic Gates</div>
+          ) : myLogicGateGroups.map((group) => (
+            <div key={group.key} style={myLogicGateGroupStyle}>
+              <div style={myLogicGateFolderLabelStyle}>
+                <ExplorerRowIcon kind="folder" />
+                <span>{group.label}</span>
+              </div>
+              <div style={myLogicGateGridStyle}>
+                {group.logicGates.map((logicGate) => (
+                  <MyLogicGateTile
+                    key={logicGate.logic_gate_id}
+                    logicGate={logicGate}
+                    selected={selectedLogicGateRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
+                    busy={busy}
+                    getLogicGateDragIDs={getLogicGateDragIDs}
+                    logicGateByID={logicGateByID}
+                    shortcut={false}
+                    onSelectShortcut={selectInboxLogicGate}
+                    onOpenLogicGate={onOpenLogicGate}
+                    onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                    onRemoveShortcut={onRemoveLogicGateShortcut}
+                    onConvertMessages={requestTriageConversionPriority}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      ) : (
       <section style={nodeInboxOtherSectionStyle} onContextMenu={openCreateNodeMenu}>
         <div style={nodeInboxRailHeaderStyle}>
           <h2 style={nodeInboxOtherPanelTitleStyle}>Others</h2>
@@ -2329,8 +2408,15 @@ export function NodeInboxRail({
           )}
         </div>
       </section>
+      )}
     </aside>
-    <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    <HomePinContextMenu
+      menu={pinContextMenu}
+      onClose={() => setPinContextMenu(null)}
+      onDelete={(target) => {
+        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id);
+      }}
+    />
     {createContextMenu && (
       <FrameRightClickMenu x={createContextMenu.x} y={createContextMenu.y} onClose={() => setCreateContextMenu(null)}>
         <button
@@ -2343,6 +2429,24 @@ export function NodeInboxRail({
         >
           Create node
         </button>
+      </FrameRightClickMenu>
+    )}
+    {triagePriorityMenu && (
+      <FrameRightClickMenu x={triagePriorityMenu.x} y={triagePriorityMenu.y} onClose={() => setTriagePriorityMenu(null)}>
+        {HOME_LOGIC_GATE_PRIORITY_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              const menu = triagePriorityMenu;
+              setTriagePriorityMenu(null);
+              onConvertMessages(menu.logicGateID, menu.messageIDs, option.value);
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
       </FrameRightClickMenu>
     )}
     </>

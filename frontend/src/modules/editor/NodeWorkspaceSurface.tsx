@@ -68,9 +68,11 @@ import {
 const DEFAULT_TEXT_CHAT_SPLIT_RATIO = 0.704;
 const TEXT_CHAT_SPLIT_MIN_RATIO = 0.50;
 const TEXT_CHAT_SPLIT_MAX_RATIO = 0.84;
-const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v1";
-const LOGIC_GATE_ASSIGN_SUCCESS_COLOR = "#166534";
-const LOGIC_GATE_ASSIGN_ERROR_COLOR = "#b00020";
+const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v2";
+const TEXT_TIMELINE_COLUMN_WIDTH_PX = 52;
+const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
+const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
+const TEXT_CHAT_PANE_MIN_WIDTH_PX = 300;
 
 function clampTextChatSplitRatio(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
@@ -252,10 +254,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const loadedTextBlockProjections = useMemo(() => listEditorTextBlockProjections(projections), [projectionIdentity, projections]);
+  const chatMessagesByBlock = useMemo(() => {
+    const grouped = new Map<string, EditorTextBlockChatMessage[]>();
+    for (const message of chatMessages) {
+      const blockMessages = grouped.get(message.blockID) ?? [];
+      blockMessages.push(message);
+      grouped.set(message.blockID, blockMessages);
+    }
+    return grouped;
+  }, [chatMessages]);
   const compact = width > 0 && width < 720;
+  const hasVisibleTextChat = !compact && blocks.some((block) => {
+    const messages = chatMessagesByBlock.get(block.id) ?? [];
+    return activeChatBlockID === block.id || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
+  });
   const editorGridTemplateColumns = compact
-    ? "120px minmax(0, 1fr)"
-    : `164px minmax(0, ${textChatSplitRatio}fr) 8px minmax(0, ${1 - textChatSplitRatio}fr)`;
+    ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
+    : hasVisibleTextChat
+      ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, ${textChatSplitRatio}fr) ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(${TEXT_CHAT_PANE_MIN_WIDTH_PX}px, ${1 - textChatSplitRatio}fr)`
+      : `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`;
   const myLogicGates = useMemo(
     () => sortLogicGateOptions(logicGateOptions),
     [logicGateOptions],
@@ -289,6 +306,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
+  const assignLogicGateButtonLabel = hasAssignedLogicGate
+    ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
+    : "Assign to Logic Gate";
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
@@ -980,17 +1000,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!canEdit) return;
     const cleanLogicGateID = logicGate.logic_gate_id.trim();
     if (!cleanLogicGateID || assigningLogicGateID) return;
+    if (logicGateAssignStatusTimerRef.current !== null) {
+      window.clearTimeout(logicGateAssignStatusTimerRef.current);
+      logicGateAssignStatusTimerRef.current = null;
+    }
     if (nodePriorityUnassignedForLogicGate) {
       const message = "Must give node a priority";
       setLastAssignedLogicGateID("");
       setLastAssignedLogicGateLabel("");
       setLogicGateAssignStatus(message);
       onRequireNodePriorityForLogicGateAssignment();
-      if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
       logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
         setLogicGateAssignStatus((current) => (current === message ? "" : current));
         logicGateAssignStatusTimerRef.current = null;
-      }, 2400);
+      }, 1500);
       return;
     }
     const label = logicGateOptionLabel(logicGate);
@@ -1000,13 +1023,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       await onAssignToLogicGate(cleanLogicGateID);
       setLastAssignedLogicGateID(cleanLogicGateID);
       setLastAssignedLogicGateLabel(label);
-      setLogicGateAssignStatus(`✓ Successfully assigned to Logic Gate: ${label}`);
+      const message = `Assigned to Logic Gate: ${label}`;
+      setLogicGateAssignStatus(message);
+      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
+        setLogicGateAssignStatus((current) => (current === message ? "" : current));
+        logicGateAssignStatusTimerRef.current = null;
+      }, 1500);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "failed_to_assign_logic_gate";
       setLastAssignedLogicGateID("");
       setLastAssignedLogicGateLabel("");
       setLogicGateAssignStatus(message);
       onError(message);
+      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
+        setLogicGateAssignStatus((current) => (current === message ? "" : current));
+        logicGateAssignStatusTimerRef.current = null;
+      }, 1500);
     } finally {
       setAssigningLogicGateID("");
     }
@@ -1058,16 +1090,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     ownerDocument.addEventListener("pointerup", finish);
     ownerDocument.addEventListener("pointercancel", finish);
   }, [canEdit, companyID, nodeID]);
-
-  const chatMessagesByBlock = useMemo(() => {
-    const grouped = new Map<string, EditorTextBlockChatMessage[]>();
-    for (const message of chatMessages) {
-      const blockMessages = grouped.get(message.blockID) ?? [];
-      blockMessages.push(message);
-      grouped.set(message.blockID, blockMessages);
-    }
-    return grouped;
-  }, [chatMessages]);
 
   useEffect(() => {
     const cleanInformationID = focusInformationID?.trim() ?? "";
@@ -1288,12 +1310,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           {canEdit && (
             <button
               type="button"
+              title={assignLogicGateButtonLabel}
               onClick={() => {
                 setLogicGateAssignerOpen((open) => !open);
                 setLogicGateAssignStatus("");
               }}
               style={{
                 minHeight: 30,
+                minWidth: 0,
+                maxWidth: compact ? "100%" : 420,
                 borderRadius: 9,
                 border: logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                 background: logicGateAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
@@ -1310,33 +1335,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               }}
             >
               <ExplorerRowIcon kind="logic_gate" />
-              Assign to Logic Gate
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignLogicGateButtonLabel}</span>
             </button>
           )}
-          <div
-            title={hasAssignedLogicGate ? `Successfully assigned to Logic Gate: ${assignedLogicGateLabel}` : "Assign to Logic Gate: None"}
-            style={{
-              minWidth: 0,
-              maxWidth: compact ? "100%" : 320,
-              color: hasAssignedLogicGate ? LOGIC_GATE_ASSIGN_SUCCESS_COLOR : surfaceText,
-              fontSize: 11,
-              fontWeight: hasAssignedLogicGate ? 800 : 700,
-              lineHeight: 1.2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {hasAssignedLogicGate ? (
-              <>✓ Successfully assigned to Logic Gate: <strong>{assignedLogicGateLabel}</strong></>
-            ) : (
-              <>Assign to Logic Gate: <strong>{assignedLogicGateLabel}</strong></>
-            )}
-          </div>
         </div>
 
-        {!compact && <div aria-hidden="true" />}
-        {!compact && (
+        {hasVisibleTextChat && <div aria-hidden="true" />}
+        {hasVisibleTextChat && (
           <div style={{ minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
         )}
 
@@ -1351,7 +1356,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 </div>
                 {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
               </div>
-              <div style={{ border: `1px solid ${nodePriorityUnassignedForLogicGate ? "rgba(255, 61, 127, 0.28)" : "rgba(22, 163, 74, 0.22)"}`, borderRadius: 10, background: nodePriorityUnassignedForLogicGate ? "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(254,249,195,0.66))" : "linear-gradient(135deg, rgba(236,253,245,0.96), rgba(207,250,254,0.66))", color: nodePriorityUnassignedForLogicGate ? LOGIC_GATE_ASSIGN_ERROR_COLOR : LOGIC_GATE_ASSIGN_SUCCESS_COLOR, padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
+              <div style={{ justifySelf: "start", maxWidth: "100%", display: "inline-flex", alignItems: "center", border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 10, background: "linear-gradient(135deg, rgba(255,251,235,0.96), rgba(254,243,199,0.72))", color: "#92400e", padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
                 In order to assign to a Logic Gate, give this node a priority.
               </div>
 
@@ -1391,10 +1396,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   {!logicGateSearchLoading && searchedLogicGateGroups.length > 0 && renderLogicGateGroups(searchedLogicGateGroups, "search")}
                 </div>
               )}
-              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus.startsWith("✓") ? LOGIC_GATE_ASSIGN_SUCCESS_COLOR : logicGateAssignStatus.startsWith("Assigning") ? accent : LOGIC_GATE_ASSIGN_ERROR_COLOR }}>{logicGateAssignStatus}</div>}
+              {logicGateAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${logicGateAssignStatus.startsWith("Assigning") ? "rgba(59,130,246,0.24)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(100,116,139,0.22)" : "rgba(245,158,11,0.30)"}`, borderRadius: 9, background: logicGateAssignStatus.startsWith("Assigning") ? "rgba(239,246,255,0.82)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(248,250,252,0.9)" : "rgba(255,251,235,0.9)", color: logicGateAssignStatus.startsWith("Assigning") ? accent : logicGateAssignStatus.startsWith("Assigned") ? surfaceText : "#92400e", padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{logicGateAssignStatus}</div>}
             </div>
-            {!compact && <div aria-hidden="true" />}
-            {!compact && <div aria-hidden="true" />}
+            {hasVisibleTextChat && <div aria-hidden="true" />}
+            {hasVisibleTextChat && <div aria-hidden="true" />}
           </>
         )}
 
@@ -1404,8 +1409,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, minHeight: 92, display: "grid", placeItems: "center", color: surfaceText, opacity: 0.7, fontSize: 13, fontWeight: 700 }}>
               No text boxes
             </div>
-            {!compact && <div />}
-            {!compact && <div />}
+            {hasVisibleTextChat && <div />}
+            {hasVisibleTextChat && <div />}
           </>
         )}
 
@@ -1604,8 +1609,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   />
                 )}
               </div>
-              {renderTextChatSplitHandle(chatIsVisible)}
-              {!compact && (
+              {hasVisibleTextChat && renderTextChatSplitHandle(chatIsVisible)}
+              {hasVisibleTextChat && (
                 chatIsVisible ? (
                   <ChatPane
                     blockID={block.id}
@@ -1683,8 +1688,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           )}
           <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onOpenEmail={setSelectedEmailID} />
         </div>
-        {!compact && <div aria-hidden="true" />}
-        {!compact && <div />}
+        {hasVisibleTextChat && <div aria-hidden="true" />}
+        {hasVisibleTextChat && <div />}
       </div>
 
       {canEdit && emailPickerOpen && (

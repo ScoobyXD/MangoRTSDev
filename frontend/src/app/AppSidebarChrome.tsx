@@ -135,8 +135,7 @@ type SidebarNotificationMenuFilter = {
 };
 
 type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
-  x: number;
-  y: number;
+  requestID: number;
   loading: boolean;
   error: string;
   items: NotificationItem[];
@@ -274,6 +273,7 @@ export function AppSidebar({
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const notificationMenuRequestRef = useRef(0);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
@@ -327,10 +327,11 @@ export function AppSidebar({
   const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
     event.preventDefault();
     event.stopPropagation();
+    const requestID = notificationMenuRequestRef.current + 1;
+    notificationMenuRequestRef.current = requestID;
     const nextMenu: SidebarNotificationMenuState = {
       ...filter,
-      x: event.clientX,
-      y: event.clientY,
+      requestID,
       loading: true,
       error: "",
       items: [],
@@ -341,14 +342,14 @@ export function AppSidebar({
       .then((items) => {
         const filtered = items.filter((item) => sidebarNotificationMatchesFilter(item, filter));
         setNotificationMenu((current) => (
-          current?.x === nextMenu.x && current?.y === nextMenu.y
+          current?.requestID === requestID
             ? { ...current, loading: false, items: filtered }
             : current
         ));
       })
       .catch((error) => {
         setNotificationMenu((current) => (
-          current?.x === nextMenu.x && current?.y === nextMenu.y
+          current?.requestID === requestID
             ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
             : current
         ));
@@ -998,6 +999,19 @@ export function AppSidebar({
             onClick={() => onHomeViewSelect(view.viewID)}
           />
         ))}
+        {notificationMenu && (
+          <NotificationPopover
+            embedded
+            title={notificationMenu.title}
+            loading={notificationMenu.loading}
+            error={notificationMenu.error}
+            items={notificationMenu.items}
+            seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
+            onClose={() => setNotificationMenu(null)}
+            onOpen={openNotificationTarget}
+            onClear={clearNotificationMenu}
+          />
+        )}
       </section>
 
       <section
@@ -1195,21 +1209,6 @@ export function AppSidebar({
           onDraftChange={(draft) => setSharedEmailDialog((current) => current ? { ...current, draft, error: "" } : current)}
           onCancel={() => setSharedEmailDialog(null)}
           onSubmit={submitSharedEmailDialog}
-        />
-      )}
-      {notificationMenu && (
-        <NotificationPopover
-          x={notificationMenu.x}
-          y={notificationMenu.y}
-          title={notificationMenu.title}
-          loading={notificationMenu.loading}
-          error={notificationMenu.error}
-          items={notificationMenu.items}
-          seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
-          width={280}
-          onClose={() => setNotificationMenu(null)}
-          onOpen={openNotificationTarget}
-          onClear={clearNotificationMenu}
         />
       )}
       {pinContextMenu && (
