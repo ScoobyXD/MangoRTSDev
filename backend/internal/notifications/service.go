@@ -75,6 +75,10 @@ func (s *Service) ProcessDomainEvent(ctx context.Context, event domain.DomainEve
 		return []domain.Notification{}, nil
 	}
 	candidates, err := s.notificationCandidates(notificationEvent)
+	if errors.Is(err, store.ErrNotFound) {
+		// Domain events can outlive their source entities; a missing source has no current notification target.
+		return []domain.Notification{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
