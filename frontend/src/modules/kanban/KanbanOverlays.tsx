@@ -134,6 +134,7 @@ export function KanbanNodeEditorOverlay({
   frameID,
   accent,
   theme,
+  allowHorizontalOverflow = false,
   onClose,
   onCollapseToTab,
 }: {
@@ -144,6 +145,7 @@ export function KanbanNodeEditorOverlay({
   frameID: string;
   accent: string;
   theme: "mango" | "teal" | "light" | "dark";
+  allowHorizontalOverflow?: boolean;
   onClose: () => void;
   onCollapseToTab: () => void;
 }) {
@@ -155,14 +157,13 @@ export function KanbanNodeEditorOverlay({
       style={{
         position: "absolute",
         zIndex: 40,
-        top: "6%",
-        left: "50%",
+        top: `${Math.round(ratio.top * 1000) / 10}%`,
+        left: `${Math.round(ratio.left * 1000) / 10}%`,
         width: `${Math.round(ratio.width * 1000) / 10}%`,
         height: `${Math.round(ratio.height * 1000) / 10}%`,
-        maxWidth: "calc(100% - 44px)",
+        maxWidth: allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
         maxHeight: "calc(100% - 64px)",
-        transform: "translateX(-50%)",
-        minWidth: "min(420px, calc(100% - 44px))",
+        minWidth: allowHorizontalOverflow ? 420 : "min(420px, calc(100% - 44px))",
         minHeight: "min(320px, calc(100% - 64px))",
         border: "1px solid transparent",
         borderRadius: 18,
@@ -247,6 +248,8 @@ export function KanbanNodeEditorOverlay({
               edges: handle.edges,
               startX: event.clientX,
               startY: event.clientY,
+              startLeft: boardWidth * ratio.left,
+              startTop: boardHeight * ratio.top,
               startWidth: boardWidth * ratio.width,
               startHeight: boardHeight * ratio.height,
               boardWidth,

@@ -214,7 +214,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         overflow: "hidden",
       }}
     >
-      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+      <section style={{ position: "relative", zIndex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         <React.Suspense fallback={arenaPanelFallback}>
           <LazyArenaEditorContent
             accent={editorFrame.accent}
@@ -236,7 +236,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         onPointerDown={startResize}
         style={{ cursor: "col-resize", background: "transparent" }}
       />
-      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+      <section style={{ position: "relative", zIndex: 2, minWidth: 0, minHeight: 0, overflow: "visible" }}>
         <KanbanContent
           accent={kanbanFrame.accent}
           widgetId={kanbanFrame.id}

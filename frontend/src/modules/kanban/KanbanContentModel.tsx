@@ -50,6 +50,8 @@ export type OverlayResizeState = {
   edges: Partial<Record<"left" | "right" | "top" | "bottom", true>>;
   startX: number;
   startY: number;
+  startLeft: number;
+  startTop: number;
   startWidth: number;
   startHeight: number;
   boardWidth: number;
@@ -57,6 +59,8 @@ export type OverlayResizeState = {
 };
 
 export type NodeEditorOverlayRatio = {
+  left: number;
+  top: number;
   width: number;
   height: number;
 };
@@ -77,34 +81,56 @@ export const nodeEditorOverlayResizeHandles: Array<{
   { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
 ];
 
-export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { width: 0.78, height: 0.82 };
+export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.11, top: 0.06, width: 0.78, height: 0.82 };
+
+type NodeEditorOverlayClampOptions = {
+  allowHorizontalOverflow?: boolean;
+};
 
 export function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
   return `kanban-node-editor-overlay-ratio-v1:${companyID}:${frameID}`;
 }
 
-export function clampNodeEditorOverlayRatio(value: NodeEditorOverlayRatio): NodeEditorOverlayRatio {
+function finiteRatio(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRatio>, options?: NodeEditorOverlayClampOptions): NodeEditorOverlayRatio {
+  const allowHorizontalOverflow = options?.allowHorizontalOverflow === true;
+  const maxWidth = allowHorizontalOverflow ? 2.4 : 0.96;
+  const width = Math.max(0.42, Math.min(finiteRatio(value.width, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width), maxWidth));
+  const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.94));
+  const defaultLeft = (1 - width) / 2;
+  const minLeft = allowHorizontalOverflow ? Math.min(0.02, 0.24 - width) : 0.02;
+  const maxLeft = allowHorizontalOverflow ? Math.max(minLeft, 0.98 - width) : Math.max(0.02, 0.98 - width);
+  const minTop = 0.02;
+  const maxTop = Math.max(minTop, 0.98 - height);
   return {
-    width: Math.max(0.42, Math.min(value.width, 0.96)),
-    height: Math.max(0.42, Math.min(value.height, 0.94)),
+    left: Math.max(minLeft, Math.min(finiteRatio(value.left, defaultLeft), maxLeft)),
+    top: Math.max(minTop, Math.min(finiteRatio(value.top, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.top), maxTop)),
+    width,
+    height,
   };
 }
 
-export function readNodeEditorOverlayRatio(companyID: string, frameID: string): NodeEditorOverlayRatio {
+export function readNodeEditorOverlayRatio(companyID: string, frameID: string, options?: NodeEditorOverlayClampOptions): NodeEditorOverlayRatio {
   if (typeof localStorage === "undefined") return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
   try {
     const parsed = JSON.parse(localStorage.getItem(nodeEditorOverlayRatioStorageKey(companyID, frameID)) ?? "") as Partial<NodeEditorOverlayRatio>;
-    const width = typeof parsed.width === "number" && Number.isFinite(parsed.width) ? parsed.width : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width;
-    const height = typeof parsed.height === "number" && Number.isFinite(parsed.height) ? parsed.height : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height;
-    return clampNodeEditorOverlayRatio({ width, height });
+    return clampNodeEditorOverlayRatio({
+      left: parsed.left,
+      top: parsed.top,
+      width: parsed.width,
+      height: parsed.height,
+    }, options);
   } catch {
     return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
   }
 }
 
-export function storeNodeEditorOverlayRatio(companyID: string, frameID: string, ratio: NodeEditorOverlayRatio) {
+export function storeNodeEditorOverlayRatio(companyID: string, frameID: string, ratio: NodeEditorOverlayRatio, options?: NodeEditorOverlayClampOptions) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(nodeEditorOverlayRatioStorageKey(companyID, frameID), JSON.stringify(clampNodeEditorOverlayRatio(ratio)));
+  localStorage.setItem(nodeEditorOverlayRatioStorageKey(companyID, frameID), JSON.stringify(clampNodeEditorOverlayRatio(ratio, options)));
 }
 
 export const contextMenuButtonStyle: React.CSSProperties = {
