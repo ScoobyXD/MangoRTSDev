@@ -5,14 +5,15 @@ import type { NotificationItem } from "../modules/notifications/notificationsApi
 import { formatNotificationTimestamp } from "../modules/notifications/notificationTime";
 
 type NotificationPopoverProps = {
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
   title: string;
   loading: boolean;
   error: string;
   items: NotificationItem[];
   seenNotificationIDs?: ReadonlySet<string>;
-  width?: number;
+  width?: number | string;
+  embedded?: boolean;
   onClose: () => void;
   onOpen: (notification: NotificationItem) => void;
   onClear: () => void;
@@ -27,6 +28,7 @@ export function NotificationPopover({
   items,
   seenNotificationIDs,
   width = 300,
+  embedded = false,
   onClose,
   onOpen,
   onClear,
@@ -83,81 +85,87 @@ export function NotificationPopover({
     selectNotificationAt(nextIndex);
   }, [items.length, loading, selectNotificationAt, selectedIndex]);
 
-  return (
-    <FrameRightClickMenu x={x} y={y} onClose={onClose} closeOnOutside={false}>
-      <div
-        ref={controlRef}
-        tabIndex={0}
-        style={{ ...notificationPopoverStyle, width }}
-        onKeyDown={handleKeyDown}
-        onWheel={handleWheel}
-      >
-        <div style={notificationPopoverHeaderStyle}>
-          <span>{title}</span>
-          <span style={notificationPopoverHeaderActionsStyle}>
+  const content = (
+    <div
+      ref={controlRef}
+      tabIndex={0}
+      style={{ ...notificationPopoverStyle(embedded), width: embedded ? "100%" : width }}
+      onKeyDown={handleKeyDown}
+      onWheel={handleWheel}
+    >
+      <div style={notificationPopoverHeaderStyle}>
+        <span>{title}</span>
+        <span style={notificationPopoverHeaderActionsStyle}>
+          <button
+            type="button"
+            style={notificationPopoverClearButtonStyle}
+            disabled={loading || items.length === 0}
+            onClick={onClear}
+          >
+            Clear All
+          </button>
+          <button
+            type="button"
+            title="Close notifications"
+            aria-label="Close notifications"
+            style={notificationPopoverCloseButtonStyle}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            X
+          </button>
+        </span>
+      </div>
+      {loading ? (
+        <div style={notificationPopoverEmptyStyle}>Loading</div>
+      ) : error ? (
+        <div style={notificationPopoverErrorStyle}>{error}</div>
+      ) : items.length === 0 ? (
+        <div style={notificationPopoverEmptyStyle}>No unread notifications</div>
+      ) : items.map((notification, index) => {
+        const notificationID = notification.notification_id;
+        const selected = notificationID === selectedNotificationID;
+        const seen = seenIDs.has(notificationID) || !!notification.read_timestamp;
+        return (
+          <div
+            key={notificationID || `${notification.source_event_id}:${index}`}
+            ref={selected ? selectedItemRef : undefined}
+            role="button"
+            aria-selected={selected}
+            tabIndex={-1}
+            style={notificationPopoverItemStyle(selected, seen)}
+            onClick={() => selectNotificationAt(index)}
+          >
             <button
               type="button"
-              style={notificationPopoverClearButtonStyle}
-              disabled={loading || items.length === 0}
-              onClick={onClear}
-            >
-              Clear All
-            </button>
-            <button
-              type="button"
-              title="Close notifications"
-              aria-label="Close notifications"
-              style={notificationPopoverCloseButtonStyle}
+              title="Select notification"
+              aria-label="Select notification"
+              style={notificationPopoverSelectorStyle(selected, seen)}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onClose();
+                selectNotificationAt(index);
               }}
-            >
-              X
-            </button>
-          </span>
-        </div>
-        {loading ? (
-          <div style={notificationPopoverEmptyStyle}>Loading</div>
-        ) : error ? (
-          <div style={notificationPopoverErrorStyle}>{error}</div>
-        ) : items.length === 0 ? (
-          <div style={notificationPopoverEmptyStyle}>No unread notifications</div>
-        ) : items.map((notification, index) => {
-          const notificationID = notification.notification_id;
-          const selected = notificationID === selectedNotificationID;
-          const seen = seenIDs.has(notificationID) || !!notification.read_timestamp;
-          return (
-            <div
-              key={notificationID || `${notification.source_event_id}:${index}`}
-              ref={selected ? selectedItemRef : undefined}
-              role="button"
-              aria-selected={selected}
-              tabIndex={-1}
-              style={notificationPopoverItemStyle(selected, seen)}
-              onClick={() => selectNotificationAt(index)}
-            >
-              <button
-                type="button"
-                title="Select notification"
-                aria-label="Select notification"
-                style={notificationPopoverSelectorStyle(selected, seen)}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  selectNotificationAt(index);
-                }}
-              />
-              <span style={notificationPopoverItemContentStyle}>
-                <NotificationPopoverTitle notification={notification} />
-                {notification.body_preview && <span style={notificationPopoverBodyStyle}>{notification.body_preview}</span>}
-                <span style={notificationPopoverMetaStyle}>{formatNotificationTimestamp(notification.created_timestamp)}</span>
-              </span>
-            </div>
-          );
-        })}
-      </div>
+            />
+            <span style={notificationPopoverItemContentStyle}>
+              <NotificationPopoverTitle notification={notification} />
+              {notification.body_preview && <span style={notificationPopoverBodyStyle}>{notification.body_preview}</span>}
+              <span style={notificationPopoverMetaStyle}>{formatNotificationTimestamp(notification.created_timestamp)}</span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <FrameRightClickMenu x={x ?? 0} y={y ?? 0} onClose={onClose} closeOnOutside={false}>
+      {content}
     </FrameRightClickMenu>
   );
 }
@@ -192,14 +200,28 @@ function NotificationPopoverTitle({ notification }: { notification: Notification
   );
 }
 
-const notificationPopoverStyle: React.CSSProperties = {
-  maxHeight: 360,
-  display: "grid",
-  alignContent: "start",
-  overflowY: "auto",
-  padding: "6px 0",
-  outline: "none",
-};
+function notificationPopoverStyle(embedded: boolean): React.CSSProperties {
+  return {
+    maxHeight: embedded ? "min(370px, calc(100vh - 230px))" : 360,
+    display: "grid",
+    alignContent: "start",
+    overflowY: "auto",
+    overflowX: "hidden",
+    padding: embedded ? "7px 0" : "6px 0",
+    outline: "none",
+    boxSizing: "border-box",
+    border: embedded ? "1px solid transparent" : undefined,
+    borderRadius: embedded ? 14 : undefined,
+    background: embedded
+      ? "linear-gradient(145deg, rgba(255,255,255,0.88), rgba(244,247,252,0.72)) padding-box, linear-gradient(135deg, rgba(92,238,255,0.68), rgba(183,124,255,0.58), rgba(255,255,255,0.86)) border-box"
+      : undefined,
+    boxShadow: embedded
+      ? "9px 9px 22px rgba(174,174,192,0.28), -8px -8px 18px rgba(255,255,255,0.92), 0 16px 34px rgba(15,23,42,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)"
+      : undefined,
+    backdropFilter: embedded ? "blur(18px) saturate(1.18)" : undefined,
+    WebkitBackdropFilter: embedded ? "blur(18px) saturate(1.18)" : undefined,
+  };
+}
 
 const notificationPopoverHeaderStyle: React.CSSProperties = {
   position: "sticky",
@@ -210,6 +232,7 @@ const notificationPopoverHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 8,
   padding: "5px 12px 8px",
+  boxSizing: "border-box",
   background: "linear-gradient(145deg, rgba(255,255,255,0.86), rgba(245,248,252,0.76))",
   color: "rgba(15, 23, 42, 0.68)",
   fontSize: 11,
@@ -259,6 +282,7 @@ const notificationPopoverCloseButtonStyle: React.CSSProperties = {
 function notificationPopoverItemStyle(selected: boolean, seen: boolean): React.CSSProperties {
   return {
     width: "100%",
+    boxSizing: "border-box",
     display: "grid",
     gridTemplateColumns: "10px minmax(0, 1fr)",
     gap: 8,

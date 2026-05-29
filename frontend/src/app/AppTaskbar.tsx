@@ -67,8 +67,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   const previousTabCountRef = useRef(tabs.length);
   const [movingTabID, setMovingTabID] = useState("");
   const [hoveredDockTabID, setHoveredDockTabID] = useState("");
-  const [timelineVisible, setTimelineVisible] = useState(true);
-  const [leftDockOpen, setLeftDockOpen] = useState(() => tabs.length > 0);
+  const [timelineVisible, setTimelineVisible] = useState(false);
+  const [leftDockOpen, setLeftDockOpen] = useState(false);
   const hasDockTabs = tabs.length > 0;
   const dockVisible = hasDockTabs && leftDockOpen;
   const layout = taskbarLayout(expanded, dockVisible ? tabs.length : 0, leftInset, timelineCenterX, viewportWidth, timelineVisible);
