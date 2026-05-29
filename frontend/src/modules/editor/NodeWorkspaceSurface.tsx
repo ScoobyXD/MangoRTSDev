@@ -73,7 +73,10 @@ const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v2
 const TEXT_TIMELINE_COLUMN_WIDTH_PX = 52;
 const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
 const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
+const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
+const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
 const TEXT_CHAT_PANE_MIN_WIDTH_PX = 300;
+const TEXT_CHAT_PANE_MAX_WIDTH_PX = 520;
 
 function clampTextChatSplitRatio(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
@@ -269,10 +272,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const messages = chatMessagesByBlock.get(block.id) ?? [];
     return activeChatBlockID === block.id || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
   });
+  const textChatResizableWidth = Math.max(
+    TEXT_CHAT_PANE_MIN_WIDTH_PX,
+    width
+      - TEXT_CHAT_HORIZONTAL_PADDING_PX
+      - TEXT_TIMELINE_COLUMN_WIDTH_PX
+      - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX
+      - (TEXT_CHAT_GRID_COLUMN_GAP_PX * 3),
+  );
+  const textChatPaneWidth = Math.max(
+    TEXT_CHAT_PANE_MIN_WIDTH_PX,
+    Math.min(TEXT_CHAT_PANE_MAX_WIDTH_PX, Math.round(textChatResizableWidth * (1 - textChatSplitRatio))),
+  );
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
     : hasVisibleTextChat
-      ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, ${textChatSplitRatio}fr) ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px minmax(${TEXT_CHAT_PANE_MIN_WIDTH_PX}px, ${1 - textChatSplitRatio}fr)`
+      ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr) ${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px ${textChatPaneWidth}px`
       : `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`;
   const myLogicGates = useMemo(
     () => sortLogicGateOptions(logicGateOptions),
@@ -1257,10 +1272,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 12, alignItems: "start", minWidth: 0 }}>
         <div aria-hidden="true" style={{ minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "2px 0 10px", background: "inherit" }}>
+        <div style={{ gridColumn: hasVisibleTextChat ? "2 / -1" : undefined, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", overflow: "hidden", padding: "2px 0 10px", borderBottom: hasVisibleTextChat ? `1px solid ${ruleColor}` : undefined, background: "inherit" }}>
           {canEdit && (
             <button
               type="button"
@@ -1301,6 +1316,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 900,
                 letterSpacing: 0,
+                whiteSpace: "nowrap",
+                flex: "0 0 auto",
                 boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
@@ -1325,6 +1342,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 800,
                 letterSpacing: 0,
+                whiteSpace: "nowrap",
+                flex: "0 0 auto",
                 boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
@@ -1343,7 +1362,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               style={{
                 minHeight: 30,
                 minWidth: 0,
-                maxWidth: compact ? "100%" : 420,
+                maxWidth: compact ? "100%" : 360,
                 borderRadius: 9,
                 border: logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                 background: logicGateAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
@@ -1356,6 +1375,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 800,
                 letterSpacing: 0,
+                whiteSpace: "nowrap",
+                flex: "1 1 132px",
                 boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
@@ -1383,6 +1404,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 fontSize: 12,
                 fontWeight: 900,
                 letterSpacing: 0,
+                whiteSpace: "nowrap",
+                flex: "0 0 auto",
                 boxShadow: EDITOR_NEU_SHADOW,
               }}
             >
@@ -1390,11 +1413,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             </button>
           )}
         </div>
-
-        {hasVisibleTextChat && <div aria-hidden="true" />}
-        {hasVisibleTextChat && (
-          <div style={{ minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
-        )}
 
         {canEdit && logicGateAssignerOpen && (
           <>
