@@ -497,6 +497,12 @@ function useCloseSettingsPopover(open: boolean, ref: React.RefObject<HTMLElement
   }, [open, onClose, ref]);
 }
 
+function settingsOptionSurface(selected: boolean): React.CSSProperties {
+  return selected
+    ? { background: SETTINGS_SELECTED_BACKGROUND, boxShadow: SETTINGS_SELECTED_SHADOW }
+    : { background: "transparent" };
+}
+
 function SettingsSelect({
   value,
   options,
@@ -516,15 +522,16 @@ function SettingsSelect({
   return (
     <span ref={rootRef} style={{ position: "relative", display: "block", minWidth: 0 }}>
       <button
+        className="mango-settings-select-button"
         type="button"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{ ...settingsSelectButtonStyle, borderColor: open ? "rgba(100, 116, 139, 0.92)" : settingsSelectButtonStyle.borderColor }}
+        style={open ? { ...settingsSelectButtonStyle, background: SETTINGS_SELECTED_BACKGROUND, borderColor: "transparent", boxShadow: SETTINGS_SELECTED_SHADOW } : settingsSelectButtonStyle}
       >
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label ?? "Select"}</span>
-        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(71, 85, 105)" }}>
+        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: SETTINGS_MUTED }}>
           <SettingsDisclosureIcon open={open} />
         </span>
       </button>
@@ -534,6 +541,7 @@ function SettingsSelect({
             const selectedOption = option.value === value;
             return (
               <button
+                className="mango-settings-option"
                 key={option.value}
                 type="button"
                 role="option"
@@ -542,7 +550,7 @@ function SettingsSelect({
                   onChange(option.value);
                   setOpen(false);
                 }}
-                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(100, 116, 139, 0.18)" : "#ffffff", color: "#000000" }}
+                style={{ ...settingsOptionButtonStyle, ...settingsOptionSurface(selectedOption) }}
               >
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
@@ -597,6 +605,7 @@ function CompanySearchSelect({
       <span style={settingsFieldLabelStyle}>{ariaLabel}</span>
       <span style={{ position: "relative", display: "block", minWidth: 0 }}>
         <input
+          className="mango-settings-input"
           value={query}
           onFocus={() => setOpen(true)}
           onChange={(event) => {
@@ -617,10 +626,11 @@ function CompanySearchSelect({
           aria-expanded={open}
           style={{ ...settingsInputStyle, paddingRight: 58 }}
         />
-        <span aria-hidden="true" style={{ position: "absolute", right: 31, top: 11, color: "rgba(100, 116, 139, 0.84)", pointerEvents: "none" }}>
+        <span aria-hidden="true" style={{ position: "absolute", right: 34, top: 13, color: SETTINGS_MUTED, pointerEvents: "none" }}>
           <SettingsSearchIcon />
         </span>
         <button
+          className="mango-settings-combo-button"
           type="button"
           aria-label={`${ariaLabel} list`}
           onClick={() => setOpen((nextOpen) => !nextOpen)}
@@ -637,6 +647,7 @@ function CompanySearchSelect({
             const selectedOption = company.company_id === value;
             return (
               <button
+                className="mango-settings-option"
                 key={company.company_id}
                 type="button"
                 role="option"
@@ -644,11 +655,11 @@ function CompanySearchSelect({
                 title={company.company_id}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectCompany(company)}
-                style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(100, 116, 139, 0.18)" : "transparent" }}
+                style={{ ...settingsCompanyOptionButtonStyle, ...settingsOptionSurface(selectedOption) }}
               >
                 <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontWeight: 600 }}>{companyName(company)}</span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontSize: 10 }}>{company.company_id}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: SETTINGS_TEXT, fontWeight: 700 }}>{companyName(company)}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: SETTINGS_MUTED, fontSize: 10 }}>{company.company_id}</span>
                 </span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
                   {selectedOption ? <SettingsCheckIcon /> : null}
@@ -787,10 +798,19 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
   const [invitedEmail, setInvitedEmail] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordStepComplete, setPasswordStepComplete] = useState(() => hasStoredToken());
   const showPasswordStep = !passwordStepComplete && !hasStoredToken();
+  const requireNewPasswordMatch = () => {
+    if (!newPassword.trim()) {
+      throw new Error("Enter a new password.");
+    }
+    if (newPassword !== confirmNewPassword) {
+      throw new Error("Passwords are not the same.");
+    }
+  };
   useEffect(() => {
     if (!tokenFromURL || !token.trim()) return;
     let cancelled = false;
@@ -821,6 +841,9 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           if (!displayName.trim()) {
             throw new Error("Enter your name.");
           }
+          if (showPasswordStep && (newPassword.length > 0 || confirmNewPassword.length > 0) && newPassword !== confirmNewPassword) {
+            throw new Error("Passwords are not the same.");
+          }
           const invitation = await validateInvitationToken(token);
           const invitedEmail = normalizeEmailInput(invitation.email);
           if (hasStoredToken()) {
@@ -831,9 +854,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
               if (invitedEmail && normalizeEmailInput(pendingChallenge.username) !== invitedEmail) {
                 throw new Error("This Mango invite token belongs to a different email address.");
               }
-              if (!newPassword.trim()) {
-                throw new Error("Enter a new password.");
-              }
+              requireNewPasswordMatch();
               await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
             } else {
               if (!email.trim()) {
@@ -852,9 +873,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
                 throw invitePasswordError(passwordError);
               }
               if (result.status === "new_password_required") {
-                if (!newPassword.trim()) {
-                  throw new Error("Enter a new password.");
-                }
+                requireNewPasswordMatch();
                 await completeNewPassword(result.username, result.session, newPassword);
               }
             }
@@ -877,6 +896,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
         {showPasswordStep && !pendingChallenge && <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />}
         {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary password from invite email" autoComplete="current-password" />}
         {showPasswordStep && <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
+        {showPasswordStep && <AuthTextField label="Confirm password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} type="password" placeholder="Confirm password" autoComplete="new-password" />}
         <AuthPrimaryButton disabled={busy}>{busy ? "Accepting" : "Accept invite"}</AuthPrimaryButton>
       </form>
       <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
@@ -1219,21 +1239,23 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const renderUserGroup = (group: CompanyUserGroup, depth = 0): React.ReactNode => {
     const childGroups = userGroupChildrenByParent.get(group.group_id) ?? [];
     const memberCount = userGroupMembers.filter((member) => member.group_id === group.group_id).length;
+    const selected = selectedUserGroupID === group.group_id;
     return (
       <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
         <button
+          className="mango-settings-action"
           type="button"
           style={{
             ...smallButtonStyle,
             justifyContent: "space-between",
             display: "flex",
-            minHeight: 30,
-            borderColor: selectedUserGroupID === group.group_id ? "rgba(100,116,139,0.84)" : "rgba(0,0,0,0.16)",
+            minHeight: 34,
+            ...(selected ? { background: SETTINGS_SELECTED_BACKGROUND, borderColor: "transparent", boxShadow: SETTINGS_SELECTED_SHADOW } : {}),
           }}
           onClick={() => setSelectedUserGroupID(group.group_id)}
         >
           <span style={{ overflowWrap: "anywhere", textAlign: "left" }}>{group.name}</span>
-          <span style={{ color: "#5f6368" }}>{memberCount}</span>
+          <span style={{ color: SETTINGS_MUTED }}>{memberCount}</span>
         </button>
         {childGroups.map((child) => renderUserGroup(child, depth + 1))}
       </div>
@@ -1245,9 +1267,9 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
       <div style={settingsHeaderStyle}>
         <h1 style={settingsPageTitleStyle}>Settings</h1>
         {!embedded && <div style={settingsNavStyle}>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
         </div>}
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}
@@ -1299,8 +1321,8 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                   setCompanyBusy(false);
                 }
               }}>
-                <input style={settingsInputStyle} value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} placeholder="New company name" />
-                <button style={settingsPrimaryButtonStyle} disabled={companyBusy}>{companyBusy ? "Creating" : "Create new company"}</button>
+                <input className="mango-settings-input" style={settingsInputStyle} value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} placeholder="New company name" />
+                <button className="mango-settings-action" style={settingsPrimaryButtonStyle} disabled={companyBusy}>{companyBusy ? "Creating" : "Create new company"}</button>
               </form>
               {createdCompanyNotice && (
                 <div style={successBoxStyle}>
@@ -1356,9 +1378,9 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                 <span style={{ overflowWrap: "anywhere" }}> {inviteCompanyID}</span>
               </div>
             )}
-            <input style={settingsInputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
+            <input className="mango-settings-input" style={settingsInputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
             <SettingsSelect value={inviteRole} options={INVITE_ROLE_OPTIONS} onChange={setInviteRole} ariaLabel="User role" />
-            <button style={settingsPrimaryButtonStyle}>Invite user</button>
+            <button className="mango-settings-action" style={settingsPrimaryButtonStyle}>Invite user</button>
           </form>
           {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
           <div style={settingsInfoTextStyle}>Dev note: while the Google app is in Testing mode, add invited Google accounts as Google Audience test users before they connect Google.</div>
@@ -1366,7 +1388,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
           <div style={settingsProfileHeaderStyle}>
             <h2 style={sectionTitleStyle}>User Profile</h2>
-            <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
+            <button className="mango-settings-action" style={smallButtonStyle} onClick={onLogout}>Logout</button>
           </div>
           <div style={profileGridStyle}>
             <span style={profileLabelStyle}>Name</span>
@@ -1403,10 +1425,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             }
           }}>
             <h3 style={settingsSubsectionTitleStyle}>Change Password</h3>
-            <input style={settingsInputStyle} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" placeholder="Current password" autoComplete="current-password" />
-            <input style={settingsInputStyle} value={newSettingsPassword} onChange={(event) => setNewSettingsPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
-            <input style={settingsInputStyle} value={confirmSettingsPassword} onChange={(event) => setConfirmSettingsPassword(event.target.value)} type="password" placeholder="Confirm new password" autoComplete="new-password" />
-            <button style={settingsPrimaryButtonStyle} disabled={passwordBusy}>{passwordBusy ? "Changing" : "Change password"}</button>
+            <input className="mango-settings-input" style={settingsInputStyle} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" placeholder="Current password" autoComplete="current-password" />
+            <input className="mango-settings-input" style={settingsInputStyle} value={newSettingsPassword} onChange={(event) => setNewSettingsPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+            <input className="mango-settings-input" style={settingsInputStyle} value={confirmSettingsPassword} onChange={(event) => setConfirmSettingsPassword(event.target.value)} type="password" placeholder="Confirm new password" autoComplete="new-password" />
+            <button className="mango-settings-action" style={settingsPrimaryButtonStyle} disabled={passwordBusy}>{passwordBusy ? "Changing" : "Change password"}</button>
           </form>
           {passwordError && <div style={settingsErrorSmallStyle}>{passwordError}</div>}
           {passwordMessage && <div style={successMessageStyle}>{passwordMessage}</div>}
@@ -1446,6 +1468,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
               <span>{user.role}</span>
               <button
+                className="mango-settings-action"
                 type="button"
                 style={{ ...smallButtonStyle, ...dangerButtonStyle }}
                 disabled={user.user_id === me.user.user_id}
@@ -1472,8 +1495,8 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               event.preventDefault();
               void createUserGroup("");
             }}>
-              <input style={settingsInputStyle} value={newUserGroupName} onChange={(event) => setNewUserGroupName(event.target.value)} placeholder="New group name" />
-              <button type="submit" style={smallButtonStyle} disabled={groupBusy}>Create</button>
+              <input className="mango-settings-input" style={settingsInputStyle} value={newUserGroupName} onChange={(event) => setNewUserGroupName(event.target.value)} placeholder="New group name" />
+              <button className="mango-settings-action" type="submit" style={smallButtonStyle} disabled={groupBusy}>Create</button>
             </form>
             <div style={{ display: "grid", gap: 4 }}>
               {userGroups.length === 0 && <div style={settingsInfoTextStyle}>No groups yet.</div>}
@@ -1488,10 +1511,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                   event.preventDefault();
                   void createUserGroup(selectedUserGroup.group_id);
                 }}>
-                  <input style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder="Child group name" />
-                  <button type="submit" style={smallButtonStyle} disabled={groupBusy}>Create child</button>
+                  <input className="mango-settings-input" style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder="Child group name" />
+                  <button className="mango-settings-action" type="submit" style={smallButtonStyle} disabled={groupBusy}>Create child</button>
                 </form>
-                <div style={{ display: "grid", gap: 4, maxHeight: 260, overflow: "auto", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, padding: 8 }}>
+                <div className="company-explorer-scroll" style={{ display: "grid", gap: 4, maxHeight: 260, overflow: "auto", border: "1px solid rgba(255, 255, 255, 0.78)", borderRadius: 8, padding: 8, background: SETTINGS_INSET_SURFACE, boxShadow: SETTINGS_INSET_SHADOW }}>
                   {users.map((user) => (
                     <label key={user.user_id} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, alignItems: "center", fontSize: 12 }}>
                       <input
@@ -1507,13 +1530,13 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                         }}
                       />
                       <span style={{ overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
-                      <span style={{ color: "#5f6368" }}>{user.role}</span>
+                      <span style={{ color: SETTINGS_MUTED }}>{user.role}</span>
                     </label>
                   ))}
                 </div>
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button type="button" style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={groupBusy} onClick={() => void deleteSelectedUserGroup()}>Delete group</button>
-                  <button type="button" style={settingsPrimaryButtonStyle} disabled={groupBusy} onClick={() => void saveSelectedUserGroupMembers()}>{groupBusy ? "Saving" : "Save users"}</button>
+                  <button className="mango-settings-action" type="button" style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={groupBusy} onClick={() => void deleteSelectedUserGroup()}>Delete group</button>
+                  <button className="mango-settings-action" type="button" style={settingsPrimaryButtonStyle} disabled={groupBusy} onClick={() => void saveSelectedUserGroupMembers()}>{groupBusy ? "Saving" : "Save users"}</button>
                 </div>
               </>
             ) : (
@@ -1525,10 +1548,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
       {deleteConfirmation && (
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#000000" }}>
+            <div style={{ fontSize: 12, fontWeight: 760, color: SETTINGS_TEXT }}>
               Are you sure you want to delete this user?
             </div>
-            <div style={{ fontSize: 11, lineHeight: 1.4, color: "#000000", overflowWrap: "anywhere" }}>
+            <div style={{ fontSize: 11, lineHeight: 1.4, color: SETTINGS_MUTED, overflowWrap: "anywhere" }}>
               This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.
             </div>
             <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
@@ -1537,6 +1560,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <button
+                className="mango-settings-action"
                 type="button"
                 disabled={!deleteAcknowledged || deleteBusy}
                 onClick={async () => {
@@ -1561,6 +1585,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                 {deleteBusy ? "Deleting" : "Yes"}
               </button>
               <button
+                className="mango-settings-action"
                 type="button"
                 onClick={() => {
                   setDeleteConfirmation(null);
@@ -1627,6 +1652,20 @@ function logoutAndNavigate(navigate: (path: string) => void): void {
   navigate("/login");
 }
 
+const SETTINGS_TEXT = "#111827";
+const SETTINGS_MUTED = "#475569";
+const SETTINGS_SUBTLE = "#64748b";
+const SETTINGS_PAGE_BACKGROUND = "linear-gradient(135deg, #f8fafc 0%, #eef3f8 52%, #f7f8fb 100%)";
+const SETTINGS_SURFACE = "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(247, 248, 252, 0.9) 100%)";
+const SETTINGS_PANEL_SURFACE = "linear-gradient(180deg, rgba(251, 251, 253, 0.96) 0%, rgba(242, 244, 248, 0.92) 100%)";
+const SETTINGS_INSET_SURFACE = "linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 245, 249, 0.76) 100%)";
+const SETTINGS_EDGE_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
+const SETTINGS_SELECTED_BACKGROUND = `${SETTINGS_SURFACE} padding-box, ${SETTINGS_EDGE_GRADIENT} border-box`;
+const SETTINGS_SOFT_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.22), -7px -7px 16px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
+const SETTINGS_RAISED_SHADOW = "12px 12px 28px rgba(174, 174, 192, 0.28), -10px -10px 24px rgba(255, 255, 255, 0.95), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
+const SETTINGS_SELECTED_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.18), 0 0 18px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.88)";
+const SETTINGS_INSET_SHADOW = "inset 3px 3px 7px rgba(174, 174, 192, 0.18), inset -3px -3px 7px rgba(255, 255, 255, 0.9), 0 0 0 1px rgba(100, 116, 139, 0.08)";
+
 const linkButtonStyle: React.CSSProperties = {
   minHeight: 34,
   display: "inline-flex",
@@ -1646,24 +1685,26 @@ const linkButtonStyle: React.CSSProperties = {
 };
 
 const smallButtonStyle: React.CSSProperties = {
-  minHeight: 30,
-  border: "1px solid rgba(100, 116, 139, 0.62)",
-  borderRadius: 6,
-  background: "#ffffff",
-  color: "#000000",
+  minHeight: 34,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: SETTINGS_SURFACE,
+  color: SETTINGS_TEXT,
   cursor: "pointer",
   font: "inherit",
-  fontWeight: 600,
-  padding: "0 10px",
-  boxShadow: "0 0 0 1px rgba(100, 116, 139, 0.12) inset",
+  fontSize: 12,
+  fontWeight: 680,
+  letterSpacing: 0,
+  padding: "0 12px",
+  boxShadow: SETTINGS_SOFT_SHADOW,
 };
 
 const settingsPageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "#ffffff",
-  color: "#000000",
+  background: SETTINGS_PAGE_BACKGROUND,
+  color: SETTINGS_TEXT,
   fontFamily: "var(--mango-font-family)",
-  padding: 18,
+  padding: 16,
   overflowY: "auto",
 };
 
@@ -1677,9 +1718,10 @@ const settingsHeaderStyle: React.CSSProperties = {
 
 const settingsPageTitleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 18,
-  color: "#000000",
-  fontWeight: 500,
+  fontSize: 20,
+  color: SETTINGS_TEXT,
+  fontWeight: 720,
+  letterSpacing: 0,
 };
 
 const settingsNavStyle: React.CSSProperties = {
@@ -1690,90 +1732,102 @@ const settingsNavStyle: React.CSSProperties = {
 };
 
 const settingsErrorStyle: React.CSSProperties = {
-  color: "#b00020",
-  marginBottom: 10,
+  color: "#be123c",
+  marginBottom: 12,
   fontSize: 12,
-  fontWeight: 600,
+  fontWeight: 720,
+  lineHeight: 1.4,
+  border: "1px solid rgba(225, 29, 72, 0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(255, 241, 242, 0.96), rgba(255, 247, 237, 0.72))",
+  padding: "9px 10px",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)",
 };
 
 const settingsErrorSmallStyle: React.CSSProperties = {
-  color: "#b00020",
+  color: "#be123c",
   fontSize: 12,
+  fontWeight: 650,
+  lineHeight: 1.35,
 };
 
 const settingsInfoTextStyle: React.CSSProperties = {
-  color: "#000000",
+  color: SETTINGS_MUTED,
   fontSize: 12,
   lineHeight: 1.4,
 };
 
 const settingsFieldLabelStyle: React.CSSProperties = {
-  color: "#000000",
-  fontSize: 10,
-  fontWeight: 500,
+  color: SETTINGS_MUTED,
+  fontSize: 11,
+  fontWeight: 720,
 };
 
 const settingsInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
-  height: 38,
-  border: "1px solid rgba(100, 116, 139, 0.44)",
-  borderRadius: 6,
-  background: "#ffffff",
-  color: "#000000",
+  height: 40,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: SETTINGS_SURFACE,
+  color: SETTINGS_TEXT,
   font: "inherit",
-  fontSize: 12,
-  fontWeight: 500,
-  padding: "0 10px",
+  fontSize: 13,
+  fontWeight: 560,
+  padding: "0 12px",
   outline: "none",
-  boxShadow: "0 0 0 1px rgba(100, 116, 139, 0.08) inset",
+  boxShadow: SETTINGS_INSET_SHADOW,
 };
 
 const settingsPrimaryButtonStyle: React.CSSProperties = {
-  minHeight: 38,
-  border: "1px solid rgba(100, 116, 139, 0.84)",
-  borderRadius: 6,
-  background: "var(--mango-gradient)",
-  color: "#000000",
+  minHeight: 40,
+  border: "1px solid transparent",
+  borderRadius: 8,
+  background: SETTINGS_SELECTED_BACKGROUND,
+  color: SETTINGS_TEXT,
   cursor: "pointer",
   font: "inherit",
-  fontWeight: 600,
-  padding: "0 12px",
-  boxShadow: "0 0 18px rgba(100, 116, 139, 0.22)",
+  fontSize: 13,
+  fontWeight: 760,
+  letterSpacing: 0,
+  padding: "0 14px",
+  boxShadow: `${SETTINGS_SOFT_SHADOW}, 0 0 14px rgba(183, 124, 255, 0.16)`,
 };
 
 const settingsSelectButtonStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: 38,
+  minHeight: 40,
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) 18px",
   alignItems: "center",
   gap: 8,
-  border: "1px solid rgba(100, 116, 139, 0.44)",
-  borderRadius: 6,
-  background: "#ffffff",
-  color: "#000000",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: SETTINGS_SURFACE,
+  color: SETTINGS_TEXT,
   cursor: "pointer",
   font: "inherit",
-  fontSize: 12,
-  fontWeight: 500,
-  padding: "0 10px",
+  fontSize: 13,
+  fontWeight: 620,
+  padding: "0 12px",
   textAlign: "left",
+  boxShadow: SETTINGS_INSET_SHADOW,
 };
 
 const settingsComboIconButtonStyle: React.CSSProperties = {
   position: "absolute",
   top: 5,
   right: 5,
-  width: 28,
-  height: 28,
+  width: 30,
+  height: 30,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.36)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#000000",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: SETTINGS_SURFACE,
+  color: SETTINGS_MUTED,
   cursor: "pointer",
+  boxShadow: "4px 4px 9px rgba(174, 174, 192, 0.20), -4px -4px 9px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
 };
 
 const settingsMenuStyle: React.CSSProperties = {
@@ -1785,12 +1839,14 @@ const settingsMenuStyle: React.CSSProperties = {
   maxHeight: 260,
   overflowY: "auto",
   overflowX: "hidden",
-  padding: 5,
-  border: "1px solid rgba(100, 116, 139, 0.58)",
+  padding: 6,
+  border: "1px solid transparent",
   borderRadius: 8,
-  background: "#ffffff",
-  color: "#000000",
-  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(100, 116, 139, 0.12) inset",
+  background: `${SETTINGS_SURFACE} padding-box, ${SETTINGS_EDGE_GRADIENT} border-box`,
+  color: SETTINGS_TEXT,
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.16), 0 0 18px rgba(183, 124, 255, 0.14), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
+  backdropFilter: "blur(14px) saturate(1.12)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.12)",
 };
 
 const settingsOptionButtonStyle: React.CSSProperties = {
@@ -1800,14 +1856,15 @@ const settingsOptionButtonStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) 18px",
   alignItems: "center",
   gap: 8,
-  border: "none",
+  border: "1px solid transparent",
   borderRadius: 6,
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 500,
+  fontWeight: 620,
   padding: "7px 8px",
   textAlign: "left",
+  color: SETTINGS_TEXT,
 };
 
 const settingsCompanyOptionButtonStyle: React.CSSProperties = {
@@ -1817,64 +1874,66 @@ const settingsCompanyOptionButtonStyle: React.CSSProperties = {
 
 const settingsEmptyOptionStyle: React.CSSProperties = {
   padding: "8px 10px",
-  color: "#000000",
+  color: SETTINGS_MUTED,
   fontSize: 11,
-  fontWeight: 500,
+  fontWeight: 620,
 };
 
 const settingsScopePlateStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  border: "1px solid rgba(100, 116, 139, 0.32)",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
   borderRadius: 8,
-  background: "#ffffff",
-  padding: 10,
+  background: SETTINGS_INSET_SURFACE,
+  padding: 11,
+  boxShadow: SETTINGS_INSET_SHADOW,
 };
 
 const settingsScopeKickerStyle: React.CSSProperties = {
-  color: "#000000",
+  color: SETTINGS_MUTED,
   fontSize: 10,
-  fontWeight: 500,
+  fontWeight: 720,
 };
 
 const settingsScopeNameStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "#000000",
+  color: SETTINGS_TEXT,
   fontSize: 15,
-  fontWeight: 600,
+  fontWeight: 760,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
 
 const settingsScopeUUIDStyle: React.CSSProperties = {
-  color: "#000000",
+  color: SETTINGS_SUBTLE,
   fontSize: 11,
   overflowWrap: "anywhere",
 };
 
 const settingsActiveScopeStyle: React.CSSProperties = {
-  border: "1px solid rgba(100, 116, 139, 0.34)",
-  borderRadius: 6,
-  background: "#f8fafc",
-  color: "#000000",
+  border: "1px solid transparent",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(230, 252, 255, 0.48) 48%, rgba(247, 239, 255, 0.58)) padding-box, linear-gradient(135deg, rgba(92, 238, 255, 0.52), rgba(183, 124, 255, 0.44)) border-box",
+  color: SETTINGS_TEXT,
   fontSize: 11,
-  fontWeight: 600,
+  fontWeight: 680,
   padding: "7px 8px",
+  boxShadow: "inset 1px 1px 0 rgba(255, 255, 255, 0.82), 0 7px 16px rgba(96, 165, 250, 0.08)",
 };
 
 const settingsSubsectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
-  borderTop: "1px solid rgba(100, 116, 139, 0.18)",
-  paddingTop: 10,
+  borderTop: "1px solid rgba(148, 163, 184, 0.18)",
+  paddingTop: 12,
 };
 
 const settingsSubsectionTitleStyle: React.CSSProperties = {
   margin: 0,
-  color: "#000000",
+  color: SETTINGS_TEXT,
   fontSize: 11,
-  fontWeight: 600,
+  fontWeight: 760,
 };
 
 const settingsSectionHeaderRowStyle: React.CSSProperties = {
@@ -1886,20 +1945,20 @@ const settingsSectionHeaderRowStyle: React.CSSProperties = {
 
 const settingsSectionScopeStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "#000000",
+  color: SETTINGS_MUTED,
   fontSize: 11,
-  fontWeight: 500,
+  fontWeight: 620,
 };
 
 const sectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 10,
   padding: 14,
-  border: "1px solid rgba(100, 116, 139, 0.68)",
-  background: "#ffffff",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  background: SETTINGS_PANEL_SURFACE,
   borderRadius: 8,
-  color: "#000000",
-  boxShadow: "0 0 0 1px rgba(100, 116, 139, 0.12) inset, 0 12px 24px rgba(0, 0, 0, 0.12)",
+  color: SETTINGS_TEXT,
+  boxShadow: SETTINGS_RAISED_SHADOW,
 };
 
 const settingsTopRowStyle: React.CSSProperties = {
@@ -1912,9 +1971,9 @@ const settingsTopRowStyle: React.CSSProperties = {
 const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
-  color: "#000000",
+  color: SETTINGS_TEXT,
   letterSpacing: 0,
-  fontWeight: 600,
+  fontWeight: 780,
 };
 
 const settingsProfileHeaderStyle: React.CSSProperties = {
@@ -1928,21 +1987,22 @@ const successMessageStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  color: "#166534",
+  color: "#047857",
   fontSize: 13,
-  fontWeight: 600,
+  fontWeight: 720,
 };
 
 const successBoxStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  color: "#166534",
+  color: "#047857",
   fontSize: 12,
-  fontWeight: 600,
-  border: "1px solid rgba(22, 163, 74, 0.24)",
-  borderRadius: 6,
-  background: "#f0fdf4",
-  padding: 8,
+  fontWeight: 700,
+  border: "1px solid rgba(5, 150, 105, 0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(224, 242, 254, 0.72))",
+  padding: "9px 10px",
+  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)",
 };
 
 const rowStyle: React.CSSProperties = {
@@ -1950,9 +2010,10 @@ const rowStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 8,
-  minHeight: 32,
-  borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
+  minHeight: 36,
+  borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
   fontSize: 12,
+  color: SETTINGS_TEXT,
 };
 
 const userRowStyle: React.CSSProperties = {
@@ -1971,18 +2032,20 @@ const statusChipStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 22,
-  border: "1px solid rgba(100, 116, 139, 0.26)",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
   borderRadius: 6,
-  background: "#f8fafc",
-  color: "#000000",
+  background: SETTINGS_INSET_SURFACE,
+  color: SETTINGS_TEXT,
   fontSize: 11,
-  fontWeight: 600,
+  fontWeight: 700,
   padding: "2px 7px",
+  boxShadow: "3px 3px 7px rgba(174, 174, 192, 0.18), -3px -3px 7px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.8)",
 };
 
 const dangerButtonStyle: React.CSSProperties = {
-  borderColor: "#64748b",
-  color: "#000000",
+  borderColor: "rgba(225, 29, 72, 0.34)",
+  color: "#9f1239",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(255, 241, 242, 0.82))",
 };
 
 const profileGridStyle: React.CSSProperties = {
@@ -1993,35 +2056,39 @@ const profileGridStyle: React.CSSProperties = {
 };
 
 const profileLabelStyle: React.CSSProperties = {
-  color: "#000000",
-  fontWeight: 500,
+  color: SETTINGS_MUTED,
+  fontWeight: 700,
 };
 
 const profileValueStyle: React.CSSProperties = {
   minWidth: 0,
   overflowWrap: "anywhere",
+  color: SETTINGS_TEXT,
+  fontWeight: 560,
 };
 
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(255,255,255,0.74)",
+  background: "rgba(248, 250, 252, 0.74)",
   zIndex: 120,
   display: "grid",
   placeItems: "center",
   padding: 16,
+  backdropFilter: "blur(10px)",
+  WebkitBackdropFilter: "blur(10px)",
 };
 
 const modalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   borderRadius: 8,
-  border: "1px solid rgba(100,116,139,0.68)",
-  background: "#ffffff",
-  color: "#000000",
-  padding: 12,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  background: SETTINGS_PANEL_SURFACE,
+  color: SETTINGS_TEXT,
+  padding: 14,
   display: "grid",
   gap: 10,
-  boxShadow: "0 0 0 1px rgba(100, 116, 139, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.18)",
+  boxShadow: "14px 14px 36px rgba(174, 174, 192, 0.30), -10px -10px 24px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
 };
 
 function companyUserLabel(user: CompanyUser): string {
