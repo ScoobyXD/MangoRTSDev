@@ -90,6 +90,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				CompanyID:        input.CompanyID,
 				NodeID:           newUUIDv7String(),
 				Title:            item.Title,
+				DefaultAccess:    ResourceDefaultAccessEdit,
 				CreatedTimestamp: now,
 			}
 			if input.CreatorUserID != "" {
@@ -106,20 +107,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				return WorkspaceEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {
-				permission := domain.EntityPermission{
-					CompanyID:        input.CompanyID,
-					EntityType:       EntityTypeNode,
-					EntityID:         created.NodeID,
-					SubjectType:      EntityPermissionSubjectUser,
-					SubjectID:        input.CreatorUserID,
-					Permission:       EntityPermissionAdmin,
-					AccessLevel:      EntityPermissionAdmin,
-					CreatedTimestamp: now,
-				}
-				r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeNode, created.NodeID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
-				if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
-					return WorkspaceEntityBatchResult{}, err
-				}
 				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
 			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
@@ -142,25 +129,10 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			CompanyID:        input.CompanyID,
 			LogicGateID:      newUUIDv7String(),
 			Header:           item.Title,
+			DefaultAccess:    ResourceDefaultAccessEdit,
 			CreatedTimestamp: now,
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
-		if input.CreatorUserID != "" {
-			permission := domain.EntityPermission{
-				CompanyID:        input.CompanyID,
-				EntityType:       EntityTypeLogicGate,
-				EntityID:         created.LogicGateID,
-				SubjectType:      EntityPermissionSubjectUser,
-				SubjectID:        input.CreatorUserID,
-				Permission:       EntityPermissionAdmin,
-				AccessLevel:      EntityPermissionAdmin,
-				CreatedTimestamp: now,
-			}
-			r.entityPermissions[entityPermissionKey(input.CompanyID, EntityTypeLogicGate, created.LogicGateID, EntityPermissionSubjectUser, input.CreatorUserID, EntityPermissionAdmin)] = permission
-			if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-		}
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
 		if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
 			return WorkspaceEntityBatchResult{}, err

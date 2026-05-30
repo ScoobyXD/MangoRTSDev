@@ -64,6 +64,7 @@ func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
 }
 
 func (r *MemoryRepo) withLogicGateRaciLocked(gate domain.LogicGate) domain.LogicGate {
+	gate.DefaultAccess = defaultResourceAccessOrEdit(gate.DefaultAccess)
 	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]...)
 	sortLogicGateRaciAssignments(assignments)
 	gate.RaciAssignments = assignments
@@ -97,6 +98,7 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 		CompanyID:        companyID,
 		LogicGateID:      newUUIDv7String(),
 		Header:           header,
+		DefaultAccess:    ResourceDefaultAccessEdit,
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item

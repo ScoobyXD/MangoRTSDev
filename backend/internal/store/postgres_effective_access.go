@@ -221,7 +221,7 @@ func recomputeDirectGrantEffectiveAccessForResourceTx(ctx context.Context, tx *s
 	companyID = cleanUUIDText(companyID)
 	resourceID = cleanUUIDText(resourceID)
 	resourceType, typeOK := NormalizeEntityType(resourceType)
-	if companyID == "" || resourceID == "" || !typeOK {
+	if ctx == nil || tx == nil || companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
 	if err := rebuildEffectiveResourceAccessForResourceTx(ctx, tx, companyID, resourceType, resourceID); err != nil {
@@ -345,7 +345,7 @@ order by user_id::text asc, source_type asc, source_id asc`, companyID, resource
 
 func recomputeCompanyAdminEffectiveAccessForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	userID = cleanUUIDText(userID)
-	if userID == "" {
+	if ctx == nil || tx == nil || userID == "" {
 		return ErrInvalid
 	}
 	rows, err := tx.QueryContext(ctx, `
@@ -438,7 +438,7 @@ func recomputeCompanyAdminEffectiveAccessForResourceTx(ctx context.Context, tx *
 	companyID = cleanUUIDText(companyID)
 	resourceID = cleanUUIDText(resourceID)
 	resourceType, typeOK := NormalizeEntityType(resourceType)
-	if companyID == "" || resourceID == "" || !typeOK {
+	if ctx == nil || tx == nil || companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForResourceTx(ctx, tx, companyID, resourceType, resourceID)
@@ -482,7 +482,7 @@ func recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx context.Conte
 	companyID = cleanUUIDText(companyID)
 	resourceID = cleanUUIDText(resourceID)
 	resourceType, typeOK := NormalizeEntityType(resourceType)
-	if companyID == "" || resourceID == "" || !typeOK {
+	if ctx == nil || tx == nil || companyID == "" || resourceID == "" || !typeOK {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForResourceTx(ctx, tx, companyID, resourceType, resourceID)
@@ -537,7 +537,7 @@ order by membership.user_id::text asc`, companyID, resourceType, resourceID)
 func recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx context.Context, tx *sql.Tx, companyID, userID string) error {
 	companyID = cleanUUIDText(companyID)
 	userID = cleanUUIDText(userID)
-	if companyID == "" || userID == "" {
+	if ctx == nil || tx == nil || companyID == "" || userID == "" {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
@@ -612,7 +612,7 @@ func scanEffectiveResourceAccessRows(rows *sql.Rows) ([]domain.EffectiveResource
 func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
-	if companyID == "" || nodeID == "" {
+	if companyID == "" || nodeID == "" || ctx == nil || tx == nil {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID)
@@ -621,7 +621,7 @@ func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, com
 func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
-	if companyID == "" || logicGateID == "" {
+	if companyID == "" || logicGateID == "" || ctx == nil || tx == nil {
 		return ErrInvalid
 	}
 	if err := rebuildEffectiveResourceAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
@@ -633,7 +633,7 @@ func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, co
 func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
-	if companyID == "" || folderID == "" {
+	if companyID == "" || folderID == "" || ctx == nil || tx == nil {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
@@ -642,7 +642,7 @@ func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, 
 func recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
-	if companyID == "" || folderID == "" {
+	if companyID == "" || folderID == "" || ctx == nil || tx == nil {
 		return ErrInvalid
 	}
 	if _, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, folderID); err != nil {
@@ -691,7 +691,7 @@ func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx,
 
 func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx *sql.Tx, companyID string) error {
 	companyID = cleanUUIDText(companyID)
-	if companyID == "" {
+	if companyID == "" || ctx == nil || tx == nil {
 		return ErrInvalid
 	}
 	return rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID)
@@ -1408,6 +1408,10 @@ func (r *PostgresRepo) RebuildEffectiveResourceAccessForCompany(companyID string
 	} else if !exists {
 		return ErrNotFound
 	}
+	if err := rebuildEffectiveResourceAccessForCompanyTx(ctx, tx, companyID); err != nil {
+		return err
+	}
+	return tx.Commit()
 
 	if _, err := tx.ExecContext(ctx, `delete from effective_resource_access where company_id=$1::uuid`, companyID); err != nil {
 		return err
@@ -1718,16 +1722,15 @@ func (r *PostgresRepo) UserHasEffectiveAccess(companyID, userID, resourceType, r
 	}
 
 	var allowed bool
+	if usesDefaultResourceAccessPolicy(resourceType) {
+		err := r.db.QueryRowContext(context.Background(), `
+select mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, $4::uuid, $5::text)`,
+			companyID, resourceType, resourceID, userID, accessLevel).Scan(&allowed)
+		return allowed, err
+	}
 	err := r.db.QueryRowContext(context.Background(), `
-select exists(
-  select 1
-  from effective_resource_access access
-  where access.company_id=$1::uuid
-    and access.user_id=$2::uuid
-    and access.resource_type=$3
-    and access.resource_id=$4::uuid
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
-)`, companyID, userID, resourceType, resourceID, accessLevel).Scan(&allowed)
+select mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, $4::uuid, $5::text)`,
+		companyID, resourceType, resourceID, userID, accessLevel).Scan(&allowed)
 	return allowed, err
 }
 
@@ -1752,6 +1755,46 @@ func (r *PostgresRepo) ListEffectiveResourceIDsForUser(companyID, userID, resour
 	}
 	if len(cleanIDs) == 0 {
 		return map[string]bool{}, nil
+	}
+
+	if usesDefaultResourceAccessPolicy(resourceType) {
+		rows, err := r.db.QueryContext(context.Background(), `
+with input as (
+  select distinct raw.resource_id::uuid as resource_id
+  from unnest($5::text[]) as raw(resource_id)
+),
+existing as (
+  select input.resource_id
+  from input
+  join nodes node
+    on node.company_id=$1::uuid
+   and node.node_id=input.resource_id
+  where $3::text='node'
+  union all
+  select input.resource_id
+  from input
+  join logic_gates gate
+    on gate.company_id=$1::uuid
+   and gate.logic_gate_id=input.resource_id
+  where $3::text='logic_gate'
+)
+select existing.resource_id::text
+from existing
+where mangorts_user_can_access_resource($1::uuid, $3::text, existing.resource_id, $2::uuid, $4::text)
+order by existing.resource_id::text`, companyID, userID, resourceType, accessLevel, cleanIDs)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := map[string]bool{}
+		for rows.Next() {
+			var resourceID string
+			if err := rows.Scan(&resourceID); err != nil {
+				return nil, err
+			}
+			out[resourceID] = true
+		}
+		return out, rows.Err()
 	}
 
 	rows, err := r.db.QueryContext(context.Background(), `
@@ -1804,6 +1847,61 @@ func (r *PostgresRepo) effectiveAccessLevelsForUser(ctx context.Context, company
 	if len(cleanIDs) == 0 {
 		return map[string]string{}, nil
 	}
+	if usesDefaultResourceAccessPolicy(resourceType) {
+		rows, err := r.db.QueryContext(ctx, `
+with input as (
+  select distinct raw.resource_id::uuid as resource_id
+  from unnest($4::text[]) as raw(resource_id)
+),
+existing as (
+  select input.resource_id
+  from input
+  join nodes node
+    on node.company_id=$1::uuid
+   and node.node_id=input.resource_id
+  where $3::text='node'
+  union all
+  select input.resource_id
+  from input
+  join logic_gates gate
+    on gate.company_id=$1::uuid
+   and gate.logic_gate_id=input.resource_id
+  where $3::text='logic_gate'
+),
+admin_actor as (
+  select exists (
+    select 1
+    from company_memberships membership
+    where membership.user_id=$2::uuid
+      and (
+        membership.role='dev_admin'
+        or (membership.company_id=$1::uuid and membership.role='company_admin')
+      )
+  ) as allowed
+)
+select existing.resource_id::text,
+       case
+         when (select allowed from admin_actor) then 'admin'
+         when mangorts_user_can_access_resource($1::uuid, $3::text, existing.resource_id, $2::uuid, 'view') then 'edit'
+         else 'no_access'
+       end as access_level
+from existing
+order by existing.resource_id::text`, companyID, userID, resourceType, cleanIDs)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := map[string]string{}
+		for rows.Next() {
+			var resourceID string
+			var accessLevel string
+			if err := rows.Scan(&resourceID, &accessLevel); err != nil {
+				return nil, err
+			}
+			out[resourceID] = accessLevel
+		}
+		return out, rows.Err()
+	}
 	rows, err := r.db.QueryContext(ctx, `
 with input as (
   select distinct raw.resource_id::uuid as resource_id
@@ -1851,6 +1949,35 @@ func (r *PostgresRepo) ListEffectiveUsersForResource(companyID, resourceType, re
 	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
 	if companyID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
 		return nil, ErrInvalid
+	}
+
+	if usesDefaultResourceAccessPolicy(resourceType) {
+		rows, err := r.db.QueryContext(context.Background(), `
+select distinct membership.user_id::text
+from company_memberships membership
+where (
+    membership.company_id=$1::uuid
+    or membership.role='dev_admin'
+  )
+  and mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, membership.user_id, $4::text)
+order by membership.user_id::text`, companyID, resourceType, resourceID, accessLevel)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []string{}
+		for rows.Next() {
+			var userID string
+			if err := rows.Scan(&userID); err != nil {
+				return nil, err
+			}
+			out = append(out, userID)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		sort.Strings(out)
+		return out, nil
 	}
 
 	rows, err := r.db.QueryContext(context.Background(), `

@@ -61,6 +61,7 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 		CompanyID:        companyID,
 		NodeID:           nodeID,
 		Title:            title,
+		DefaultAccess:    ResourceDefaultAccessEdit,
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	if assigneeUserID != "" {
@@ -137,6 +138,7 @@ func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
 }
 
 func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
+	node.DefaultAccess = defaultResourceAccessOrEdit(node.DefaultAccess)
 	node = r.withDerivedNodeStatusLocked(node)
 	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
 	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {

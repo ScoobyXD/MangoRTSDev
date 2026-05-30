@@ -145,7 +145,7 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	}
 	defer tx.Rollback()
 
-	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header}
+	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header, DefaultAccess: ResourceDefaultAccessEdit}
 	err = tx.QueryRowContext(ctx,
 		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
 		 values ($1, $2, $3, now())
@@ -156,12 +156,6 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 		return domain.LogicGate{}, err
 	}
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, item.LogicGateID, item.Header); err != nil {
-		return domain.LogicGate{}, err
-	}
-	if err := recomputeCompanyMemberDefaultEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
-		return domain.LogicGate{}, err
-	}
-	if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -606,6 +600,11 @@ func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.Logic
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
+	if defaultAccess, err := postgresResourceDefaultAccess(ctx, r.db, companyID, EntityTypeLogicGate, logicGateID); err == nil {
+		item.DefaultAccess = defaultAccess
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return domain.LogicGate{}, err
+	}
 	items, err := r.attachLogicGateRaciAssignments(ctx, companyID, []domain.LogicGate{item})
 	if err != nil {
 		return domain.LogicGate{}, err
@@ -838,6 +837,13 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
 	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from resource_access
+		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
+		companyID, logicGateID,
+	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
 		return err
 	}
 

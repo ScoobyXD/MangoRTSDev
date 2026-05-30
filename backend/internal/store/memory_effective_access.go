@@ -302,16 +302,7 @@ func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, res
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, access := range r.effectiveAccess {
-		if access.CompanyID == companyID &&
-			access.UserID == userID &&
-			access.ResourceType == resourceType &&
-			access.ResourceID == resourceID &&
-			EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return r.userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel), nil
 }
 
 func (r *MemoryRepo) ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error) {
@@ -338,13 +329,9 @@ func (r *MemoryRepo) ListEffectiveResourceIDsForUser(companyID, userID, resource
 	defer r.mu.RUnlock()
 
 	out := map[string]bool{}
-	for _, access := range r.effectiveAccess {
-		if access.CompanyID == companyID &&
-			access.UserID == userID &&
-			access.ResourceType == resourceType &&
-			filter[access.ResourceID] &&
-			EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
-			out[access.ResourceID] = true
+	for resourceID := range filter {
+		if r.userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel) {
+			out[resourceID] = true
 		}
 	}
 	return out, nil
@@ -362,21 +349,30 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	seen := map[string]bool{}
-	for _, access := range r.effectiveAccess {
-		if access.CompanyID == companyID &&
-			access.ResourceType == resourceType &&
-			access.ResourceID == resourceID &&
-			EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
-			seen[access.UserID] = true
-		}
-	}
+	seen := r.effectiveUserIDsForResourceLocked(companyID, resourceType, resourceID, accessLevel)
 	out := make([]string, 0, len(seen))
 	for userID := range seen {
 		out = append(out, userID)
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (r *MemoryRepo) effectiveUserIDsForResourceLocked(companyID, resourceType, resourceID, accessLevel string) map[string]bool {
+	seen := map[string]bool{}
+	for _, membership := range r.memberships {
+		userID := strings.TrimSpace(membership.UserID)
+		if userID == "" || seen[userID] {
+			continue
+		}
+		if membership.CompanyID != companyID && membership.Role != domain.RoleDevAdmin {
+			continue
+		}
+		if r.userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel) {
+			seen[userID] = true
+		}
+	}
+	return seen
 }
 
 func (r *MemoryRepo) ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error) {
@@ -397,13 +393,9 @@ func (r *MemoryRepo) effectiveUsersForWorkspaceEventLocked(event domain.DomainEv
 	}
 	seen := map[string]bool{}
 	for _, target := range targets {
-		for _, access := range r.effectiveAccess {
-			if access.CompanyID == event.CompanyID &&
-				access.ResourceType == target.ResourceType &&
-				access.ResourceID == target.ResourceID &&
-				EntityPermissionSatisfies(access.AccessLevel, EntityPermissionView) {
-				seen[access.UserID] = true
-			}
+		resourceSeen := r.effectiveUserIDsForResourceLocked(event.CompanyID, target.ResourceType, target.ResourceID, EntityPermissionView)
+		for userID := range resourceSeen {
+			seen[userID] = true
 		}
 	}
 	return sortWorkspaceEventUserIDs(seen)
@@ -439,6 +431,53 @@ func (r *MemoryRepo) effectiveAccessLevelForUserLocked(companyID, userID, resour
 		}
 	}
 	return bestLevel
+}
+
+func (r *MemoryRepo) userHasDefaultResourceAccessLocked(companyID, userID, resourceType, resourceID string) bool {
+	if r.userHasRoleAdminAccessLocked(companyID, userID) {
+		return true
+	}
+	if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
+		return false
+	}
+	defaultAccess, ok := r.defaultAccessForResourceLocked(companyID, resourceType, resourceID)
+	if !ok {
+		return false
+	}
+	hasOverride := r.resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID)
+	return (defaultAccess == ResourceDefaultAccessEdit) != hasOverride
+}
+
+func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, resourceID string) (string, bool) {
+	switch resourceType {
+	case EntityTypeNode:
+		node, ok := r.nodes[key(companyID, resourceID)]
+		if !ok {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(node.DefaultAccess), true
+	case EntityTypeLogicGate:
+		gate, ok := r.logicGates[key(companyID, resourceID)]
+		if !ok {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(gate.DefaultAccess), true
+	default:
+		return "", false
+	}
+}
+
+func (r *MemoryRepo) resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID string) bool {
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID &&
+			permission.EntityType == resourceType &&
+			permission.EntityID == resourceID &&
+			permission.SubjectType == EntityPermissionSubjectUser &&
+			permission.SubjectID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *MemoryRepo) projectLegacyGrantEffectiveAccessLocked(companyID string, facts map[string]domain.EffectiveResourceAccess, now time.Time) {
@@ -545,10 +584,13 @@ func (r *MemoryRepo) projectCompanyMemberDefaultEffectiveAccessLocked(companyID 
 		return
 	}
 	for _, node := range r.nodes {
-		if node.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeNode, node.NodeID) {
+		if node.CompanyID != companyID || defaultResourceAccessOrEdit(node.DefaultAccess) != ResourceDefaultAccessEdit {
 			continue
 		}
 		for _, membership := range memberships {
+			if r.resourceAccessOverrideExistsLocked(companyID, EntityTypeNode, node.NodeID, membership.UserID) {
+				continue
+			}
 			addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
 				CompanyID:    companyID,
 				UserID:       membership.UserID,
@@ -561,10 +603,13 @@ func (r *MemoryRepo) projectCompanyMemberDefaultEffectiveAccessLocked(companyID 
 		}
 	}
 	for _, gate := range r.logicGates {
-		if gate.CompanyID != companyID || r.resourceHasDirectEntityPermissionsLocked(companyID, EntityTypeLogicGate, gate.LogicGateID) {
+		if gate.CompanyID != companyID || defaultResourceAccessOrEdit(gate.DefaultAccess) != ResourceDefaultAccessEdit {
 			continue
 		}
 		for _, membership := range memberships {
+			if r.resourceAccessOverrideExistsLocked(companyID, EntityTypeLogicGate, gate.LogicGateID, membership.UserID) {
+				continue
+			}
 			addEffectiveAccessFact(facts, now, domain.EffectiveResourceAccess{
 				CompanyID:    companyID,
 				UserID:       membership.UserID,

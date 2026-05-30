@@ -1226,6 +1226,13 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from resource_access
+		 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`,
+		companyID, nodeID,
+	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
+		return err
+	}
 	deleted, err := tx.ExecContext(ctx,
 		`delete from nodes
 		 where company_id=$1 and node_id=$2`,
@@ -1346,6 +1353,13 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
 	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from resource_access
+		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
+		companyID, logicGateID,
+	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,
