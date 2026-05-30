@@ -61,6 +61,7 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 		CompanyID:        companyID,
 		NodeID:           nodeID,
 		Title:            title,
+		DefaultAccess:    ResourceDefaultAccessEdit,
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	if assigneeUserID != "" {
@@ -69,15 +70,6 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 	r.nodes[key(companyID, n.NodeID)] = n
 	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
 		delete(r.nodes, key(companyID, n.NodeID))
-		return domain.Node{}, err
-	}
-	if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, n.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
 		return domain.Node{}, err
 	}
 	return r.withNodeReadModelLocked(n), nil
@@ -137,6 +129,7 @@ func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
 }
 
 func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
+	node.DefaultAccess = defaultResourceAccessOrEdit(node.DefaultAccess)
 	node = r.withDerivedNodeStatusLocked(node)
 	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
 	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
@@ -237,11 +230,6 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 		}
 	}
 	r.nodes[k] = node
-	if input.AssigneeUserIDSet {
-		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
-			return domain.Node{}, err
-		}
-	}
 	return r.withNodeReadModelLocked(node), nil
 }
 

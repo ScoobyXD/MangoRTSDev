@@ -72,9 +72,6 @@ func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMove
 	if input.CompanyID == "" || input.LogicGateID == "" || input.NodeID == "" {
 		return LogicGateNodeAssignmentMoveInput{}, ErrInvalid
 	}
-	if input.FromLogicGateID != "" && input.FromLogicGateID != input.LogicGateID {
-		return LogicGateNodeAssignmentMoveInput{}, ErrNotFound
-	}
 	if input.PrioritySet && input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
 		return LogicGateNodeAssignmentMoveInput{}, ErrInvalid
 	}

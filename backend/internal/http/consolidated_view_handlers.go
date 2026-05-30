@@ -116,6 +116,9 @@ func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Req
 		writeAccessResourceNotFound(w)
 		return domain.EffectiveAccessFlags{}, actorUserID, false
 	}
+	if resourceType == store.EntityTypeNode || resourceType == store.EntityTypeLogicGate {
+		return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: false}, actorUserID, true
+	}
 	canEdit, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
 	if err != nil {
 		log.Printf("failed to check v2 root edit access company_id=%s resource_type=%s resource_id=%s user_id=%s: %v", companyID, resourceType, resourceID, actorUserID, err)

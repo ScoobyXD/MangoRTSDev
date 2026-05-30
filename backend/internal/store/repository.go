@@ -347,6 +347,9 @@ const (
 	EntityPermissionEdit     = "edit"
 	EntityPermissionAdmin    = "admin"
 
+	ResourceDefaultAccessEdit     = EntityPermissionEdit
+	ResourceDefaultAccessNoAccess = EntityPermissionNoAccess
+
 	EntityPermissionSubjectUser  = "user"
 	EntityPermissionSubjectGroup = "group"
 
@@ -926,10 +929,13 @@ type EntityPermissionInput struct {
 }
 
 type EntityPermissionUpdateInput struct {
-	CompanyID   string
-	EntityType  string
-	EntityID    string
-	Permissions []EntityPermissionInput
+	CompanyID        string
+	EntityType       string
+	EntityID         string
+	DefaultAccess    string
+	DefaultAccessSet bool
+	OverrideUserIDs  []string
+	Permissions      []EntityPermissionInput
 }
 
 type CreateInvitationInput struct {
@@ -1019,6 +1025,25 @@ func NormalizeEntityPermission(permission string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func NormalizeResourceDefaultAccess(access string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(access)) {
+	case "", ResourceDefaultAccessEdit:
+		return ResourceDefaultAccessEdit, true
+	case ResourceDefaultAccessNoAccess:
+		return ResourceDefaultAccessNoAccess, true
+	default:
+		return "", false
+	}
+}
+
+func OppositeResourceDefaultAccess(access string) string {
+	access, ok := NormalizeResourceDefaultAccess(access)
+	if !ok || access == ResourceDefaultAccessEdit {
+		return ResourceDefaultAccessNoAccess
+	}
+	return ResourceDefaultAccessEdit
 }
 
 func EntityPermissionRank(permission string) int {

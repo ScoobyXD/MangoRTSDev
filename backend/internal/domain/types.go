@@ -123,6 +123,16 @@ type EntityPermission struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
+type ResourceAccessPolicy struct {
+	CompanyID        string             `json:"company_id"`
+	ResourceType     string             `json:"resource_type"`
+	ResourceID       string             `json:"resource_id"`
+	DefaultAccess    string             `json:"default_access"`
+	Overrides        []EntityPermission `json:"overrides"`
+	CreatedTimestamp time.Time          `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp time.Time          `json:"updated_timestamp,omitempty"`
+}
+
 type EffectiveResourceAccess struct {
 	CompanyID        string    `json:"company_id"`
 	UserID           string    `json:"user_id"`
@@ -223,6 +233,7 @@ type Node struct {
 	NodeID    string `json:"node_id"`
 	// Title is the canonical public API field name for node text labels.
 	Title            string    `json:"title"`
+	DefaultAccess    string    `json:"default_access"`
 	Status           *string   `json:"status"`
 	StatusColor      *string   `json:"status_color"`
 	DueDate          *string   `json:"due_date"`
@@ -314,6 +325,7 @@ type LogicGate struct {
 	CompanyID        string                    `json:"company_id"`
 	LogicGateID      string                    `json:"logic_gate_id"`
 	Header           string                    `json:"header"`
+	DefaultAccess    string                    `json:"default_access"`
 	RaciAssignments  []LogicGateRaciAssignment `json:"raci_assignments"`
 	EffectiveAccess  string                    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`

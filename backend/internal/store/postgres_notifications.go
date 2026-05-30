@@ -107,48 +107,23 @@ const notificationRecipientVisibilityWhereSQL = `
         )
         when btrim(logic_gate_id) <> '' then exists (
           select 1
-          from effective_resource_access access
-          where access.company_id=notifications.company_id
-            and access.user_id=notifications.recipient_user_id
-            and access.resource_type='logic_gate'
-            and access.resource_id=notifications.logic_gate_id::uuid
-            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+          where mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.logic_gate_id::uuid, notifications.recipient_user_id, 'view')
         )
         when btrim(node_id) <> '' then exists (
           select 1
-          from effective_resource_access access
-          where access.company_id=notifications.company_id
-            and access.user_id=notifications.recipient_user_id
-            and access.resource_type='node'
-            and access.resource_id=notifications.node_id::uuid
-            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+          where mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.node_id::uuid, notifications.recipient_user_id, 'view')
         )
         when entity_type = 'logic_gate' then exists (
           select 1
-          from effective_resource_access access
-          where access.company_id=notifications.company_id
-            and access.user_id=notifications.recipient_user_id
-            and access.resource_type='logic_gate'
-            and access.resource_id=notifications.entity_id::uuid
-            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+          where mangorts_user_can_access_resource(notifications.company_id, 'logic_gate', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
         )
         when entity_type = 'node' then exists (
           select 1
-          from effective_resource_access access
-          where access.company_id=notifications.company_id
-            and access.user_id=notifications.recipient_user_id
-            and access.resource_type='node'
-            and access.resource_id=notifications.entity_id::uuid
-            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+          where mangorts_user_can_access_resource(notifications.company_id, 'node', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
         )
         when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder') then exists (
           select 1
-          from effective_resource_access access
-          where access.company_id=notifications.company_id
-            and access.user_id=notifications.recipient_user_id
-            and access.resource_type='shared_triage_folder'
-            and access.resource_id=notifications.entity_id::uuid
-            and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank('view')
+          where mangorts_user_can_access_resource(notifications.company_id, 'shared_triage_folder', notifications.entity_id::uuid, notifications.recipient_user_id, 'view')
         )
         else true
       end

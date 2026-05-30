@@ -10,8 +10,10 @@ import (
 )
 
 type entityPermissionUpdateRequest struct {
-	CompanyID   string                        `json:"company_id"`
-	Permissions []store.EntityPermissionInput `json:"permissions"`
+	CompanyID       string                        `json:"company_id"`
+	DefaultAccess   *string                       `json:"default_access"`
+	OverrideUserIDs []string                      `json:"override_user_ids"`
+	Permissions     []store.EntityPermissionInput `json:"permissions"`
 }
 
 const (
@@ -574,12 +576,28 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusInternalServerError, "failed_to_list_entity_effective_access")
 			return
 		}
+		defaultAccess, err := s.entityDefaultAccess(companyID, entityType, entityID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, notFoundCode)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")
+			return
+		}
 		actor, _ := authenticatedActor(r)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"company_id":           companyID,
 			"entity_type":          entityType,
 			"entity_id":            entityID,
+			"default_access":       defaultAccess,
 			"permissions":          permissions,
+			"access_grants":        permissions,
+			"override_user_ids":    entityPermissionUserIDs(permissions),
 			"effective_access":     effectiveAccess,
 			"can_edit_permissions": actorCanManageCompany(actor, companyID),
 		})
@@ -599,10 +617,13 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:   req.CompanyID,
-		EntityType:  entityType,
-		EntityID:    entityID,
-		Permissions: req.Permissions,
+		CompanyID:        req.CompanyID,
+		EntityType:       entityType,
+		EntityID:         entityID,
+		DefaultAccess:    stringPointerValue(req.DefaultAccess),
+		DefaultAccessSet: req.DefaultAccess != nil,
+		OverrideUserIDs:  req.OverrideUserIDs,
+		Permissions:      req.Permissions,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
@@ -631,11 +652,19 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		payload["logic_gate_id"] = entityID
 	}
 	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
+	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"company_id":  req.CompanyID,
-		"entity_type": entityType,
-		"entity_id":   entityID,
-		"permissions": permissions,
+		"company_id":        req.CompanyID,
+		"entity_type":       entityType,
+		"entity_id":         entityID,
+		"default_access":    defaultAccess,
+		"permissions":       permissions,
+		"access_grants":     permissions,
+		"override_user_ids": entityPermissionUserIDs(permissions),
 	})
 }
 
@@ -643,6 +672,29 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 	users, err := s.repo.ListCompanyUsers(companyID)
 	if err != nil {
 		return nil, err
+	}
+	if entityType == store.EntityTypeNode || entityType == store.EntityTypeLogicGate {
+		out := make([]map[string]string, 0, len(users))
+		for _, user := range users {
+			userID := strings.TrimSpace(user.UserID)
+			if userID == "" {
+				continue
+			}
+			if domain.CanManageCompany(user.Role) {
+				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionAdmin})
+				continue
+			}
+			allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, entityType, entityID, store.EntityPermissionEdit)
+			if err != nil {
+				return nil, err
+			}
+			if allowed {
+				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionEdit})
+			} else {
+				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionNoAccess})
+			}
+		}
+		return out, nil
 	}
 	levels := []string{store.EntityPermissionAdmin, store.EntityPermissionEdit, store.EntityPermissionView}
 	out := make([]map[string]string, 0, len(users))
@@ -674,4 +726,50 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 		}
 	}
 	return out, nil
+}
+
+func (s *Server) entityDefaultAccess(companyID, entityType, entityID string) (string, error) {
+	switch entityType {
+	case store.EntityTypeNode:
+		node, err := s.repo.GetNode(companyID, entityID)
+		if err != nil {
+			return "", err
+		}
+		return defaultAccessOrEdit(node.DefaultAccess), nil
+	case store.EntityTypeLogicGate:
+		logicGate, err := s.repo.GetLogicGate(companyID, entityID)
+		if err != nil {
+			return "", err
+		}
+		return defaultAccessOrEdit(logicGate.DefaultAccess), nil
+	case store.EntityTypeSharedTriageFolder:
+		return store.EntityPermissionNoAccess, nil
+	default:
+		return "", store.ErrInvalid
+	}
+}
+
+func defaultAccessOrEdit(access string) string {
+	access, ok := store.NormalizeResourceDefaultAccess(access)
+	if !ok {
+		return store.ResourceDefaultAccessEdit
+	}
+	return access
+}
+
+func entityPermissionUserIDs(permissions []domain.EntityPermission) []string {
+	out := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if permission.SubjectType == store.EntityPermissionSubjectUser && strings.TrimSpace(permission.SubjectID) != "" {
+			out = append(out, strings.TrimSpace(permission.SubjectID))
+		}
+	}
+	return out
+}
+
+func stringPointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }

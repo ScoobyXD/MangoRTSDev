@@ -207,7 +207,9 @@ create table if not exists nodes (
   due_date date,
   priority smallint,
   assignee_user_id uuid,
+  default_access text not null default 'edit',
   created_timestamp timestamptz not null,
+  constraint nodes_default_access_chk check (default_access in ('edit', 'no_access')),
   constraint nodes_priority_chk check (priority is null or priority between 1 and 5),
   primary key (company_id, node_id),
   foreign key (assignee_user_id) references users (user_id)
@@ -315,7 +317,9 @@ create table if not exists logic_gates (
   company_id uuid not null,
   logic_gate_id uuid not null,
   header text not null,
+  default_access text not null default 'edit',
   created_timestamp timestamptz not null,
+  constraint logic_gates_default_access_chk check (default_access in ('edit', 'no_access')),
   primary key (company_id, logic_gate_id)
 );
 
@@ -401,6 +405,25 @@ create index if not exists idx_resource_access_grants_principal
 create index if not exists idx_resource_access_grants_resource
   on resource_access_grants(company_id, resource_type, resource_id);
 
+create table if not exists resource_access (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  user_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint resource_access_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  primary key (company_id, resource_type, resource_id, user_id),
+  foreign key (company_id) references companies (company_id) on delete cascade,
+  foreign key (user_id) references users (user_id) on delete cascade
+);
+
+create index if not exists idx_resource_access_user_resource
+  on resource_access(company_id, user_id, resource_type, resource_id);
+
+create index if not exists idx_resource_access_resource_user
+  on resource_access(company_id, resource_type, resource_id, user_id);
+
 create table if not exists effective_resource_access (
   company_id uuid not null,
   user_id uuid not null,
@@ -462,6 +485,30 @@ returns boolean as $$
           membership.role = 'dev_admin'
           or (membership.company_id = p_company_id and membership.role = 'company_admin')
         )
+    )
+  ),
+  normalized_resource_row(default_access) as (
+    select coalesce(node.default_access, 'edit')
+    from nodes node, normalized_resource normalized
+    where normalized.resource_type='node'
+      and node.company_id=p_company_id
+      and node.node_id=p_resource_id
+    union all
+    select coalesce(gate.default_access, 'edit')
+    from logic_gates gate, normalized_resource normalized
+    where normalized.resource_type='logic_gate'
+      and gate.company_id=p_company_id
+      and gate.logic_gate_id=p_resource_id
+  ),
+  direct_override(exists_override) as (
+    select exists (
+      select 1
+      from resource_access access
+      join normalized_resource normalized
+        on normalized.resource_type=access.resource_type
+      where access.company_id=p_company_id
+        and access.resource_id=p_resource_id
+        and access.user_id=p_user_id
     )
   ),
   resource_scope(resource_id, depth, path) as (
@@ -538,19 +585,16 @@ returns boolean as $$
     when normalized_resource.resource_type not in ('node', 'logic_gate', 'shared_triage_folder') then false
     when (select allowed from role_admin_actor) then true
     when normalized_resource.resource_type in ('node', 'logic_gate')
-      and requested.required_rank <= mangorts_access_level_rank('edit')
       and exists (
         select 1
         from company_memberships membership
         where membership.company_id = p_company_id
           and membership.user_id = p_user_id
       )
-      and not exists (
-        select 1
-        from resource_access_grants grant_row
-        where grant_row.company_id = p_company_id
-          and grant_row.resource_type = normalized_resource.resource_type
-          and grant_row.resource_id = p_resource_id
+      and exists (select 1 from normalized_resource_row)
+      and (
+        ((select default_access from normalized_resource_row limit 1) = 'edit' and not (select exists_override from direct_override))
+        or ((select default_access from normalized_resource_row limit 1) = 'no_access' and (select exists_override from direct_override))
       ) then true
     when exists (select 1 from effective_grant) then (select access_rank from effective_grant) >= requested.required_rank
     else false

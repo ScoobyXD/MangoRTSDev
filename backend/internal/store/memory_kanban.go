@@ -487,6 +487,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	if board.LogicGateID != nil && !logicGateAssignmentNodeHasPriority(node.Priority) {
 		return domain.KanbanCard{}, ErrPriorityRequired
 	}
+	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	if board.LogicGateID != nil {
 		for boardKeyValue, cards := range r.kanbanCards {
 			nextCards := cards[:0]
@@ -543,6 +544,11 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		}
 		if card.LogicGateID != nil {
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+			if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
+				if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID); err != nil {
+					return domain.KanbanCard{}, err
+				}
+			}
 		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
@@ -575,6 +581,11 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	}
 	if card.LogicGateID != nil {
 		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
+			if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID); err != nil {
+				return domain.KanbanCard{}, err
+			}
+		}
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	return card, nil
@@ -654,8 +665,8 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
-	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
+	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
+		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -780,11 +791,15 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
-	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
+	sourceLogicGateID := input.LogicGateID
+	if input.FromLogicGateID != "" {
+		sourceLogicGateID = input.FromLogicGateID
+	}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, sourceLogicGateID)
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
-	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, input.LogicGateID)
+	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, sourceLogicGateID)
 	if len(locations) == 0 {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
@@ -793,10 +808,19 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	crossLogicGateMove := assignment.LogicGateID != input.LogicGateID
+	targetBoardID := card.BoardID
+	if crossLogicGateMove {
+		targetBoardID = LogicGateKanbanBoardID(input.LogicGateID)
+		board, ok := r.kanbanBoards[boardKey(input.CompanyID, targetBoardID)]
+		if !ok || board.LogicGateID == nil || *board.LogicGateID != input.LogicGateID {
+			return LogicGateNodeAssignmentResult{}, ErrNotFound
+		}
+	}
 
 	columnID := card.ColumnID
 	if input.ColumnID != "" || input.Status != "" {
-		column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, card.BoardID)], input.ColumnID, input.Status)
+		column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, targetBoardID)], input.ColumnID, input.Status)
 		if err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -805,8 +829,8 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	position := card.Position
 	if input.Position > 0 {
 		position = input.Position
-	} else if columnID != card.ColumnID {
-		position = nextKanbanCardPosition(r.kanbanCards[location.mapKey], columnID)
+	} else if crossLogicGateMove || columnID != card.ColumnID {
+		position = nextKanbanCardPosition(r.kanbanCards[boardKey(input.CompanyID, targetBoardID)], columnID)
 	}
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
@@ -822,12 +846,15 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	}
 
 	card.ColumnID = columnID
+	card.BoardID = targetBoardID
+	value := input.LogicGateID
+	card.LogicGateID = &value
 	card.Position = position
 	if strings.TrimSpace(node.Title) != "" {
 		card.NodeTitle = node.Title
 	}
 	card.UpdatedTimestamp = time.Now().UTC()
-	column, _ := r.kanbanColumnLocked(input.CompanyID, card.BoardID, columnID)
+	column, _ := r.kanbanColumnLocked(input.CompanyID, targetBoardID, columnID)
 	r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
 		CompanyID:            input.CompanyID,
 		NodeID:               input.NodeID,
@@ -836,11 +863,21 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		StatusKey:            logicGateAssignmentStatusKey(column.Title),
 		IsIssue:              card.IsIssue,
 		Position:             position,
-		CompatibilityBoardID: card.BoardID,
+		CompatibilityBoardID: targetBoardID,
 		CompatibilityCardID:  card.CardID,
 		UpdatedTimestamp:     card.UpdatedTimestamp,
 	})
-	r.kanbanCards[location.mapKey][location.index] = card
+	if crossLogicGateMove {
+		r.kanbanCards[location.mapKey] = append(r.kanbanCards[location.mapKey][:location.index], r.kanbanCards[location.mapKey][location.index+1:]...)
+		targetKey := boardKey(input.CompanyID, targetBoardID)
+		r.kanbanCards[targetKey] = append(r.kanbanCards[targetKey], card)
+		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	} else {
+		r.kanbanCards[location.mapKey][location.index] = card
+	}
 	if input.AssigneePolicySet {
 		previousAssigneeUserID := nodeAssigneeUserID(r.nodes[nodeKey])
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)

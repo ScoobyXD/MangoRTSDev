@@ -487,6 +487,44 @@ func (r *PostgresRepo) ListEntityPermissions(companyID, entityType, entityID str
 		return nil, ErrNotFound
 	}
 
+	if usesDefaultResourceAccessPolicy(entityType) {
+		defaultAccess, err := postgresResourceDefaultAccess(ctx, r.db, companyID, entityType, entityID)
+		if err != nil {
+			return nil, err
+		}
+		overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
+		rows, err := r.db.QueryContext(ctx, `
+select access.company_id::text,
+       access.resource_type,
+       access.resource_id::text,
+       'user'::text,
+       access.user_id::text,
+       nullif(app_user.display_name, ''),
+       nullif(app_user.email, ''),
+       $4::text,
+       access.created_timestamp
+from resource_access access
+join users app_user on app_user.user_id=access.user_id
+where access.company_id=$1::uuid
+  and access.resource_type=$2
+  and access.resource_id=$3::uuid
+order by lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.user_id::text)) asc,
+         access.user_id::text asc`, companyID, entityType, entityID, overrideAccess)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		items := make([]domain.EntityPermission, 0)
+		for rows.Next() {
+			item, err := scanEntityPermission(rows)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		return items, rows.Err()
+	}
+
 	rows, err := r.db.QueryContext(ctx, `
 select grant_row.company_id::text,
        grant_row.resource_type,
@@ -530,8 +568,24 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 	companyID := strings.TrimSpace(input.CompanyID)
 	entityID := strings.TrimSpace(input.EntityID)
 	entityType, ok := NormalizeEntityType(input.EntityType)
-	if companyID == "" || entityID == "" || !ok || len(input.Permissions) > EntityPermissionMaxAssignments {
+	if companyID == "" || entityID == "" || !ok || len(input.Permissions) > EntityPermissionMaxAssignments || len(input.OverrideUserIDs) > EntityPermissionMaxAssignments {
 		return nil, ErrInvalid
+	}
+
+	if usesDefaultResourceAccessPolicy(entityType) {
+		ctx := context.Background()
+		tx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		if err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return r.ListEntityPermissions(companyID, entityType, entityID)
 	}
 
 	type normalizedPermission struct {
@@ -718,6 +772,9 @@ func (r *PostgresRepo) ListAccessibleEntityIDs(companyID, entityType, userID, ac
 	}
 	if len(cleanIDs) == 0 {
 		return map[string]bool{}, nil
+	}
+	if usesDefaultResourceAccessPolicy(entityType) {
+		return r.ListEffectiveResourceIDsForUser(companyID, userID, entityType, accessLevel, cleanIDs)
 	}
 
 	existingSQL := ""
