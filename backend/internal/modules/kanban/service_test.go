@@ -326,6 +326,64 @@ func TestLogicGateAssignmentMovePriorityOmittedNullAndValue(t *testing.T) {
 	}
 }
 
+func TestLogicGateAssignmentCrossGateMoveWithoutStatusResolvesTargetColumn(t *testing.T) {
+	repo, service, companyID, sourceGate, node := setupLogicGateAssignmentCommandTest(t, "ddddddddddde")
+	targetGate, err := repo.CreateLogicGate(companyID, "Target Command Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	priority := 2
+	assigned, err := service.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "in_progress",
+		Priority:    &priority,
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus source: %v", err)
+	}
+
+	targetColumns, err := repo.ListKanbanColumns(companyID, store.LogicGateKanbanBoardID(targetGate.LogicGateID))
+	if err != nil {
+		t.Fatalf("ListKanbanColumns target: %v", err)
+	}
+	targetColumnID := ""
+	for _, column := range targetColumns {
+		if column.Title == "In Progress" {
+			targetColumnID = column.ColumnID
+			break
+		}
+	}
+	if targetColumnID == "" {
+		t.Fatalf("target in-progress column missing: %+v", targetColumns)
+	}
+	if assigned.Card.ColumnID == targetColumnID {
+		t.Fatalf("test setup expected source and target columns to have distinct ids")
+	}
+
+	moved, err := service.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
+		CompanyID:       companyID,
+		LogicGateID:     targetGate.LogicGateID,
+		FromLogicGateID: sourceGate.LogicGateID,
+		NodeID:          node.NodeID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment cross gate without status: %v", err)
+	}
+	if moved.Card.BoardID != store.LogicGateKanbanBoardID(targetGate.LogicGateID) || moved.Card.ColumnID != targetColumnID {
+		t.Fatalf("moved card placement = board %q column %q, want target board %q column %q", moved.Card.BoardID, moved.Card.ColumnID, store.LogicGateKanbanBoardID(targetGate.LogicGateID), targetColumnID)
+	}
+	if moved.Node.Status == nil || *moved.Node.Status != "In Progress" {
+		t.Fatalf("moved node status = %+v, want In Progress", moved.Node.Status)
+	}
+	if len(moved.Node.LogicGateIDs) != 1 || moved.Node.LogicGateIDs[0] != targetGate.LogicGateID {
+		t.Fatalf("moved node logic_gate_ids = %+v, want target gate", moved.Node.LogicGateIDs)
+	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, targetGate.LogicGateID, moved.Card, false)
+}
+
 func TestLogicGateAssignmentMoveInvalidPlacementDoesNotPatchNode(t *testing.T) {
 	repo, service, companyID, logicGate, node := setupLogicGateAssignmentCommandTest(t, "eeeeeeeeeeee")
 	priority := 3

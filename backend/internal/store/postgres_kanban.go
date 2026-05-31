@@ -1088,7 +1088,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&nodePr
 	}
 
 	columnID := card.ColumnID
-	if input.ColumnID != "" || input.Status != "" {
+	if crossLogicGateMove || input.ColumnID != "" || input.Status != "" {
 		rows, err := tx.QueryContext(ctx, `
 select company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp
 from kanban_columns
@@ -1113,7 +1113,7 @@ order by position asc, created_timestamp asc, column_id asc`, input.CompanyID, t
 		if err := rows.Close(); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
-		column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+		column, err := resolveLogicGateAssignmentMoveColumn(columns, input, card.ColumnID, assignment.StatusKey, crossLogicGateMove)
 		if err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -1137,6 +1137,9 @@ where company_id=$1 and compatibility_board_id=$2 and column_id=$3`, input.Compa
 select title
 from kanban_columns
 where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, targetBoardID, columnID).Scan(&columnTitle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return LogicGateNodeAssignmentResult{}, ErrNotFound
+		}
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if input.PrioritySet {

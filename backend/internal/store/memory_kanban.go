@@ -816,8 +816,8 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	}
 
 	columnID := card.ColumnID
-	if input.ColumnID != "" || input.Status != "" {
-		column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, targetBoardID)], input.ColumnID, input.Status)
+	if crossLogicGateMove || input.ColumnID != "" || input.Status != "" {
+		column, err := resolveLogicGateAssignmentMoveColumn(r.kanbanColumns[boardKey(input.CompanyID, targetBoardID)], input, card.ColumnID, assignment.StatusKey, crossLogicGateMove)
 		if err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -851,7 +851,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		card.NodeTitle = node.Title
 	}
 	card.UpdatedTimestamp = time.Now().UTC()
-	column, _ := r.kanbanColumnLocked(input.CompanyID, targetBoardID, columnID)
+	column, ok := r.kanbanColumnLocked(input.CompanyID, targetBoardID, columnID)
+	if !ok {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
 	r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
 		CompanyID:            input.CompanyID,
 		NodeID:               input.NodeID,
