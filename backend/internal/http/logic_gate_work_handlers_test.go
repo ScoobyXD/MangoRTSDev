@@ -384,9 +384,10 @@ func listLogicGateWorkNotificationsForTest(t *testing.T, handler http.Handler, c
 }
 
 type logicGateWorkMutationPayloadForTest struct {
-	Assignment domain.NodeLogicGateAssignment `json:"assignment"`
-	Node       domain.Node                    `json:"node"`
-	Card       domain.KanbanCard              `json:"card"`
+	Assignment          domain.NodeLogicGateAssignment   `json:"assignment"`
+	Node                domain.Node                      `json:"node"`
+	Card                domain.KanbanCard                `json:"card"`
+	RacioProjectionRows []store.RacioMatrixProjectionRow `json:"racio_projection_rows"`
 }
 
 func decodeLogicGateWorkMutationPayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) logicGateWorkMutationPayloadForTest {

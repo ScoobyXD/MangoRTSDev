@@ -225,6 +225,7 @@ type MapLayoutRepository interface {
 
 type WorkspaceEntityCommandRepository interface {
 	CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error)
+	CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateResult, error)
 }
 
 type KanbanRepository interface {
@@ -330,6 +331,24 @@ type WorkItemLogicGateInboxItem struct {
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
+type RacioMatrixProjectionRow struct {
+	CompanyID                string    `json:"company_id"`
+	UserID                   string    `json:"user_id"`
+	ResourceType             string    `json:"resource_type"`
+	ResourceID               string    `json:"resource_id"`
+	LogicGateID              *string   `json:"logic_gate_id,omitempty"`
+	DisplayTitle             string    `json:"display_title"`
+	Status                   *string   `json:"status,omitempty"`
+	StatusColor              *string   `json:"status_color,omitempty"`
+	DueDate                  *string   `json:"due_date,omitempty"`
+	Priority                 *int      `json:"priority,omitempty"`
+	AssigneeUserID           *string   `json:"assignee_user_id,omitempty"`
+	AssigneeDisplayName      *string   `json:"assignee_display_name,omitempty"`
+	AssigneeEmail            *string   `json:"assignee_email,omitempty"`
+	ResourceCreatedTimestamp time.Time `json:"resource_created_timestamp"`
+	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
+}
+
 const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
 
@@ -404,6 +423,36 @@ type WorkspaceEntityBatchResult struct {
 	FolderItems            []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
 	NodeMapPositions       []domain.NodeMapPosition            `json:"node_map_positions,omitempty"`
 	LogicGateMapPositions  []domain.LogicGateMapPosition       `json:"logic_gate_map_positions,omitempty"`
+}
+
+type RacioMatrixNodeCreateInput struct {
+	CompanyID                string
+	NodeID                   string
+	Title                    string
+	LogicGateID              string
+	CreateLogicGateHeader    string
+	CreatorLogicGateRaciRole string
+	Status                   string
+	ColumnID                 string
+	DescriptionSnapshot      string
+	Position                 int
+	Priority                 *int
+	PrioritySet              bool
+	IsIssue                  bool
+	IsIssueSet               bool
+	AssigneePolicy           string
+	ActorUserID              string
+	IdempotencyKey           string
+}
+
+type RacioMatrixNodeCreateResult struct {
+	Node                domain.Node                        `json:"node"`
+	LogicGate           *domain.LogicGate                  `json:"logic_gate,omitempty"`
+	Assignment          *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
+	Card                *domain.KanbanCard                 `json:"card,omitempty"`
+	FolderItems         []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
+	RacioProjectionRows []RacioMatrixProjectionRow         `json:"racio_projection_rows,omitempty"`
+	Events              []domain.DomainEvent               `json:"-"`
 }
 type NodeMapWindowBounds struct {
 	MinX float64 `json:"min_x"`
@@ -728,17 +777,19 @@ type LogicGateNodeAssignmentIssueInput struct {
 }
 
 type LogicGateNodeAssignmentResult struct {
-	Card       domain.KanbanCard              `json:"card"`
-	Node       domain.Node                    `json:"node"`
-	Assignment domain.NodeLogicGateAssignment `json:"-"`
-	Events     []domain.DomainEvent           `json:"-"`
+	Card                domain.KanbanCard              `json:"card"`
+	Node                domain.Node                    `json:"node"`
+	Assignment          domain.NodeLogicGateAssignment `json:"-"`
+	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	Events              []domain.DomainEvent           `json:"-"`
 }
 
 type LogicGateNodeAssignmentRemoveResult struct {
-	Card       domain.KanbanCard              `json:"card"`
-	Node       domain.Node                    `json:"node"`
-	Assignment domain.NodeLogicGateAssignment `json:"-"`
-	Events     []domain.DomainEvent           `json:"-"`
+	Card                domain.KanbanCard              `json:"card"`
+	Node                domain.Node                    `json:"node"`
+	Assignment          domain.NodeLogicGateAssignment `json:"-"`
+	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	Events              []domain.DomainEvent           `json:"-"`
 }
 
 type KanbanWorkspaceEventResult struct {

@@ -33,6 +33,7 @@ import type { ExplorerDragPayload } from "../../modules/company-explorer/company
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import {
   assignNodeToLogicGateStatus as defaultAssignNodeToLogicGateStatus,
+  createRacioMatrixNode as defaultCreateRacioMatrixNode,
   invalidateKanbanBoardListCache as defaultInvalidateKanbanBoardListCache,
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
@@ -63,6 +64,8 @@ export type HomeDropAssignNodeToLogicGateStatus = (
 export type HomeBulkMoveLogicGateAssignment = (
   args: Parameters<typeof defaultMoveLogicGateAssignment>[0],
 ) => Promise<LogicGateAssignmentCommandResult>;
+
+export type HomeCreateRacioMatrixNode = typeof defaultCreateRacioMatrixNode;
 
 export type HomeArchiveEmailMessage = typeof defaultArchiveEmailMessage;
 export type HomeArchiveEmailMessagesBatch = typeof defaultArchiveEmailMessagesBatch;
@@ -135,6 +138,12 @@ export type HomeCreateNodeCommandResult = {
 
 export type HomeCreateLogicGateCommandResult = {
   logicGate: LogicGateRecord;
+  folderItems: CompanyExplorerFolderItem[];
+};
+
+export type HomeCreateRacioMatrixNodeCommandResult = {
+  node: NodeRecord;
+  logicGate?: LogicGateRecord;
   folderItems: CompanyExplorerFolderItem[];
 };
 
@@ -425,6 +434,36 @@ export async function createHomeLogicGateCommand(args: {
   const logicGate = response.logic_gates?.[0];
   if (!logicGate) throw new Error("logic_gate_batch_create_missing_gate");
   return { logicGate, folderItems: response.folder_items ?? [] };
+}
+
+export async function createHomeRacioMatrixNodeCommand(args: {
+  apiBase: string;
+  companyID: string;
+  title?: string;
+  logicGateID?: string;
+  createLogicGateTitle?: string;
+  creatorRaciRole?: LogicGateRaciRole;
+  priority: InboxPriority;
+  status?: ResponsibleInboxStatus;
+  createRacioMatrixNode?: HomeCreateRacioMatrixNode;
+}): Promise<HomeCreateRacioMatrixNodeCommandResult> {
+  const createRacioMatrixNode = args.createRacioMatrixNode ?? defaultCreateRacioMatrixNode;
+  const result = await createRacioMatrixNode({
+    apiBase: args.apiBase,
+    companyID: args.companyID,
+    title: args.title?.trim() || "new node",
+    logicGateID: args.logicGateID,
+    createLogicGateHeader: args.createLogicGateTitle,
+    creatorLogicGateRaciRole: args.creatorRaciRole,
+    priority: args.priority === 0 ? null : args.priority,
+    status: args.status ?? "pending",
+    position: 0,
+  });
+  return {
+    node: result.node,
+    logicGate: result.logic_gate,
+    folderItems: result.folder_items ?? [],
+  };
 }
 
 export async function deleteHomeEntitiesCommand(args: {

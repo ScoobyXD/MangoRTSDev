@@ -67,7 +67,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -2345,34 +2345,24 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("create-node");
     setError("");
     try {
-      const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole: input.creatorRaciRole });
-      const logicGate = logicGateResult.logicGate;
-      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
-
-      const nodeResult = await createHomeNodeCommand({ apiBase, companyID });
-      mergeCreatedFolderItems(nodeResult.folderItems);
-      mergeUpdatedNode(nodeResult.node);
-
-      const nodeMap = new Map(nodeByID);
-      nodeMap.set(nodeResult.node.node_id, nodeResult.node);
-      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+      const result = await createHomeRacioMatrixNodeCommand({
         apiBase,
         companyID,
-        logicGateID: logicGate.logic_gate_id,
-        nodeIDs: [nodeResult.node.node_id],
         priority: input.priority,
         status: input.status,
-        nodeByID: nodeMap,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        creatorRaciRole: input.creatorRaciRole,
+        createLogicGateTitle: "new logic gate",
       });
-      for (const node of updatedNodes) mergeUpdatedNode(node);
+      if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
+      mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
+      mergeUpdatedNode(result.node);
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
       setError(formatError(createError, "Failed to create note in matrix cell"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();

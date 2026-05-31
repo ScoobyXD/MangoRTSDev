@@ -221,6 +221,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gate-arena", s.handleLogicGateArena)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
+	mux.HandleFunc("/v2/racio-matrix/nodes", s.handleRacioMatrixNodesV2)
+	mux.HandleFunc("/v2/racio-matrix/nodes/", s.handleRacioMatrixNodeByIDV2)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
 	mux.HandleFunc("/v1/work-items/responsible-inbox", s.handleWorkItemResponsibleInbox)
 	mux.HandleFunc("/v1/work-items/aci-inbox", s.handleWorkItemACIInbox)
