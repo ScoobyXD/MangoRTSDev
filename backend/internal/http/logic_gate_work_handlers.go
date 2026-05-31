@@ -99,6 +99,9 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
 		return
 	}
+	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
+		return
+	}
 
 	input := store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
 	if !parseLogicGateWorkAssignmentCreateFields(w, fields, &input) {
@@ -370,6 +373,30 @@ func (s *Server) requireLogicGateWorkEffectiveAccess(w http.ResponseWriter, r *h
 	}
 	writeAccessResourceNotFound(w)
 	return false
+}
+
+func (s *Server) requireLogicGateWorkExistingSourceEditAccess(w http.ResponseWriter, r *http.Request, companyID, targetLogicGateID, nodeID string) bool {
+	assignments, err := s.repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_assignment")
+		return false
+	}
+	if err != nil {
+		log.Printf("failed to list existing node logic gate assignments company_id=%s node_id=%s: %v", companyID, nodeID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_check_logic_gate_access")
+		return false
+	}
+	userID := s.entityPermissionActorUserID(r, companyID)
+	for _, assignment := range assignments {
+		sourceLogicGateID := strings.TrimSpace(assignment.LogicGateID)
+		if sourceLogicGateID == "" || sourceLogicGateID == targetLogicGateID {
+			continue
+		}
+		if !s.requireKanbanLogicGateEffectiveAccess(w, companyID, userID, sourceLogicGateID, store.EntityPermissionEdit) {
+			return false
+		}
+	}
+	return true
 }
 
 func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback string) bool {

@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { CompanyUser, CommunicationsSharedInbox, CommunicationsSharedInboxRaciAssignment, CommunicationsSharedInboxRaciRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
-import type { LogicGateAssignmentCommandResult } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
+import type { LogicGateAssignmentCommandResult, RacioMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRacioMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -32,6 +32,19 @@ function card(input: { nodeID: string; boardID?: string; columnID?: string }): K
     position: 1000,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
+  };
+}
+
+function projectionRow(resourceID: string, overrides: Partial<RacioMatrixProjectionRow> = {}): RacioMatrixProjectionRow {
+  return {
+    company_id: "company-1",
+    user_id: "user-1",
+    resource_type: "node",
+    resource_id: resourceID,
+    display_title: `Node ${resourceID}`,
+    resource_created_timestamp: timestamp,
+    updated_timestamp: timestamp,
+    ...overrides,
   };
 }
 
@@ -134,7 +147,7 @@ test("Home node drop uses one work-item assignment command for status and priori
     calls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
     const updatedNode = { ...sourceNode, status: "In Progress", priority: input.priority } as NodeRecord;
-    return { card: card({ nodeID: input.nodeID }), node: updatedNode } satisfies LogicGateAssignmentCommandResult;
+    return { card: card({ nodeID: input.nodeID }), node: updatedNode, racio_projection_rows: [projectionRow(input.nodeID)] } satisfies LogicGateAssignmentCommandResult;
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -160,11 +173,12 @@ test("Home node drop uses one work-item assignment command for status and priori
     nodeTitle: "Launch checklist",
     position: 0,
   });
-  assert.deepEqual(updated.map((item) => [item.node_id, item.status, item.priority]), [["node-1", "In Progress", 2]]);
+  assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority]), [["node-1", "In Progress", 2]]);
+  assert.deepEqual(updated.racio_projection_rows.map((row) => row.resource_id), ["node-1"]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:gate-1"]);
 });
 
-test("Home matrix node drop assigns into a different Logic Gate instead of using same-gate move", async () => {
+test("Home matrix node drop moves into a different Logic Gate with the move command", async () => {
   const nodes = new Map([
     ["node-1", node("node-1", { title: "Cross gate node", status: "pending", logic_gate_ids: ["source-gate"] })],
   ]);
@@ -177,12 +191,17 @@ test("Home matrix node drop assigns into a different Logic Gate instead of using
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-done" }),
       node: { ...sourceNode, status: "Done", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
+      racio_projection_rows: [projectionRow(input.nodeID)],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
     moveCalls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: sourceNode } satisfies LogicGateAssignmentCommandResult;
+    return {
+      card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-done" }),
+      node: { ...sourceNode, status: "Done", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
+      racio_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
+    } satisfies LogicGateAssignmentCommandResult;
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -199,19 +218,20 @@ test("Home matrix node drop assigns into a different Logic Gate instead of using
     invalidateKanbanBoardContents: (_apiBase, _companyID, boardID) => invalidatedBoards.push(boardID),
   });
 
-  assert.equal(moveCalls.length, 0);
-  assert.equal(assignCalls.length, 1);
-  assert.deepEqual(assignCalls[0], {
+  assert.equal(assignCalls.length, 0);
+  assert.equal(moveCalls.length, 1);
+  assert.deepEqual(moveCalls[0], {
     apiBase: "https://api.example.test",
     companyID: "company-1",
     logicGateID: "target-gate",
+    fromLogicGateID: "source-gate",
     nodeID: "node-1",
     status: "done",
     priority: 4,
-    nodeTitle: "Cross gate node",
     position: 0,
   });
-  assert.deepEqual(updated.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
+  assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
+  assert.deepEqual(updated.racio_projection_rows.map((row) => [row.resource_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:target-gate", "logic-gate:source-gate"]);
 });
 
@@ -227,12 +247,13 @@ test("Home matrix node drop keeps same Logic Gate status moves on the move endpo
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "column-verify" }),
       node: { ...sourceNode, status: "Verify", priority: input.priority } as NodeRecord,
+      racio_projection_rows: [projectionRow(input.nodeID)],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const assignNodeToLogicGateStatus: HomeDropAssignNodeToLogicGateStatus = async (input) => {
     assignCalls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: sourceNode } satisfies LogicGateAssignmentCommandResult;
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode, racio_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
   };
 
   await dropNodesIntoInboxLogicGateCommand({
@@ -273,7 +294,7 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
     statuses.push(input.status ?? "");
     priorities.push(input.priority);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: { ...sourceNode, status: input.status } as NodeRecord };
+    return { card: card({ nodeID: input.nodeID }), node: { ...sourceNode, status: input.status } as NodeRecord, racio_projection_rows: [projectionRow(input.nodeID)] };
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -286,7 +307,8 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
     assignNodeToLogicGateStatus,
   });
 
-  assert.deepEqual(updated.map((item) => item.node_id), ["node-1", "node-2"]);
+  assert.deepEqual(updated.nodes.map((item) => item.node_id), ["node-1", "node-2"]);
+  assert.deepEqual(updated.racio_projection_rows.map((row) => row.resource_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
 });
@@ -321,6 +343,27 @@ test("Home logic gate creation sends creator RACI role through batch create", as
   assert.equal(calls[0].body.creator_logic_gate_raci_role, "responsible");
   assert.equal(result.logicGate.raci_assignments?.[0]?.role, "responsible");
 });
+
+test("Home RACIO matrix node create preserves projection rows", async () => {
+  const rows = [projectionRow("node-1", { logic_gate_id: "gate-1" })];
+  const createRacioMatrixNode: HomeCreateRacioMatrixNode = async () => ({
+    node: node("node-1", { logic_gate_ids: ["gate-1"] }),
+    folder_items: [explorerFolderItem("folder-1", "node-1", "node")],
+    racio_projection_rows: rows,
+  });
+
+  const result = await createHomeRacioMatrixNodeCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    priority: 3,
+    status: "pending",
+    createRacioMatrixNode,
+  });
+
+  assert.deepEqual(result.racio_projection_rows, rows);
+  assert.deepEqual(result.folderItems.map((item) => item.item_id), ["node-1"]);
+});
+
 test("Home bulk node priority placement uses the work-item move command", async () => {
   const nodes = new Map([
     ["node-1", node("node-1", { status: "Pending", priority: 5, logic_gate_ids: ["gate-1"] })],
@@ -334,6 +377,7 @@ test("Home bulk node priority placement uses the work-item move command", async 
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "pending-column" }),
       node: { ...sourceNode, priority: input.priority ?? null } as NodeRecord,
+      racio_projection_rows: [],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const updateNode: HomeBulkUpdateNode = async (companyID, nodeID, patch) => {
@@ -379,6 +423,7 @@ test("Home bulk node patch keeps non-placement fields on the node update endpoin
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "done-column" }),
       node: { ...sourceNode, status: "Done", priority: input.priority ?? sourceNode.priority } as NodeRecord,
+      racio_projection_rows: [],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const updateNode: HomeBulkUpdateNode = async (companyID, nodeID, patch) => {

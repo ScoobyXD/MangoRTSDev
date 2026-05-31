@@ -197,7 +197,7 @@ export type RacioMatrixProjectionRow = {
   updated_timestamp: string;
 };
 
-export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; racio_projection_rows?: RacioMatrixProjectionRow[] };
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; racio_projection_rows: RacioMatrixProjectionRow[] };
 
 export type RacioMatrixNodeCreateResult = {
   node: NodeRecord;
@@ -205,8 +205,28 @@ export type RacioMatrixNodeCreateResult = {
   assignment?: unknown;
   card?: KanbanCard;
   folder_items?: CompanyExplorerFolderItem[];
-  racio_projection_rows?: RacioMatrixProjectionRow[];
+  racio_projection_rows: RacioMatrixProjectionRow[];
 };
+
+type LogicGateAssignmentCommandPayload = Omit<LogicGateAssignmentCommandResult, "racio_projection_rows"> & {
+  racio_projection_rows?: RacioMatrixProjectionRow[] | null;
+};
+
+type RacioMatrixNodeCreatePayload = Omit<RacioMatrixNodeCreateResult, "racio_projection_rows"> & {
+  racio_projection_rows?: RacioMatrixProjectionRow[] | null;
+};
+
+function normalizeRacioProjectionRows(rows?: RacioMatrixProjectionRow[] | null): RacioMatrixProjectionRow[] {
+  return Array.isArray(rows) ? rows : [];
+}
+
+function normalizeLogicGateAssignmentCommandResult(payload: LogicGateAssignmentCommandPayload): LogicGateAssignmentCommandResult {
+  return {
+    card: { ...payload.card },
+    node: { ...payload.node },
+    racio_projection_rows: normalizeRacioProjectionRows(payload.racio_projection_rows),
+  };
+}
 
 export async function createRacioMatrixNode(args: {
   apiBase: string;
@@ -221,7 +241,7 @@ export async function createRacioMatrixNode(args: {
   position?: number;
   isIssue?: boolean;
 }): Promise<RacioMatrixNodeCreateResult> {
-  const payload = await requestJSON<RacioMatrixNodeCreateResult>(args.apiBase, "/v2/racio-matrix/nodes", {
+  const payload = await requestJSON<RacioMatrixNodeCreatePayload>(args.apiBase, "/v2/racio-matrix/nodes", {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -243,7 +263,10 @@ export async function createRacioMatrixNode(args: {
     markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, payload.card.board_id);
   }
   markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
-  return payload;
+  return {
+    ...payload,
+    racio_projection_rows: normalizeRacioProjectionRows(payload.racio_projection_rows),
+  };
 }
 
 export async function assignNodeToLogicGateStatus(args: {
@@ -259,7 +282,7 @@ export async function assignNodeToLogicGateStatus(args: {
   position?: number;
   isIssue?: boolean;
 }): Promise<LogicGateAssignmentCommandResult> {
-  const payload = await requestJSON<{ card: KanbanCard; node: NodeRecord }>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes`, {
+  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes`, {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -275,10 +298,7 @@ export async function assignNodeToLogicGateStatus(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
-  return {
-    card: { ...payload.card },
-    node: { ...payload.node },
-  };
+  return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
 export async function moveLogicGateAssignment(args: {
@@ -294,7 +314,7 @@ export async function moveLogicGateAssignment(args: {
   assigneePolicy?: string;
 }): Promise<LogicGateAssignmentCommandResult> {
   if (!args.fromLogicGateID || args.fromLogicGateID === args.logicGateID) {
-    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
+    const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
       method: "PUT",
       json: {
         company_id: args.companyID,
@@ -306,12 +326,9 @@ export async function moveLogicGateAssignment(args: {
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
-    return {
-      card: { ...payload.card },
-      node: { ...payload.node },
-    };
+    return normalizeLogicGateAssignmentCommandResult(payload);
   }
-  const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/racio-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
+  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/racio-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -326,10 +343,7 @@ export async function moveLogicGateAssignment(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
-  return {
-    card: { ...payload.card },
-    node: { ...payload.node },
-  };
+  return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
 export async function removeLogicGateAssignment(args: {
@@ -347,17 +361,14 @@ export async function removeLogicGateAssignment(args: {
       fallback_status: args.fallbackStatus ?? undefined,
       fallback_status_color: args.fallbackStatusColor ?? undefined,
     });
-    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}?${params}`, {
+    const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}?${params}`, {
       method: "DELETE",
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
-    return {
-      card: { ...payload.card },
-      node: { ...payload.node },
-    };
+    return normalizeLogicGateAssignmentCommandResult(payload);
   }
-  const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
+  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -369,10 +380,7 @@ export async function removeLogicGateAssignment(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
-  return {
-    card: { ...payload.card },
-    node: { ...payload.node },
-  };
+  return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
 export async function setLogicGateAssignmentIssue(args: {
@@ -384,7 +392,7 @@ export async function setLogicGateAssignmentIssue(args: {
 }): Promise<LogicGateAssignmentCommandResult> {
   const logicGateID = args.logicGateID?.trim() ?? "";
   if (logicGateID) {
-    const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
+    const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
       method: "PUT",
       json: {
         company_id: args.companyID,
@@ -393,12 +401,9 @@ export async function setLogicGateAssignmentIssue(args: {
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
-    return {
-      card: { ...payload.card },
-      node: { ...payload.node },
-    };
+    return normalizeLogicGateAssignmentCommandResult(payload);
   }
-  const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/issue", {
+  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, "/v1/work-items/logic-gate-assignments/issue", {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -409,10 +414,7 @@ export async function setLogicGateAssignmentIssue(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
-  return {
-    card: { ...payload.card },
-    node: { ...payload.node },
-  };
+  return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
 export async function moveKanbanCard(args: {

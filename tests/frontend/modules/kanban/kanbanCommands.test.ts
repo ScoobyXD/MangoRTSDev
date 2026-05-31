@@ -149,6 +149,7 @@ function createClient(): {
           priority: args.priority,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
+        racio_projection_rows: [],
       };
     },
     async moveLogicGateAssignment(args) {
@@ -168,6 +169,7 @@ function createClient(): {
           priority: args.priority,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
+        racio_projection_rows: [],
       };
     },
     async removeLogicGateAssignment(args) {
@@ -180,6 +182,7 @@ function createClient(): {
           title: args.nodeID,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
+        racio_projection_rows: [],
       };
     },
     async setLogicGateAssignmentIssue(args) {
@@ -192,6 +195,7 @@ function createClient(): {
           title: args.nodeID,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
+        racio_projection_rows: [],
       };
     },
   };

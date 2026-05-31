@@ -217,6 +217,103 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}
 }
 
+func TestLogicGateWorkV2CreateRequiresExistingSourceLogicGateEditAccess(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666412"
+	repo.EnsureCompany(companyID, "Logic Gate Work Source Guard Co")
+
+	mover := mustLogicGateWorkHTTPUser(t, repo, companyID, "work-v2-source-guard-mover")
+	sourceGate, err := repo.CreateLogicGate(companyID, "Source Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate source: %v", err)
+	}
+	targetGate, err := repo.CreateLogicGate(companyID, "Target Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Guarded Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    testPriority(2),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus source: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         targetGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: mover.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions target: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         sourceGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions source no access: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+	payload := map[string]any{
+		"company_id": companyID,
+		"node_id":    node.NodeID,
+		"status":     "done",
+		"priority":   2,
+	}
+	forbiddenReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/logic-gates/"+targetGate.LogicGateID+"/nodes", payload, mover, companyID)
+	forbiddenRecord := httptest.NewRecorder()
+	handler.ServeHTTP(forbiddenRecord, forbiddenReq)
+	if forbiddenRecord.Code != http.StatusNotFound {
+		t.Fatalf("POST target without source edit status = %d body=%s, want 404", forbiddenRecord.Code, forbiddenRecord.Body.String())
+	}
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments after forbidden move: %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].LogicGateID != sourceGate.LogicGateID {
+		t.Fatalf("assignments after forbidden move = %+v, want source gate only", assignments)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         sourceGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: mover.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions source edit: %v", err)
+	}
+	allowedReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/logic-gates/"+targetGate.LogicGateID+"/nodes", payload, mover, companyID)
+	allowedRecord := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRecord, allowedReq)
+	if allowedRecord.Code != http.StatusCreated {
+		t.Fatalf("POST target with source edit status = %d body=%s, want 201", allowedRecord.Code, allowedRecord.Body.String())
+	}
+	result := decodeLogicGateWorkMutationPayloadForTest(t, allowedRecord)
+	if result.Assignment.NodeID != node.NodeID || result.Assignment.LogicGateID != targetGate.LogicGateID {
+		t.Fatalf("allowed assignment = %+v, want target gate", result.Assignment)
+	}
+}
+
 func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666411"
