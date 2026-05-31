@@ -117,3 +117,49 @@ func TestNodeLogicGateAssignmentMigrationBackfillsAndGuardsLegacyCards(t *testin
 		t.Fatal("canonical schema is missing Kanban-card assignment sync trigger")
 	}
 }
+
+func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesAcrossCardIdentityChange(t *testing.T) {
+	raw, err := os.ReadFile("postgres_kanban.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_kanban.go: %v", err)
+	}
+	body := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
+	takeIndex := strings.Index(body, "takePostgresCommunicationsEmailNodeReferenceForCardTx")
+	deleteIndex := strings.Index(body, "delete from kanban_cards\nwhere company_id=$1 and board_id=$2 and card_id=$3")
+	updateBoardIndex := strings.Index(body, "set board_id=$4,")
+	restoreIndex := strings.Index(body, "restorePostgresCommunicationsEmailNodeReferenceTx")
+	updatePrimaryIndex := strings.Index(body, "updatePostgresCommunicationsEmailNodeReferenceForNodeTx")
+	updateAttachmentIndex := strings.Index(body, "updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx")
+	for name, index := range map[string]int{
+		"take email reference":        takeIndex,
+		"delete source card":          deleteIndex,
+		"update moved card board":     updateBoardIndex,
+		"restore email reference":     restoreIndex,
+		"update primary placement":    updatePrimaryIndex,
+		"update attachment placement": updateAttachmentIndex,
+	} {
+		if index < 0 {
+			t.Fatalf("MoveLogicGateNodeAssignment missing %s step", name)
+		}
+	}
+	if !(takeIndex < deleteIndex && takeIndex < updateBoardIndex) {
+		t.Fatal("MoveLogicGateNodeAssignment should detach email references before deleting or changing the old card identity")
+	}
+	if !(deleteIndex < restoreIndex && updateBoardIndex < restoreIndex && restoreIndex < updateAttachmentIndex && restoreIndex < updatePrimaryIndex) {
+		t.Fatal("MoveLogicGateNodeAssignment should restore/update email references after the final card exists")
+	}
+}
+
+func postgresKanbanFunctionBodyForTest(t *testing.T, source, signature string) string {
+	t.Helper()
+	start := strings.Index(source, signature)
+	if start < 0 {
+		t.Fatalf("missing function %q", signature)
+	}
+	remaining := source[start+len(signature):]
+	end := strings.Index(remaining, "\nfunc ")
+	if end < 0 {
+		return remaining
+	}
+	return remaining[:end]
+}

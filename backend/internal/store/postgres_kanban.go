@@ -1190,6 +1190,15 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
+	var emailNodeReference postgresCommunicationsEmailNodeReference
+	emailNodeReferenceTaken := false
+	if crossLogicGateMove {
+		emailNodeReference, emailNodeReferenceTaken, err = takePostgresCommunicationsEmailNodeReferenceForCardTx(ctx, tx, input.CompanyID, input.NodeID, card.BoardID, card.CardID)
+		if err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+
 	if useExistingTargetCard {
 		deleted, err := tx.ExecContext(ctx, `
 delete from kanban_cards
@@ -1238,6 +1247,18 @@ returning `+kanbanCardSelectColumns,
 	}
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
+	}
+	if crossLogicGateMove {
+		if emailNodeReferenceTaken {
+			if err := restorePostgresCommunicationsEmailNodeReferenceTx(ctx, tx, emailNodeReference, card.BoardID, card.CardID, input.LogicGateID); err != nil {
+				return LogicGateNodeAssignmentResult{}, err
+			}
+		} else if err := updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx, tx, input.CompanyID, input.NodeID, card.BoardID, card.CardID, input.LogicGateID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		if err := updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx, tx, input.CompanyID, input.NodeID, card.BoardID, card.CardID, input.LogicGateID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
 	}
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
 		return LogicGateNodeAssignmentResult{}, err

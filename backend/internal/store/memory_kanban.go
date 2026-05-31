@@ -772,6 +772,29 @@ func (r *MemoryRepo) applyNodeStatusAfterLogicGateAssignmentRemovalLocked(compan
 	r.nodes[nodeKey] = node
 }
 
+func (r *MemoryRepo) moveEmailNodeLinksForKanbanCardLocked(companyID, nodeID, oldBoardID, oldCardID, newBoardID, newCardID, logicGateID string, updatedAt time.Time) {
+	oldPrimaryKey := emailNodeLinkKey(companyID, oldBoardID, oldCardID)
+	newPrimaryKey := emailNodeLinkKey(companyID, newBoardID, newCardID)
+	if link, ok := r.emailNodeLinks[oldPrimaryKey]; ok && link.NodeID == nodeID {
+		delete(r.emailNodeLinks, oldPrimaryKey)
+		link.BoardID = newBoardID
+		link.CardID = newCardID
+		link.LogicGateID = logicGateID
+		link.UpdatedTimestamp = updatedAt
+		r.emailNodeLinks[newPrimaryKey] = link
+	}
+	for linkKey, link := range r.emailNodeLinks {
+		if link.CompanyID != companyID || link.NodeID != nodeID {
+			continue
+		}
+		link.BoardID = newBoardID
+		link.CardID = newCardID
+		link.LogicGateID = logicGateID
+		link.UpdatedTimestamp = updatedAt
+		r.emailNodeLinks[linkKey] = link
+	}
+}
+
 func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error) {
 	input, err := NormalizeLogicGateNodeAssignmentMoveInput(input)
 	if err != nil {
@@ -901,6 +924,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 			targetKey := boardKey(input.CompanyID, targetBoardID)
 			r.kanbanCards[targetKey] = append(r.kanbanCards[targetKey], resultCard)
 		}
+		r.moveEmailNodeLinksForKanbanCardLocked(input.CompanyID, input.NodeID, card.BoardID, card.CardID, resultCard.BoardID, resultCard.CardID, input.LogicGateID, resultCard.UpdatedTimestamp)
 		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err

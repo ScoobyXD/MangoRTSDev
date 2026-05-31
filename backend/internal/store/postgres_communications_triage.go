@@ -67,6 +67,98 @@ func scanCommunicationsEmailPlacement(row interface {
 	return placement, err
 }
 
+type postgresCommunicationsEmailNodeReference struct {
+	CompanyID        string
+	UserID           string
+	MessageID        string
+	NodeID           string
+	Message          []byte
+	CreatedTimestamp time.Time
+}
+
+func takePostgresCommunicationsEmailNodeReferenceForCardTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID string) (postgresCommunicationsEmailNodeReference, bool, error) {
+	var reference postgresCommunicationsEmailNodeReference
+	err := tx.QueryRowContext(ctx, `
+delete from communications_email_nodes
+where company_id=$1::uuid
+  and node_id=$2::uuid
+  and board_id=$3
+  and card_id=$4::uuid
+returning company_id::text, user_id::text, message_id, node_id::text, message, created_timestamp`,
+		companyID, nodeID, boardID, cardID,
+	).Scan(
+		&reference.CompanyID,
+		&reference.UserID,
+		&reference.MessageID,
+		&reference.NodeID,
+		&reference.Message,
+		&reference.CreatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return postgresCommunicationsEmailNodeReference{}, false, nil
+	}
+	if err != nil {
+		return postgresCommunicationsEmailNodeReference{}, false, err
+	}
+	return reference, true, nil
+}
+
+func restorePostgresCommunicationsEmailNodeReferenceTx(ctx context.Context, tx *sql.Tx, reference postgresCommunicationsEmailNodeReference, boardID, cardID, logicGateID string) error {
+	_, err := tx.ExecContext(ctx, `
+insert into communications_email_nodes (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6::uuid, $7::uuid, $8::jsonb, $9, now())
+on conflict (company_id, node_id)
+do update set
+  user_id=excluded.user_id,
+  message_id=excluded.message_id,
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()`,
+		reference.CompanyID,
+		reference.UserID,
+		reference.MessageID,
+		reference.NodeID,
+		boardID,
+		cardID,
+		logicGateID,
+		string(reference.Message),
+		reference.CreatedTimestamp,
+	)
+	return err
+}
+
+func updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
+	_, err := tx.ExecContext(ctx, `
+update communications_email_nodes
+set board_id=$3,
+    card_id=$4::uuid,
+    logic_gate_id=$5::uuid,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and node_id=$2::uuid`,
+		companyID, nodeID, boardID, cardID, logicGateID,
+	)
+	return err
+}
+
+func updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
+	_, err := tx.ExecContext(ctx, `
+update communications_email_node_attachments
+set board_id=$3,
+    card_id=$4::uuid,
+    logic_gate_id=$5::uuid,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and node_id=$2::uuid`,
+		companyID, nodeID, boardID, cardID, logicGateID,
+	)
+	return err
+}
+
 func (r *PostgresRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

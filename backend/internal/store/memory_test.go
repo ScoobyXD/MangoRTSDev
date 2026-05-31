@@ -1257,3 +1257,107 @@ func TestMemoryRepo_MoveLogicGateAssignmentReusesExistingTargetCompatibilityCard
 		t.Fatalf("target board has %d cards for moved node: %+v", matchingTargetCards, targetCards)
 	}
 }
+
+func TestMemoryRepo_MoveLogicGateAssignmentMovesCommunicationsEmailPlacementToFinalCard(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-999999999902"
+	repo.EnsureCompany(companyID, "Move Email Placement Company")
+	user, err := repo.UpsertAuthUser("move-email-user", "move-email@example.com", "Move Email User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	sourceGate, err := repo.CreateLogicGate(companyID, "Source Email Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate source: %v", err)
+	}
+	targetGate, err := repo.CreateLogicGate(companyID, "Target Email Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	message := domain.EmailMessageSnapshot{
+		ID:       "move-email-message",
+		ThreadID: "move-email-thread",
+		Subject:  "Move this email node",
+		Snippet:  "Email node should keep placement provenance",
+		Date:     1770000001,
+		From:     []domain.EmailAddressSnapshot{{Name: "Customer", Email: "customer@example.com"}},
+	}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+	converted, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:      user.UserID,
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		MessageIDs:  []string{message.ID},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems: %v", err)
+	}
+	if len(converted.Nodes) != 1 || len(converted.Cards) != 1 {
+		t.Fatalf("converted result nodes/cards = %d/%d, want 1/1", len(converted.Nodes), len(converted.Cards))
+	}
+
+	node := converted.Nodes[0]
+	sourceCard := converted.Cards[0]
+	targetBoardID := LogicGateKanbanBoardID(targetGate.LogicGateID)
+	targetColumns, err := repo.ListKanbanColumns(companyID, targetBoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns target: %v", err)
+	}
+	if len(targetColumns) == 0 {
+		t.Fatal("target gate has no columns")
+	}
+	targetCardID := newUUIDv7String()
+	targetLogicGateID := targetGate.LogicGateID
+	now := time.Now().UTC()
+	repo.mu.Lock()
+	repo.kanbanCards[boardKey(companyID, targetBoardID)] = append(repo.kanbanCards[boardKey(companyID, targetBoardID)], domain.KanbanCard{
+		CompanyID:        companyID,
+		BoardID:          targetBoardID,
+		CardID:           targetCardID,
+		ColumnID:         targetColumns[0].ColumnID,
+		NodeID:           node.NodeID,
+		LogicGateID:      &targetLogicGateID,
+		NodeTitle:        node.Title,
+		Position:         500,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	})
+	repo.mu.Unlock()
+
+	moved, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:       companyID,
+		LogicGateID:     targetGate.LogicGateID,
+		FromLogicGateID: sourceGate.LogicGateID,
+		NodeID:          node.NodeID,
+		Status:          "verify",
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+	}
+	if moved.Card.CardID != targetCardID {
+		t.Fatalf("moved card_id = %q, want existing target card %q", moved.Card.CardID, targetCardID)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
+	if err != nil {
+		t.Fatalf("ListCommunicationsEmailPlacements: %v", err)
+	}
+	if len(placements) != 1 {
+		t.Fatalf("placements = %+v, want one placement", placements)
+	}
+	placement := placements[0]
+	if placement.BoardID != moved.Card.BoardID || placement.CardID != moved.Card.CardID || placement.LogicGateID != targetGate.LogicGateID {
+		t.Fatalf("placement after move = %+v, want final moved card %+v", placement, moved.Card)
+	}
+	repo.mu.RLock()
+	_, oldLinkExists := repo.emailNodeLinks[emailNodeLinkKey(companyID, sourceCard.BoardID, sourceCard.CardID)]
+	_, newLinkExists := repo.emailNodeLinks[emailNodeLinkKey(companyID, moved.Card.BoardID, moved.Card.CardID)]
+	repo.mu.RUnlock()
+	if oldLinkExists {
+		t.Fatalf("old source card email placement link still exists for %s/%s", sourceCard.BoardID, sourceCard.CardID)
+	}
+	if !newLinkExists {
+		t.Fatalf("new target card email placement link missing for %s/%s", moved.Card.BoardID, moved.Card.CardID)
+	}
+}
