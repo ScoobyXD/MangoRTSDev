@@ -38,7 +38,7 @@ import {
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
 } from "../../modules/kanban/kanbanApi.js";
-import type { LogicGateAssignmentCommandResult } from "../../modules/kanban/kanbanApi.js";
+import type { LogicGateAssignmentCommandResult, RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -145,6 +145,12 @@ export type HomeCreateRacioMatrixNodeCommandResult = {
   node: NodeRecord;
   logicGate?: LogicGateRecord;
   folderItems: CompanyExplorerFolderItem[];
+  racio_projection_rows: RacioMatrixProjectionRow[];
+};
+
+export type HomeLogicGateDropCommandResult = {
+  nodes: NodeRecord[];
+  racio_projection_rows: RacioMatrixProjectionRow[];
 };
 
 type HomeWorkspaceEntityBatchResponse = {
@@ -306,20 +312,20 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
   moveLogicGateAssignment?: HomeBulkMoveLogicGateAssignment;
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
-}): Promise<NodeRecord[]> {
+}): Promise<HomeLogicGateDropCommandResult> {
   const logicGateID = args.logicGateID.trim();
   const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
-  if (!logicGateID || nodeIDs.length === 0) return [];
+  if (!logicGateID || nodeIDs.length === 0) return { nodes: [], racio_projection_rows: [] };
 
   const assignNodeToLogicGateStatus = args.assignNodeToLogicGateStatus ?? defaultAssignNodeToLogicGateStatus;
   const moveLogicGateAssignment = args.moveLogicGateAssignment ?? defaultMoveLogicGateAssignment;
   const priority = args.priority === 0 ? null : args.priority;
-  return Promise.all(nodeIDs.map(async (nodeID) => {
+  const results = await Promise.all(nodeIDs.map(async (nodeID) => {
     const node = args.nodeByID.get(nodeID);
     if (!node) return null;
     const status = args.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
-    if (fromLogicGateID && fromLogicGateID === logicGateID) {
+    if (fromLogicGateID) {
       const result = await moveLogicGateAssignment({
         apiBase: args.apiBase,
         companyID: args.companyID,
@@ -334,7 +340,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
       if (fromLogicGateID !== logicGateID) {
         args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
       }
-      return result.node;
+      return result;
     }
     const result = await assignNodeToLogicGateStatus({
       apiBase: args.apiBase,
@@ -347,11 +353,13 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
       position: 0,
     });
     args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
-    if (fromLogicGateID && fromLogicGateID !== logicGateID) {
-      args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
-    }
-    return result.node;
-  })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
+    return result;
+  }));
+  const assignmentResults = results.filter((result): result is LogicGateAssignmentCommandResult => result !== null);
+  return {
+    nodes: assignmentResults.map((result) => result.node),
+    racio_projection_rows: assignmentResults.flatMap((result) => result.racio_projection_rows),
+  };
 }
 
 export async function addNodesToLogicGateCommand(args: {
@@ -463,6 +471,7 @@ export async function createHomeRacioMatrixNodeCommand(args: {
     node: result.node,
     logicGate: result.logic_gate,
     folderItems: result.folder_items ?? [],
+    racio_projection_rows: result.racio_projection_rows,
   };
 }
 

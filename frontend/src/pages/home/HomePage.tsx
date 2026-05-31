@@ -55,7 +55,7 @@ import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/Log
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
+import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import {
@@ -2226,6 +2226,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
   }, [apiBase, companyID]);
+  const applyRacioProjectionRows = useCallback((rows: RacioMatrixProjectionRow[]) => {
+    if (rows.length === 0) return;
+    // The home RACIO matrix is currently derived from nodes and Logic Gates.
+  }, []);
   const attachMessagesToNode = useCallback(async (logicGateID: string, nodeID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     const cleanLogicGateID = logicGateID.trim();
@@ -2297,7 +2301,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (assignment?.logicGateID.trim()) {
         const nodeMap = new Map(nodeByID);
         nodeMap.set(result.node.node_id, result.node);
-        const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+        const dropResult = await dropNodesIntoInboxLogicGateCommand({
           apiBase,
           companyID,
           logicGateID: assignment.logicGateID,
@@ -2307,7 +2311,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           nodeByID: nodeMap,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        for (const node of updatedNodes) mergeUpdatedNode(node);
+        applyRacioProjectionRows(dropResult.racio_projection_rows);
+        for (const node of dropResult.nodes) mergeUpdatedNode(node);
         setNotice("Node created and added to Logic Gate.");
         return;
       }
@@ -2317,7 +2322,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
   const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean; creatorRaciRole?: LogicGateRaciRole; openArena?: boolean } = {}) => {
     setBusy("create-logic-gate");
     setError("");
@@ -2355,6 +2360,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       });
       if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
+      applyRacioProjectionRows(result.racio_projection_rows);
       mergeUpdatedNode(result.node);
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
@@ -2362,7 +2368,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
+  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2406,7 +2412,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("inbox-node-drop");
     setError("");
     try {
-      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+      const dropResult = await dropNodesIntoInboxLogicGateCommand({
         apiBase,
         companyID,
         logicGateID,
@@ -2417,7 +2423,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      for (const node of updatedNodes) {
+      applyRacioProjectionRows(dropResult.racio_projection_rows);
+      for (const node of dropResult.nodes) {
         if (node) mergeUpdatedNode(node);
       }
       const action = fromLogicGateID ? "moved" : "added";
@@ -2427,7 +2434,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyRacioProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
   const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; fromLogicGateID?: string }) => {
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (nodeIDs.length === 0) return;
@@ -2437,7 +2444,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole: input.creatorRaciRole });
       const logicGate = logicGateResult.logicGate;
       mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
-      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+      const dropResult = await dropNodesIntoInboxLogicGateCommand({
         apiBase,
         companyID,
         logicGateID: logicGate.logic_gate_id,
@@ -2448,14 +2455,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      for (const node of updatedNodes) mergeUpdatedNode(node);
+      applyRacioProjectionRows(dropResult.racio_projection_rows);
+      for (const node of dropResult.nodes) mergeUpdatedNode(node);
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
       setError(formatError(dropError, "Failed to move nodes into a new Logic Gate"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
   const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
     const logicGateIDs = cleanIDList(input.logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     if (logicGateIDs.length === 0) return;
@@ -2496,7 +2504,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             .filter((node) => cleanIDList(node.logic_gate_ids ?? []).includes(logicGateID))
             .map((node) => node.node_id);
         if (nodeIDs.length === 0) continue;
-        const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+        const dropResult = await dropNodesIntoInboxLogicGateCommand({
           apiBase,
           companyID,
           logicGateID,
@@ -2507,8 +2515,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           nodeByID,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        movedNodeCount += updatedNodes.length;
-        for (const node of updatedNodes) mergeUpdatedNode(node);
+        applyRacioProjectionRows(dropResult.racio_projection_rows);
+        movedNodeCount += dropResult.nodes.length;
+        for (const node of dropResult.nodes) mergeUpdatedNode(node);
       }
       setNotice(logicGateIDs.length === 1
         ? (movedNodeCount > 0 ? "Logic Gate moved." : "Logic Gate assignment updated.")
@@ -2518,7 +2527,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
+  }, [apiBase, applyRacioProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
   const addNodesToLogicGate = useCallback(async (nodeIDs: string[], logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
