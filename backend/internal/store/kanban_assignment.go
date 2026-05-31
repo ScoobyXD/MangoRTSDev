@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -215,6 +216,23 @@ func resolveLogicGateAssignmentColumn(columns []domain.KanbanColumn, columnID, s
 		}
 	}
 	return domain.KanbanColumn{}, ErrNotFound
+}
+
+func resolveLogicGateAssignmentMoveColumn(columns []domain.KanbanColumn, input LogicGateNodeAssignmentMoveInput, currentColumnID, currentStatusKey string, crossLogicGateMove bool) (domain.KanbanColumn, error) {
+	if !crossLogicGateMove && input.ColumnID == "" && input.Status == "" {
+		return domain.KanbanColumn{ColumnID: currentColumnID}, nil
+	}
+	if input.ColumnID != "" || input.Status != "" {
+		return resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+	}
+	column, err := resolveLogicGateAssignmentColumn(columns, "", currentStatusKey)
+	if err == nil {
+		return column, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return resolveLogicGateAssignmentColumn(columns, "", "")
+	}
+	return domain.KanbanColumn{}, err
 }
 
 func logicGateAssignmentStatusKey(status string) string {
