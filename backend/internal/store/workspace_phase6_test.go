@@ -34,41 +34,24 @@ func TestPhase6WorkspaceEventAffectedUsersUseLogicGateEffectiveAccess(t *testing
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeLogicGate,
-		EntityID:   logicGate.LogicGateID,
-		Permissions: []EntityPermissionInput{
-			{
-				SubjectType: EntityPermissionSubjectUser,
-				SubjectID:   viewer.UserID,
-				AccessLevel: EntityPermissionView,
-				Permission:  EntityPermissionView,
-			},
-			{
-				SubjectType: EntityPermissionSubjectUser,
-				SubjectID:   blocked.UserID,
-				AccessLevel: EntityPermissionNoAccess,
-				Permission:  EntityPermissionNoAccess,
-			},
-		},
+		CompanyID:        companyID,
+		EntityType:       EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{viewer.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []EntityPermissionInput{{
-			SubjectType: EntityPermissionSubjectUser,
-			SubjectID:   blocked.UserID,
-			AccessLevel: EntityPermissionNoAccess,
-			Permission:  EntityPermissionNoAccess,
-		}},
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{viewer.UserID},
 	}); err != nil {
 		t.Fatalf("Set node permissions: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	event := domain.DomainEvent{

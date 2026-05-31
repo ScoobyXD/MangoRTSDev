@@ -244,9 +244,6 @@ func TestAuthMiddlewareAllowsCompanyUserGrantedEntityAccess(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),

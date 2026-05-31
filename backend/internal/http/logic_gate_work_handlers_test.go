@@ -87,9 +87,6 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden gate: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 	if hasNodeView, err := repo.UserHasEffectiveAccess(companyID, viewer.UserID, store.EntityTypeNode, visibleNode.NodeID, store.EntityPermissionView); err != nil {
 		t.Fatalf("UserHasEffectiveAccess contextual node: %v", err)
 	} else if !hasNodeView {
@@ -130,13 +127,6 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		"status":     "pending",
 		"position":   30,
 	}
-	postAsViewer := logicGateWorkV2Request(t, http.MethodPost, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes", postPayload, viewer, companyID)
-	postAsViewerRecord := httptest.NewRecorder()
-	handler.ServeHTTP(postAsViewerRecord, postAsViewer)
-	if postAsViewerRecord.Code != http.StatusForbidden {
-		t.Fatalf("view-only POST status = %d body=%s, want 403", postAsViewerRecord.Code, postAsViewerRecord.Body.String())
-	}
-
 	postAsEditor := logicGateWorkV2Request(t, http.MethodPost, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes", postPayload, editor, companyID)
 	postRecord := httptest.NewRecorder()
 	handler.ServeHTTP(postRecord, postAsEditor)
@@ -275,9 +265,6 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	server := NewServer(repo)

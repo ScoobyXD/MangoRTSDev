@@ -90,10 +90,6 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
-	kanbanBoardsSnapshot := cloneMemoryMap(r.kanbanBoards)
-	kanbanColumnsSnapshot := cloneMemorySliceMap(r.kanbanColumns)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	item := domain.LogicGate{
 		CompanyID:        companyID,
 		LogicGateID:      newUUIDv7String(),
@@ -103,20 +99,6 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
-	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
-		r.logicGates = logicGatesSnapshot
-		r.kanbanBoards = kanbanBoardsSnapshot
-		r.kanbanColumns = kanbanColumnsSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		return domain.LogicGate{}, err
-	}
-	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID); err != nil {
-		r.logicGates = logicGatesSnapshot
-		r.kanbanBoards = kanbanBoardsSnapshot
-		r.kanbanColumns = kanbanColumnsSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		return domain.LogicGate{}, err
-	}
 	return r.withLogicGateRaciLocked(item), nil
 }
 
@@ -136,6 +118,7 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 		board.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanBoards[boardKeyValue] = board
 	}
+	r.syncRacioProjectionForLogicGateLocked(companyID, logicGateID)
 	return r.withLogicGateRaciLocked(item), nil
 }
 
@@ -391,8 +374,9 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 		})
 	}
 	sortLogicGateRaciAssignments(assignments)
+	before := cloneLogicGateRaciAssignments(r.logicGateRaci[key(companyID, logicGateID)])
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
-	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
+	r.syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, assignments)
 	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil
 }
 
@@ -414,9 +398,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 			affectedNodeIDs = append(affectedNodeIDs, assignment.NodeID)
 		}
 	}
-	if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID); err != nil {
-		return err
-	}
+	r.deleteRacioProjectionForLogicGateLocked(companyID, logicGateID)
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
@@ -427,8 +409,8 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 		}
 	}
 	r.deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID)
-	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, nil, affectedNodeIDs); err != nil {
-		return err
+	for _, nodeID := range affectedNodeIDs {
+		r.syncRacioProjectionForNodeLocked(companyID, nodeID)
 	}
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)

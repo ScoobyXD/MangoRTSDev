@@ -84,9 +84,6 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
 		t.Fatalf("clear responsible node assignee: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {
@@ -118,8 +115,8 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMyNodes: %v", err)
 	}
-	if len(myNodes) != 2 || mustFindInboxReadNode(t, myNodes, olderNode.NodeID).NodeID == "" {
-		t.Fatalf("my nodes = %+v, want the assigned company nodes", myNodes)
+	if len(myNodes) != 1 || myNodes[0].NodeID != newerNode.NodeID {
+		t.Fatalf("my nodes = %+v, want standalone assigned company node %s", myNodes, newerNode.NodeID)
 	}
 
 	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})

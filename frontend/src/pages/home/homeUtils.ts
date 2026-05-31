@@ -400,11 +400,6 @@ export function buildRaciRoleInboxGroupsByCell(
       const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
       if (logicGateIDs.length === 0) {
         addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), INBOX_NO_LOGIC_GATE_ID, node.node_id);
-        continue;
-      }
-      for (const logicGateID of logicGateIDs) {
-        if (logicGateHasAnyRaciRole(logicGateByID.get(logicGateID), cleanUserID)) continue;
-        addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), logicGateID, node.node_id);
       }
       continue;
     }

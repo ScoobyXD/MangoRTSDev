@@ -13,8 +13,8 @@ func TestMemoryVisibleQueriesUseEffectiveAccessDirectGrants(t *testing.T) {
 	companyID := "22222222-2222-4222-8222-222222222301"
 	repo.EnsureCompany(companyID, "Visible Direct Co")
 
-	viewer := mustEffectiveAccessUser(t, repo, companyID, "visible-direct-viewer")
-	blocked := mustEffectiveAccessUser(t, repo, companyID, "visible-direct-blocked")
+	viewer := mustCreateInboxReadCompanyUser(t, repo, "visible-direct-viewer", companyID, "visible-direct-viewer@example.com", "Visible Direct Viewer")
+	blocked := mustCreateInboxReadCompanyUser(t, repo, "visible-direct-blocked", companyID, "visible-direct-blocked@example.com", "Visible Direct Blocked")
 	viewNode := mustCreateVisibleQueryNode(t, repo, companyID, "View node")
 	editNode := mustCreateVisibleQueryNode(t, repo, companyID, "Edit node")
 	hiddenNode := mustCreateVisibleQueryNode(t, repo, companyID, "Hidden node")
@@ -28,10 +28,6 @@ func TestMemoryVisibleQueriesUseEffectiveAccessDirectGrants(t *testing.T) {
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, editGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
-
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	nodes, err := repo.ListVisibleNodes(companyID, viewer.UserID)
 	if err != nil {
@@ -68,7 +64,7 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	companyID := "22222222-2222-4222-8222-222222222303"
 	repo.EnsureCompany(companyID, "Visible Folder Co")
 
-	viewer := mustEffectiveAccessUser(t, repo, companyID, "visible-folder-viewer")
+	viewer := mustCreateInboxReadCompanyUser(t, repo, "visible-folder-viewer", companyID, "visible-folder-viewer@example.com", "Visible Folder Viewer")
 	nodeParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder node parent: %v", err)
@@ -106,9 +102,6 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, viewGate.LogicGateID, viewer.UserID, EntityPermissionView)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, adminGate.LogicGateID, viewer.UserID, EntityPermissionAdmin)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	nodes, err := repo.ListVisibleNodesInFolderSubtree(companyID, nodeParent.FolderID, viewer.UserID)
 	if err != nil {
@@ -137,7 +130,7 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	companyID := "22222222-2222-4222-8222-222222222304"
 	repo.EnsureCompany(companyID, "Visible Explorer Co")
 
-	viewer := mustEffectiveAccessUser(t, repo, companyID, "visible-explorer-viewer")
+	viewer := mustCreateInboxReadCompanyUser(t, repo, "visible-explorer-viewer", companyID, "visible-explorer-viewer@example.com", "Visible Explorer Viewer")
 	nodeFolder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node folder")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder node: %v", err)
@@ -181,10 +174,6 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	aciGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item ACI")
 	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleAccountable, UserID: viewer.UserID}})
 
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
-
 	sharedFolders, err := repo.ListVisibleCompanyExplorerFolders(companyID, "communications", viewer.UserID)
 	if err != nil {
 		t.Fatalf("ListVisibleCompanyExplorerFolders: %v", err)
@@ -213,14 +202,14 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	assertVisibleQueryLogicGateIDs(t, gateSummaries, visibleGate.LogicGateID, responsibleGate.LogicGateID, aciGate.LogicGateID)
 	assertVisibleQueryLogicGatesDoNotContain(t, gateSummaries, hiddenGate.LogicGateID)
 
-	removeEffectiveFactsForTest(repo, companyID, viewer.UserID, EntityTypeNode, responsibleNode.NodeID)
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeNode, responsibleNode.NodeID, ResourceDefaultAccessNoAccess)
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListResponsibleInboxNodes: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
 
-	removeEffectiveFactsForTest(repo, companyID, viewer.UserID, EntityTypeLogicGate, aciGate.LogicGateID)
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeLogicGate, aciGate.LogicGateID, ResourceDefaultAccessNoAccess)
 	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListACIInboxLogicGates: %v", err)
@@ -230,7 +219,7 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	}
 }
 
-func TestPostgresVisibleQueriesUseEffectiveAccessReadModel(t *testing.T) {
+func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	nodeRaw, err := os.ReadFile("postgres_nodes.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_nodes.go: %v", err)
@@ -238,19 +227,15 @@ func TestPostgresVisibleQueriesUseEffectiveAccessReadModel(t *testing.T) {
 	nodeSource := visibleQueryNormalizeSource(string(nodeRaw))
 	for _, needle := range []string{
 		"func (r *postgresrepo) listvisiblenodes",
-		"join ( select distinct access.resource_id",
-		"from effective_resource_access access",
-		"access.resource_type='node'",
-		") visible on visible.resource_id=n.node_id",
-		"mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)",
+		"mangorts_user_can_access_resource(n.company_id, 'node', n.node_id",
 		"func (r *postgresrepo) listvisiblenodesinfoldersubtree",
-		"join folder_nodes folder_node on folder_node.node_id=access.resource_id",
+		"join folder_nodes visible on visible.node_id=n.node_id",
 	} {
 		if !strings.Contains(nodeSource, needle) {
 			t.Fatalf("Postgres visible node query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "mangorts_user_can_access_resource"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
 		if strings.Contains(nodeSource, forbidden) {
 			t.Fatalf("Postgres visible node query should not use %q", forbidden)
 		}
@@ -263,20 +248,16 @@ func TestPostgresVisibleQueriesUseEffectiveAccessReadModel(t *testing.T) {
 	logicGateSource := visibleQueryNormalizeSource(string(logicGateRaw))
 	for _, needle := range []string{
 		"func (r *postgresrepo) listvisiblelogicgates",
-		"join ( select distinct access.resource_id",
-		"from effective_resource_access access",
-		"access.resource_type='logic_gate'",
-		") visible on visible.resource_id=gate.logic_gate_id",
-		"mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)",
+		"mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id",
 		"func (r *postgresrepo) listvisiblelogicgatesinfoldersubtree",
-		"join folder_gates folder_gate on folder_gate.logic_gate_id=access.resource_id",
+		"join folder_gates visible on visible.logic_gate_id=gate.logic_gate_id",
 		"func (r *postgresrepo) queryvisiblelogicgates",
 	} {
 		if !strings.Contains(logicGateSource, needle) {
 			t.Fatalf("Postgres visible Logic Gate query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "mangorts_user_can_access_resource"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
 		if strings.Contains(logicGateSource, forbidden) {
 			t.Fatalf("Postgres visible Logic Gate query should not use %q", forbidden)
 		}
@@ -292,15 +273,15 @@ func TestPostgresVisibleQueriesUseEffectiveAccessReadModel(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecompanyexplorerfolderitems",
 		"func (r *postgresrepo) listvisiblecompanyexplorernodesummaries",
 		"func (r *postgresrepo) listvisiblecompanyexplorerlogicgatesummaries",
-		"from effective_resource_access access",
-		"access.resource_type='shared_triage_folder'",
-		"access.resource_type=case item.item_type when 'node' then 'node' else 'logic_gate' end",
+		"mangorts_user_can_access_resource",
+		"'shared_triage_folder'",
+		"case item.item_type when 'node' then 'node' else 'logic_gate' end",
 	} {
 		if !strings.Contains(companyExplorerSource, needle) {
 			t.Fatalf("Postgres visible company explorer query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "mangorts_user_can_access_resource"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
 		if strings.Contains(companyExplorerSource, forbidden) {
 			t.Fatalf("Postgres visible company explorer query should not use %q", forbidden)
 		}
@@ -312,17 +293,15 @@ func TestPostgresVisibleQueriesUseEffectiveAccessReadModel(t *testing.T) {
 	}
 	workItemSource := visibleQueryNormalizeSource(string(workItemRaw))
 	for _, needle := range []string{
-		"from effective_resource_access access",
-		"access.resource_type='node'",
-		"access.resource_type='logic_gate'",
-		"mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)",
-		"mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)",
+		"from racio_matrix_projection_table entry",
+		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, entry.user_id, 'edit')",
+		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, entry.user_id, 'edit')",
 	} {
 		if !strings.Contains(workItemSource, needle) {
 			t.Fatalf("Postgres visible work item query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "mangorts_user_can_access_resource"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
 		if strings.Contains(workItemSource, forbidden) {
 			t.Fatalf("Postgres visible work item query should not use %q", forbidden)
 		}
@@ -349,17 +328,39 @@ func mustCreateVisibleQueryGate(t *testing.T, repo *MemoryRepo, companyID, heade
 
 func mustSetVisibleQueryPermission(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, userID, accessLevel string) {
 	t.Helper()
-	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+	input := EntityPermissionUpdateInput{
 		CompanyID:  companyID,
 		EntityType: entityType,
 		EntityID:   entityID,
-		Permissions: []EntityPermissionInput{{
+	}
+	if usesDefaultResourceAccessPolicy(entityType) {
+		input.DefaultAccess = ResourceDefaultAccessNoAccess
+		input.DefaultAccessSet = true
+		if accessLevel != EntityPermissionNoAccess {
+			input.OverrideUserIDs = []string{userID}
+		}
+	} else {
+		input.Permissions = []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectUser,
 			SubjectID:   userID,
 			AccessLevel: accessLevel,
-		}},
-	}); err != nil {
+		}}
+	}
+	if _, err := repo.SetEntityPermissions(input); err != nil {
 		t.Fatalf("SetEntityPermissions %s/%s: %v", entityType, entityID, err)
+	}
+}
+
+func mustSetVisibleQueryDefaultAccess(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, defaultAccess string) {
+	t.Helper()
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       entityType,
+		EntityID:         entityID,
+		DefaultAccess:    defaultAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions default %s/%s: %v", entityType, entityID, err)
 	}
 }
 
@@ -497,19 +498,6 @@ func assertVisibleQueryFolderItemsDoNotContain(t *testing.T, items []domain.Comp
 	for _, item := range items {
 		if hidden[item.ItemType+":"+item.ItemID] {
 			t.Fatalf("visible folder items leaked hidden item %s/%s in %+v", item.ItemType, item.ItemID, items)
-		}
-	}
-}
-
-func removeEffectiveFactsForTest(repo *MemoryRepo, companyID, userID, resourceType, resourceID string) {
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	for accessKey, access := range repo.effectiveAccess {
-		if access.CompanyID == companyID &&
-			access.UserID == userID &&
-			access.ResourceType == resourceType &&
-			access.ResourceID == resourceID {
-			delete(repo.effectiveAccess, accessKey)
 		}
 	}
 }

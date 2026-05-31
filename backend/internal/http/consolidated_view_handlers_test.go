@@ -91,9 +91,6 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden node: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	guardedRepo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: repo}
 	server := NewServer(guardedRepo)
@@ -101,8 +98,8 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, viewer, http.StatusOK)
-	if !view.CanView || view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanView || !view.CanEdit || view.CanAdmin {
+		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.Node.NodeID != node.NodeID || view.ProjectionCount != 1 || view.AssignmentCount != 1 {
 		t.Fatalf("node view = %+v, want summary, projection, and assignment metadata", view)
@@ -116,8 +113,8 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		t.Fatalf("editor flags = view:%v edit:%v admin:%v, want view/edit", editView.CanView, editView.CanEdit, editView.CanAdmin)
 	}
 	adminView, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, admin, http.StatusOK)
-	if !adminView.CanView || !adminView.CanEdit || !adminView.CanAdmin {
-		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want all true", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
+	if !adminView.CanView || !adminView.CanEdit || adminView.CanAdmin {
+		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want view/edit without role admin", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
 	}
 
 	_, blockedBody := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, blocked, http.StatusNotFound)
@@ -296,9 +293,6 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden logic gate: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	guardedRepo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: repo}
 	server := NewServer(guardedRepo)
@@ -306,8 +300,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, _ := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
-	if !view.CanView || view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanView || !view.CanEdit || view.CanAdmin {
+		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.RaciAssignmentCount != 1 {
 		t.Fatalf("logic gate view = %+v, want details, projection, and RACI", view)
@@ -318,8 +312,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 
 	getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	adminView, _ := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, admin, http.StatusOK)
-	if !adminView.CanView || !adminView.CanEdit || !adminView.CanAdmin {
-		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want all true", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
+	if !adminView.CanView || !adminView.CanEdit || adminView.CanAdmin {
+		t.Fatalf("admin flags = view:%v edit:%v admin:%v, want view/edit without role admin", adminView.CanView, adminView.CanEdit, adminView.CanAdmin)
 	}
 
 	_, blockedBody := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, blocked, http.StatusNotFound)

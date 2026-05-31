@@ -426,20 +426,13 @@ func sortCompanyExplorerFolders(items []domain.CompanyExplorerFolder) {
 }
 
 func (r *MemoryRepo) effectiveAccessLevelLocked(companyID, userID, resourceType, resourceID, accessLevel string) string {
-	best := ""
-	for _, access := range r.effectiveAccess {
-		if access.CompanyID != companyID ||
-			access.UserID != userID ||
-			access.ResourceType != resourceType ||
-			access.ResourceID != resourceID ||
-			!EntityPermissionSatisfies(access.AccessLevel, accessLevel) {
-			continue
-		}
-		if best == "" || EntityPermissionRank(access.AccessLevel) > EntityPermissionRank(best) {
-			best = access.AccessLevel
-		}
+	if r.userHasRoleAdminAccessLocked(companyID, userID) {
+		return EntityPermissionAdmin
 	}
-	return best
+	if r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, accessLevel) {
+		return EntityPermissionEdit
+	}
+	return ""
 }
 
 func companyExplorerFolderSubtreeIDsLocked(folders map[string]domain.CompanyExplorerFolder, companyID, folderID, folderKind string) map[string]bool {

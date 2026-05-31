@@ -74,7 +74,8 @@ select current_database() as db, current_user as role, now() as verified_at;
 
 select to_regclass('public.domain_events') as domain_events,
        to_regclass('public.node_logic_gate_assignments') as node_logic_gate_assignments,
-       to_regclass('public.work_item_inbox_entries') as work_item_inbox_entries,
+       to_regclass('public.racio_matrix_projection_table') as racio_matrix_projection_table,
+       to_regclass('public.resource_permissions') as resource_permissions,
        to_regclass('public.kanban_cards') as kanban_cards,
        to_regclass('public.nodes') as nodes,
        to_regclass('public.logic_gate_raci_assignments') as logic_gate_raci_assignments;
@@ -83,9 +84,8 @@ select proname
 from pg_proc
 where proname in (
   'sync_node_logic_gate_assignment_from_kanban_card',
-  'rebuild_work_item_inbox_entries_for_company',
-  'rebuild_work_item_inbox_entries_for_node',
-  'rebuild_work_item_inbox_entries_for_logic_gate'
+  'mangorts_user_can_access_resource',
+  'mangorts_user_can_view_entity'
 )
 order by proname;
 
@@ -97,8 +97,11 @@ begin
   if to_regclass('public.node_logic_gate_assignments') is null then
     raise exception 'missing node_logic_gate_assignments; run backend/db/migrations/20260519_node_logic_gate_assignments.sql';
   end if;
-  if to_regclass('public.work_item_inbox_entries') is null then
-    raise exception 'missing work_item_inbox_entries; run backend/db/migrations/20260519_work_item_inbox_entries.sql';
+  if to_regclass('public.racio_matrix_projection_table') is null then
+    raise exception 'missing racio_matrix_projection_table; run backend/db/migrations/20260530_racio_projection_resource_permissions.sql';
+  end if;
+  if to_regclass('public.resource_permissions') is null then
+    raise exception 'missing resource_permissions; run backend/db/migrations/20260530_racio_projection_resource_permissions.sql';
   end if;
   if not exists (
     select 1
@@ -110,9 +113,17 @@ begin
   if not exists (
     select 1
     from pg_proc
-    where proname = 'rebuild_work_item_inbox_entries_for_company'
+    where proname = 'mangorts_user_can_access_resource'
   ) then
-    raise exception 'missing rebuild_work_item_inbox_entries_for_company()';
+    raise exception 'missing mangorts_user_can_access_resource()';
+  end if;
+  if exists (
+    select 1
+    from pg_trigger
+    where tgname like ('trg_rebuild_work_item_' || 'inbox_entries%')
+      and not tgisinternal
+  ) then
+    raise exception 'old work-item inbox rebuild trigger still exists';
   end if;
   if not exists (
     select 1

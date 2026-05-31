@@ -64,9 +64,6 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden node: %v", err)
 	}
-	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	repo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: base}
 	server := NewServer(repo)
@@ -126,10 +123,10 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	editBody, _ := json.Marshal(map[string]string{"company_id": companyID, "title": "Blocked edit"})
 	editReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+visibleNode.NodeID, bytes.NewReader(editBody))
 	editReq.Header.Set("Content-Type", "application/json")
-	editReq = requestWithLogicGateWorkActorForTest(editReq, viewer, companyID)
+	editReq = requestWithLogicGateWorkActorForTest(editReq, blocked, companyID)
 	editRec := httptest.NewRecorder()
 	handler.ServeHTTP(editRec, editReq)
-	assertGenericActionDenied(t, editRec, visibleNode.Title)
+	assertGenericResourceDenied(t, editRec, visibleNode.Title)
 
 	if repo.legacyAccessReadCount != 0 {
 		t.Fatalf("active access path used legacy entity access reads %d times", repo.legacyAccessReadCount)
@@ -183,9 +180,6 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("SetEntityPermissions %s: %v", grant.entityType, err)
 		}
-	}
-	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	repo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: base}

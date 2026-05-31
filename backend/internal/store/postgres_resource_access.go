@@ -85,7 +85,7 @@ func deletePostgresResourceOverridesTx(ctx context.Context, tx *sql.Tx, companyI
 		return ErrInvalid
 	}
 	_, err := tx.ExecContext(ctx, `
-delete from resource_access
+delete from resource_permissions
 where company_id=$1::uuid
   and resource_type=$2
   and resource_id=$3::uuid`, companyID, resourceType, resourceID)
@@ -101,7 +101,7 @@ func insertPostgresResourceOverrideTx(ctx context.Context, tx *sql.Tx, companyID
 		return ErrInvalid
 	}
 	_, err := tx.ExecContext(ctx, `
-insert into resource_access (
+insert into resource_permissions (
   company_id,
   resource_type,
   resource_id,
@@ -244,11 +244,24 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 	if err != nil {
 		return err
 	}
+	defaultAccessChanged := false
 	if input.DefaultAccessSet {
 		defaultAccess, ok = NormalizeResourceDefaultAccess(input.DefaultAccess)
 		if !ok {
 			return ErrInvalid
 		}
+		defaultAccessChanged = true
+	} else if len(input.OverrideUserIDs) == 0 {
+		inferredDefaultAccess, inferred, err := inferredResourceDefaultAccessFromPermissions(input.Permissions)
+		if err != nil {
+			return err
+		}
+		if inferred {
+			defaultAccess = inferredDefaultAccess
+			defaultAccessChanged = true
+		}
+	}
+	if defaultAccessChanged {
 		if err := setPostgresResourceDefaultAccessTx(ctx, tx, companyID, entityType, entityID, defaultAccess); err != nil {
 			return err
 		}
@@ -287,7 +300,7 @@ func copyPostgresLogicGateAccessPolicyToNodeTx(ctx context.Context, tx *sql.Tx, 
 	}
 	rows, err := tx.QueryContext(ctx, `
 select user_id::text
-from resource_access
+from resource_permissions
 where company_id=$1::uuid
   and resource_type='logic_gate'
   and resource_id=$2::uuid

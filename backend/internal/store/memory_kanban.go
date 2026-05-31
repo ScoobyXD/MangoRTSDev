@@ -513,9 +513,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		if board.LogicGateID == nil {
 			return nil
 		}
-		if r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID) {
-			return r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID)
-		}
+		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID)
 		return nil
 	}
 	for index, card := range r.kanbanCards[k] {
@@ -551,6 +549,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 			}
 		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
+		r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 		return card, nil
 	}
 	cardID := strings.TrimSpace(input.CardID)
@@ -588,6 +587,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		}
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return card, nil
 }
 
@@ -659,24 +659,14 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
-	if nodeAssigneeUserID(r.nodes[nodeKey]) != previousAssigneeUserID {
-		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
-			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-			return LogicGateNodeAssignmentResult{}, err
-		}
-	}
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
-	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
-			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-			return LogicGateNodeAssignmentResult{}, err
-		}
-	}
+	_ = previousAssigneeUserID
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -887,14 +877,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if input.AssigneePolicySet {
 		previousAssigneeUserID := nodeAssigneeUserID(r.nodes[nodeKey])
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)
-		if nodeAssigneeUserID(r.nodes[nodeKey]) != previousAssigneeUserID {
-			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
-				r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-				return LogicGateNodeAssignmentResult{}, err
-			}
-		}
+		_ = previousAssigneeUserID
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -946,10 +932,7 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus, input.FallbackStatusColor)
-	if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
-		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-		return LogicGateNodeAssignmentRemoveResult{}, err
-	}
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	result := LogicGateNodeAssignmentRemoveResult{
 		Card:       location.card,
@@ -1009,6 +992,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	r.syncNodeStatusFromKanbanCardLocked(card)
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1100,7 +1084,7 @@ type memoryKanbanWorkspaceEventSnapshot struct {
 	kanbanColumns            map[string][]domain.KanbanColumn
 	kanbanCards              map[string][]domain.KanbanCard
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
-	workItemInboxEntries     map[string]memoryWorkItemInboxEntry
+	racioProjectionRows      map[string]memoryRacioProjectionRow
 	domainEvents             map[string]domain.DomainEvent
 	workspaceReadVersions    map[string]int64
 }
@@ -1113,7 +1097,7 @@ func (r *MemoryRepo) snapshotKanbanWorkspaceEventStateLocked() memoryKanbanWorks
 		kanbanColumns:            cloneMemorySliceMap(r.kanbanColumns),
 		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
-		workItemInboxEntries:     cloneMemoryMap(r.workItemInboxEntries),
+		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
 		workspaceReadVersions:    cloneMemoryMap(r.workspaceReadVersions),
 	}
@@ -1126,7 +1110,7 @@ func (r *MemoryRepo) restoreKanbanWorkspaceEventStateLocked(snapshot memoryKanba
 	r.kanbanColumns = snapshot.kanbanColumns
 	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
-	r.workItemInboxEntries = snapshot.workItemInboxEntries
+	r.racioProjectionRows = snapshot.racioProjectionRows
 	r.domainEvents = snapshot.domainEvents
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }

@@ -154,7 +154,6 @@ type EntityPermissionRepository interface {
 }
 
 type EffectiveAccessRepository interface {
-	RebuildEffectiveResourceAccessForCompany(companyID string) error
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
@@ -179,9 +178,6 @@ type WorkItemReadRepository interface {
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	RebuildWorkItemInboxEntries(companyID string) error
-	RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error
-	RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error
 }
 
 type CompanyExplorerRepository interface {

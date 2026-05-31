@@ -72,15 +72,7 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
 	}
-	if err := r.recomputeNodeAssigneeEffectiveAccessLocked(companyID, n.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeNode, n.NodeID); err != nil {
-		return domain.Node{}, err
-	}
+	r.syncRacioProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
 }
 
@@ -239,11 +231,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 		}
 	}
 	r.nodes[k] = node
-	if input.AssigneeUserIDSet {
-		if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, input.NodeID); err != nil {
-			return domain.Node{}, err
-		}
-	}
+	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return r.withNodeReadModelLocked(node), nil
 }
 
@@ -440,9 +428,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
-	if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeNode, nodeID); err != nil {
-		return err
-	}
+	r.deleteRacioProjectionForNodeLocked(companyID, nodeID)
 
 	delete(r.nodes, k)
 	delete(r.nodeInfo, k)

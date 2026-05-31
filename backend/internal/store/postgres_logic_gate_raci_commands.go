@@ -165,6 +165,11 @@ where company_id=$1::uuid
 		return LogicGateRaciAssignmentCommandResult{}, err
 	}
 	assignments := cloneLogicGateRaciAssignments(assignmentsByGate[logicGateID])
+	if changed {
+		if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, assignments); err != nil {
+			return LogicGateRaciAssignmentCommandResult{}, err
+		}
+	}
 	result := LogicGateRaciAssignmentCommandResult{
 		CompanyID:         companyID,
 		LogicGateID:       logicGateID,

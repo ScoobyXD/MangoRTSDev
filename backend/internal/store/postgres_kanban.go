@@ -436,7 +436,7 @@ select count(*) from updated_node`,
 	if changedCount == 0 {
 		return nil
 	}
-	return recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, companyID, nodeID)
+	return syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
@@ -743,6 +743,9 @@ returning `+kanbanCardSelectColumns,
 			return domain.KanbanCard{}, err
 		}
 	}
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return domain.KanbanCard{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.KanbanCard{}, err
 	}
@@ -825,6 +828,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && (!nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5) {
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
+	_ = previousAssignee
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
 		if !ok {
@@ -945,15 +949,14 @@ from nodes
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&currentAssignee); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if previousAssignee.String != currentAssignee.String || previousAssignee.Valid != currentAssignee.Valid {
-		if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
-	}
+	_ = currentAssignee
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
+	}
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
 	}
 	status := column.Title
 	statusColor := column.ItemColor
@@ -1062,6 +1065,7 @@ from nodes
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&previousAssignee); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
+		_ = previousAssignee
 	}
 	var nodePriority sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
@@ -1185,16 +1189,15 @@ from nodes
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&currentAssignee); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
-		if previousAssignee.String != currentAssignee.String || previousAssignee.Valid != currentAssignee.Valid {
-			if err := recomputeNodeAssigneeEffectiveAccessTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-				return LogicGateNodeAssignmentResult{}, err
-			}
-		}
+		_ = currentAssignee
 	}
 	if crossLogicGateMove {
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
+	}
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
 	}
 	node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -1284,7 +1287,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStat
 	} else if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, input.CompanyID, []string{input.LogicGateID}, []string{input.NodeID}); err != nil {
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 
@@ -1359,6 +1362,9 @@ returning `+kanbanCardSelectColumns,
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	node, err := scanNode(tx.QueryRowContext(ctx, `

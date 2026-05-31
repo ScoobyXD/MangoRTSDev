@@ -647,6 +647,14 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		restore()
 		return DeleteCompanyUserResult{}, err
 	}
+	for rowKey, row := range r.racioProjectionRows {
+		if row.CompanyID == companyID && row.UserID == userID {
+			delete(r.racioProjectionRows, rowKey)
+		}
+	}
+	for nodeID := range changedNodeIDs {
+		r.syncRacioProjectionForNodeLocked(companyID, nodeID)
+	}
 
 	hasRemainingMembership := false
 	for _, membership := range r.memberships {
@@ -728,6 +736,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 	for accessKey, access := range r.effectiveAccess {
 		if access.UserID == userID {
 			delete(r.effectiveAccess, accessKey)
+		}
+	}
+	for rowKey, row := range r.racioProjectionRows {
+		if row.UserID == userID {
+			delete(r.racioProjectionRows, rowKey)
 		}
 	}
 	delete(r.users, user.CognitoSubject)

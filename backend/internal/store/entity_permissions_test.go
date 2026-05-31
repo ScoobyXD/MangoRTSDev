@@ -42,13 +42,15 @@ func TestMemoryEntityPermissionsIncludeDescendantGroupMembers(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeNode,
-		EntityID:   node.NodeID,
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectGroup,
 			SubjectID:   parent.GroupID,
-			Permission:  EntityPermissionView,
+			AccessLevel: EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -61,11 +63,17 @@ func TestMemoryEntityPermissionsIncludeDescendantGroupMembers(t *testing.T) {
 		t.Fatalf("other user allowed = %v err = %v, want false", allowed, err)
 	}
 
-	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{CompanyID: companyID, EntityType: EntityTypeNode, EntityID: node.NodeID}); err != nil {
-		t.Fatalf("clear SetEntityPermissions: %v", err)
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("reopen SetEntityPermissions: %v", err)
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, otherUser.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("other user edit allowed after clear = %v err = %v, want true", allowed, err)
+		t.Fatalf("other user edit allowed after reopen = %v err = %v, want true", allowed, err)
 	}
 }
 
@@ -144,15 +152,12 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []EntityPermissionInput{
-			{SubjectType: EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: EntityPermissionView},
-			{SubjectType: EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: EntityPermissionEdit},
-			{SubjectType: EntityPermissionSubjectUser, SubjectID: admin.UserID, AccessLevel: EntityPermissionAdmin},
-			{SubjectType: EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: EntityPermissionNoAccess},
-		},
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{viewer.UserID, editor.UserID, admin.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
@@ -164,14 +169,15 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 		want        bool
 	}{
 		{name: "viewer can view", userID: viewer.UserID, accessLevel: EntityPermissionView, want: true},
-		{name: "viewer cannot edit", userID: viewer.UserID, accessLevel: EntityPermissionEdit, want: false},
+		{name: "viewer can edit", userID: viewer.UserID, accessLevel: EntityPermissionEdit, want: true},
+		{name: "viewer cannot admin", userID: viewer.UserID, accessLevel: EntityPermissionAdmin, want: false},
 		{name: "blocked no access cannot view", userID: blocked.UserID, accessLevel: EntityPermissionView, want: false},
 		{name: "editor can view", userID: editor.UserID, accessLevel: EntityPermissionView, want: true},
 		{name: "editor can edit", userID: editor.UserID, accessLevel: EntityPermissionEdit, want: true},
 		{name: "editor cannot admin", userID: editor.UserID, accessLevel: EntityPermissionAdmin, want: false},
 		{name: "admin can view", userID: admin.UserID, accessLevel: EntityPermissionView, want: true},
 		{name: "admin can edit", userID: admin.UserID, accessLevel: EntityPermissionEdit, want: true},
-		{name: "admin can admin", userID: admin.UserID, accessLevel: EntityPermissionAdmin, want: true},
+		{name: "regular override cannot admin", userID: admin.UserID, accessLevel: EntityPermissionAdmin, want: false},
 		{name: "company admin role can admin", userID: companyAdmin.UserID, accessLevel: EntityPermissionAdmin, want: true},
 		{name: "dev admin role can admin", userID: devAdmin.UserID, accessLevel: EntityPermissionAdmin, want: true},
 	}
@@ -214,7 +220,7 @@ func TestMemoryEntityPermissionsAccessLevelHierarchy(t *testing.T) {
 	}
 }
 
-func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
+func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111114"
 	repo.EnsureCompany(companyID, "Assignment Access Co")
@@ -257,8 +263,8 @@ func TestMemoryAssignmentsGrantEditAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateNode assignee: %v", err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, assigned.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("assigned node edit allowed = %v err = %v, want true", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, assigned.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("assigned node edit allowed = %v err = %v, want false", allowed, err)
 	}
 
 	gate, err := repo.CreateLogicGate(companyID, "RACI gate")

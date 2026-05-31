@@ -23,7 +23,7 @@ func (r *failingWorkItemAssignmentRepo) AssignNodeToLogicGateStatus(input store.
 
 func TestWorkItemAssignmentPublishesCommittedWorkspaceEventAfterAtomicCommit(t *testing.T) {
 	backing := store.NewMemoryRepo()
-	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
+	repo := backing
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "55555555-5555-4555-8555-555555555555"
@@ -87,9 +87,6 @@ func TestWorkItemAssignmentPublishesCommittedWorkspaceEventAfterAtomicCommit(t *
 	}
 	if len(durable) != 3 || durable[0].Type != store.WorkItemLogicGateAssignmentSavedEventType || durable[1].Type != "kanban_card_upserted" || durable[2].Type != "node_updated" {
 		t.Fatalf("durable events = %+v, want atomic semantic plus compatibility events", durable)
-	}
-	if repo.rebuildCalls != 0 {
-		t.Fatalf("work item assignment handler called full-company rebuild %d times, want 0", repo.rebuildCalls)
 	}
 }
 

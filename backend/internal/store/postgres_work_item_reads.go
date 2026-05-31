@@ -13,7 +13,7 @@ func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]do
 }
 
 func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listWorkItemInboxNodes(ctx, query, domain.LogicGateRaciRoleResponsible)
+	return r.listRacioProjectedNodes(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -21,37 +21,31 @@ func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, err
 }
 
 func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listWorkItemInboxNodes(ctx, query, "assignee")
+	return r.listRacioProjectedNodes(ctx, query, false)
 }
 
-func (r *PostgresRepo) RebuildWorkItemInboxEntries(companyID string) error {
-	ctx := context.Background()
-	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_company($1::uuid)`, strings.TrimSpace(companyID))
-	return err
-}
-
-func (r *PostgresRepo) RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error {
-	ctx := context.Background()
-	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_node($1::uuid, $2::uuid)`, strings.TrimSpace(companyID), strings.TrimSpace(nodeID))
-	return err
-}
-
-func (r *PostgresRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error {
-	ctx := context.Background()
-	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_logic_gate($1::uuid, $2::uuid)`, strings.TrimSpace(companyID), strings.TrimSpace(logicGateID))
-	return err
-}
-
-func (r *PostgresRepo) listWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery, role string) ([]domain.Node, error) {
+func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
+	roleFilter := "and entry.logic_gate_id is null"
+	if responsibleOnly {
+		roleFilter = `and entry.logic_gate_id is not null
+  and exists (
+    select 1
+    from logic_gate_raci_assignments assignment
+    where assignment.company_id=entry.company_id
+      and assignment.logic_gate_id=entry.logic_gate_id
+      and assignment.user_id=entry.user_id
+      and assignment.role='responsible'
+  )`
+	}
 	rows, err := r.db.QueryContext(ctx, `
 select
   entry.company_id::text,
-  entry.node_id::text,
-  entry.node_title,
+  entry.resource_id::text,
+  entry.display_title,
   entry.status,
   entry.status_color,
   entry.due_date::text,
@@ -59,24 +53,19 @@ select
   entry.assignee_user_id::text,
   nullif(entry.assignee_display_name, ''),
   nullif(entry.assignee_email, ''),
-  entry.node_created_timestamp,
-  entry.logic_gate_ids::text
-from work_item_inbox_entries entry
-where entry.entry_kind='node'
-  and entry.company_id=$1
-  and entry.user_id::text=$2
-  and entry.role=$3
-  and exists (
-    select 1
-    from effective_resource_access access
-    where access.company_id=entry.company_id
-      and access.user_id=entry.user_id
-      and access.resource_type='node'
-      and access.resource_id=entry.node_id
-      and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
-  )
-order by entry.node_created_timestamp asc, entry.node_id::text asc
-limit $4`, query.CompanyID, query.UserID, role, query.Limit, EntityPermissionView)
+  entry.resource_created_timestamp,
+  case
+    when entry.logic_gate_id is null then '[]'::jsonb
+    else jsonb_build_array(entry.logic_gate_id::text)
+  end::text as logic_gate_ids_json
+from racio_matrix_projection_table entry
+where entry.resource_type='node'
+  and entry.company_id=$1::uuid
+  and entry.user_id=$2::uuid
+  `+roleFilter+`
+  and mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, entry.user_id, 'edit')
+order by entry.resource_created_timestamp asc, entry.resource_id::text asc
+limit $3`, query.CompanyID, query.UserID, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +87,7 @@ func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkI
 }
 
 func (r *PostgresRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(ctx, query, true)
+	return r.listRacioProjectedLogicGates(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
@@ -106,26 +95,26 @@ func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLog
 }
 
 func (r *PostgresRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(ctx, query, false)
+	return r.listRacioProjectedLogicGates(ctx, query, false)
 }
 
-func (r *PostgresRepo) listWorkItemLogicGateInboxItems(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) listRacioProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := ""
 	if aciOnly {
-		roleFilter = "\n  and entry.role in ('accountable', 'consulted', 'informed')"
+		roleFilter = "\n  and assignment.role in ('accountable', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
   entry.company_id::text,
-  entry.logic_gate_id::text,
-  entry.logic_gate_header,
-  entry.logic_gate_created_timestamp,
-  coalesce(jsonb_agg(entry.role order by
-    case entry.role
+  entry.resource_id::text,
+  entry.display_title,
+  entry.resource_created_timestamp,
+  coalesce(jsonb_agg(assignment.role order by
+    case assignment.role
       when 'responsible' then 1
       when 'accountable' then 2
       when 'consulted' then 3
@@ -133,22 +122,18 @@ select
       else 5
     end
   ), '[]'::jsonb)::text as roles_json
-from work_item_inbox_entries entry
-where entry.entry_kind='logic_gate'
-  and entry.company_id=$1
-  and entry.user_id::text=$2`+roleFilter+`
-  and exists (
-    select 1
-    from effective_resource_access access
-    where access.company_id=entry.company_id
-      and access.user_id=entry.user_id
-      and access.resource_type='logic_gate'
-      and access.resource_id=entry.logic_gate_id
-      and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
-  )
-group by entry.company_id, entry.logic_gate_id, entry.logic_gate_header, entry.logic_gate_created_timestamp
-order by lower(entry.logic_gate_header) asc, entry.logic_gate_id::text asc
-limit $3`, query.CompanyID, query.UserID, query.Limit, EntityPermissionView)
+from racio_matrix_projection_table entry
+join logic_gate_raci_assignments assignment
+  on assignment.company_id=entry.company_id
+ and assignment.logic_gate_id=entry.resource_id
+ and assignment.user_id=entry.user_id
+where entry.resource_type='logic_gate'
+  and entry.company_id=$1::uuid
+  and entry.user_id=$2::uuid`+roleFilter+`
+  and mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, entry.user_id, 'edit')
+group by entry.company_id, entry.resource_id, entry.display_title, entry.resource_created_timestamp
+order by lower(entry.display_title) asc, entry.resource_id::text asc
+limit $3`, query.CompanyID, query.UserID, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -197,27 +182,31 @@ func (r *PostgresRepo) listProjectedLogicGateRaciAssignments(ctx context.Context
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
-  entry.company_id::text,
-  entry.logic_gate_id::text,
-  entry.role,
-  entry.user_id::text,
-  nullif(entry.raci_user_display_name, ''),
-  nullif(entry.raci_user_email, ''),
-  entry.raci_created_timestamp
-from work_item_inbox_entries entry
-where entry.entry_kind = 'logic_gate'
-  and entry.company_id = $1
-  and entry.logic_gate_id = any(string_to_array($2, ',')::uuid[])
-order by entry.logic_gate_id::text asc,
-  case entry.role
+  assignment.company_id::text,
+  assignment.logic_gate_id::text,
+  assignment.role,
+  assignment.user_id::text,
+  nullif(app_user.display_name, ''),
+  nullif(app_user.email, ''),
+  assignment.created_timestamp
+from logic_gate_raci_assignments assignment
+join company_memberships membership
+  on membership.company_id=assignment.company_id
+ and membership.user_id=assignment.user_id
+join users app_user
+  on app_user.user_id=assignment.user_id
+where assignment.company_id=$1::uuid
+  and assignment.logic_gate_id = any(string_to_array($2, ',')::uuid[])
+order by assignment.logic_gate_id::text asc,
+  case assignment.role
     when 'responsible' then 1
     when 'accountable' then 2
     when 'consulted' then 3
     when 'informed' then 4
     else 5
   end,
-  lower(coalesce(nullif(entry.raci_user_display_name, ''), nullif(entry.raci_user_email, ''), entry.user_id::text)) asc,
-  entry.user_id::text asc`, companyID, strings.Join(logicGateIDs, ","))
+  lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.user_id::text)) asc,
+  assignment.user_id::text asc`, companyID, strings.Join(logicGateIDs, ","))
 	if err != nil {
 		return nil, err
 	}

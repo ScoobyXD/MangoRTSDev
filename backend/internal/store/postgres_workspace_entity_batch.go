@@ -82,6 +82,9 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			if input.CreatorUserID != "" {
 				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
 			}
+			if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
 			if input.CreatorUserID != "" {
 				created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
 			}
@@ -154,6 +157,9 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				assignment.UserEmail = strings.TrimSpace(*creatorAssignee.Email)
 			}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
+			if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, created.RaciAssignments); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
 		}
 		if input.CreatorUserID != "" {
 			created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)

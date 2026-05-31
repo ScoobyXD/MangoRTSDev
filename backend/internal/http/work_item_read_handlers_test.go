@@ -93,6 +93,10 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee aci: %v", err)
 	}
+	standaloneNode, err := repo.CreateNodeWithAssignee(companyID, "Read API standalone node", user.UserID)
+	if err != nil {
+		t.Fatalf("CreateNodeWithAssignee standalone: %v", err)
+	}
 	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done", Priority: testPriority(2), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus aci: %v", err)
 	}
@@ -105,9 +109,6 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
 		t.Fatalf("clear responsible node assignee: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	handler := NewServer(repo).Routes()
@@ -136,8 +137,8 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		Nodes []domain.Node `json:"nodes"`
 	}
 	decodeWorkItemInboxReadPayload(t, myNodesRec, &myNodesPayload)
-	if len(myNodesPayload.Nodes) != 1 || myNodesPayload.Nodes[0].NodeID != aciNode.NodeID {
-		t.Fatalf("my nodes = %+v, want assigned node", myNodesPayload.Nodes)
+	if len(myNodesPayload.Nodes) != 1 || myNodesPayload.Nodes[0].NodeID != standaloneNode.NodeID {
+		t.Fatalf("my nodes = %+v, want standalone assigned node %s", myNodesPayload.Nodes, standaloneNode.NodeID)
 	}
 
 	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/aci-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
@@ -198,9 +199,6 @@ func TestWorkItemInboxReadUsesAuthenticatedActorUserID(t *testing.T) {
 	otherNode, err := repo.CreateNodeWithAssignee(companyID, "Other assigned node", other.UserID)
 	if err != nil {
 		t.Fatalf("CreateNodeWithAssignee other: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
