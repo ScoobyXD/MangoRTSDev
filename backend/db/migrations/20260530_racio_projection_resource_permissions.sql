@@ -420,6 +420,30 @@ projected_nodes as (
    and membership.user_id=node_rows.assignee_user_id
   where node_rows.logic_gate_id is null
     and node_rows.assignee_user_id is not null
+),
+deduped_projected_nodes as (
+  select distinct on (company_id, user_id, resource_type, resource_id)
+    company_id,
+    user_id,
+    resource_type,
+    resource_id,
+    logic_gate_id,
+    display_title,
+    status,
+    status_color,
+    due_date,
+    priority,
+    assignee_user_id,
+    assignee_display_name,
+    assignee_email,
+    resource_created_timestamp
+  from projected_nodes
+  order by company_id,
+           user_id,
+           resource_type,
+           resource_id,
+           logic_gate_id nulls last,
+           resource_created_timestamp desc
 )
 insert into racio_matrix_projection_table (
   company_id,
@@ -453,7 +477,7 @@ select company_id,
        assignee_email,
        resource_created_timestamp,
        now()
-from projected_nodes
+from deduped_projected_nodes
 on conflict (company_id, user_id, resource_type, resource_id)
 do update set
   logic_gate_id=excluded.logic_gate_id,
