@@ -5,6 +5,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
+	"time"
 )
 
 func memoryNodeTextBlockInformation(t *testing.T, document string) string {
@@ -1151,5 +1152,108 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	}
 	if payload["attached_timestamp"] == "" {
 		t.Fatalf("attached_timestamp missing from payload: %+v", payload)
+	}
+}
+
+func TestMemoryRepo_MoveLogicGateAssignmentReusesExistingTargetCompatibilityCard(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-999999999901"
+	repo.EnsureCompany(companyID, "Move Reconcile Company")
+
+	sourceGate, err := repo.CreateLogicGate(companyID, "Source Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate source: %v", err)
+	}
+	targetGate, err := repo.CreateLogicGate(companyID, "Target Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Move reconcile node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 2
+	assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus source: %v", err)
+	}
+
+	targetBoardID := LogicGateKanbanBoardID(targetGate.LogicGateID)
+	targetColumns, err := repo.ListKanbanColumns(companyID, targetBoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns target: %v", err)
+	}
+	if len(targetColumns) == 0 {
+		t.Fatal("target gate has no columns")
+	}
+	targetCardID := newUUIDv7String()
+	targetLogicGateID := targetGate.LogicGateID
+	now := time.Now().UTC()
+	repo.mu.Lock()
+	repo.kanbanCards[boardKey(companyID, targetBoardID)] = append(repo.kanbanCards[boardKey(companyID, targetBoardID)], domain.KanbanCard{
+		CompanyID:        companyID,
+		BoardID:          targetBoardID,
+		CardID:           targetCardID,
+		ColumnID:         targetColumns[0].ColumnID,
+		NodeID:           node.NodeID,
+		LogicGateID:      &targetLogicGateID,
+		NodeTitle:        node.Title,
+		Position:         500,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	})
+	repo.mu.Unlock()
+
+	moved, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:       companyID,
+		LogicGateID:     targetGate.LogicGateID,
+		FromLogicGateID: sourceGate.LogicGateID,
+		NodeID:          node.NodeID,
+		Status:          "verify",
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+	}
+	if moved.Card.CardID != targetCardID {
+		t.Fatalf("moved card_id = %q, want existing target card %q", moved.Card.CardID, targetCardID)
+	}
+	if moved.Card.BoardID != targetBoardID {
+		t.Fatalf("moved card board_id = %q, want %q", moved.Card.BoardID, targetBoardID)
+	}
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments: %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].LogicGateID != targetGate.LogicGateID || assignments[0].CompatibilityCardID != targetCardID {
+		t.Fatalf("assignments after move = %+v, want target assignment on existing card", assignments)
+	}
+	sourceCards, err := repo.ListKanbanCards(companyID, assigned.Card.BoardID, KanbanCardQuery{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListKanbanCards source: %v", err)
+	}
+	for _, card := range sourceCards {
+		if card.NodeID == node.NodeID {
+			t.Fatalf("source board still has moved node card: %+v", card)
+		}
+	}
+	targetCards, err := repo.ListKanbanCards(companyID, targetBoardID, KanbanCardQuery{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListKanbanCards target: %v", err)
+	}
+	matchingTargetCards := 0
+	for _, card := range targetCards {
+		if card.NodeID == node.NodeID {
+			matchingTargetCards++
+		}
+	}
+	if matchingTargetCards != 1 {
+		t.Fatalf("target board has %d cards for moved node: %+v", matchingTargetCards, targetCards)
 	}
 }

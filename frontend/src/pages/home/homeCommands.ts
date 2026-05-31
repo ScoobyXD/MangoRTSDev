@@ -55,6 +55,7 @@ import {
   nodeTitle,
   normalizeResponsibleInboxStatus,
 } from "./homeUtils.js";
+import { INBOX_NO_LOGIC_GATE_ID } from "./homeConstants.js";
 import type { ComposeState, HomeEntityDeleteKind, HomeViewID, InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
 
 export type HomeDropAssignNodeToLogicGateStatus = (
@@ -314,7 +315,8 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
 }): Promise<HomeLogicGateDropCommandResult> {
   const logicGateID = args.logicGateID.trim();
-  const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
+  const rawFromLogicGateID = args.fromLogicGateID?.trim() ?? "";
+  const fromLogicGateID = rawFromLogicGateID === INBOX_NO_LOGIC_GATE_ID ? "" : rawFromLogicGateID;
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
   if (!logicGateID || nodeIDs.length === 0) return { nodes: [], racio_projection_rows: [] };
 

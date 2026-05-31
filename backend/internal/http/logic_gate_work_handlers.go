@@ -413,6 +413,7 @@ func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback 
 		return false
 	}
 	if err != nil {
+		log.Printf("%s: %v", fallback, err)
 		writeError(w, http.StatusInternalServerError, fallback)
 		return false
 	}
