@@ -405,52 +405,24 @@ create index if not exists idx_resource_access_grants_principal
 create index if not exists idx_resource_access_grants_resource
   on resource_access_grants(company_id, resource_type, resource_id);
 
-create table if not exists resource_access (
+create table if not exists resource_permissions (
   company_id uuid not null,
   resource_type text not null,
   resource_id uuid not null,
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint resource_access_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate')),
   primary key (company_id, resource_type, resource_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
-create index if not exists idx_resource_access_user_resource
-  on resource_access(company_id, user_id, resource_type, resource_id);
+create index if not exists idx_resource_permissions_user_resource
+  on resource_permissions(company_id, user_id, resource_type, resource_id);
 
-create index if not exists idx_resource_access_resource_user
-  on resource_access(company_id, resource_type, resource_id, user_id);
-
-create table if not exists effective_resource_access (
-  company_id uuid not null,
-  user_id uuid not null,
-  resource_type text not null,
-  resource_id uuid not null,
-  access_level text not null,
-  source_type text not null,
-  source_id text not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint effective_resource_access_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
-  constraint effective_resource_access_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
-  constraint effective_resource_access_source_type_nonblank_chk check (btrim(source_type) <> ''),
-  constraint effective_resource_access_source_id_nonblank_chk check (btrim(source_id) <> ''),
-  primary key (company_id, user_id, resource_type, resource_id),
-  foreign key (company_id) references companies (company_id) on delete cascade,
-  foreign key (user_id) references users (user_id) on delete cascade
-);
-
-create index if not exists idx_effective_resource_access_user_resource
-  on effective_resource_access(company_id, user_id, resource_type, resource_id);
-
-create index if not exists idx_effective_resource_access_resource_user
-  on effective_resource_access(company_id, resource_type, resource_id, user_id);
-
-create index if not exists idx_effective_resource_access_source
-  on effective_resource_access(company_id, source_type, source_id);
+create index if not exists idx_resource_permissions_resource_user
+  on resource_permissions(company_id, resource_type, resource_id, user_id);
 
 create or replace function mangorts_access_level_rank(p_access_level text)
 returns integer as $$
@@ -503,7 +475,7 @@ returns boolean as $$
   direct_override(exists_override) as (
     select exists (
       select 1
-      from resource_access access
+      from resource_permissions access
       join normalized_resource normalized
         on normalized.resource_type=access.resource_type
       where access.company_id=p_company_id
@@ -1226,27 +1198,18 @@ create trigger trg_sync_node_logic_gate_assignment_from_kanban_card
 after insert or update or delete on kanban_cards
 for each row execute function sync_node_logic_gate_assignment_from_kanban_card();
 
--- Rebuildable read model for work-item inbox endpoints.
+-- Targeted read model for RACIO matrix and work-item inbox endpoints.
 -- Source of truth remains nodes, node_logic_gate_assignments, logic_gates,
--- logic_gate_raci_assignments, users, and company_memberships.
-create table if not exists work_item_inbox_entries (
-  entry_id uuid not null,
+-- logic_gate_raci_assignments, users, and company_memberships. Application writes
+-- maintain only affected rows; there are intentionally no whole-table rebuild
+-- triggers or database-side rebuild functions for this projection.
+create table if not exists racio_matrix_projection_table (
   company_id uuid not null,
   user_id uuid not null,
-  entry_kind text not null,
-  role text not null,
-  node_id uuid,
+  resource_type text not null,
+  resource_id uuid not null,
   logic_gate_id uuid,
-  assignment_id uuid,
-  status_key text,
-  column_id uuid,
-  column_title text,
-  column_color text,
-  compatibility_board_id text,
-  compatibility_card_id uuid,
-  is_issue boolean,
-  position integer,
-  node_title text,
+  display_title text not null default '',
   status text,
   status_color text,
   due_date date,
@@ -1254,645 +1217,31 @@ create table if not exists work_item_inbox_entries (
   assignee_user_id uuid,
   assignee_display_name text,
   assignee_email text,
-  logic_gate_ids jsonb not null default '[]'::jsonb,
-  node_created_timestamp timestamptz,
-  logic_gate_header text,
-  logic_gate_created_timestamp timestamptz,
-  raci_created_timestamp timestamptz,
-  raci_user_display_name text,
-  raci_user_email text,
-  source_version bigint not null default 1,
-  source_updated_timestamp timestamptz not null default now(),
-  projected_timestamp timestamptz not null default now(),
-  constraint work_item_inbox_entries_kind_chk check (entry_kind in ('node', 'logic_gate')),
-  constraint work_item_inbox_entries_role_chk check (role in ('assignee', 'responsible', 'accountable', 'consulted', 'informed')),
-  constraint work_item_inbox_entries_shape_chk check (
-    (
-      entry_kind = 'node'
-      and role = 'assignee'
-      and node_id is not null
-      and assignee_user_id = user_id
-    )
-    or (
-      entry_kind = 'node'
-      and role = 'responsible'
-      and node_id is not null
-      and logic_gate_id is not null
-    )
-    or (
-      entry_kind = 'logic_gate'
-      and role in ('responsible', 'accountable', 'consulted', 'informed')
-      and logic_gate_id is not null
-      and node_id is null
-    )
+  resource_created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint racio_matrix_projection_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  constraint racio_matrix_projection_shape_chk check (
+    (resource_type = 'node')
+    or (resource_type = 'logic_gate' and logic_gate_id = resource_id)
   ),
-  constraint work_item_inbox_entries_logic_gate_ids_array_chk check (jsonb_typeof(logic_gate_ids) = 'array'),
-  primary key (company_id, entry_id),
+  primary key (company_id, user_id, resource_type, resource_id),
+  foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
-create unique index if not exists idx_work_item_inbox_entries_node_user_role
-  on work_item_inbox_entries(company_id, user_id, node_id, role)
-  where entry_kind = 'node';
+create index if not exists idx_racio_projection_node_read
+  on racio_matrix_projection_table(company_id, user_id, resource_type, logic_gate_id, resource_created_timestamp, resource_id)
+  where resource_type = 'node';
 
-create unique index if not exists idx_work_item_inbox_entries_logic_gate_user_role
-  on work_item_inbox_entries(company_id, logic_gate_id, user_id, role)
-  where entry_kind = 'logic_gate';
+create index if not exists idx_racio_projection_logic_gate_read
+  on racio_matrix_projection_table(company_id, user_id, resource_type, lower(display_title), resource_id)
+  where resource_type = 'logic_gate';
 
-create index if not exists idx_work_item_inbox_entries_node_read
-  on work_item_inbox_entries(company_id, user_id, role, node_created_timestamp, node_id)
-  where entry_kind = 'node';
+create index if not exists idx_racio_projection_logic_gate_user
+  on racio_matrix_projection_table(company_id, logic_gate_id, user_id);
 
-create index if not exists idx_work_item_inbox_entries_logic_gate_read
-  on work_item_inbox_entries(company_id, user_id, lower(logic_gate_header), logic_gate_id)
-  where entry_kind = 'logic_gate';
-
-create index if not exists idx_work_item_inbox_entries_logic_gate_assignments
-  on work_item_inbox_entries(
-    company_id,
-    logic_gate_id,
-    role,
-    lower(coalesce(nullif(raci_user_display_name, ''), nullif(raci_user_email, ''), user_id::text)),
-    user_id
-  )
-  where entry_kind = 'logic_gate';
-
-create or replace function rebuild_work_item_inbox_entries_for_node(p_company_id uuid, p_node_id uuid)
-returns void as $$
-begin
-  delete from work_item_inbox_entries entry
-  where entry.company_id = p_company_id
-    and entry.entry_kind = 'node'
-    and entry.node_id = p_node_id;
-
-  with node_read_model as (
-    select
-      n.company_id,
-      n.node_id,
-      assignment.logic_gate_id,
-      assignment.assignment_id,
-      assignment.status_key,
-      assignment.column_id,
-      column_row.title as column_title,
-      column_row.item_color as column_color,
-      assignment.compatibility_board_id,
-      assignment.compatibility_card_id,
-      assignment.is_issue,
-      assignment.position,
-      n.title as node_title,
-      coalesce(
-        case
-          when assignment.is_issue then 'Issue'
-          else column_row.title
-        end,
-        nullif(n.status, '')
-      ) as status,
-      coalesce(
-        case
-          when assignment.is_issue then '#ffd400'
-          else column_row.item_color
-        end,
-        nullif(n.status_color, '')
-      ) as status_color,
-      n.due_date,
-      n.priority,
-      n.assignee_user_id,
-      nullif(assignee.display_name, '') as assignee_display_name,
-      nullif(assignee.email, '') as assignee_email,
-      coalesce(node_logic_gates.logic_gate_ids_json, '[]'::jsonb) as logic_gate_ids,
-      n.created_timestamp as node_created_timestamp,
-      coalesce(assignment.version, 1) as source_version,
-      greatest(
-        n.created_timestamp,
-        coalesce(assignment.updated_timestamp, n.created_timestamp),
-        coalesce(column_row.updated_timestamp, n.created_timestamp),
-        coalesce(assignee.updated_timestamp, n.created_timestamp)
-      ) as source_updated_timestamp
-    from nodes n
-    left join lateral (
-      select assignment_row.*
-      from node_logic_gate_assignments assignment_row
-      where assignment_row.company_id = n.company_id
-        and assignment_row.node_id = n.node_id
-      order by assignment_row.updated_timestamp desc, assignment_row.created_timestamp desc, assignment_row.assignment_id desc
-      limit 1
-    ) assignment on true
-    left join kanban_columns column_row
-      on column_row.company_id = assignment.company_id
-     and column_row.board_id = assignment.compatibility_board_id
-     and column_row.column_id = assignment.column_id
-    left join company_memberships assignee_membership
-      on assignee_membership.company_id = n.company_id
-     and assignee_membership.user_id = n.assignee_user_id
-    left join users assignee
-      on assignee.user_id = assignee_membership.user_id
-    left join lateral (
-      select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb) as logic_gate_ids_json
-      from (
-        select distinct assignment_row.logic_gate_id::text as logic_gate_id
-        from node_logic_gate_assignments assignment_row
-        where assignment_row.company_id = n.company_id
-          and assignment_row.node_id = n.node_id
-      ) gate
-    ) node_logic_gates on true
-    where n.company_id = p_company_id
-      and n.node_id = p_node_id
-  ),
-  node_recipients as (
-    select
-      md5(n.company_id::text || ':node:' || n.node_id::text || ':assignee:' || n.assignee_user_id::text)::uuid as entry_id,
-      n.company_id,
-      n.assignee_user_id as user_id,
-      'assignee'::text as role,
-      n.node_id,
-      n.logic_gate_id,
-      n.assignment_id,
-      n.status_key,
-      n.column_id,
-      n.column_title,
-      n.column_color,
-      n.compatibility_board_id,
-      n.compatibility_card_id,
-      n.is_issue,
-      n.position,
-      n.node_title,
-      n.status,
-      n.status_color,
-      n.due_date,
-      n.priority,
-      n.assignee_user_id,
-      n.assignee_display_name,
-      n.assignee_email,
-      n.logic_gate_ids,
-      n.node_created_timestamp,
-      n.source_version,
-      n.source_updated_timestamp
-    from node_read_model n
-    where n.assignee_user_id is not null
-    union all
-    select
-      md5(n.company_id::text || ':node:' || n.node_id::text || ':responsible:' || raci.user_id::text)::uuid as entry_id,
-      n.company_id,
-      raci.user_id,
-      'responsible',
-      n.node_id,
-      n.logic_gate_id,
-      n.assignment_id,
-      n.status_key,
-      n.column_id,
-      n.column_title,
-      n.column_color,
-      n.compatibility_board_id,
-      n.compatibility_card_id,
-      n.is_issue,
-      n.position,
-      n.node_title,
-      n.status,
-      n.status_color,
-      n.due_date,
-      n.priority,
-      n.assignee_user_id,
-      n.assignee_display_name,
-      n.assignee_email,
-      n.logic_gate_ids,
-      n.node_created_timestamp,
-      n.source_version,
-      n.source_updated_timestamp
-    from node_read_model n
-    join logic_gate_raci_assignments raci
-      on raci.company_id = n.company_id
-     and raci.logic_gate_id = n.logic_gate_id
-     and raci.role = 'responsible'
-    join company_memberships responsible_membership
-      on responsible_membership.company_id = raci.company_id
-     and responsible_membership.user_id = raci.user_id
-    where n.logic_gate_id is not null
-  )
-  insert into work_item_inbox_entries (
-    entry_id,
-    company_id,
-    user_id,
-    entry_kind,
-    role,
-    node_id,
-    logic_gate_id,
-    assignment_id,
-    status_key,
-    column_id,
-    column_title,
-    column_color,
-    compatibility_board_id,
-    compatibility_card_id,
-    is_issue,
-    position,
-    node_title,
-    status,
-    status_color,
-    due_date,
-    priority,
-    assignee_user_id,
-    assignee_display_name,
-    assignee_email,
-    logic_gate_ids,
-    node_created_timestamp,
-    source_version,
-    source_updated_timestamp,
-    projected_timestamp
-  )
-  select
-    entry_id,
-    company_id,
-    user_id,
-    'node',
-    role,
-    node_id,
-    logic_gate_id,
-    assignment_id,
-    status_key,
-    column_id,
-    column_title,
-    column_color,
-    compatibility_board_id,
-    compatibility_card_id,
-    is_issue,
-    position,
-    node_title,
-    status,
-    status_color,
-    due_date,
-    priority,
-    assignee_user_id,
-    assignee_display_name,
-    assignee_email,
-    logic_gate_ids,
-    node_created_timestamp,
-    source_version,
-    source_updated_timestamp,
-    now()
-  from node_recipients
-  on conflict (company_id, entry_id)
-  do update set
-    user_id = excluded.user_id,
-    logic_gate_id = excluded.logic_gate_id,
-    assignment_id = excluded.assignment_id,
-    status_key = excluded.status_key,
-    column_id = excluded.column_id,
-    column_title = excluded.column_title,
-    column_color = excluded.column_color,
-    compatibility_board_id = excluded.compatibility_board_id,
-    compatibility_card_id = excluded.compatibility_card_id,
-    is_issue = excluded.is_issue,
-    position = excluded.position,
-    node_title = excluded.node_title,
-    status = excluded.status,
-    status_color = excluded.status_color,
-    due_date = excluded.due_date,
-    priority = excluded.priority,
-    assignee_user_id = excluded.assignee_user_id,
-    assignee_display_name = excluded.assignee_display_name,
-    assignee_email = excluded.assignee_email,
-    logic_gate_ids = excluded.logic_gate_ids,
-    node_created_timestamp = excluded.node_created_timestamp,
-    source_version = excluded.source_version,
-    source_updated_timestamp = excluded.source_updated_timestamp,
-    projected_timestamp = excluded.projected_timestamp;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_logic_gate(p_company_id uuid, p_logic_gate_id uuid)
-returns void as $$
-begin
-  delete from work_item_inbox_entries entry
-  where entry.company_id = p_company_id
-    and entry.entry_kind = 'logic_gate'
-    and entry.logic_gate_id = p_logic_gate_id;
-
-  insert into work_item_inbox_entries (
-    entry_id,
-    company_id,
-    user_id,
-    entry_kind,
-    role,
-    logic_gate_id,
-    logic_gate_header,
-    logic_gate_created_timestamp,
-    raci_created_timestamp,
-    raci_user_display_name,
-    raci_user_email,
-    source_updated_timestamp,
-    projected_timestamp
-  )
-  select
-    md5(logic_gate.company_id::text || ':logic_gate:' || logic_gate.logic_gate_id::text || ':' || assignment.role || ':' || assignment.user_id::text)::uuid,
-    logic_gate.company_id,
-    assignment.user_id,
-    'logic_gate',
-    assignment.role,
-    logic_gate.logic_gate_id,
-    logic_gate.header,
-    logic_gate.created_timestamp,
-    assignment.created_timestamp,
-    nullif(app_user.display_name, ''),
-    nullif(app_user.email, ''),
-    greatest(logic_gate.created_timestamp, assignment.created_timestamp, app_user.updated_timestamp),
-    now()
-  from logic_gates logic_gate
-  join logic_gate_raci_assignments assignment
-    on assignment.company_id = logic_gate.company_id
-   and assignment.logic_gate_id = logic_gate.logic_gate_id
-  join company_memberships membership
-    on membership.company_id = assignment.company_id
-   and membership.user_id = assignment.user_id
-  join users app_user
-    on app_user.user_id = assignment.user_id
-  where logic_gate.company_id = p_company_id
-    and logic_gate.logic_gate_id = p_logic_gate_id
-  on conflict (company_id, entry_id)
-  do update set
-    user_id = excluded.user_id,
-    role = excluded.role,
-    logic_gate_header = excluded.logic_gate_header,
-    logic_gate_created_timestamp = excluded.logic_gate_created_timestamp,
-    raci_created_timestamp = excluded.raci_created_timestamp,
-    raci_user_display_name = excluded.raci_user_display_name,
-    raci_user_email = excluded.raci_user_email,
-    source_updated_timestamp = excluded.source_updated_timestamp,
-    projected_timestamp = excluded.projected_timestamp;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_logic_gate_nodes(p_company_id uuid, p_logic_gate_id uuid)
-returns void as $$
-declare
-  source_row record;
-begin
-  for source_row in
-    select node_id
-    from node_logic_gate_assignments
-    where company_id = p_company_id
-      and logic_gate_id = p_logic_gate_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_node(p_company_id, source_row.node_id);
-  end loop;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_company(p_company_id uuid)
-returns void as $$
-declare
-  source_row record;
-begin
-  delete from work_item_inbox_entries entry
-  where entry.company_id = p_company_id;
-
-  for source_row in
-    select node_id
-    from nodes
-    where company_id = p_company_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_node(p_company_id, source_row.node_id);
-  end loop;
-
-  for source_row in
-    select logic_gate_id
-    from logic_gates
-    where company_id = p_company_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_logic_gate(p_company_id, source_row.logic_gate_id);
-  end loop;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_membership(p_company_id uuid, p_user_id uuid)
-returns void as $$
-declare
-  source_row record;
-begin
-  for source_row in
-    select node_id
-    from nodes
-    where company_id = p_company_id
-      and assignee_user_id = p_user_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_node(p_company_id, source_row.node_id);
-  end loop;
-
-  for source_row in
-    select distinct logic_gate_id
-    from logic_gate_raci_assignments
-    where company_id = p_company_id
-      and user_id = p_user_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_logic_gate(p_company_id, source_row.logic_gate_id);
-    perform rebuild_work_item_inbox_entries_for_logic_gate_nodes(p_company_id, source_row.logic_gate_id);
-  end loop;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_user(p_user_id uuid)
-returns void as $$
-declare
-  source_row record;
-begin
-  for source_row in
-    select company_id
-    from company_memberships
-    where user_id = p_user_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_membership(source_row.company_id, p_user_id);
-  end loop;
-end;
-$$ language plpgsql;
-
-create or replace function rebuild_work_item_inbox_entries_for_column(p_company_id uuid, p_board_id text, p_column_id uuid)
-returns void as $$
-declare
-  source_row record;
-begin
-  for source_row in
-    select node_id
-    from node_logic_gate_assignments
-    where company_id = p_company_id
-      and compatibility_board_id = p_board_id
-      and column_id = p_column_id
-  loop
-    perform rebuild_work_item_inbox_entries_for_node(p_company_id, source_row.node_id);
-  end loop;
-end;
-$$ language plpgsql;
-
-create or replace function trg_rebuild_work_item_inbox_entries_node()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_node(old.company_id, old.node_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.node_id is distinct from new.node_id) then
-    perform rebuild_work_item_inbox_entries_for_node(old.company_id, old.node_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_node(new.company_id, new.node_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_node on nodes;
-create trigger trg_rebuild_work_item_inbox_entries_node
-after insert or update or delete on nodes
-for each row execute function trg_rebuild_work_item_inbox_entries_node();
-
-create or replace function trg_rebuild_work_item_inbox_entries_assignment()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_node(old.company_id, old.node_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.node_id is distinct from new.node_id) then
-    perform rebuild_work_item_inbox_entries_for_node(old.company_id, old.node_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_node(new.company_id, new.node_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_assignment on node_logic_gate_assignments;
-create trigger trg_rebuild_work_item_inbox_entries_assignment
-after insert or update or delete on node_logic_gate_assignments
-for each row execute function trg_rebuild_work_item_inbox_entries_assignment();
-
-create or replace function trg_rebuild_work_item_inbox_entries_logic_gate()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_logic_gate(old.company_id, old.logic_gate_id);
-    perform rebuild_work_item_inbox_entries_for_logic_gate_nodes(old.company_id, old.logic_gate_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.logic_gate_id is distinct from new.logic_gate_id) then
-    perform rebuild_work_item_inbox_entries_for_logic_gate(old.company_id, old.logic_gate_id);
-    perform rebuild_work_item_inbox_entries_for_logic_gate_nodes(old.company_id, old.logic_gate_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_logic_gate(new.company_id, new.logic_gate_id);
-  perform rebuild_work_item_inbox_entries_for_logic_gate_nodes(new.company_id, new.logic_gate_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_logic_gate on logic_gates;
-create trigger trg_rebuild_work_item_inbox_entries_logic_gate
-after insert or update or delete on logic_gates
-for each row execute function trg_rebuild_work_item_inbox_entries_logic_gate();
-
-create or replace function trg_rebuild_work_item_inbox_entries_raci()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_logic_gate(old.company_id, old.logic_gate_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.logic_gate_id is distinct from new.logic_gate_id) then
-    perform rebuild_work_item_inbox_entries_for_logic_gate(old.company_id, old.logic_gate_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_logic_gate(new.company_id, new.logic_gate_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_raci on logic_gate_raci_assignments;
-create trigger trg_rebuild_work_item_inbox_entries_raci
-after insert or update or delete on logic_gate_raci_assignments
-for each row execute function trg_rebuild_work_item_inbox_entries_raci();
-
-create or replace function trg_rebuild_work_item_inbox_entries_membership()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_membership(old.company_id, old.user_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.user_id is distinct from new.user_id) then
-    perform rebuild_work_item_inbox_entries_for_membership(old.company_id, old.user_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_membership(new.company_id, new.user_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_membership on company_memberships;
-create trigger trg_rebuild_work_item_inbox_entries_membership
-after insert or update or delete on company_memberships
-for each row execute function trg_rebuild_work_item_inbox_entries_membership();
-
-create or replace function trg_rebuild_work_item_inbox_entries_user()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    delete from work_item_inbox_entries entry
-    where entry.user_id = old.user_id
-       or entry.assignee_user_id = old.user_id;
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and old.user_id is distinct from new.user_id then
-    perform rebuild_work_item_inbox_entries_for_user(old.user_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_user(new.user_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_user on users;
-create trigger trg_rebuild_work_item_inbox_entries_user
-after update or delete on users
-for each row execute function trg_rebuild_work_item_inbox_entries_user();
-
-create or replace function trg_rebuild_work_item_inbox_entries_column()
-returns trigger as $$
-begin
-  if tg_op = 'DELETE' then
-    perform rebuild_work_item_inbox_entries_for_column(old.company_id, old.board_id, old.column_id);
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE' and (old.company_id is distinct from new.company_id or old.board_id is distinct from new.board_id or old.column_id is distinct from new.column_id) then
-    perform rebuild_work_item_inbox_entries_for_column(old.company_id, old.board_id, old.column_id);
-  end if;
-
-  perform rebuild_work_item_inbox_entries_for_column(new.company_id, new.board_id, new.column_id);
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_rebuild_work_item_inbox_entries_column on kanban_columns;
-create trigger trg_rebuild_work_item_inbox_entries_column
-after update or delete on kanban_columns
-for each row execute function trg_rebuild_work_item_inbox_entries_column();
-
-do $$
-declare
-  company_row record;
-begin
-  for company_row in
-    select company_id
-    from companies
-  loop
-    perform rebuild_work_item_inbox_entries_for_company(company_row.company_id);
-  end loop;
-end $$;
-
-
+create index if not exists idx_racio_projection_resource
+  on racio_matrix_projection_table(company_id, resource_type, resource_id);
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 drop index if exists idx_node_projection_table_one_text_box;

@@ -430,9 +430,6 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatal(err)
-	}
 	totalCount := 42
 	nylas := &fakeNylasClient{
 		folders: []NylasFolder{{ID: "archive", Name: "Archive", Attributes: []string{"\\Archive"}, TotalCount: &totalCount}},
@@ -500,10 +497,6 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatal(err)
-	}
-
 	nylas := &fakeNylasClient{}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
@@ -530,10 +523,6 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatal(err)
-	}
-
 	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-support" {
 		t.Fatalf("send grant = %q, want shared inbox grant", nylas.lastSendGrantID)

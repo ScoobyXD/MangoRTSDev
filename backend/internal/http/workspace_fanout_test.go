@@ -202,9 +202,6 @@ func TestWorkspaceStreamUserScopedFanoutUsesEffectiveAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	viewerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server.Routes().ServeHTTP(w, requestWithActorForTest(r, viewer, companyID))

@@ -442,14 +442,16 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 	}
 	rows, err := r.db.QueryContext(ctx,
 		`with visible_shared_triage as (
-		   select access.resource_id,
-		          (array_agg(access.access_level order by mangorts_access_level_rank(access.access_level) desc))[1]::text as access_level
-		   from effective_resource_access access
-		   where access.company_id=$1::uuid
-		     and access.user_id=$3::uuid
-		     and access.resource_type='shared_triage_folder'
-		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
-		   group by access.resource_id
+		   select shared.folder_id as resource_id,
+		          case
+		            when mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, 'admin') then 'admin'
+		            when mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, 'edit') then 'edit'
+		            else 'view'
+		          end as access_level
+		   from company_explorer_folders shared
+		   where shared.company_id=$1::uuid
+		     and shared.folder_kind='communications'
+		     and mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, $4)
 		 )
 		 select folder.company_id, folder.folder_id, folder.parent_folder_id, folder.folder_kind, folder.system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
 		        visible_shared_triage.access_level
@@ -592,14 +594,15 @@ with recursive subtree as (
    and child.parent_folder_id=parent.folder_id
   where ($3::text is null or child.folder_kind=$3)
 ), visible_shared_triage as (
-  select access.resource_id,
-         (array_agg(access.access_level order by mangorts_access_level_rank(access.access_level) desc))[1]::text as access_level
-  from effective_resource_access access
-  where access.company_id=$1::uuid
-    and access.user_id=$4::uuid
-    and access.resource_type='shared_triage_folder'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
-  group by access.resource_id
+  select subtree.folder_id as resource_id,
+         case
+           when mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, 'admin') then 'admin'
+           when mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, 'edit') then 'edit'
+           else 'view'
+         end as access_level
+  from subtree
+  where subtree.folder_kind='communications'
+    and mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, $5)
 )
 select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.folder_kind, subtree.system_key, subtree.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "subtree")+`, subtree.position, subtree.created_timestamp, subtree.updated_timestamp,
        visible_shared_triage.access_level
@@ -1177,6 +1180,9 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
 		return err
 	}
+	if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_relationships
 		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
@@ -1227,10 +1233,10 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from resource_access
+		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
+	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,
@@ -1253,6 +1259,9 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 
 func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
+	}
+	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 		return err
 	}
 	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {
@@ -1356,10 +1365,10 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from resource_access
+		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
+	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,
@@ -1671,14 +1680,12 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		   and item.item_type <> 'kanban'
 		   and (
 		     item.item_type not in ('node', 'logic_gate')
-		     or exists (
-		       select 1
-		       from effective_resource_access access
-		       where access.company_id=item.company_id
-		         and access.user_id=$4::uuid
-		         and access.resource_type=case item.item_type when 'node' then 'node' else 'logic_gate' end
-		         and access.resource_id::text=item.item_id
-		         and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+		     or mangorts_user_can_access_resource(
+		       item.company_id,
+		       case item.item_type when 'node' then 'node' else 'logic_gate' end,
+		       item.item_id::uuid,
+		       $4::uuid,
+		       $5
 		     )
 		   )
 		 order by item.position asc, item.created_timestamp asc`,
@@ -1799,14 +1806,12 @@ where item.company_id=$1::uuid
   and item.item_type <> 'kanban'
   and (
     item.item_type not in ('node', 'logic_gate')
-    or exists (
-      select 1
-      from effective_resource_access access
-      where access.company_id=item.company_id
-        and access.user_id=$4::uuid
-        and access.resource_type=case item.item_type when 'node' then 'node' else 'logic_gate' end
-        and access.resource_id::text=item.item_id
-        and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($5)
+    or mangorts_user_can_access_resource(
+      item.company_id,
+      case item.item_type when 'node' then 'node' else 'logic_gate' end,
+      item.item_id::uuid,
+      $4::uuid,
+      $5
     )
   )
 order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam, userID, EntityPermissionView)
@@ -1878,15 +1883,8 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID
 	rows, err := r.db.QueryContext(context.Background(), `
 select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
 from nodes n
-join (
-  select distinct access.resource_id
-  from effective_resource_access access
-  where access.company_id=$1::uuid
-    and access.user_id=$2::uuid
-    and access.resource_type='node'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
-) visible on visible.resource_id=n.node_id
 where n.company_id=$1::uuid
+  and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $2::uuid, $3)
 order by n.created_timestamp asc, n.node_id::text asc`, companyID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
@@ -1961,19 +1959,12 @@ with recursive folder_scope as (
   join folder_scope folder on folder.folder_id=item.folder_id
   where item.company_id=$1::uuid
     and item.item_type='node'
-), visible_nodes as (
-  select distinct access.resource_id as node_id
-  from effective_resource_access access
-  join folder_nodes folder_node on folder_node.node_id=access.resource_id
-  where access.company_id=$1::uuid
-    and access.user_id=$3::uuid
-    and access.resource_type='node'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
 )
 select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
 from nodes n
-join visible_nodes visible on visible.node_id=n.node_id
+join folder_nodes visible on visible.node_id=n.node_id
 where n.company_id=$1::uuid
+  and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $3::uuid, $4)
 order by n.created_timestamp asc, n.node_id::text asc`, companyID, folderID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
@@ -2021,15 +2012,8 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, u
 	rows, err := r.db.QueryContext(context.Background(), `
 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 from logic_gates gate
-join (
-  select distinct access.resource_id
-  from effective_resource_access access
-  where access.company_id=$1::uuid
-    and access.user_id=$2::uuid
-    and access.resource_type='logic_gate'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
-) visible on visible.resource_id=gate.logic_gate_id
 where gate.company_id=$1::uuid
+  and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $2::uuid, $3)
 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err
@@ -2104,19 +2088,12 @@ with recursive folder_scope as (
   join folder_scope folder on folder.folder_id=item.folder_id
   where item.company_id=$1::uuid
     and item.item_type='logic_gate'
-), visible_gates as (
-  select distinct access.resource_id as logic_gate_id
-  from effective_resource_access access
-  join folder_gates folder_gate on folder_gate.logic_gate_id=access.resource_id
-  where access.company_id=$1::uuid
-    and access.user_id=$3::uuid
-    and access.resource_type='logic_gate'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
 )
 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 from logic_gates gate
-join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+join folder_gates visible on visible.logic_gate_id=gate.logic_gate_id
 where gate.company_id=$1::uuid
+  and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $3::uuid, $4)
 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, folderID, userID, EntityPermissionView)
 	if err != nil {
 		return nil, err

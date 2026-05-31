@@ -281,17 +281,8 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:     now,
 		})
 		r.syncNodeStatusFromKanbanCardLocked(card)
-		if r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID) {
-			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, nodeID); err != nil {
-				return CommunicationsTriageConversionResult{}, err
-			}
-		}
-		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, nodeID); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(input.CompanyID, []string{input.LogicGateID}, []string{nodeID}); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
+		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID)
+		r.syncRacioProjectionForNodeLocked(input.CompanyID, nodeID)
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,

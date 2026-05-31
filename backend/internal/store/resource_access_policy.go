@@ -22,3 +22,29 @@ func permissionInputAccessLevel(input EntityPermissionInput) string {
 	}
 	return accessLevel
 }
+
+func inferredResourceDefaultAccessFromPermissions(permissions []EntityPermissionInput) (string, bool, error) {
+	if len(permissions) == 0 {
+		return "", false, nil
+	}
+	hasPositiveGrant := false
+	hasNoAccess := false
+	for _, permission := range permissions {
+		accessLevel, ok := NormalizeEntityPermission(permissionInputAccessLevel(permission))
+		if !ok {
+			return "", false, ErrInvalid
+		}
+		if accessLevel == EntityPermissionNoAccess {
+			hasNoAccess = true
+			continue
+		}
+		hasPositiveGrant = true
+	}
+	if hasPositiveGrant {
+		return ResourceDefaultAccessNoAccess, true, nil
+	}
+	if hasNoAccess {
+		return ResourceDefaultAccessEdit, true, nil
+	}
+	return "", false, nil
+}

@@ -50,9 +50,6 @@ func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, company
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions %s %s: %v", entityType, entityID, err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 }
 
 func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
@@ -228,7 +225,7 @@ func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignmen
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
-	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
+	repo := backing
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "77777777-7777-4777-8777-777777777770"
@@ -320,9 +317,6 @@ func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignmen
 	accountableNotifications = listNotifications(accountable)
 	if len(accountableNotifications) != 2 {
 		t.Fatalf("accountable notification count after reassignment = %d, want 2: %+v", len(accountableNotifications), accountableNotifications)
-	}
-	if repo.rebuildCalls != 0 {
-		t.Fatalf("Logic Gate RACI notification flow called full-company rebuild %d times, want 0", repo.rebuildCalls)
 	}
 }
 

@@ -65,9 +65,6 @@ func TestPhase6NotificationRecipientsUseRACIRouting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	notifications, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666699",
@@ -157,15 +154,9 @@ func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany setup: %v", err)
-	}
 
 	process := func(label, wantType, wantTitle string, events []domain.DomainEvent) []domain.Notification {
 		t.Helper()
-		if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-			t.Fatalf("%s RebuildEffectiveResourceAccessForCompany: %v", label, err)
-		}
 		items, err := service.ProcessDomainEvents(context.Background(), events)
 		if err != nil {
 			t.Fatalf("%s ProcessDomainEvents: %v", label, err)
@@ -405,9 +396,6 @@ func TestProcessDomainEventNodeMentionFiltersByEffectiveAccessAndSkipsActor(t *t
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666622",
@@ -487,9 +475,6 @@ func TestProcessDomainEventNodeAssignmentUsesEffectiveAccessMyTriageAndSkipsActo
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666632",
@@ -552,36 +537,23 @@ func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t 
 		t.Fatalf("CreateNode: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   assignee.UserID,
-			AccessLevel: store.EntityPermissionView,
-			Permission:  store.EntityPermissionView,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{assignee.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   assignee.UserID,
-			AccessLevel: store.EntityPermissionNoAccess,
-			Permission:  store.EntityPermissionNoAccess,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
@@ -645,9 +617,6 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
 		CompanyID: companyID,
@@ -750,14 +719,8 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeSharedTriageFolder, EntityID: folder.FolderID}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
@@ -804,9 +767,6 @@ func TestProcessDomainEventDuplicateReturnsNoNewNotifications(t *testing.T) {
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	event := domain.DomainEvent{
@@ -868,9 +828,6 @@ func TestReplayDomainEventsRetriesFailedProjectionWithoutAdvancingCheckpoint(t *
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 	event, err := base.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:   companyID,
@@ -953,9 +910,6 @@ func TestReplayDomainEventsSkipsMissingSourceEntityAndAdvancesCheckpoint(t *test
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	staleEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:   companyID,
@@ -1025,20 +979,14 @@ func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   assignee.UserID,
-			AccessLevel: store.EntityPermissionView,
-			Permission:  store.EntityPermissionView,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{assignee.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("first RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
 		EventID:     "66666666-6666-4666-8666-666666666692",
@@ -1068,20 +1016,13 @@ func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
 	}
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   assignee.UserID,
-			AccessLevel: store.EntityPermissionNoAccess,
-			Permission:  store.EntityPermissionNoAccess,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("second RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 	after, err := repo.ListNotifications(store.NotificationListInput{UserID: assignee.UserID, CompanyID: companyID, Limit: 50})
 	if err != nil {
@@ -1143,7 +1084,6 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 			"listpendingnotificationevents",
 			"marknotificationeventprocessed",
 			"listaccessibleentityids",
-			"mangorts_user_can_access_resource",
 			"usercanaccessentity",
 			"usercanaccessentitylocked",
 			"recordkanbanstatenotification",

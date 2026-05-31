@@ -1863,12 +1863,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   ), [assignedMyLogicGateIDs, myNodes]);
   const otherAssignedNodes = useMemo(() => (
     myNodes
-      .filter((node) => !cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => assignedMyLogicGateIDs.has(logicGateID)))
+      .filter((node) => cleanIDList(node.logic_gate_ids ?? []).length === 0)
       .sort((a, b) => (
         nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
         || a.node_id.localeCompare(b.node_id)
       ))
-  ), [assignedMyLogicGateIDs, myNodes]);
+  ), [myNodes]);
   const myNodeGroups = useMemo(() => buildMyNodeGroups({
     nodes: myLogicGateNodes,
     logicGateFolders,

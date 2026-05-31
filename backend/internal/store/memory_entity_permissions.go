@@ -330,7 +330,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if usesDefaultResourceAccessPolicy(entityType) && (input.DefaultAccessSet || len(input.OverrideUserIDs) > 0) {
+	if usesDefaultResourceAccessPolicy(entityType) {
 		return r.setDefaultResourceAccessPolicyLocked(input, companyID, entityType, entityID)
 	}
 
@@ -478,12 +478,25 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		return nil, ErrNotFound
 	}
 	defaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
+	defaultAccessChanged := false
 	if input.DefaultAccessSet {
 		nextDefaultAccess, ok := NormalizeResourceDefaultAccess(input.DefaultAccess)
 		if !ok {
 			return nil, ErrInvalid
 		}
 		defaultAccess = nextDefaultAccess
+		defaultAccessChanged = true
+	} else if len(input.OverrideUserIDs) == 0 {
+		inferredDefaultAccess, inferred, err := inferredResourceDefaultAccessFromPermissions(input.Permissions)
+		if err != nil {
+			return nil, err
+		}
+		if inferred {
+			defaultAccess = inferredDefaultAccess
+			defaultAccessChanged = true
+		}
+	}
+	if defaultAccessChanged {
 		switch entityType {
 		case EntityTypeNode:
 			node := r.nodes[key(companyID, entityID)]
@@ -667,20 +680,28 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 }
 
 func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, userID, accessLevel string) bool {
+	return r.userHasResourcePermissionLocked(companyID, userID, entityType, entityID, accessLevel)
+}
+
+func (r *MemoryRepo) resourceHasDirectEntityPermissionsLocked(companyID, entityType, entityID string) bool {
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID &&
+			permission.EntityType == entityType &&
+			permission.EntityID == entityID &&
+			permission.SubjectType == EntityPermissionSubjectUser {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *MemoryRepo) userHasSharedTriagePermissionLocked(companyID, entityID, userID, accessLevel string) bool {
 	requiredRank := entityPermissionRank(accessLevel)
 	if requiredRank == 0 {
 		return false
 	}
-	if r.userHasRoleAdminAccessLocked(companyID, userID) {
-		return true
-	}
-	if r.userHasEffectiveAccessLocked(companyID, userID, entityType, entityID, accessLevel) {
-		return true
-	}
 	entityIDs := []string{entityID}
-	if entityType == EntityTypeSharedTriageFolder {
-		entityIDs = r.sharedTriageFolderAncestryLocked(companyID, entityID)
-	}
+	entityIDs = r.sharedTriageFolderAncestryLocked(companyID, entityID)
 	type matchedGrant struct {
 		depth       int
 		subjectRank int
@@ -690,7 +711,7 @@ func (r *MemoryRepo) userCanAccessEntityLocked(companyID, entityType, entityID, 
 	found := false
 	for depth, currentEntityID := range entityIDs {
 		for _, permission := range r.entityPermissions {
-			if permission.CompanyID != companyID || permission.EntityType != entityType || permission.EntityID != currentEntityID {
+			if permission.CompanyID != companyID || permission.EntityType != EntityTypeSharedTriageFolder || permission.EntityID != currentEntityID {
 				continue
 			}
 			subjectRank := 0

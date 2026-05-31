@@ -197,6 +197,9 @@ where company_id=$1 and logic_gate_id=$2::uuid`,
 		companyID, logicGateID, normalizeKanbanBoardTitle(LogicGateKanbanBoardID(logicGateID), header)); err != nil {
 		return domain.LogicGate{}, err
 	}
+	if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return domain.LogicGate{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -246,15 +249,8 @@ func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain
 	rows, err := r.db.QueryContext(ctx,
 		`select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 		 from logic_gates gate
-		 join (
-		   select distinct access.resource_id
-		   from effective_resource_access access
-		   where access.company_id=$1::uuid
-		     and access.user_id=$2::uuid
-		     and access.resource_type='logic_gate'
-		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
-		 ) visible on visible.resource_id=gate.logic_gate_id
 		 where gate.company_id=$1::uuid
+		   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $2::uuid, $3::text)
 		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
 		companyID, userID, EntityPermissionView,
 	)
@@ -359,19 +355,12 @@ func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID,
 		   from company_explorer_folder_items item
 		   join folder_scope folder on folder.folder_id=item.folder_id
 		   where item.company_id=$1::uuid and item.item_type='logic_gate'
-		 ), visible_gates as (
-		   select distinct access.resource_id as logic_gate_id
-		   from effective_resource_access access
-		   join folder_gates folder_gate on folder_gate.logic_gate_id=access.resource_id
-		   where access.company_id=$1::uuid
-		     and access.user_id=$3::uuid
-		     and access.resource_type='logic_gate'
-		     and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($4)
 		 )
 		 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 		 from logic_gates gate
-		 join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+		 join folder_gates visible on visible.logic_gate_id=gate.logic_gate_id
 		 where gate.company_id=$1::uuid
+		   and mangorts_user_can_access_resource(gate.company_id, 'logic_gate', gate.logic_gate_id, $3::uuid, $4::text)
 		 order by gate.created_timestamp asc, gate.logic_gate_id::text asc`,
 		companyID, folderID, userID, EntityPermissionView,
 	)
@@ -530,15 +519,8 @@ func (r *PostgresRepo) QueryVisibleLogicGates(companyID, userID string, query Lo
 	}
 	sqlText := `select logic_gate.company_id, logic_gate.logic_gate_id, logic_gate.header, logic_gate.created_timestamp
 from logic_gates logic_gate
-join (
-  select distinct access.resource_id
-  from effective_resource_access access
-  where access.company_id=$1::uuid
-    and access.user_id=$2::uuid
-    and access.resource_type='logic_gate'
-    and mangorts_access_level_rank(access.access_level) >= mangorts_access_level_rank($3)
-) visible on visible.resource_id=logic_gate.logic_gate_id
 where ` + strings.Join(conditions, " and ") + `
+  and mangorts_user_can_access_resource(logic_gate.company_id, 'logic_gate', logic_gate.logic_gate_id, $2::uuid, $3::text)
 order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
 	if query.Limit > 0 {
 		args = append(args, query.Limit)
@@ -638,6 +620,11 @@ func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignment
 	} else if err != nil {
 		return nil, err
 	}
+	beforeByGate, err := listLogicGateRaciAssignmentsTx(ctx, tx, companyID, []string{logicGateID})
+	if err != nil {
+		return nil, err
+	}
+	before := cloneLogicGateRaciAssignments(beforeByGate[logicGateID])
 
 	type normalizedAssignment struct {
 		role   string
@@ -699,17 +686,25 @@ on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
 			return nil, err
 		}
 	}
+	assignmentsByGate, err := listLogicGateRaciAssignmentsTx(ctx, tx, companyID, []string{logicGateID})
+	if err != nil {
+		return nil, err
+	}
+	assignments := cloneLogicGateRaciAssignments(assignmentsByGate[logicGateID])
+	if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, assignments); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	assignmentsByGate, err := r.listLogicGateRaciAssignments(ctx, companyID, []string{logicGateID})
+	assignmentsByGate, err = r.listLogicGateRaciAssignments(ctx, companyID, []string{logicGateID})
 	if err != nil {
 		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
 			return nil, ErrRaciStorageUnavailable
 		}
 		return nil, err
 	}
-	assignments := assignmentsByGate[logicGateID]
+	assignments = assignmentsByGate[logicGateID]
 	if assignments == nil {
 		assignments = []domain.LogicGateRaciAssignment{}
 	}
@@ -725,6 +720,9 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	defer tx.Rollback()
 
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
+	}
+	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 		return err
 	}
 	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {
@@ -840,10 +838,10 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from resource_access
+		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access") {
+	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 		return err
 	}
 

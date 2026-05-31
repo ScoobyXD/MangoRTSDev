@@ -503,7 +503,7 @@ select access.company_id::text,
        nullif(app_user.email, ''),
        $4::text,
        access.created_timestamp
-from resource_access access
+from resource_permissions access
 join users app_user on app_user.user_id=access.user_id
 where access.company_id=$1::uuid
   and access.resource_type=$2
@@ -967,9 +967,9 @@ func (r *PostgresRepo) UserCanAccessEntity(companyID, entityType, entityID, user
 	} else if !exists {
 		return false, ErrNotFound
 	}
-	if allowed, err := r.UserHasEffectiveAccess(companyID, userID, entityType, entityID, accessLevel); err == nil && allowed {
-		return true, nil
-	} else if err != nil && !errors.Is(err, ErrInvalid) && !isPostgresUndefinedTable(err, "effective_resource_access") {
+	if allowed, err := r.UserHasEffectiveAccess(companyID, userID, entityType, entityID, accessLevel); err == nil {
+		return allowed, nil
+	} else if err != nil && !errors.Is(err, ErrInvalid) {
 		return false, err
 	}
 	var allowed bool

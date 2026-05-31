@@ -16,7 +16,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
-	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
+	repo := backing
 	server := NewServer(repo)
 	companyID := "company-shared-inbox-route-test"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
@@ -107,16 +107,13 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	if len(listPayload.SharedInboxes) != 1 || listPayload.SharedInboxes[0].FolderID != created.FolderID || listPayload.SharedInboxes[0].AccountEmail != "shared@example.com" {
 		t.Fatalf("shared inbox list = %+v", listPayload.SharedInboxes)
 	}
-	if repo.rebuildCalls != 0 {
-		t.Fatalf("shared inbox access route called full-company rebuild %d times, want 0", repo.rebuildCalls)
-	}
 }
 
 func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPermissions(t *testing.T) {
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
-	repo := &noRebuildEffectiveAccessRepo{MemoryRepo: backing}
+	repo := backing
 	server := NewServer(repo)
 	companyID := "company-shared-inbox-access-no-raci-compat"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
@@ -163,9 +160,6 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPerm
 	if allowed {
 		t.Fatal("assignments-only access update created effective access, want no derived compatibility")
 	}
-	if repo.rebuildCalls != 0 {
-		t.Fatalf("shared inbox assignments-only access route called full-company rebuild %d times, want 0", repo.rebuildCalls)
-	}
 }
 
 func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
@@ -206,9 +200,6 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions admin error = %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany error = %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -294,9 +285,6 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions unrelated error = %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)

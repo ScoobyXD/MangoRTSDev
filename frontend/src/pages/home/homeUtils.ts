@@ -403,7 +403,8 @@ export function buildRaciRoleInboxGroupsByCell(
         continue;
       }
       for (const logicGateID of logicGateIDs) {
-        if (logicGateHasAnyRaciRole(logicGateByID.get(logicGateID), cleanUserID)) continue;
+        const logicGate = logicGateByID.get(logicGateID);
+        if (logicGateHasAnyRaciRole(logicGate, cleanUserID)) continue;
         addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), logicGateID, node.node_id);
       }
       continue;

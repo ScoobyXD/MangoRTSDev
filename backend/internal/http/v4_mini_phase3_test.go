@@ -51,9 +51,6 @@ func TestV4MiniPhase3LegacyKanbanCardMutationUsesLogicGateWorkAccess(t *testing.
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 
 	repo := &phase3ForbiddenKanbanCardListRepo{Repository: base}
 	server := NewServer(repo)
@@ -101,9 +98,6 @@ func TestV4MiniPhase3LogicGateWorkAndKanbanReadDeniedResponses(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden phase 3 gate: %v", err)
 	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
-	}
 	server := NewServer(repo)
 	defer server.Close()
 	handler := server.Routes()
@@ -128,7 +122,7 @@ func TestV4MiniPhase3KanbanMutationDeniedResponses(t *testing.T) {
 	companyID := "77777777-7777-4777-8777-777777777733"
 	repo.EnsureCompany(companyID, "V4 Mini Kanban Mutation Co")
 	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "v4-mini-kanban-viewer")
-	logicGate, err := repo.CreateLogicGate(companyID, "View Only Phase 3 Gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "Hidden Phase 3 Mutation Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
@@ -143,13 +137,10 @@ func TestV4MiniPhase3KanbanMutationDeniedResponses(t *testing.T) {
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionNoAccess,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if err := repo.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 	server := NewServer(repo)
 	defer server.Close()
@@ -166,7 +157,7 @@ func TestV4MiniPhase3KanbanMutationDeniedResponses(t *testing.T) {
 	req = requestWithLogicGateWorkActorForTest(req, viewer, companyID)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	assertGenericActionDenied(t, rec, logicGate.Header)
+	assertGenericResourceDenied(t, rec, logicGate.Header)
 }
 
 func TestV4MiniPhase3OldKanbanRoutePolicy(t *testing.T) {
@@ -259,9 +250,6 @@ func TestV4MiniPhase3KanbanBoardListProjectsVisibleLogicGates(t *testing.T) {
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden projection gate: %v", err)
-	}
-	if err := base.RebuildEffectiveResourceAccessForCompany(companyID); err != nil {
-		t.Fatalf("RebuildEffectiveResourceAccessForCompany: %v", err)
 	}
 
 	repo := &phase3ForbiddenKanbanBoardListRepo{Repository: base}

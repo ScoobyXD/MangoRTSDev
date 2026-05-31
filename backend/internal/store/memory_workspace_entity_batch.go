@@ -97,15 +97,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				created.AssigneeUserID = &input.CreatorUserID
 			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
-			if err := r.recomputeNodeAssigneeEffectiveAccessLocked(input.CompanyID, created.NodeID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeNode, created.NodeID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
+			r.syncRacioProjectionForNodeLocked(input.CompanyID, created.NodeID)
 			if input.CreatorUserID != "" {
 				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
 			}
@@ -134,12 +126,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
-		if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
-			return WorkspaceEntityBatchResult{}, err
-		}
-		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(input.CompanyID, EntityTypeLogicGate, created.LogicGateID); err != nil {
-			return WorkspaceEntityBatchResult{}, err
-		}
 		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
 			user, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID)
 			if !ok {
@@ -156,7 +142,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			}
 			r.logicGateRaci[key(input.CompanyID, created.LogicGateID)] = []domain.LogicGateRaciAssignment{assignment}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
-			r.rebuildWorkItemInboxEntriesForLogicGateLocked(input.CompanyID, created.LogicGateID)
+			r.syncRacioProjectionForLogicGateAssignmentsLocked(input.CompanyID, created.LogicGateID, nil, created.RaciAssignments)
 		}
 		if input.CreatorUserID != "" {
 			created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)

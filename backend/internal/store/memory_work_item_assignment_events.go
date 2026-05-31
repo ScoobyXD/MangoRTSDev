@@ -9,7 +9,7 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
 	entityPermissions        map[string]domain.EntityPermission
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
-	workItemInboxEntries     map[string]memoryWorkItemInboxEntry
+	racioProjectionRows      map[string]memoryRacioProjectionRow
 	domainEvents             map[string]domain.DomainEvent
 }
 
@@ -21,7 +21,7 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
 		entityPermissions:        cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
-		workItemInboxEntries:     cloneMemoryMap(r.workItemInboxEntries),
+		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
 	}
 }
@@ -33,6 +33,6 @@ func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWo
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
-	r.workItemInboxEntries = snapshot.workItemInboxEntries
+	r.racioProjectionRows = snapshot.racioProjectionRows
 	r.domainEvents = snapshot.domainEvents
 }
