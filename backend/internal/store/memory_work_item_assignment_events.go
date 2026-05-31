@@ -7,6 +7,7 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 	folderItems              map[string]domain.CompanyExplorerFolderItem
 	kanbanCards              map[string][]domain.KanbanCard
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
+	emailNodeLinks           map[string]communicationsEmailNodeLink
 	entityPermissions        map[string]domain.EntityPermission
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
 	racioProjectionRows      map[string]memoryRacioProjectionRow
@@ -19,6 +20,7 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 		folderItems:              cloneMemoryMap(r.folderItems),
 		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
+		emailNodeLinks:           cloneMemoryMap(r.emailNodeLinks),
 		entityPermissions:        cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
 		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
@@ -31,6 +33,7 @@ func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWo
 	r.folderItems = snapshot.folderItems
 	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
+	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.racioProjectionRows = snapshot.racioProjectionRows
