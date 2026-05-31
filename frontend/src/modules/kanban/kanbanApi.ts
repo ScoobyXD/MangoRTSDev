@@ -1,4 +1,6 @@
 import { requestJSON } from "../api/requestJSON.js";
+import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import type { LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { logicGateIDFromKanbanBoardID, logicGateKanbanBoardID } from "./shared.js";
@@ -177,7 +179,72 @@ export async function upsertKanbanCard(args: {
   return card;
 }
 
-export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord };
+export type RacioMatrixProjectionRow = {
+  company_id: string;
+  user_id: string;
+  resource_type: "node" | "logic_gate";
+  resource_id: string;
+  logic_gate_id?: string;
+  display_title: string;
+  status?: string;
+  status_color?: string;
+  due_date?: string;
+  priority?: number;
+  assignee_user_id?: string;
+  assignee_display_name?: string;
+  assignee_email?: string;
+  resource_created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; racio_projection_rows?: RacioMatrixProjectionRow[] };
+
+export type RacioMatrixNodeCreateResult = {
+  node: NodeRecord;
+  logic_gate?: LogicGateRecord;
+  assignment?: unknown;
+  card?: KanbanCard;
+  folder_items?: CompanyExplorerFolderItem[];
+  racio_projection_rows?: RacioMatrixProjectionRow[];
+};
+
+export async function createRacioMatrixNode(args: {
+  apiBase: string;
+  companyID: string;
+  title: string;
+  logicGateID?: string;
+  createLogicGateHeader?: string;
+  creatorLogicGateRaciRole?: LogicGateRaciRole;
+  status?: string;
+  columnID?: string;
+  priority?: number | null;
+  position?: number;
+  isIssue?: boolean;
+}): Promise<RacioMatrixNodeCreateResult> {
+  const payload = await requestJSON<RacioMatrixNodeCreateResult>(args.apiBase, "/v2/racio-matrix/nodes", {
+    method: "POST",
+    json: {
+      company_id: args.companyID,
+      title: args.title,
+      logic_gate_id: args.logicGateID,
+      create_logic_gate_header: args.createLogicGateHeader,
+      creator_logic_gate_raci_role: args.creatorLogicGateRaciRole,
+      status: args.status ?? args.columnID,
+      priority: args.priority,
+      position: args.position,
+      is_issue: args.isIssue,
+      assignee_policy: "first_responsible",
+    },
+  });
+  if (payload.logic_gate?.logic_gate_id) {
+    invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, payload.logic_gate.logic_gate_id);
+  }
+  if (payload.card?.board_id) {
+    markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, payload.card.board_id);
+  }
+  markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  return payload;
+}
 
 export async function assignNodeToLogicGateStatus(args: {
   apiBase: string;
@@ -244,13 +311,12 @@ export async function moveLogicGateAssignment(args: {
       node: { ...payload.node },
     };
   }
-  const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/move", {
+  const payload = await requestJSON<LogicGateAssignmentCommandResult>(args.apiBase, `/v2/racio-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
     method: "POST",
     json: {
       company_id: args.companyID,
-      logic_gate_id: args.logicGateID,
+      to_logic_gate_id: args.logicGateID,
       from_logic_gate_id: args.fromLogicGateID,
-      node_id: args.nodeID,
       status: args.status,
       column_id: args.columnID,
       position: args.position,

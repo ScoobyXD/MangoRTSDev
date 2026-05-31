@@ -158,31 +158,34 @@ func (r *MemoryRepo) syncRacioProjectionForNodeLocked(companyID, nodeID string) 
 	if companyID == "" || nodeID == "" {
 		return
 	}
-	r.deleteRacioProjectionForNodeLocked(companyID, nodeID)
+	desired := map[string]bool{}
 	node, ok := r.nodes[key(companyID, nodeID)]
-	if !ok {
-		return
-	}
-	node = r.withNodeReadModelLocked(node)
-	assignment, assigned := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
-	if assigned && strings.TrimSpace(assignment.LogicGateID) != "" {
-		logicGateID := strings.TrimSpace(assignment.LogicGateID)
-		for _, userID := range r.logicGateRaciUserIDsLocked(companyID, logicGateID) {
-			r.upsertRacioProjectionNodeRowLocked(companyID, node, logicGateID, userID)
+	if ok {
+		node = r.withNodeReadModelLocked(node)
+		assignment, assigned := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
+		if assigned && strings.TrimSpace(assignment.LogicGateID) != "" {
+			logicGateID := strings.TrimSpace(assignment.LogicGateID)
+			for _, userID := range r.logicGateRaciUserIDsLocked(companyID, logicGateID) {
+				userID = strings.TrimSpace(userID)
+				if userID == "" {
+					continue
+				}
+				rowKey := racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)
+				desired[rowKey] = true
+				r.upsertRacioProjectionNodeRowLocked(companyID, node, logicGateID, userID)
+			}
+		} else if node.AssigneeUserID != nil {
+			userID := strings.TrimSpace(*node.AssigneeUserID)
+			if userID != "" {
+				if _, ok := r.memberships[membershipKey(companyID, userID)]; ok {
+					rowKey := racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)
+					desired[rowKey] = true
+					r.upsertRacioProjectionNodeRowLocked(companyID, node, "", userID)
+				}
+			}
 		}
-		return
 	}
-	if node.AssigneeUserID == nil {
-		return
-	}
-	userID := strings.TrimSpace(*node.AssigneeUserID)
-	if userID == "" {
-		return
-	}
-	if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
-		return
-	}
-	r.upsertRacioProjectionNodeRowLocked(companyID, node, "", userID)
+	r.deleteStaleRacioProjectionForNodeLocked(companyID, nodeID, desired)
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateID string) {
@@ -194,10 +197,7 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateI
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) {
-	users := racioAssignmentUserSet(before)
-	for userID := range racioAssignmentUserSet(after) {
-		users[userID] = true
-	}
+	users := racioAssignmentChangedUserSet(before, after)
 	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
 }
 
@@ -213,36 +213,52 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logic
 		if userID == "" {
 			continue
 		}
-		r.deleteRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID)
+		desired := map[string]bool{}
 		if !r.logicGateUserHasAnyRaciLocked(companyID, logicGateID, userID) {
+			r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
 			continue
 		}
+		desired[racioProjectionKey(companyID, userID, racioProjectionResourceLogicGate, logicGateID)] = true
 		r.upsertRacioProjectionLogicGateRowLocked(companyID, logicGateID, userID)
 		for _, nodeID := range r.nodeIDsAssignedToLogicGateLocked(companyID, logicGateID) {
 			node, ok := r.nodes[key(companyID, nodeID)]
 			if !ok {
 				continue
 			}
+			desired[racioProjectionKey(companyID, userID, racioProjectionResourceNode, nodeID)] = true
 			r.upsertRacioProjectionNodeRowLocked(companyID, r.withNodeReadModelLocked(node), logicGateID, userID)
 		}
+		r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
 	}
 }
 
 func (r *MemoryRepo) deleteRacioProjectionForNodeLocked(companyID, nodeID string) {
+	r.deleteStaleRacioProjectionForNodeLocked(companyID, nodeID, map[string]bool{})
+}
+
+func (r *MemoryRepo) deleteStaleRacioProjectionForNodeLocked(companyID, nodeID string, desired map[string]bool) {
 	for rowKey, row := range r.racioProjectionRows {
 		if row.CompanyID == companyID && row.ResourceType == racioProjectionResourceNode && row.ResourceID == nodeID {
-			delete(r.racioProjectionRows, rowKey)
+			if !desired[rowKey] {
+				delete(r.racioProjectionRows, rowKey)
+			}
 		}
 	}
 }
 
 func (r *MemoryRepo) deleteRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID string) {
+	r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, map[string]bool{})
+}
+
+func (r *MemoryRepo) deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID string, desired map[string]bool) {
 	for rowKey, row := range r.racioProjectionRows {
 		if row.CompanyID != companyID || row.UserID != userID || row.LogicGateID != logicGateID {
 			continue
 		}
 		if row.ResourceType == racioProjectionResourceLogicGate || row.ResourceType == racioProjectionResourceNode {
-			delete(r.racioProjectionRows, rowKey)
+			if !desired[rowKey] {
+				delete(r.racioProjectionRows, rowKey)
+			}
 		}
 	}
 }
@@ -288,6 +304,97 @@ func (r *MemoryRepo) upsertRacioProjectionLogicGateRowLocked(companyID, logicGat
 		UpdatedTimestamp:          time.Now().UTC(),
 	}
 	r.racioProjectionRows[racioProjectionKey(companyID, userID, racioProjectionResourceLogicGate, logicGateID)] = row
+}
+
+func (r *MemoryRepo) racioProjectionRowsForResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) []RacioMatrixProjectionRow {
+	nodeSet := map[string]bool{}
+	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			nodeSet[nodeID] = true
+		}
+	}
+	logicGateSet := map[string]bool{}
+	for _, logicGateID := range logicGateIDs {
+		logicGateID = strings.TrimSpace(logicGateID)
+		if logicGateID != "" {
+			logicGateSet[logicGateID] = true
+		}
+	}
+	items := make([]RacioMatrixProjectionRow, 0)
+	for _, row := range r.racioProjectionRows {
+		if row.CompanyID != companyID {
+			continue
+		}
+		if row.ResourceType == racioProjectionResourceNode && !nodeSet[row.ResourceID] {
+			continue
+		}
+		if row.ResourceType == racioProjectionResourceLogicGate && !logicGateSet[row.ResourceID] {
+			continue
+		}
+		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+			continue
+		}
+		items = append(items, memoryRacioProjectionRowToDTO(row))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ResourceType != items[j].ResourceType {
+			return items[i].ResourceType < items[j].ResourceType
+		}
+		if items[i].ResourceID != items[j].ResourceID {
+			return items[i].ResourceID < items[j].ResourceID
+		}
+		return items[i].UserID < items[j].UserID
+	})
+	return items
+}
+
+func memoryRacioProjectionRowToDTO(row memoryRacioProjectionRow) RacioMatrixProjectionRow {
+	item := RacioMatrixProjectionRow{
+		CompanyID:                row.CompanyID,
+		UserID:                   row.UserID,
+		ResourceType:             row.ResourceType,
+		ResourceID:               row.ResourceID,
+		DisplayTitle:             row.Node.Title,
+		ResourceCreatedTimestamp: row.Node.CreatedTimestamp,
+		UpdatedTimestamp:         row.UpdatedTimestamp,
+	}
+	if row.LogicGateID != "" {
+		item.LogicGateID = stringPointer(row.LogicGateID)
+	}
+	if row.ResourceType == racioProjectionResourceLogicGate {
+		item.DisplayTitle = row.LogicGateHeader
+		item.ResourceCreatedTimestamp = row.LogicGateCreatedTimestamp
+		return item
+	}
+	item.Status = cloneStringPointer(row.Node.Status)
+	item.StatusColor = cloneStringPointer(row.Node.StatusColor)
+	item.DueDate = cloneStringPointer(row.Node.DueDate)
+	item.Priority = cloneIntPointer(row.Node.Priority)
+	item.AssigneeUserID = cloneStringPointer(row.Node.AssigneeUserID)
+	item.AssigneeDisplayName = cloneStringPointer(row.Node.AssigneeName)
+	item.AssigneeEmail = cloneStringPointer(row.Node.AssigneeEmail)
+	return item
+}
+
+func stringPointer(value string) *string {
+	return &value
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func (r *MemoryRepo) logicGateRaciAssignmentsByGateLocked(companyID string) map[string][]domain.LogicGateRaciAssignment {
@@ -365,6 +472,51 @@ func racioAssignmentUserSet(assignments []domain.LogicGateRaciAssignment) map[st
 		}
 	}
 	return users
+}
+
+func racioAssignmentChangedUserSet(before, after []domain.LogicGateRaciAssignment) map[string]bool {
+	beforeRoles := racioAssignmentRoleSetByUser(before)
+	afterRoles := racioAssignmentRoleSetByUser(after)
+	users := map[string]bool{}
+	for userID, roles := range beforeRoles {
+		if !stringSetEqual(roles, afterRoles[userID]) {
+			users[userID] = true
+		}
+	}
+	for userID, roles := range afterRoles {
+		if !stringSetEqual(roles, beforeRoles[userID]) {
+			users[userID] = true
+		}
+	}
+	return users
+}
+
+func racioAssignmentRoleSetByUser(assignments []domain.LogicGateRaciAssignment) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for _, assignment := range assignments {
+		userID := strings.TrimSpace(assignment.UserID)
+		role := strings.TrimSpace(assignment.Role)
+		if userID == "" || role == "" {
+			continue
+		}
+		if out[userID] == nil {
+			out[userID] = map[string]bool{}
+		}
+		out[userID][role] = true
+	}
+	return out
+}
+
+func stringSetEqual(left, right map[string]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for value := range left {
+		if !right[value] {
+			return false
+		}
+	}
+	return true
 }
 
 func logicGateRaciRolesForUser(assignments []domain.LogicGateRaciAssignment, userID string, allowedRoles map[string]bool) []string {

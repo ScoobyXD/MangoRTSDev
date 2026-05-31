@@ -302,6 +302,13 @@ func parseLogicGateWorkAssignmentMoveFields(w http.ResponseWriter, fields map[st
 			*changed = true
 		}
 	}
+	if columnID, set, ok := parseOptionalStringField(fields, "column_id"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_column_id")
+		return false
+	} else if set && columnID != nil && strings.TrimSpace(*columnID) != "" {
+		input.ColumnID = *columnID
+		*changed = true
+	}
 	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
 		return false
@@ -405,9 +412,10 @@ func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentRe
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
 	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
-		"assignment": assignment,
-		"node":       result.Node,
-		"card":       card,
+		"assignment":            assignment,
+		"node":                  result.Node,
+		"card":                  card,
+		"racio_projection_rows": result.RacioProjectionRows,
 	}
 }
 
@@ -415,9 +423,10 @@ func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssign
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
 	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
-		"assignment": assignment,
-		"node":       result.Node,
-		"card":       card,
+		"assignment":            assignment,
+		"node":                  result.Node,
+		"card":                  card,
+		"racio_projection_rows": result.RacioProjectionRows,
 	}
 }
 

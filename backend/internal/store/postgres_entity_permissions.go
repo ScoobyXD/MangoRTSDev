@@ -917,23 +917,6 @@ left join effective_grant
 where requested.required_rank > 0
   and (
     (select allowed from role_admin_actor)
-    or (
-      normalized_resource.resource_type in ('node', 'logic_gate')
-      and requested.required_rank <= mangorts_access_level_rank('edit')
-      and exists (
-        select 1
-        from company_memberships membership
-        where membership.company_id=$1::uuid
-          and membership.user_id=$3::uuid
-      )
-      and not exists (
-        select 1
-        from resource_access_grants grant_row
-        where grant_row.company_id=$1::uuid
-          and grant_row.resource_type=normalized_resource.resource_type
-          and grant_row.resource_id=existing.resource_id
-      )
-    )
     or coalesce(effective_grant.access_rank >= requested.required_rank, false)
   )`, companyID, entityType, userID, accessLevel, cleanIDs)
 	if err != nil {

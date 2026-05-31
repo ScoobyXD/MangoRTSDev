@@ -674,9 +674,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:       card,
-		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
-		Assignment: assignment,
+		Card:                card,
+		Node:                r.withNodeReadModelLocked(r.nodes[nodeKey]),
+		Assignment:          assignment,
+		RacioProjectionRows: r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil),
 	}
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
@@ -888,9 +889,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:       card,
-		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
-		Assignment: assignment,
+		Card:                card,
+		Node:                r.withNodeReadModelLocked(r.nodes[nodeKey]),
+		Assignment:          assignment,
+		RacioProjectionRows: r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil),
 	}
 	events, err := r.appendDomainEventsLocked(logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
@@ -935,9 +937,10 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	result := LogicGateNodeAssignmentRemoveResult{
-		Card:       location.card,
-		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
-		Assignment: assignment,
+		Card:                location.card,
+		Node:                r.withNodeReadModelLocked(r.nodes[nodeKey]),
+		Assignment:          assignment,
+		RacioProjectionRows: r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil),
 	}
 	events, err := r.appendDomainEventsLocked(logicGateAssignmentRemovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
@@ -1000,9 +1003,10 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:       card,
-		Node:       r.withNodeReadModelLocked(r.nodes[nodeKey]),
-		Assignment: assignment,
+		Card:                card,
+		Node:                r.withNodeReadModelLocked(r.nodes[nodeKey]),
+		Assignment:          assignment,
+		RacioProjectionRows: r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil),
 	}
 	events, err := r.appendDomainEventsLocked(logicGateAssignmentIssueWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {

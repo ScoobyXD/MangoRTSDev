@@ -765,6 +765,17 @@ func (r *PostgresRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignment
 	}
 	defer tx.Rollback()
 
+	result, err := r.assignNodeToLogicGateStatusTx(ctx, tx, input)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) assignNodeToLogicGateStatusTx(ctx context.Context, tx *sql.Tx, input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error) {
 	boardID := LogicGateKanbanBoardID(input.LogicGateID)
 	rows, err := tx.QueryContext(ctx, `
 select kc.company_id, kc.board_id, kc.column_id, kc.title, kc.position, kc.width_px, kc.height_px, kc.item_color, kc.created_timestamp, kc.updated_timestamp
@@ -958,6 +969,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionRows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	status := column.Title
 	statusColor := column.ItemColor
 	if card.IsIssue {
@@ -997,7 +1012,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID, status, 
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, RacioProjectionRows: projectionRows}
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
 	if createdNode.CompanyID != "" {
@@ -1008,9 +1023,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID, status, 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if err := tx.Commit(); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 	return result, nil
 }
 
@@ -1199,6 +1211,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionRows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -1207,7 +1223,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, RacioProjectionRows: projectionRows}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -1290,6 +1306,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStat
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
+	projectionRows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
 
 	node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -1299,7 +1319,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	result := LogicGateNodeAssignmentRemoveResult{Card: card, Node: node, Assignment: assignment}
+	result := LogicGateNodeAssignmentRemoveResult{Card: card, Node: node, Assignment: assignment, RacioProjectionRows: projectionRows}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentRemovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
@@ -1367,6 +1387,10 @@ returning `+kanbanCardSelectColumns,
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionRows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -1375,7 +1399,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, RacioProjectionRows: projectionRows}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentIssueWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err

@@ -104,6 +104,45 @@ func NormalizeLogicGateNodeAssignmentIssueInput(input LogicGateNodeAssignmentIss
 	return input, nil
 }
 
+func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateInput, error) {
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
+	input.Title = strings.TrimSpace(input.Title)
+	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.CreateLogicGateHeader = strings.TrimSpace(input.CreateLogicGateHeader)
+	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
+	input.ColumnID = strings.TrimSpace(input.ColumnID)
+	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
+	input.CreatorLogicGateRaciRole = strings.TrimSpace(input.CreatorLogicGateRaciRole)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.NodeID == "" {
+		input.NodeID = newUUIDv7String()
+	}
+	if input.CompanyID == "" || input.NodeID == "" || input.Title == "" {
+		return RacioMatrixNodeCreateInput{}, ErrInvalid
+	}
+	if input.LogicGateID != "" && input.CreateLogicGateHeader != "" {
+		return RacioMatrixNodeCreateInput{}, ErrInvalid
+	}
+	if input.CreatorLogicGateRaciRole != "" {
+		role, ok := NormalizeLogicGateRaciRole(input.CreatorLogicGateRaciRole)
+		if !ok {
+			return RacioMatrixNodeCreateInput{}, ErrInvalid
+		}
+		input.CreatorLogicGateRaciRole = role
+	}
+	policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
+	if !ok {
+		return RacioMatrixNodeCreateInput{}, ErrInvalid
+	}
+	input.AssigneePolicy = policy
+	if input.PrioritySet && input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
+		return RacioMatrixNodeCreateInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
 func normalizeOptionalStringPointer(value *string) *string {
 	if value == nil {
 		return nil
