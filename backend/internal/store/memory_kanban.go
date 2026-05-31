@@ -814,6 +814,27 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
 	}
+	var targetLocation struct {
+		mapKey string
+		index  int
+		card   domain.KanbanCard
+		ok     bool
+	}
+	if crossLogicGateMove {
+		targetKey := boardKey(input.CompanyID, targetBoardID)
+		for index, candidate := range r.kanbanCards[targetKey] {
+			if candidate.NodeID != input.NodeID {
+				continue
+			}
+			targetLocation = struct {
+				mapKey string
+				index  int
+				card   domain.KanbanCard
+				ok     bool
+			}{mapKey: targetKey, index: index, card: candidate, ok: true}
+			break
+		}
+	}
 
 	columnID := card.ColumnID
 	if crossLogicGateMove || input.ColumnID != "" || input.Status != "" {
@@ -842,15 +863,20 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
 
-	card.ColumnID = columnID
-	card.BoardID = targetBoardID
-	value := input.LogicGateID
-	card.LogicGateID = &value
-	card.Position = position
-	if strings.TrimSpace(node.Title) != "" {
-		card.NodeTitle = node.Title
+	resultCard := card
+	if targetLocation.ok {
+		resultCard = targetLocation.card
 	}
-	card.UpdatedTimestamp = time.Now().UTC()
+	value := input.LogicGateID
+	resultCard.ColumnID = columnID
+	resultCard.BoardID = targetBoardID
+	resultCard.LogicGateID = &value
+	resultCard.IsIssue = assignment.IsIssue
+	resultCard.Position = position
+	if strings.TrimSpace(node.Title) != "" {
+		resultCard.NodeTitle = node.Title
+	}
+	resultCard.UpdatedTimestamp = time.Now().UTC()
 	column, ok := r.kanbanColumnLocked(input.CompanyID, targetBoardID, columnID)
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
@@ -861,29 +887,33 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		LogicGateID:          input.LogicGateID,
 		ColumnID:             columnID,
 		StatusKey:            logicGateAssignmentStatusKey(column.Title),
-		IsIssue:              card.IsIssue,
+		IsIssue:              resultCard.IsIssue,
 		Position:             position,
 		CompatibilityBoardID: targetBoardID,
-		CompatibilityCardID:  card.CardID,
-		UpdatedTimestamp:     card.UpdatedTimestamp,
+		CompatibilityCardID:  resultCard.CardID,
+		UpdatedTimestamp:     resultCard.UpdatedTimestamp,
 	})
 	if crossLogicGateMove {
 		r.kanbanCards[location.mapKey] = append(r.kanbanCards[location.mapKey][:location.index], r.kanbanCards[location.mapKey][location.index+1:]...)
-		targetKey := boardKey(input.CompanyID, targetBoardID)
-		r.kanbanCards[targetKey] = append(r.kanbanCards[targetKey], card)
+		if targetLocation.ok {
+			r.kanbanCards[targetLocation.mapKey][targetLocation.index] = resultCard
+		} else {
+			targetKey := boardKey(input.CompanyID, targetBoardID)
+			r.kanbanCards[targetKey] = append(r.kanbanCards[targetKey], resultCard)
+		}
 		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	} else {
-		r.kanbanCards[location.mapKey][location.index] = card
+		r.kanbanCards[location.mapKey][location.index] = resultCard
 	}
 	if input.AssigneePolicySet {
 		previousAssigneeUserID := nodeAssigneeUserID(r.nodes[nodeKey])
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)
 		_ = previousAssigneeUserID
 	}
-	r.syncNodeStatusFromKanbanCardLocked(card)
+	r.syncNodeStatusFromKanbanCardLocked(resultCard)
 	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
@@ -892,7 +922,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:                card,
+		Card:                resultCard,
 		Node:                r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment:          assignment,
 		RacioProjectionRows: r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil),

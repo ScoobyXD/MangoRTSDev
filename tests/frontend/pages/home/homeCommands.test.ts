@@ -5,6 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateAssignmentCommandResult, RacioMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
+import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
 import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRacioMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
@@ -233,6 +234,46 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
   assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
   assert.deepEqual(updated.racio_projection_rows.map((row) => [row.resource_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:target-gate", "logic-gate:source-gate"]);
+});
+
+test("Home matrix node drop from the no-Logic-Gate group assigns instead of moving", async () => {
+  const nodes = new Map([
+    ["node-1", node("node-1", { title: "Unplaced node", status: "pending", logic_gate_ids: [] })],
+  ]);
+  const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
+  const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
+  const assignNodeToLogicGateStatus: HomeDropAssignNodeToLogicGateStatus = async (input) => {
+    assignCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return {
+      card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-pending" }),
+      node: { ...sourceNode, status: "Pending", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
+      racio_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
+    } satisfies LogicGateAssignmentCommandResult;
+  };
+  const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
+    moveCalls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode, racio_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
+  };
+
+  const updated = await dropNodesIntoInboxLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "target-gate",
+    fromLogicGateID: INBOX_NO_LOGIC_GATE_ID,
+    nodeIDs: ["node-1"],
+    priority: 3,
+    status: "pending",
+    nodeByID: nodes,
+    assignNodeToLogicGateStatus,
+    moveLogicGateAssignment,
+  });
+
+  assert.equal(moveCalls.length, 0);
+  assert.equal(assignCalls.length, 1);
+  assert.equal(assignCalls[0].logicGateID, "target-gate");
+  assert.deepEqual(updated.nodes.map((item) => item.logic_gate_ids), [["target-gate"]]);
 });
 
 test("Home matrix node drop keeps same Logic Gate status moves on the move endpoint", async () => {
