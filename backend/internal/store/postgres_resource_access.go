@@ -308,17 +308,28 @@ order by user_id::text`, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	userIDs := []string{}
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
+			rows.Close()
 			return err
 		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
 		if err := insertPostgresResourceOverrideTx(ctx, tx, companyID, EntityTypeNode, nodeID, userID); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (r *PostgresRepo) effectiveAccessLevelForUserTx(ctx context.Context, tx *sql.Tx, companyID, userID, resourceType, resourceID string) (string, error) {
