@@ -71,13 +71,17 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	postgresSource := readPhase4SourceForTest(t, "postgres_logic_gate_work.go")
 	normalizedPostgres := strings.ToLower(postgresSource)
-	if !strings.Contains(normalizedPostgres, "from node_logic_gate_assignments assignment") {
-		t.Fatalf("postgres logic gate work read does not select from node_logic_gate_assignments")
+	if !strings.Contains(normalizedPostgres, "from kanban_board_projection projection") {
+		t.Fatalf("postgres logic gate work read does not select from kanban_board_projection")
+	}
+	if !strings.Contains(normalizedPostgres, "join node_logic_gate_assignments assignment") {
+		t.Fatalf("postgres logic gate work read does not join assignment metadata narrowly")
 	}
 	for _, forbidden := range []string{
 		"from kanban_boards",
 		"from kanban_columns",
 		"from kanban_cards",
+		"join nodes",
 		"join kanban_boards",
 		"join kanban_columns",
 		"join kanban_cards",

@@ -39,37 +39,38 @@ select
   assignment.version,
   assignment.created_timestamp,
   assignment.updated_timestamp,
-  n.company_id::text,
-  n.node_id::text,
-  n.title,
+  projection.company_id::text,
+  projection.node_id::text,
+  projection.title,
   case
-    when assignment.is_issue then 'Issue'
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
+    when projection.is_issue then 'Issue'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
     else 'Pending'
   end as status,
   case
-    when assignment.is_issue then '#ffd400'
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $3
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $4
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then $5
+    when projection.is_issue then '#ffd400'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $3
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $4
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then $5
     else $6
   end as status_color,
-  n.due_date::text,
-  n.priority,
-  n.assignee_user_id::text,
+  projection.due_date::text,
+  projection.priority,
+  projection.assignee_user_id::text,
   nullif(assignee.display_name, '') as assignee_name,
   nullif(assignee.email, '') as assignee_email,
-  n.created_timestamp,
+  projection.node_created_timestamp,
   coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json
-from node_logic_gate_assignments assignment
-join nodes n
-  on n.company_id = assignment.company_id
- and n.node_id = assignment.node_id
+from kanban_board_projection projection
+join node_logic_gate_assignments assignment
+  on assignment.company_id = projection.company_id
+ and assignment.logic_gate_id = projection.logic_gate_id
+ and assignment.node_id = projection.node_id
 left join company_memberships assignee_membership
-  on assignee_membership.company_id = n.company_id
- and assignee_membership.user_id = n.assignee_user_id
+  on assignee_membership.company_id = projection.company_id
+ and assignee_membership.user_id = projection.assignee_user_id
 left join users assignee
   on assignee.user_id = assignee_membership.user_id
 left join lateral (
@@ -77,22 +78,22 @@ left join lateral (
   from (
     select distinct all_assignment.logic_gate_id::text as logic_gate_id
     from node_logic_gate_assignments all_assignment
-    where all_assignment.company_id = n.company_id
-      and all_assignment.node_id = n.node_id
+    where all_assignment.company_id = projection.company_id
+      and all_assignment.node_id = projection.node_id
   ) gate
 ) node_logic_gates on true
-where assignment.company_id = $1::uuid
-  and assignment.logic_gate_id = $2::uuid
+where projection.company_id = $1::uuid
+  and projection.logic_gate_id = $2::uuid
 order by
   case
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('pending', 'p') then 1
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 2
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 3
-    when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 4
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 1
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 2
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 3
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 4
     else 1
   end asc,
-  assignment.position asc,
-  assignment.created_timestamp asc,
+  projection.position asc,
+  projection.assignment_created_timestamp asc,
   assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultInProgressColor, KanbanDefaultVerifyColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
