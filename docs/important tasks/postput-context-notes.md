@@ -604,3 +604,266 @@ After this pass, the main remaining backend work is transaction cleanup:
 - B7/B8 still need fresh accounting logs, but likely share the same assignment/Kanban/event issues.
 
 Do not proceed into a major Kanban rewrite, command endpoint rewrite, or RACIO projection delta rewrite without a separate pass.
+
+## Update: Async Event Pipeline Pass Completed
+
+This section supersedes the earlier recommendation to move committed workspace event publish and notification projection off the HTTP request path. That change has now been implemented by another Codex instance.
+
+Reported code changes:
+
+- `workspace_handlers.go`: committed workspace publish now copies events, records `events.publish.enqueue`, and runs fanout/listener work asynchronously with separate `async_workspace_events_publish` logs.
+- `notification_handlers.go`: notification projection now copies events, records `notifications.enqueue`, runs asynchronously, logs failures, and still triggers catch-up on errors.
+- Blocking `events.publish.total` / `notifications.total` wrappers were removed from the measured POST/PUT handlers.
+- Async-sensitive tests were updated to wait for notification projection.
+- `go test ./...` from `backend/` passed.
+- Frontend was not touched.
+
+Event inventory from that pass:
+
+- Raw node create: `company_explorer_folder_item_assigned`, `node_created`, `node_map_positions_updated`
+- Empty matrix cell create: `company_explorer_folder_item_assigned`, `logic_gate_created`, `node_created`, `work_item.logic_gate_assignment_saved`, `kanban_card_upserted`, `node_updated`
+- Move between gates: `work_item.logic_gate_assignment_moved`, `kanban_card_moved`, `node_updated`
+
+No event-count collapse was made in that pass. The derived events still have active downstream consumers.
+
+### After Async Publish: Raw Node Create
+
+User action: create raw node in Others view.
+
+```text
+request.total=846.1ms
+request.accounted_total=846.1ms
+request.unaccounted=0s
+source.transaction=585ms
+events.append.total=260.6ms
+events.publish.enqueue=0s
+```
+
+Important details:
+
+```text
+reread.assignment=46.9ms
+explorer.folder_setup=201.8ms(2x)
+source.node=60.6ms
+racio_projection.delete_stale=88.6ms
+racio_projection.upsert=56.6ms
+racio_projection.total=145.2ms
+map.position_write=45ms
+explorer.folder_position_read=47.4ms
+explorer.folder_item_write=45.7ms
+source.transaction_commit=26.2ms
+source.transaction_repo=585ms
+events.sequence_lock=91.9ms(3x)
+events.insert=114ms(3x)
+events.append.item_total=206.8ms(3x)
+events.append.transaction=260.6ms
+```
+
+Async publish still ran, but no longer blocked the response:
+
+```text
+async_workspace_events_publish count=3 duration=823.1ms events.publish.total=823.1ms event_types=company_explorer_folder_item_assigned,node_created,node_map_positions_updated
+```
+
+Interpretation:
+
+- Async publish worked.
+- Raw node create dropped from about `1.2032s` request timing to `846.1ms`.
+- Remaining blockers are synchronous transaction work and durable event append.
+- To get under `500ms`, likely targets are `events.append.total=260.6ms`, `explorer.folder_setup=201.8ms(2x)`, and `racio_projection.total=145.2ms`.
+
+### After Async Publish: Matrix Create Logic Gate Plus Node
+
+User action: create a new node in an R view matrix cell, which also creates a new Logic Gate.
+
+```text
+request.total=2.0932s
+request.accounted_total=2.0932s
+request.unaccounted=0s
+source.transaction_repo=2.0932s
+events.publish.enqueue=0s
+notifications.enqueue=0s
+```
+
+Important details:
+
+```text
+source.logic_gate=728.4ms(2x)
+kanban.board_ensure=99.1ms
+source.raci_assignment=57.3ms
+racio_projection.delete_stale=98.7ms(3x)
+racio_projection.upsert=105.9ms(3x)
+racio_projection.total=206.3ms(3x)
+racio_projection.sync_call=144ms(2x)
+explorer.folder_setup=109.8ms(2x)
+explorer.folder_position_read=46.3ms(2x)
+explorer.folder_item_write=322.6ms
+events.sequence_lock=139.8ms(6x)
+events.insert=177ms(6x)
+events.append.item_total=317.8ms(6x)
+events.append.batch_total=317.8ms(2x)
+events.append.total=317.8ms(2x)
+kanban.column_read=50.2ms
+source.node=409.2ms(2x)
+source.assignment=1.2833s(2x)
+kanban.card_trigger_assignment_sync=75.2ms(2x)
+kanban.card_work=181.3ms
+reread.racio_projection=45.7ms(2x)
+reread.node=46.3ms
+source.command_total=1.2453s
+source.transaction_commit=35.5ms
+```
+
+Async side effects:
+
+```text
+async_notification_projection count=6 notifications=0 duration=230.5ms notifications.total=230.5ms event_types=company_explorer_folder_item_assigned,logic_gate_created,node_created,work_item.logic_gate_assignment_saved,kanban_card_upserted,node_updated
+async_workspace_events_publish count=6 duration=2.2461s events.publish.total=2.2461s event_types=company_explorer_folder_item_assigned,logic_gate_created,node_created,work_item.logic_gate_assignment_saved,kanban_card_upserted,node_updated
+```
+
+Interpretation:
+
+- Async publish/notification worked and cut this path roughly in half.
+- The remaining problem is now transaction bloat.
+- Biggest remaining targets are `source.assignment`, `source.logic_gate`, `source.node`, event append, folder item writes, RACIO projection, and legacy Kanban writes.
+
+### After Async Publish: Move Node Between Logic Gates
+
+User action: move a node from one Logic Gate to another.
+
+```text
+request.total=774.8ms
+request.accounted_total=774.8ms
+request.unaccounted=0s
+source.transaction_repo=774.4ms
+events.publish.enqueue=0s
+notifications.enqueue=0s
+```
+
+Important details:
+
+```text
+reread.assignment=22.6ms
+kanban.card_read=47.3ms(2x)
+kanban.board_read=22.5ms
+reread.node=49.2ms(2x)
+kanban.column_read=45.4ms(2x)
+source.assignment_position_read=22.1ms
+source.node=24.3ms
+source.assignment=23.5ms
+kanban.email_reference_work=85.3ms(2x)
+kanban.card_update=25.6ms
+kanban.card_work=50.5ms(2x)
+kanban.card_trigger_assignment_sync=24.9ms
+source.access_policy_copy=96.8ms
+racio_projection.delete_stale=24.1ms
+racio_projection.upsert=25.8ms
+racio_projection.total=50ms
+racio_projection.sync_call=50ms
+reread.racio_projection=26.1ms
+events.sequence_lock=71.9ms(3x)
+events.insert=87ms(3x)
+events.append.item_total=158.9ms(3x)
+events.append.total=158.9ms
+source.transaction_commit=25.4ms
+source.command_total=749.7ms
+```
+
+Async side effects:
+
+```text
+async_notification_projection count=3 notifications=0 duration=111.4ms notifications.total=111.4ms event_types=work_item.logic_gate_assignment_moved,kanban_card_moved,node_updated
+async_workspace_events_publish count=3 duration=634.7ms events.publish.total=634.7ms event_types=work_item.logic_gate_assignment_moved,kanban_card_moved,node_updated
+```
+
+Interpretation:
+
+- Async publish/notification worked.
+- Move dropped from about `2.2478s` request timing to `774.8ms`.
+- This path is now close to target.
+- Remaining targets are event append, access policy copy, Kanban email reference work, Kanban card work, and RACIO projection sync.
+
+### Before / After Summary
+
+| Case | Before Async Publish | After Async Publish | Improvement |
+| --- | ---: | ---: | ---: |
+| Raw node create | `1.2032s` | `846.1ms` | about `30%` faster |
+| Matrix create Logic Gate plus node | `4.1662s` | `2.0932s` | about `50%` faster |
+| Move node between Logic Gates | `2.2478s` | `774.8ms` | about `66%` faster |
+
+## Current Priority After Async Publish
+
+The first major problem, synchronous post-commit publish/notification work, is now improved.
+
+The next problem is synchronous transaction work and durable event append.
+
+### Priority 1: Reduce Durable Event Append Cost
+
+Current examples:
+
+- Raw node create: `events.append.total=260.6ms`
+- Matrix create: `events.append.total=317.8ms(2x)`
+- Move between gates: `events.append.total=158.9ms`
+
+Potential approaches:
+
+- Batch domain event sequence allocation/locking/inserts per command.
+- Reduce repeated per-event advisory lock or sequence work.
+- Keep durable append synchronous for now.
+- Do not drop events blindly.
+
+### Priority 2: Reduce Event Count Where Safe
+
+Current event counts:
+
+- Raw node create: 3 events
+- Matrix create: 6 events
+- Move between gates: 3 events
+
+Potential approaches:
+
+- Replace multiple derived events with one richer command-level event where consumers can support it.
+- Avoid `kanban_card_*` events once Kanban becomes projection-only.
+- Keep payloads rich enough to avoid immediate follow-up rereads.
+
+### Priority 3: Slim Repository Transactions
+
+Raw node create targets:
+
+- `explorer.folder_setup=201.8ms(2x)`
+- `racio_projection.total=145.2ms`
+- `events.append.total=260.6ms`
+
+Move targets:
+
+- `events.append.total=158.9ms`
+- `source.access_policy_copy=96.8ms`
+- `kanban.email_reference_work=85.3ms(2x)`
+- `kanban.card_work=50.5ms(2x)`
+- `racio_projection.total=50ms`
+
+Matrix create targets:
+
+- `source.assignment=1.2833s(2x)`
+- `source.logic_gate=728.4ms(2x)`
+- `source.node=409.2ms(2x)`
+- `explorer.folder_item_write=322.6ms`
+- `events.append.total=317.8ms(2x)`
+- `racio_projection.total=206.3ms(3x)`
+- `kanban.card_work=181.3ms`
+- `kanban.card_trigger_assignment_sync=75.2ms(2x)`
+
+## Recommended Next Change
+
+Focus the next pass on event append/event count and the easiest transaction deletions.
+
+Suggested scope:
+
+1. Inspect domain event append implementation.
+2. Reduce repeated sequence lock/insert overhead for 3-event and 6-event commands.
+3. Collapse event count only where downstream consumers can safely handle a richer command-level event.
+4. Improve raw node create first, targeting `<500ms`.
+5. Improve move node second, targeting `<500ms`.
+6. Improve matrix create third, targeting a measurable drop from `2.0932s` toward `1.3s` or better.
+
+Do not start the full Kanban rewrite in the next pass unless event append batching/count reduction is insufficient or directly blocked by Kanban event consumers.
