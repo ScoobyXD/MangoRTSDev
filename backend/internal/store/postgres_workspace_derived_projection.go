@@ -77,6 +77,9 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItem(event domain.Dom
 	if companyID == "" || itemType == "" || itemID == "" {
 		return nil, ErrInvalid
 	}
+	if itemType != "node" && itemType != "logic_gate" {
+		return nil, ErrInvalid
+	}
 	if folderID == "" && systemFolderKey == "" {
 		switch itemType {
 		case "node":
@@ -104,6 +107,9 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItem(event domain.Dom
 	}
 	item, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	meta := workItemAssignmentEventMetadataFromValues(workspaceDerivedEventActor(event), "")
