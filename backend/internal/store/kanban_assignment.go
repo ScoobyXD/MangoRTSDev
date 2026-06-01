@@ -13,6 +13,7 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.NodeTitle = strings.TrimSpace(input.NodeTitle)
 	input.CreateNodeTitle = strings.TrimSpace(input.CreateNodeTitle)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
@@ -56,6 +57,7 @@ func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMove
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 
@@ -111,6 +113,7 @@ func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (Raci
 	input.Title = strings.TrimSpace(input.Title)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.CreateLogicGateHeader = strings.TrimSpace(input.CreateLogicGateHeader)
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)

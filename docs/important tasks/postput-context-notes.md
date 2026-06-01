@@ -929,3 +929,98 @@ Recommended next pass:
 3. Consider folding matrix create durable events into one append call only if the assignment helper can be refactored without changing event order or removing events.
 4. For move, audit whether `copyPostgresLogicGateAccessPolicyToNodeTx` can be skipped when the target Logic Gate policy is unchanged or already equivalent on the node.
 5. For move, audit communications email reference updates for no-op guards before broad Kanban rewrites.
+
+## Update: Mutation-Origin Derived-Write Deferral
+
+This pass focused on deleting non-immediate derived writes from the POST/PUT transaction path without changing the source-of-truth contract.
+
+New request context:
+
+- `POST /v1/workspace/entity-batches` now accepts `mutation_origin`.
+- `POST /v2/racio-matrix/nodes`, `POST /v2/racio-matrix/nodes/{nodeID}/move`, `POST /v2/logic-gates/{id}/nodes`, and `POST /v2/logic-gates/{id}/nodes/{nodeID}/move` now carry a normalized mutation origin internally.
+- Frontend callers now mark the surface that actually needs immediate derived state:
+  - Company Explorer sends `company_explorer`.
+  - Node Map sends `node_map`.
+  - Logic Gate Map sends `logic_gate_map`.
+  - Home/RACIO matrix paths send `matrix`.
+  - Kanban paths send `kanban`.
+  - Editor/sidebar text-selection creates send `editor`.
+
+Deferred writes:
+
+- Home/matrix/editor/kanban workspace entity creates no longer synchronously write Company Explorer folder items just to keep the Explorer projection current.
+- Non-map workspace entity creates no longer synchronously write default node/Logic-Gate map positions.
+- Matrix and Kanban-created nodes, plus matrix-created Logic Gates, now skip immediate Company Explorer folder item assignment.
+- Deferred work is represented by internal durable domain events:
+  - `company_explorer_folder_item_assign_requested`
+  - `node_map_position_upsert_requested`
+  - `logic_gate_map_position_upsert_requested`
+- A new async workspace-derived projector consumes those internal events, writes the derived rows, appends the normal public projection events, and publishes those projected events.
+- A new `workspace_derived_domain_event_projection_checkpoints` table tracks catch-up progress. Initial checkpoint setup starts at the latest existing event per company, matching the notification projector pattern, so deployment does not backfill historical events.
+- Map-position projection uses `on conflict do nothing`, so delayed default placement does not overwrite a user-created map position.
+- Frontend workspace stream/Home panel invalidation ignores the internal request events and waits for the public projected events.
+
+What intentionally stayed synchronous:
+
+- Source-of-truth rows stayed synchronous: `nodes`, `logic_gates`, `node_logic_gate_assignments`, RACI/access rows, and durable command events.
+- Durable append of the internal deferred request events stayed synchronous. This preserves recovery/catch-up if the process exits before async projection finishes.
+- The active surface still gets immediate writes. Company Explorer creates still write Explorer folder items; Node Map creates still write node map positions; Logic Gate Map creates still write Logic Gate map positions.
+- Map creates with an explicit folder ID still synchronously write the Explorer folder item to preserve scoped map visibility for the current view.
+- RACIO projection sync and rereads stayed synchronous because matrix/Home responses return projection rows and the frontend still applies those rows immediately.
+- Legacy Kanban board/card writes stayed synchronous because active Kanban readers, read-version invalidation, and `kanban_card_*` events still depend on that compatibility model.
+- Access policy copy stayed synchronous because it affects authorization correctness for the moved/assigned node. This pass only added an equivalence guard so already-matching policies skip the copy.
+
+Other transaction slimming in this pass:
+
+- `copyPostgresLogicGateAccessPolicyToNodeTx` now checks whether the target Logic Gate policy already matches the node policy before deleting/reinserting node permissions.
+- Assignment paths can create a node without the standalone Explorer folder item write when the current mutation origin will defer that projection.
+
+Expected timing impact:
+
+The app benchmark actions were not rerun in this pass. Expected values are estimates from the latest measured buckets after async publish and durable append batching.
+
+| Case | Before this pass / latest estimate | Expected request-path after this pass | Expected savings |
+| --- | ---: | ---: | ---: |
+| Raw node create | roughly `550-650ms` after append batching estimate | roughly `400-525ms` | removes sync Explorer folder setup/item writes and default map-position write from non-map Home creates |
+| Matrix create Logic Gate plus node | roughly `1.75-1.9s` after append batching estimate | roughly `1.35-1.65s` | defers matrix-created Explorer folder items for the new Logic Gate/node |
+| Move node between Logic Gates | roughly `650-725ms` after append batching estimate | roughly `550-725ms` | only improves when access policies are already equivalent and the new no-op guard skips copy |
+| Create node in Logic Gate Kanban column | no fresh post-append benchmark | should drop by the skipped Explorer folder item write for newly created nodes | still pays legacy Kanban compatibility work |
+
+Request timing after this pass should show smaller or absent spans for the non-owning surface writes:
+
+```text
+repo.CreateWorkspaceEntityBatch.folder_setup
+repo.CreateWorkspaceEntityBatch.map_position_writes
+repo.CreateWorkspaceEntityBatch.folder_item_writes
+repo.createRacioMatrixLogicGateTx.folder_item_writes
+repo.assignNodeToLogicGateStatusTx.node_writes
+```
+
+New async work should appear separately:
+
+```text
+derived_projection.enqueue=...
+async_workspace_derived_projection count=... derived_projection.total=... event_types=...
+```
+
+Remaining bottlenecks:
+
+- Durable event append is still synchronous and still emits multiple events per command.
+- RACIO projection sync/rereads still sit in the request path for matrix/Home correctness.
+- Legacy Kanban board/card writes and email reference work still sit in assignment/move transactions.
+- Matrix create still performs combined Logic Gate creation, node creation, assignment, RACI/access setup, projection rereads, Kanban compatibility writes, and multiple append call sites.
+- Async derived projection now adds eventual consistency for non-owning surfaces; clients should consume the later public projected events, not the internal request events.
+
+Validation:
+
+- `go test ./...` from `backend/` passed.
+- `npm.cmd run build` from `frontend/` passed after installing frontend dependencies.
+- `node scripts\run_all_tests.mjs` passed all frontend feature tests, production build, and backend Go tests.
+
+Recommended next pass:
+
+1. Rerun B1, B3/B5, B6, B7, and B8 in the app and capture fresh `request_timing`, `async_workspace_events_publish`, `async_notification_projection`, and `async_workspace_derived_projection` logs.
+2. If raw node create is still above `<500ms`, inspect post-pass `events.append.total`, RACIO projection upsert, creator/effective-access rereads, and any remaining folder/map spans.
+3. For moves, measure how often the access-policy no-op guard skips work. If the remaining cost is Kanban/email-reference dominated, add no-op guards there before attempting the full Kanban rewrite.
+4. For matrix create, target RACIO delta writes/reread reduction and then consider folding the separate Logic Gate/create-assignment append call sites while preserving event order.
+5. Keep the full Kanban projection rewrite as a separate larger pass unless the fresh timings prove it is the dominant remaining blocker.

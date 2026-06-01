@@ -408,6 +408,7 @@ export async function createHomeNodeCommand(args: {
   const response = await createWorkspaceEntityBatchCommand<HomeWorkspaceEntityBatchResponse>({
     companyID: args.companyID,
     entityKind: "node",
+    mutationOrigin: "matrix",
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-node"),
       title: args.title?.trim() || "new node",
@@ -433,6 +434,7 @@ export async function createHomeLogicGateCommand(args: {
     companyID: args.companyID,
     entityKind: "logic_gate",
     creatorLogicGateRaciRole: args.creatorRaciRole,
+    mutationOrigin: "matrix",
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-logic-gate"),
       title: args.title?.trim() || "new logic gate",

@@ -113,6 +113,7 @@ export async function createNodeFromSelectionTitle(args: {
     companyID,
     entityKind: "node",
     folderID,
+    mutationOrigin: "editor",
     items: [{
       client_id: clientID,
       title,

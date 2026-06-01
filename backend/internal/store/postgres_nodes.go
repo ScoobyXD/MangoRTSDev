@@ -280,14 +280,18 @@ func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx,
 }
 
 func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDProjectionTx(ctx, tx, companyID, nodeID, title, assigneeUserID, true)
+	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, true, true)
 }
 
 func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDProjectionTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false)
+	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false, true)
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeIDProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string, syncProjection bool) (domain.Node, error) {
+func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false, false)
+}
+
+func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string, syncProjection, syncFolderItem bool) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	var assignee postgresNodeAssigneeReadModel
@@ -311,12 +315,14 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionTx(ctx context.Context,
 	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 		return domain.Node{}, err
 	}
-	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
-	if err != nil {
-		return domain.Node{}, err
-	}
-	if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
-		return domain.Node{}, err
+	if syncFolderItem {
+		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
+		if err != nil {
+			return domain.Node{}, err
+		}
+		if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
+			return domain.Node{}, err
+		}
 	}
 	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}

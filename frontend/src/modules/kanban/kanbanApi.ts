@@ -198,6 +198,7 @@ export type RacioMatrixProjectionRow = {
 };
 
 export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; racio_projection_rows: RacioMatrixProjectionRow[] };
+type LogicGateAssignmentMutationOrigin = "kanban" | "matrix";
 
 export type RacioMatrixNodeCreateResult = {
   node: NodeRecord;
@@ -249,6 +250,7 @@ export async function createRacioMatrixNode(args: {
       logic_gate_id: args.logicGateID,
       create_logic_gate_header: args.createLogicGateHeader,
       creator_logic_gate_raci_role: args.creatorLogicGateRaciRole,
+      mutation_origin: "matrix",
       status: args.status ?? args.columnID,
       priority: args.priority,
       position: args.position,
@@ -281,6 +283,7 @@ export async function assignNodeToLogicGateStatus(args: {
   createNodeTitle?: string;
   position?: number;
   isIssue?: boolean;
+  mutationOrigin?: LogicGateAssignmentMutationOrigin;
 }): Promise<LogicGateAssignmentCommandResult> {
   const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes`, {
     method: "POST",
@@ -291,6 +294,7 @@ export async function assignNodeToLogicGateStatus(args: {
       priority: args.priority,
       node_title: args.nodeTitle,
       create_node_title: args.createNodeTitle,
+      mutation_origin: args.mutationOrigin ?? "matrix",
       position: args.position,
       is_issue: args.isIssue,
       assignee_policy: "first_responsible",
@@ -312,6 +316,7 @@ export async function moveLogicGateAssignment(args: {
   position?: number;
   priority?: number | null;
   assigneePolicy?: string;
+  mutationOrigin?: LogicGateAssignmentMutationOrigin;
 }): Promise<LogicGateAssignmentCommandResult> {
   if (!args.fromLogicGateID || args.fromLogicGateID === args.logicGateID) {
     const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(args.logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}/state`, {
@@ -319,6 +324,7 @@ export async function moveLogicGateAssignment(args: {
       json: {
         company_id: args.companyID,
         status: args.status ?? args.columnID,
+        mutation_origin: args.mutationOrigin ?? "matrix",
         position: args.position,
         priority: args.priority,
         assignee_policy: args.assigneePolicy,
@@ -336,6 +342,7 @@ export async function moveLogicGateAssignment(args: {
       from_logic_gate_id: args.fromLogicGateID,
       status: args.status,
       column_id: args.columnID,
+      mutation_origin: args.mutationOrigin ?? "matrix",
       position: args.position,
       priority: args.priority,
       assignee_policy: args.assigneePolicy,

@@ -125,7 +125,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	}
 	stop()
 
-	input := store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
+	input := store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban}
 	stop = timings.observeAccounted("request.validate")
 	if !parseLogicGateWorkAssignmentCreateFields(w, fields, &input) {
 		stop()
@@ -140,6 +140,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
+	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
@@ -190,7 +191,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 	}
 	stop()
 
-	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
+	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban}
 	mutateAssignment := false
 	stop = timings.observeAccounted("request.validate")
 	if !parseLogicGateWorkAssignmentMoveFields(w, fields, &input, &mutateAssignment) {
@@ -223,6 +224,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
+		s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 		s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	}
@@ -286,6 +288,12 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 }
 
 func parseLogicGateWorkAssignmentCreateFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.LogicGateNodeAssignmentInput) bool {
+	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_mutation_origin")
+		return false
+	} else if set && origin != nil {
+		input.MutationOrigin = store.NormalizeMutationOrigin(*origin)
+	}
 	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_status")
 		return false
@@ -347,6 +355,12 @@ func parseLogicGateWorkAssignmentCreateFields(w http.ResponseWriter, fields map[
 }
 
 func parseLogicGateWorkAssignmentMoveFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.LogicGateNodeAssignmentMoveInput, changed *bool) bool {
+	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_mutation_origin")
+		return false
+	} else if set && origin != nil {
+		input.MutationOrigin = store.NormalizeMutationOrigin(*origin)
+	}
 	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_status")
 		return false

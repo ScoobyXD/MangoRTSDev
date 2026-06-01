@@ -27,21 +27,27 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	result := RacioMatrixNodeCreateResult{}
 	logicGateID := input.LogicGateID
+	deferCompanyExplorerFolderItems := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if input.CreateLogicGateHeader != "" {
 		stop := observeTiming(ctx, "repo.CreateRacioMatrixNode.logic_gate_writes")
-		logicGate, folderItem, err := createRacioMatrixLogicGateTx(ctx, tx, input)
+		logicGate, folderItem, err := createRacioMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
 		stop()
 		if err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
-		result.FolderItems = append(result.FolderItems, folderItem)
+		eventInputs := []DomainEventInput{logicGateCreatedWorkspaceEventInput(logicGate, meta)}
+		if deferCompanyExplorerFolderItems {
+			eventInputs = append([]DomainEventInput{
+				DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveLogicGatesKey, "logic_gate", logicGate.LogicGateID, 0, input.ActorUserID),
+			}, eventInputs...)
+		} else {
+			result.FolderItems = append(result.FolderItems, folderItem)
+			eventInputs = append([]DomainEventInput{folderItemAssignedWorkspaceEventInput(folderItem, meta)}, eventInputs...)
+		}
 		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.domain_event_append")
-		events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
-			folderItemAssignedWorkspaceEventInput(folderItem, meta),
-			logicGateCreatedWorkspaceEventInput(logicGate, meta),
-		})
+		events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 		stop()
 		if err != nil {
 			return RacioMatrixNodeCreateResult{}, err
@@ -66,6 +72,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 			IsIssue:             input.IsIssue,
 			IsIssueSet:          input.IsIssueSet,
 			AssigneePolicy:      input.AssigneePolicy,
+			MutationOrigin:      input.MutationOrigin,
 			ActorUserID:         input.ActorUserID,
 			IdempotencyKey:      input.IdempotencyKey,
 		})
@@ -99,18 +106,25 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	}
 
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.node_writes")
-	node, err := r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID)
+	var node domain.Node
+	if deferCompanyExplorerFolderItems {
+		node, err = r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID, true, false)
+	} else {
+		node, err = r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID)
+	}
 	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
-	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.folder_item_read")
-	folderItem, err := postgresCompanyExplorerFolderItemForEntityTx(ctx, tx, input.CompanyID, "node", node.NodeID)
-	stop()
-	if err == nil {
-		result.FolderItems = append(result.FolderItems, folderItem)
-	} else if !errors.Is(err, ErrNotFound) {
-		return RacioMatrixNodeCreateResult{}, err
+	if !deferCompanyExplorerFolderItems {
+		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.folder_item_read")
+		folderItem, err := postgresCompanyExplorerFolderItemForEntityTx(ctx, tx, input.CompanyID, "node", node.NodeID)
+		stop()
+		if err == nil {
+			result.FolderItems = append(result.FolderItems, folderItem)
+		} else if !errors.Is(err, ErrNotFound) {
+			return RacioMatrixNodeCreateResult{}, err
+		}
 	}
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.projection_reread")
 	rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{node.NodeID}, nil)
@@ -118,15 +132,21 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
+	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
+	if deferCompanyExplorerFolderItems {
+		eventInputs = append([]DomainEventInput{
+			DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveNodesKey, "node", node.NodeID, 0, input.ActorUserID),
+		}, eventInputs...)
+	}
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.domain_event_append")
-	event, err := r.appendDomainEventTx(ctx, tx, nodeCreatedWorkspaceEventInputWithMetadata(node, meta))
+	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
 	result.Node = node
 	result.RacioProjectionRows = rows
-	result.Events = append(result.Events, event)
+	result.Events = append(result.Events, events...)
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
 	if err := tx.Commit(); err != nil {
 		stop()
@@ -136,7 +156,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	return result, nil
 }
 
-func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMatrixNodeCreateInput) (domain.LogicGate, domain.CompanyExplorerFolderItem, error) {
+func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMatrixNodeCreateInput, syncFolderItem bool) (domain.LogicGate, domain.CompanyExplorerFolderItem, error) {
 	created := domain.LogicGate{
 		CompanyID:     input.CompanyID,
 		LogicGateID:   newUUIDv7String(),
@@ -197,18 +217,21 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 		stop()
 		created.EffectiveAccess = EntityPermissionEdit
 	}
-	stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.folder_item_writes")
-	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
-	if err != nil {
+	var folderItem domain.CompanyExplorerFolderItem
+	if syncFolderItem {
+		stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.folder_item_writes")
+		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
+		if err != nil {
+			stop()
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
+		}
+		folderItem, _, err = assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeFolder.FolderID, "logic_gate", created.LogicGateID, 0)
+		if err != nil {
+			stop()
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
+		}
 		stop()
-		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
-	folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeFolder.FolderID, "logic_gate", created.LogicGateID, 0)
-	if err != nil {
-		stop()
-		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
-	}
-	stop()
 	return created, folderItem, nil
 }
 

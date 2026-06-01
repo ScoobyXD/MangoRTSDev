@@ -56,7 +56,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	}
 	stop()
 
-	input := store.RacioMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID)}
+	input := store.RacioMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID), MutationOrigin: store.MutationOriginMatrix}
 	stop = timings.observeAccounted("request.validate")
 	if nodeID, set, ok := parseOptionalStringField(fields, "node_id"); !ok {
 		stop()
@@ -130,6 +130,13 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	} else if set && role != nil {
 		input.CreatorLogicGateRaciRole = *role
 	}
+	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
+		stop()
+		writeError(w, http.StatusBadRequest, "invalid_mutation_origin")
+		return
+	} else if set && origin != nil {
+		input.MutationOrigin = store.NormalizeMutationOrigin(*origin)
+	}
 	stop()
 	stop = timings.observeAccounted("request.access_check")
 	if input.LogicGateID != "" && !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, input.LogicGateID, store.EntityPermissionEdit) {
@@ -152,6 +159,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	if !writeRacioMatrixNodeCreateError(w, err) {
 		return
 	}
+	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, result)
@@ -216,13 +224,20 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "logic_gate_id_required")
 		return
 	}
-	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
+	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginMatrix}
 	if fromLogicGateID, set, ok := parseOptionalStringField(fields, "from_logic_gate_id"); !ok {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_from_logic_gate_id")
 		return
 	} else if set && fromLogicGateID != nil {
 		input.FromLogicGateID = *fromLogicGateID
+	}
+	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
+		stop()
+		writeError(w, http.StatusBadRequest, "invalid_mutation_origin")
+		return
+	} else if set && origin != nil {
+		input.MutationOrigin = store.NormalizeMutationOrigin(*origin)
 	}
 	mutateAssignment := false
 	if !parseLogicGateWorkAssignmentMoveFields(w, fields, &input, &mutateAssignment) {
@@ -257,6 +272,7 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_racio_matrix_node") {
 		return
 	}
+	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
