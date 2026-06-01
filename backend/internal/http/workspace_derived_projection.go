@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -127,9 +129,11 @@ func (s *Server) replayWorkspaceDerivedDomainEvents(ctx context.Context, project
 		}
 		projected, err := projector.ProjectWorkspaceDerivedDomainEvent(event)
 		if err != nil {
-			return err
-		}
-		if len(projected) > 0 {
+			if !errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("event_id=%s sequence=%d type=%s: %w", event.EventID, event.Sequence, event.Type, err)
+			}
+			log.Printf("workspace derived projection skipped missing target company_id=%s sequence=%d event_id=%s type=%s", event.CompanyID, event.Sequence, event.EventID, event.Type)
+		} else if len(projected) > 0 {
 			s.publishCommittedWorkspaceEvents(projected)
 		}
 		checkpoint = store.NotificationDomainEventCheckpoint{
@@ -165,6 +169,10 @@ func (s *Server) projectCommittedWorkspaceDerivedEventsAsync(projector workspace
 	for _, event := range events {
 		projected, err := projector.ProjectWorkspaceDerivedDomainEvent(event)
 		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				log.Printf("async workspace derived projection skipped missing target company_id=%s sequence=%d event_id=%s type=%s", event.CompanyID, event.Sequence, event.EventID, event.Type)
+				continue
+			}
 			log.Printf("async workspace derived projection failed company_id=%s sequence=%d event_id=%s type=%s: %v", event.CompanyID, event.Sequence, event.EventID, event.Type, err)
 			go s.runWorkspaceDerivedDomainEventCatchupOnce(context.Background())
 			continue
