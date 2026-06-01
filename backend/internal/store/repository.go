@@ -836,7 +836,8 @@ type NotificationCreateInput struct {
 }
 
 type CreateNotificationsInput struct {
-	Notifications []NotificationCreateInput
+	Notifications  []NotificationCreateInput
+	TimingRecorder TimingRecorder
 }
 
 type NotificationListInput struct {

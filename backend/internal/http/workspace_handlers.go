@@ -1145,26 +1145,45 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 }
 
 func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
+	s.publishCommittedWorkspaceEventsWithTiming(events, nil)
+}
+
+func (s *Server) publishCommittedWorkspaceEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
 	for _, event := range events {
-		s.publishCommittedWorkspaceEvent(event)
+		s.publishCommittedWorkspaceEventWithTiming(event, timings)
 	}
 }
+
 func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
+	s.publishCommittedWorkspaceEventWithTiming(event, nil)
+}
+
+func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEvent, timings *requestTimingRecorder) {
+	stop := timings.observe("events.publish.serialize")
 	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
+	stop()
 	if err != nil {
 		log.Printf("failed to marshal committed workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
 		return
 	}
+	stop = timings.observe("events.publish.client_send")
 	s.hub.publish(event.CompanyID, payload)
+	stop()
+	stop = timings.observe("events.publish.fanout")
 	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
+	stop()
 	if err != nil {
 		log.Printf("failed to resolve workspace event recipients company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
 	} else {
 		for _, userID := range userIDs {
+			stop = timings.observe("events.publish.client_send")
 			s.hub.publishUser(event.CompanyID, userID, payload)
+			stop()
 		}
 	}
+	stop = timings.observe("events.publish.listener_work")
 	s.notifyWorkspaceEventFanout(event)
+	stop()
 }
 
 func (s *Server) workspaceEventVisibleToUser(event domain.DomainEvent, userID string) bool {

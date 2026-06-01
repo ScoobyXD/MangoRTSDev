@@ -297,6 +297,7 @@ func syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx context.Context, t
 }
 
 func syncPostgresRacioProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForLogicGateUsersTx.total")()
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
@@ -316,6 +317,7 @@ func syncPostgresRacioProjectionForLogicGateUsersTx(ctx context.Context, tx *sql
 }
 
 func deleteStalePostgresRacioProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
+	defer observeTiming(ctx, "repo.deleteStalePostgresRacioProjectionForLogicGateUserTx")()
 	_, err := tx.ExecContext(ctx, postgresRacioLogicGateUserProjectionCTE+`
 delete from racio_matrix_projection_table entry
 where entry.company_id=$1::uuid
@@ -334,6 +336,7 @@ where entry.company_id=$1::uuid
 }
 
 func upsertPostgresRacioProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
+	defer observeTiming(ctx, "repo.upsertPostgresRacioProjectionForLogicGateUserTx")()
 	_, err := tx.ExecContext(ctx, postgresRacioLogicGateUserProjectionCTE+`
 insert into racio_matrix_projection_table (
   company_id,

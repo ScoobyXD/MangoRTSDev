@@ -244,26 +244,38 @@ func (s *Server) handleNotificationStream(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent) {
-	items, err := s.notifications.ProcessDomainEvents(context.Background(), events)
+	s.projectCommittedNotificationEventsWithTiming(events, nil)
+}
+
+func (s *Server) projectCommittedNotificationEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
+	items, err := s.notifications.ProcessDomainEventsWithTiming(context.Background(), events, timings)
 	if err != nil {
 		log.Printf("failed to project committed notification events: %v", err)
 		go s.runNotificationDomainEventCatchupOnce(context.Background())
 		return
 	}
-	s.publishNotifications(items)
+	s.publishNotificationsWithTiming(items, timings)
 }
 
 func (s *Server) publishNotifications(items []domain.Notification) {
+	s.publishNotificationsWithTiming(items, nil)
+}
+
+func (s *Server) publishNotificationsWithTiming(items []domain.Notification, timings *requestTimingRecorder) {
 	for _, item := range items {
+		stop := timings.observe("notifications.publish.serialize")
 		payload, err := json.Marshal(notificationStreamEnvelope{
 			Type:         "notification.created",
 			Notification: item,
 			TS:           time.Now().UTC(),
 		})
+		stop()
 		if err != nil {
 			continue
 		}
+		stop = timings.observe("notifications.publish")
 		s.notificationHub.publish(item.RecipientUserID, payload)
+		stop()
 	}
 }
 

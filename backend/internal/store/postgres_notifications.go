@@ -145,7 +145,7 @@ case
 end`
 
 func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error) {
-	ctx := context.Background()
+	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -171,6 +171,7 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
+		stop := observeTiming(ctx, "notifications.insert")
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
 insert into notifications (
   notification_id, company_id, recipient_user_id, actor_user_id, notification_type,
@@ -183,6 +184,7 @@ returning `+notificationSelectColumns,
 			candidate.Type, candidate.SourceEventID, candidate.EntityType, candidate.EntityID,
 			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID, candidate.InformationID,
 		))
+		stop()
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue

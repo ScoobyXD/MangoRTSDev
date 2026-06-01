@@ -939,17 +939,21 @@ where company_id=$1 and board_id=$2 and node_id=$3`, input.CompanyID, boardID, i
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_card_work")
+	stopDeleteCard := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_card_delete")
 	if _, err := tx.ExecContext(ctx, `
 delete from kanban_cards
 where company_id=$1
   and node_id=$2
   and board_id<>$3
   and logic_gate_id is not null`, input.CompanyID, input.NodeID, boardID); err != nil {
+		stopDeleteCard()
 		stop()
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	stopDeleteCard()
 
 	var card domain.KanbanCard
+	stopUpdateCard := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_card_update")
 	card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
 set column_id=$4,
@@ -963,11 +967,13 @@ where company_id=$1 and board_id=$2 and node_id=$3
 returning `+kanbanCardSelectColumns,
 		input.CompanyID, boardID, input.NodeID, column.ColumnID, input.LogicGateID, nodeTitle, descriptionSnapshot, position, input.IsIssueSet, issueValue,
 	))
+	stopUpdateCard()
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		stop()
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if errors.Is(err, sql.ErrNoRows) {
+		stopInsertCard := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_card_insert")
 		card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 insert into kanban_cards (
   company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
@@ -977,15 +983,19 @@ returning `+kanbanCardSelectColumns,
 			input.CompanyID, boardID, cardID, column.ColumnID,
 			input.NodeID, input.LogicGateID, nodeTitle, descriptionSnapshot, issueValue, position,
 		))
+		stopInsertCard()
 		if err != nil {
 			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
+	stopCardSync := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_card_trigger_assignment_sync")
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		stopCardSync()
 		stop()
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	stopCardSync()
 	stop()
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.node_assignment_writes")
 	if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
@@ -1002,9 +1012,12 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 	}
 	_ = currentAssignee
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
+		stop := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.access_policy_copy")
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
+		stop()
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.racio_projection_sync")
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
@@ -1289,24 +1302,30 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 
 	stop = observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_work")
 	if useExistingTargetCard {
+		stopDeleteCard := observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_delete")
 		deleted, err := tx.ExecContext(ctx, `
 delete from kanban_cards
 where company_id=$1 and board_id=$2 and card_id=$3`,
 			input.CompanyID, card.BoardID, card.CardID,
 		)
 		if err != nil {
+			stopDeleteCard()
 			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
 		affected, err := deleted.RowsAffected()
 		if err != nil {
+			stopDeleteCard()
 			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
 		if affected == 0 {
+			stopDeleteCard()
 			stop()
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
+		stopDeleteCard()
+		stopUpdateCard := observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_update")
 		card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
 set column_id=$4,
@@ -1319,7 +1338,9 @@ where company_id=$1 and board_id=$2 and card_id=$3
 returning `+kanbanCardSelectColumns,
 			input.CompanyID, targetBoardID, targetCard.CardID, columnID, input.LogicGateID, assignment.IsIssue, position,
 		))
+		stopUpdateCard()
 	} else {
+		stopUpdateCard := observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_update")
 		card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
 set board_id=$4,
@@ -1333,6 +1354,7 @@ where company_id=$1 and board_id=$2 and card_id=$3
 returning `+kanbanCardSelectColumns,
 			input.CompanyID, card.BoardID, card.CardID, targetBoardID, columnID, input.LogicGateID, assignment.IsIssue, position,
 		))
+		stopUpdateCard()
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		stop()
@@ -1361,10 +1383,13 @@ returning `+kanbanCardSelectColumns,
 		stop()
 	}
 	stop = observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_work")
+	stopCardSync := observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_card_trigger_assignment_sync")
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		stopCardSync()
 		stop()
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	stopCardSync()
 	stop()
 	if input.AssigneePolicySet {
 		stop := observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.node_assignment_writes")

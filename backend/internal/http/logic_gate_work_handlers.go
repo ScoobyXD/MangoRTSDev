@@ -75,12 +75,14 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 		return
 	}
 	var fields map[string]json.RawMessage
-	stop := timings.observe("request_decode_validation")
+	stop := timings.observeAccounted("request.decode")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	stop()
+	stop = timings.observeAccounted("request.validate")
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
 		stop()
@@ -109,7 +111,10 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 		return
 	}
 	stop()
-	stop = timings.observe("auth_access")
+	stop = timings.observeAccounted("request.auth")
+	authenticatedActor(r)
+	stop()
+	stop = timings.observeAccounted("request.access_check")
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
 		stop()
 		return
@@ -121,7 +126,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	stop()
 
 	input := store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
-	stop = timings.observe("request_decode_validation")
+	stop = timings.observeAccounted("request.validate")
 	if !parseLogicGateWorkAssignmentCreateFields(w, fields, &input) {
 		stop()
 		return
@@ -129,17 +134,17 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	stop()
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	input.TimingRecorder = timings
-	stop = timings.observe("repository_transaction")
+	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.AssignNodeToLogicGateStatus(input)
 	stop()
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
-	stop = timings.observe("domain_event_publish")
-	s.publishCommittedWorkspaceEvents(result.Events)
+	stop = timings.observeAccounted("events.publish.total")
+	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	stop()
-	stop = timings.observe("notification_projection")
-	s.projectCommittedNotificationEvents(result.Events)
+	stop = timings.observeAccounted("notifications.total")
+	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	stop()
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
@@ -159,12 +164,14 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		return
 	}
 	var fields map[string]json.RawMessage
-	stop := timings.observe("request_decode_validation")
+	stop := timings.observeAccounted("request.decode")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	stop()
+	stop = timings.observeAccounted("request.validate")
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
 		stop()
@@ -177,7 +184,10 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		return
 	}
 	stop()
-	stop = timings.observe("auth_access")
+	stop = timings.observeAccounted("request.auth")
+	authenticatedActor(r)
+	stop()
+	stop = timings.observeAccounted("request.access_check")
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
 		stop()
 		return
@@ -186,7 +196,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 
 	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
 	mutateAssignment := false
-	stop = timings.observe("request_decode_validation")
+	stop = timings.observeAccounted("request.validate")
 	if !parseLogicGateWorkAssignmentMoveFields(w, fields, &input, &mutateAssignment) {
 		stop()
 		return
@@ -211,21 +221,21 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		input.IdempotencyKey = idempotencyKey
 		input.TimingRecorder = timings
 		var err error
-		stop = timings.observe("repository_transaction")
+		stop = timings.observeAccounted("source.transaction")
 		result, err = s.repo.MoveLogicGateNodeAssignment(input)
 		stop()
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
-		stop = timings.observe("domain_event_publish")
-		s.publishCommittedWorkspaceEvents(result.Events)
+		stop = timings.observeAccounted("events.publish.total")
+		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 		stop()
-		stop = timings.observe("notification_projection")
-		s.projectCommittedNotificationEvents(result.Events)
+		stop = timings.observeAccounted("notifications.total")
+		s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 		stop()
 	}
 	if issueSet {
-		stop = timings.observe("repository_transaction")
+		stop = timings.observeAccounted("source.transaction")
 		issueResult, err := s.repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
 			CompanyID:      companyID,
 			LogicGateID:    logicGateID,
@@ -238,11 +248,11 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_issue_state") {
 			return
 		}
-		stop = timings.observe("domain_event_publish")
-		s.publishCommittedWorkspaceEvents(issueResult.Events)
+		stop = timings.observeAccounted("events.publish.total")
+		s.publishCommittedWorkspaceEventsWithTiming(issueResult.Events, timings)
 		stop()
-		stop = timings.observe("notification_projection")
-		s.projectCommittedNotificationEvents(issueResult.Events)
+		stop = timings.observeAccounted("notifications.total")
+		s.projectCommittedNotificationEventsWithTiming(issueResult.Events, timings)
 		stop()
 		result = issueResult
 	}

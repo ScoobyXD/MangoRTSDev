@@ -140,6 +140,7 @@ func (r *PostgresRepo) attachCompanyExplorerFolderMetadata(ctx context.Context, 
 }
 
 func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any) (int, error) {
+	defer observeTiming(ctx, "repo.nextCompanyExplorerSQLRowPosition")()
 	var position int
 	err := tx.QueryRowContext(ctx,
 		`select coalesce(max(position), 0) + 1000
@@ -275,6 +276,7 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 }
 
 func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, companyID, systemKey string) (domain.CompanyExplorerFolder, error) {
+	defer observeTiming(ctx, "repo.ensureCompanyExplorerSystemFolderSQL")()
 	seed, ok := companyExplorerSystemFolderDefinitionForKey(systemKey)
 	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrNotFound

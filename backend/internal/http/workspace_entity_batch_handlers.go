@@ -58,13 +58,14 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
 	}
-	stop := timings.observe("request_decode_validation")
+	stop := timings.observeAccounted("request.decode")
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-
+	stop()
+	stop = timings.observeAccounted("request.validate")
 	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
 	if !ok {
 		stop()
@@ -72,10 +73,12 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		return
 	}
 	stop()
-	stop = timings.observe("auth_access")
+	stop = timings.observeAccounted("request.auth")
 	if actor, ok := authenticatedActor(r); ok {
 		input.CreatorUserID = strings.TrimSpace(actor.User.UserID)
 	}
+	stop()
+	stop = timings.observeAccounted("request.access_check")
 	for _, relationship := range input.Relationships {
 		entityType := store.EntityTypeNode
 		notFoundCode := "node_not_found"
@@ -95,7 +98,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 	stop()
 
 	input.TimingRecorder = timings
-	stop = timings.observe("repository_transaction")
+	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.CreateWorkspaceEntityBatch(input)
 	stop()
 	if errors.Is(err, store.ErrInvalid) {
@@ -271,14 +274,14 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	if len(inputs) == 0 {
 		return
 	}
-	stop := timings.observe("domain_event_append")
+	stop := timings.observeAccounted("events.append.total")
 	events, err := s.repo.AppendDomainEvents(inputs)
 	stop()
 	if err != nil {
 		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
-	stop = timings.observe("domain_event_publish")
-	s.publishCommittedWorkspaceEvents(events)
+	stop = timings.observeAccounted("events.publish.total")
+	s.publishCommittedWorkspaceEventsWithTiming(events, timings)
 	stop()
 }
