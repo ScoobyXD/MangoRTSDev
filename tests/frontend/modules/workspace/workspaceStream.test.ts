@@ -184,6 +184,17 @@ test("derives scoped invalidation targets from workspace event types", () => {
   assert.deepEqual(unknownScopes, [{ kind: "workspace", eventType: "future_workspace_event" }]);
 });
 
+test("internal derived projection request events produce no reconciliation scopes", () => {
+  for (const type of [
+    "workspace_derived_projection_requested",
+    "company_explorer_folder_item_assign_requested",
+    "node_map_position_upsert_requested",
+    "logic_gate_map_position_upsert_requested",
+  ]) {
+    assert.deepEqual(deriveWorkspaceReconciliationScopes({ type, data: { item_type: "node", item_id: "node-1" } }), []);
+  }
+});
+
 test("sequence gaps emit scoped reconciliation metadata to subscribers", async () => {
   const previousFetch = globalThis.fetch;
   const globalWithWindow = globalThis as unknown as { window?: unknown };

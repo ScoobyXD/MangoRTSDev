@@ -29,6 +29,7 @@ import {
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
+  workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
@@ -123,6 +124,14 @@ test("mailbox count helper keeps the Inbox folder count for the primary tab", ()
   ]);
 
   assert.deepEqual(counts, { primary: 30, starred: 4, archive: 9 });
+});
+
+test("Home workspace panel ignores internal derived projection request events", () => {
+  assert.equal(workspaceEventTouchesHomePanel("workspace_derived_projection_requested"), false);
+  assert.equal(workspaceEventTouchesHomePanel("company_explorer_folder_item_assign_requested"), false);
+  assert.equal(workspaceEventTouchesHomePanel("node_map_position_upsert_requested"), false);
+  assert.equal(workspaceEventTouchesHomePanel("logic_gate_map_position_upsert_requested"), false);
+  assert.equal(workspaceEventTouchesHomePanel("node_created"), true);
 });
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {

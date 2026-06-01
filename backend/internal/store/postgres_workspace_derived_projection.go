@@ -56,24 +56,78 @@ where excluded.checkpoint_timestamp > workspace_derived_domain_event_projection_
 
 func (r *PostgresRepo) ProjectWorkspaceDerivedDomainEvent(event domain.DomainEvent) ([]domain.DomainEvent, error) {
 	switch strings.TrimSpace(event.Type) {
+	case WorkspaceDerivedProjectionRequestedEventType:
+		return r.projectWorkspaceDerivedProjectionRequested(event)
 	case WorkspaceDeferredFolderItemAssignEventType:
-		return r.projectDeferredCompanyExplorerFolderItem(event)
+		task := workspaceDerivedPayloadCopy(event.Payload)
+		task["kind"] = WorkspaceDerivedTaskCompanyExplorerFolderItemAssign
+		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
 	case WorkspaceDeferredNodeMapPositionUpsertEventType:
-		return r.projectDeferredNodeMapPosition(event)
+		task := workspaceDerivedPayloadCopy(event.Payload)
+		task["kind"] = WorkspaceDerivedTaskNodeMapPositionUpsert
+		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
 	case WorkspaceDeferredLogicMapPositionUpsertEventType:
-		return r.projectDeferredLogicGateMapPosition(event)
+		task := workspaceDerivedPayloadCopy(event.Payload)
+		task["kind"] = WorkspaceDerivedTaskLogicGateMapPositionUpsert
+		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
 	default:
 		return nil, nil
 	}
 }
 
-func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItem(event domain.DomainEvent) ([]domain.DomainEvent, error) {
+func (r *PostgresRepo) projectWorkspaceDerivedProjectionRequested(event domain.DomainEvent) ([]domain.DomainEvent, error) {
+	return r.projectWorkspaceDerivedTasks(event, workspaceDerivedPayloadTasks(event.Payload))
+}
+
+func (r *PostgresRepo) projectWorkspaceDerivedTasks(event domain.DomainEvent, tasks []map[string]any) ([]domain.DomainEvent, error) {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	projected := make([]domain.DomainEvent, 0, len(tasks))
+	for index, task := range tasks {
+		var eventInput *DomainEventInput
+		switch workspaceDerivedPayloadString(task, "kind") {
+		case WorkspaceDerivedTaskCompanyExplorerFolderItemAssign:
+			eventInput, err = r.projectDeferredCompanyExplorerFolderItemTx(ctx, tx, event, task, index)
+		case WorkspaceDerivedTaskNodeMapPositionUpsert:
+			eventInput, err = r.projectDeferredNodeMapPositionTx(ctx, tx, event, task, index)
+		case WorkspaceDerivedTaskLogicGateMapPositionUpsert:
+			eventInput, err = r.projectDeferredLogicGateMapPositionTx(ctx, tx, event, task, index)
+		default:
+			err = ErrInvalid
+		}
+		if err != nil {
+			return nil, err
+		}
+		if eventInput == nil {
+			continue
+		}
+		appended, err := r.appendDomainEventTx(ctx, tx, *eventInput)
+		if err != nil {
+			return nil, err
+		}
+		projected = append(projected, appended)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return projected, nil
+}
+
+func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent, payload map[string]any, index int) (*DomainEventInput, error) {
 	companyID := strings.TrimSpace(event.CompanyID)
-	itemType := workspaceDerivedPayloadString(event.Payload, "item_type")
-	itemID := workspaceDerivedPayloadString(event.Payload, "item_id")
-	folderID := workspaceDerivedPayloadString(event.Payload, "folder_id")
-	systemFolderKey := workspaceDerivedPayloadString(event.Payload, "system_folder_key")
-	position := workspaceDerivedPayloadInt(event.Payload, "position")
+	itemType := workspaceDerivedPayloadString(payload, "item_type")
+	itemID := workspaceDerivedPayloadString(payload, "item_id")
+	folderID := workspaceDerivedPayloadString(payload, "folder_id")
+	systemFolderKey := workspaceDerivedPayloadString(payload, "system_folder_key")
+	position := workspaceDerivedPayloadInt(payload, "position")
 	if companyID == "" || itemType == "" || itemID == "" {
 		return nil, ErrInvalid
 	}
@@ -91,13 +145,6 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItem(event domain.Dom
 		}
 	}
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	if folderID == "" {
 		folder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, systemFolderKey)
 		if err != nil {
@@ -105,44 +152,33 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItem(event domain.Dom
 		}
 		folderID = folder.FolderID
 	}
-	item, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
+	item, inserted, err := insertMissingCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	if !inserted {
+		return nil, nil
+	}
 	meta := workItemAssignmentEventMetadataFromValues(workspaceDerivedEventActor(event), "")
 	eventInput := folderItemAssignedWorkspaceEventInput(item, meta)
-	eventInput.IdempotencyKey = workspaceDerivedEventIdempotencyKey(event, "folder-item")
-	projected, err := r.appendDomainEventTx(ctx, tx, eventInput)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return []domain.DomainEvent{projected}, nil
+	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "folder-item")
+	return &eventInput, nil
 }
 
-func (r *PostgresRepo) projectDeferredNodeMapPosition(event domain.DomainEvent) ([]domain.DomainEvent, error) {
+func (r *PostgresRepo) projectDeferredNodeMapPositionTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent, payload map[string]any, index int) (*DomainEventInput, error) {
 	companyID := strings.TrimSpace(event.CompanyID)
-	nodeID := workspaceDerivedPayloadString(event.Payload, "node_id")
-	x, xOK := workspaceDerivedPayloadFloat(event.Payload, "x")
-	y, yOK := workspaceDerivedPayloadFloat(event.Payload, "y")
+	nodeID := workspaceDerivedPayloadString(payload, "node_id")
+	x, xOK := workspaceDerivedPayloadFloat(payload, "x")
+	y, yOK := workspaceDerivedPayloadFloat(payload, "y")
 	if companyID == "" || nodeID == "" || !xOK || !yOK {
 		return nil, ErrInvalid
 	}
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	var position domain.NodeMapPosition
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 select $1::uuid, $2::uuid, $3, $4, now()
 where exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)
@@ -151,9 +187,6 @@ returning company_id::text, node_id::text, x, y, updated_timestamp`,
 		companyID, nodeID, x, y,
 	).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
 		return nil, nil
 	}
 	if err != nil {
@@ -161,35 +194,21 @@ returning company_id::text, node_id::text, x, y, updated_timestamp`,
 	}
 	eventInput := workspaceDomainEventInput(companyID, "node_map_positions_updated", map[string]any{"positions": []domain.NodeMapPosition{position}})
 	eventInput.ActorUserID = workspaceDerivedEventActor(event)
-	eventInput.IdempotencyKey = workspaceDerivedEventIdempotencyKey(event, "node-map-position")
-	projected, err := r.appendDomainEventTx(ctx, tx, eventInput)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return []domain.DomainEvent{projected}, nil
+	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "node-map-position")
+	return &eventInput, nil
 }
 
-func (r *PostgresRepo) projectDeferredLogicGateMapPosition(event domain.DomainEvent) ([]domain.DomainEvent, error) {
+func (r *PostgresRepo) projectDeferredLogicGateMapPositionTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent, payload map[string]any, index int) (*DomainEventInput, error) {
 	companyID := strings.TrimSpace(event.CompanyID)
-	logicGateID := workspaceDerivedPayloadString(event.Payload, "logic_gate_id")
-	x, xOK := workspaceDerivedPayloadFloat(event.Payload, "x")
-	y, yOK := workspaceDerivedPayloadFloat(event.Payload, "y")
+	logicGateID := workspaceDerivedPayloadString(payload, "logic_gate_id")
+	x, xOK := workspaceDerivedPayloadFloat(payload, "x")
+	y, yOK := workspaceDerivedPayloadFloat(payload, "y")
 	if companyID == "" || logicGateID == "" || !xOK || !yOK {
 		return nil, ErrInvalid
 	}
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	var position domain.LogicGateMapPosition
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
 select $1::uuid, $2::uuid, $3, $4, now()
 where exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)
@@ -198,9 +217,6 @@ returning company_id::text, logic_gate_id::text, x, y, updated_timestamp`,
 		companyID, logicGateID, x, y,
 	).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
 		return nil, nil
 	}
 	if err != nil {
@@ -208,15 +224,8 @@ returning company_id::text, logic_gate_id::text, x, y, updated_timestamp`,
 	}
 	eventInput := workspaceDomainEventInput(companyID, "logic_gate_map_positions_updated", map[string]any{"positions": []domain.LogicGateMapPosition{position}})
 	eventInput.ActorUserID = workspaceDerivedEventActor(event)
-	eventInput.IdempotencyKey = workspaceDerivedEventIdempotencyKey(event, "logic-gate-map-position")
-	projected, err := r.appendDomainEventTx(ctx, tx, eventInput)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return []domain.DomainEvent{projected}, nil
+	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "logic-gate-map-position")
+	return &eventInput, nil
 }
 
 func workspaceDerivedEventActor(event domain.DomainEvent) string {
@@ -228,6 +237,123 @@ func workspaceDerivedEventActor(event domain.DomainEvent) string {
 
 func workspaceDerivedEventIdempotencyKey(event domain.DomainEvent, suffix string) string {
 	return fmt.Sprintf("workspace-derived:%s:%s", strings.TrimSpace(event.EventID), suffix)
+}
+
+func workspaceDerivedTaskIdempotencyKey(event domain.DomainEvent, index int, suffix string) string {
+	if index <= 0 {
+		return workspaceDerivedEventIdempotencyKey(event, suffix)
+	}
+	return workspaceDerivedEventIdempotencyKey(event, fmt.Sprintf("%s-%d", suffix, index))
+}
+
+func insertMissingCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, bool, error) {
+	var err error
+	var folderKind string
+	if err := tx.QueryRowContext(ctx,
+		`select folder_kind
+		 from company_explorer_folders
+		 where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	).Scan(&folderKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
+		}
+		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	var exists bool
+	var existsQuery string
+	if itemType == "node" {
+		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
+	} else if itemType == "logic_gate" {
+		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
+	} else {
+		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
+	}
+	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&exists); err != nil {
+		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	if !exists {
+		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
+	}
+	if position <= 0 {
+		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, folderID)
+		if err != nil {
+			return domain.CompanyExplorerFolderItem{}, false, err
+		}
+	}
+
+	var item domain.CompanyExplorerFolderItem
+	if err := tx.QueryRowContext(ctx,
+		`insert into company_explorer_folder_items
+		 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, $5, now(), now())
+		 on conflict (company_id, item_type, item_id) do nothing
+		 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
+		companyID, folderID, itemType, itemID, position,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&item.ItemType,
+		&item.ItemID,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolderItem{}, false, nil
+		}
+		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	return item, true, nil
+}
+
+func workspaceDerivedPayloadCopy(payload map[string]any) map[string]any {
+	copied := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		copied[key] = value
+	}
+	return copied
+}
+
+func workspaceDerivedPayloadTasks(payload map[string]any) []map[string]any {
+	if payload == nil {
+		return nil
+	}
+	switch tasks := payload["tasks"].(type) {
+	case []map[string]any:
+		out := make([]map[string]any, 0, len(tasks))
+		for _, task := range tasks {
+			if len(task) > 0 {
+				out = append(out, task)
+			}
+		}
+		return out
+	case []WorkspaceDerivedProjectionTask:
+		out := make([]map[string]any, 0, len(tasks))
+		for _, task := range tasks {
+			if len(task) > 0 {
+				out = append(out, map[string]any(task))
+			}
+		}
+		return out
+	case []any:
+		out := make([]map[string]any, 0, len(tasks))
+		for _, raw := range tasks {
+			switch task := raw.(type) {
+			case map[string]any:
+				if len(task) > 0 {
+					out = append(out, task)
+				}
+			case WorkspaceDerivedProjectionTask:
+				if len(task) > 0 {
+					out = append(out, map[string]any(task))
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func workspaceDerivedPayloadString(payload map[string]any, key string) string {

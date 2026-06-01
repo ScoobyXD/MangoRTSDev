@@ -171,14 +171,24 @@ func (s *Server) projectCommittedWorkspaceDerivedEventsAsync(projector workspace
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				log.Printf("async workspace derived projection skipped missing target company_id=%s sequence=%d event_id=%s type=%s", event.CompanyID, event.Sequence, event.EventID, event.Type)
+			} else {
+				log.Printf("async workspace derived projection failed company_id=%s sequence=%d event_id=%s type=%s: %v", event.CompanyID, event.Sequence, event.EventID, event.Type, err)
+				go s.runWorkspaceDerivedDomainEventCatchupOnce(context.Background())
 				continue
 			}
-			log.Printf("async workspace derived projection failed company_id=%s sequence=%d event_id=%s type=%s: %v", event.CompanyID, event.Sequence, event.EventID, event.Type, err)
-			go s.runWorkspaceDerivedDomainEventCatchupOnce(context.Background())
-			continue
 		}
 		if len(projected) > 0 {
 			s.publishCommittedWorkspaceEvents(projected)
+		}
+		checkpoint := store.NotificationDomainEventCheckpoint{
+			CompanyID:        event.CompanyID,
+			CreatedTimestamp: event.CreatedTimestamp,
+			EventID:          event.EventID,
+		}
+		if err := projector.SaveWorkspaceDerivedDomainEventCheckpoint(checkpoint); err != nil {
+			log.Printf("async workspace derived projection checkpoint save failed company_id=%s sequence=%d event_id=%s type=%s: %v", event.CompanyID, event.Sequence, event.EventID, event.Type, err)
+			go s.runWorkspaceDerivedDomainEventCatchupOnce(context.Background())
+			continue
 		}
 	}
 	duration := time.Since(start)

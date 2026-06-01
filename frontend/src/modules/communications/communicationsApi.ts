@@ -157,6 +157,16 @@ export type CommunicationsWorkspacePanel = {
   nodes: NodeRecord[];
 };
 
+export type CommunicationsWorkspacePanelCacheScope = {
+  logicGateFolders?: boolean;
+  logicGateFolderItems?: boolean;
+  logicGates?: boolean;
+  nodeFolders?: boolean;
+  nodeFolderItems?: boolean;
+  nodes?: boolean;
+  companyUsers?: boolean;
+};
+
 export type MessagePage = {
   messages: EmailMessage[];
   next_page_token?: string;
@@ -804,9 +814,19 @@ export function invalidateCommunicationsWorkspacePanelCache(companyID: string): 
   invalidateWorkspacePanelCache(companyID);
 }
 
-export function markCommunicationsWorkspacePanelStale(companyID: string): void {
+export function markCommunicationsWorkspacePanelStale(companyID: string, scope?: CommunicationsWorkspacePanelCacheScope): void {
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return;
+  if (scope) {
+    if (scope.logicGates) invalidateCacheKey(`logic-gates:${cleanCompanyID}`);
+    if (scope.nodes) invalidateCacheKey(`nodes:${cleanCompanyID}`);
+    if (scope.nodeFolders) invalidateCacheKey(`node-folders:${cleanCompanyID}`);
+    if (scope.nodeFolderItems) invalidateCacheKey(`node-folder-items:${cleanCompanyID}`);
+    if (scope.logicGateFolders) invalidateCacheKey(`logic-gate-folders:${cleanCompanyID}`);
+    if (scope.logicGateFolderItems) invalidateCacheKey(`logic-gate-folder-items:${cleanCompanyID}`);
+    if (scope.companyUsers) invalidateCacheKey(`company-users:${cleanCompanyID}`);
+    return;
+  }
   clearWorkspacePanelReadCache(cleanCompanyID);
 }
 

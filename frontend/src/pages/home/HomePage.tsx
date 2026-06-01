@@ -58,10 +58,6 @@ import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanB
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
-import {
-  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
-  EVENT_KANBAN_BOARDS_UPDATED,
-} from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
@@ -1228,7 +1224,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
       },
-      onEvent(event) {
+      onEvent(event, context) {
         if (event.event !== "workspace") return;
         let envelope: WorkspaceStreamEnvelope;
         try {
@@ -1238,11 +1234,86 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         }
         if (envelope.company_id?.trim() && envelope.company_id.trim() !== companyID) return;
         const type = envelope.type?.trim() ?? "";
-        if (!workspaceEventTouchesHomePanel(type)) return;
-        if ((type === "communications_shared_inbox_raci_updated" || type === "shared_triage_access_updated" || type.startsWith("company_explorer_folder_"))) {
+        if (!type) return;
+        const data: Record<string, unknown> = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
+        const scopes = context.scopes ?? [];
+        const touchesSharedInbox = scopes.some((scope) => (
+          scope.eventType === "communications_shared_inbox_raci_updated" || scope.eventType === "shared_triage_access_updated" ||
+          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications"))
+        ));
+        if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
-        scheduleWorkspacePanelReload();
+        if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
+          const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
+          if (node?.node_id) {
+            setNodes((previous) => {
+              const next = previous.filter((item) => item.node_id !== node.node_id);
+              return [...next, node];
+            });
+            invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+            upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+          }
+        } else if (type === "node_deleted") {
+          const nodeID = typeof data.node_id === "string" ? data.node_id.trim() : "";
+          if (nodeID) {
+            setNodes((previous) => previous.filter((node) => node.node_id !== nodeID));
+            setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== nodeID));
+            removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
+          }
+        } else if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_raci_updated" || type === "logic_gate_permissions_updated") {
+          const logicGate = data.logic_gate && typeof data.logic_gate === "object" ? data.logic_gate as LogicGateRecord : null;
+          if (logicGate?.logic_gate_id) {
+            setLogicGates((previous) => {
+              const next = previous.filter((item) => item.logic_gate_id !== logicGate.logic_gate_id);
+              return [...next, logicGate];
+            });
+            upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
+          }
+        } else if (type === "logic_gate_deleted") {
+          const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id.trim() : "";
+          if (logicGateID) {
+            setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== logicGateID));
+            setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID));
+            removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
+          }
+        } else if (type === "company_explorer_folder_item_assigned") {
+          const item = data.folder_item && typeof data.folder_item === "object" ? data.folder_item as CompanyExplorerFolderItem : null;
+          if (item?.item_type === "node") {
+            setNodeFolderItems((previous) => [...previous.filter((candidate) => candidate.item_type !== item.item_type || candidate.item_id !== item.item_id), item]);
+          } else if (item?.item_type === "logic_gate") {
+            setLogicGateFolderItems((previous) => [...previous.filter((candidate) => candidate.item_type !== item.item_type || candidate.item_id !== item.item_id), item]);
+          }
+          if (item) {
+            upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+            upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+          }
+        } else if (type === "company_explorer_folder_item_removed") {
+          const itemType = typeof data.item_type === "string" ? data.item_type.trim() : "";
+          const itemID = typeof data.item_id === "string" ? data.item_id.trim() : "";
+          if (itemType === "node" && itemID) setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== itemType || item.item_id !== itemID));
+          if (itemType === "logic_gate" && itemID) setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== itemType || item.item_id !== itemID));
+        } else if (type === "company_explorer_folder_created" || type === "company_explorer_folder_updated") {
+          const folder = data.folder && typeof data.folder === "object" ? data.folder as CompanyExplorerFolder : null;
+          if (folder?.folder_kind === "node") {
+            setNodeFolders((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
+          } else if (folder?.folder_kind === "logic_gate") {
+            setLogicGateFolders((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
+          }
+        } else if (type === "company_explorer_folder_deleted") {
+          const folderID = typeof data.folder_id === "string" ? data.folder_id.trim() : "";
+          const folderKind = typeof data.folder_kind === "string" ? data.folder_kind.trim() : "";
+          if (folderKind === "node" && folderID) {
+            setNodeFolders((previous) => previous.filter((folder) => folder.folder_id !== folderID));
+            setNodeFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
+          } else if (folderKind === "logic_gate" && folderID) {
+            setLogicGateFolders((previous) => previous.filter((folder) => folder.folder_id !== folderID));
+            setLogicGateFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
+          }
+        }
+        if (scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
+          scheduleWorkspacePanelReload();
+        }
       },
       onError() {
         // Workspace SSE reconnects automatically; visible errors come from reloads.
@@ -1256,19 +1327,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       }
     };
   }, [apiBase, companyID, loadSharedInboxes, scheduleWorkspacePanelReload]);
-  useEffect(() => {
-    const handleKanbanChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
-      if (detail?.companyID && detail.companyID !== companyID) return;
-      scheduleWorkspacePanelReload();
-    };
-    window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, handleKanbanChange);
-    window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, handleKanbanChange);
-    return () => {
-      window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, handleKanbanChange);
-      window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, handleKanbanChange);
-    };
-  }, [companyID, scheduleWorkspacePanelReload]);
   useEffect(() => {
     if (!selectedMessageID) return;
     let cancelled = false;
