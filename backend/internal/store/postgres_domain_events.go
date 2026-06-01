@@ -16,6 +16,21 @@ const domainEventSelectColumns = `
 event_id::text, company_id::text, stream_type, stream_id, sequence, event_type,
 actor_user_id::text, idempotency_key, payload, published_timestamp, created_timestamp`
 
+const domainEventReturningColumns = `
+event_id, company_id, stream_type, stream_id, sequence, event_type,
+actor_user_id, idempotency_key, payload, published_timestamp, created_timestamp`
+
+func domainEventSelectColumnsForAlias(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return domainEventSelectColumns
+	}
+	prefix := alias + "."
+	return `
+` + prefix + `event_id::text, ` + prefix + `company_id::text, ` + prefix + `stream_type, ` + prefix + `stream_id, ` + prefix + `sequence, ` + prefix + `event_type,
+` + prefix + `actor_user_id::text, ` + prefix + `idempotency_key, ` + prefix + `payload, ` + prefix + `published_timestamp, ` + prefix + `created_timestamp`
+}
+
 func scanDomainEvent(row interface{ Scan(dest ...any) error }) (domain.DomainEvent, error) {
 	var item domain.DomainEvent
 	var actorUserID sql.NullString
@@ -158,15 +173,163 @@ returning `+domainEventSelectColumns,
 	))
 }
 
+type postgresDomainEventBatchItem struct {
+	input        DomainEventInput
+	payloadBytes []byte
+	eventID      string
+}
+
 func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inputs []DomainEventInput) ([]domain.DomainEvent, error) {
 	defer observeTiming(ctx, "repo.appendDomainEventsTx.total")()
-	events := make([]domain.DomainEvent, 0, len(inputs))
+	if len(inputs) == 0 {
+		return []domain.DomainEvent{}, nil
+	}
+	if len(inputs) == 1 || domainEventInputsRequireSequentialAppend(inputs) {
+		events := make([]domain.DomainEvent, 0, len(inputs))
+		for _, input := range inputs {
+			event, err := r.appendDomainEventTx(ctx, tx, input)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, event)
+		}
+		return events, nil
+	}
+
+	items := make([]postgresDomainEventBatchItem, 0, len(inputs))
 	for _, input := range inputs {
-		event, err := r.appendDomainEventTx(ctx, tx, input)
+		stop := observeTiming(ctx, "repo.appendDomainEventTx.normalize_payload")
+		normalized, payloadBytes, err := normalizePostgresDomainEventInput(input)
+		stop()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, postgresDomainEventBatchItem{
+			input:        normalized,
+			payloadBytes: payloadBytes,
+			eventID:      newUUIDv7String(),
+		})
+	}
+
+	events := make([]domain.DomainEvent, 0, len(items))
+	for start := 0; start < len(items); {
+		end := start + 1
+		for end < len(items) && domainEventBatchSameStream(items[start].input, items[end].input) {
+			end++
+		}
+		batch, err := r.appendDomainEventBatchTx(ctx, tx, items[start:end])
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, batch...)
+		start = end
+	}
+	return events, nil
+}
+
+func domainEventInputsRequireSequentialAppend(inputs []DomainEventInput) bool {
+	for _, input := range inputs {
+		if strings.TrimSpace(input.IdempotencyKey) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func domainEventBatchSameStream(a, b DomainEventInput) bool {
+	return a.CompanyID == b.CompanyID && a.StreamType == b.StreamType && a.StreamID == b.StreamID
+}
+
+func (r *PostgresRepo) appendDomainEventBatchTx(ctx context.Context, tx *sql.Tx, items []postgresDomainEventBatchItem) ([]domain.DomainEvent, error) {
+	if len(items) == 0 {
+		return []domain.DomainEvent{}, nil
+	}
+	first := items[0].input
+	stop := observeTiming(ctx, "repo.appendDomainEventTx.advisory_lock")
+	if _, err := tx.ExecContext(ctx,
+		`select pg_advisory_xact_lock(hashtext($1), hashtext($2 || ':' || $3))`,
+		first.CompanyID, first.StreamType, first.StreamID,
+	); err != nil {
+		stop()
+		return nil, err
+	}
+	stop()
+
+	args := []any{first.CompanyID, first.StreamType, first.StreamID}
+	var values strings.Builder
+	for index, item := range items {
+		if index > 0 {
+			values.WriteString(",\n")
+		}
+		ordinalParam := len(args) + 1
+		eventIDParam := ordinalParam + 1
+		actorParam := ordinalParam + 2
+		typeParam := ordinalParam + 3
+		idempotencyParam := ordinalParam + 4
+		payloadParam := ordinalParam + 5
+		fmt.Fprintf(
+			&values,
+			"($%d::integer, $%d::uuid, nullif($%d, '')::uuid, $%d::text, $%d::text, $%d::jsonb)",
+			ordinalParam,
+			eventIDParam,
+			actorParam,
+			typeParam,
+			idempotencyParam,
+			payloadParam,
+		)
+		args = append(args, index, item.eventID, item.input.ActorUserID, item.input.Type, item.input.IdempotencyKey, string(item.payloadBytes))
+	}
+
+	stop = observeTiming(ctx, "repo.appendDomainEventTx.insert")
+	rows, err := tx.QueryContext(ctx, `
+with next_sequence as (
+  select coalesce(max(sequence), 0) as base_sequence
+  from domain_events
+  where company_id=$1::uuid
+    and stream_type=$2
+    and stream_id=$3
+),
+input_rows(input_order, event_id, actor_user_id, event_type, idempotency_key, payload) as (
+  values `+values.String()+`
+),
+numbered_input_rows as (
+  select input_rows.*,
+         next_sequence.base_sequence + row_number() over (order by input_rows.input_order) as sequence
+  from input_rows
+  cross join next_sequence
+),
+inserted as (
+  insert into domain_events (
+    event_id, company_id, actor_user_id, stream_type, stream_id, sequence,
+    event_type, idempotency_key, payload, created_timestamp
+  )
+  select event_id, $1::uuid, actor_user_id, $2, $3, sequence, event_type, idempotency_key, payload, now()
+  from numbered_input_rows
+  order by input_order
+  returning `+domainEventReturningColumns+`
+)
+select `+domainEventSelectColumnsForAlias("inserted")+`
+from inserted
+order by sequence asc, event_id asc`, args...)
+	stop()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]domain.DomainEvent, 0, len(items))
+	for rows.Next() {
+		event, err := scanDomainEvent(rows)
 		if err != nil {
 			return nil, err
 		}
 		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(events) != len(items) {
+		return nil, fmt.Errorf("append domain events batch inserted %d events, want %d", len(events), len(items))
 	}
 	return events, nil
 }
