@@ -37,10 +37,12 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, folderItem)
+		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.domain_event_append")
 		events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
 			folderItemAssignedWorkspaceEventInput(folderItem, meta),
 			logicGateCreatedWorkspaceEventInput(logicGate, meta),
 		})
+		stop()
 		if err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
@@ -116,7 +118,9 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
+	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.domain_event_append")
 	event, err := r.appendDomainEventTx(ctx, tx, nodeCreatedWorkspaceEventInputWithMetadata(node, meta))
+	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}

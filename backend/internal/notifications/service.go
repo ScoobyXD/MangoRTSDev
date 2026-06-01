@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Service struct {
@@ -48,6 +49,10 @@ func NewService(repo store.Repository) *Service {
 }
 
 func (s *Service) ProcessDomainEvents(ctx context.Context, events []domain.DomainEvent) ([]domain.Notification, error) {
+	return s.ProcessDomainEventsWithTiming(ctx, events, nil)
+}
+
+func (s *Service) ProcessDomainEventsWithTiming(ctx context.Context, events []domain.DomainEvent, recorder store.TimingRecorder) ([]domain.Notification, error) {
 	all := make([]domain.Notification, 0)
 	for _, event := range events {
 		if ctx != nil {
@@ -55,7 +60,7 @@ func (s *Service) ProcessDomainEvents(ctx context.Context, events []domain.Domai
 				return all, err
 			}
 		}
-		items, err := s.ProcessDomainEvent(ctx, event)
+		items, err := s.processDomainEvent(ctx, event, recorder)
 		if err != nil {
 			return all, err
 		}
@@ -65,16 +70,22 @@ func (s *Service) ProcessDomainEvents(ctx context.Context, events []domain.Domai
 }
 
 func (s *Service) ProcessDomainEvent(ctx context.Context, event domain.DomainEvent) ([]domain.Notification, error) {
+	return s.processDomainEvent(ctx, event, nil)
+}
+
+func (s *Service) processDomainEvent(ctx context.Context, event domain.DomainEvent, recorder store.TimingRecorder) ([]domain.Notification, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 	}
+	stop := observeNotificationTiming(recorder, "notifications.event_mapping")
 	notificationEvent, ok := notificationEventFromDomainEvent(event)
+	stop()
 	if !ok {
 		return []domain.Notification{}, nil
 	}
-	candidates, err := s.notificationCandidates(notificationEvent)
+	candidates, err := s.notificationCandidates(notificationEvent, recorder)
 	if errors.Is(err, store.ErrNotFound) {
 		// Domain events can outlive their source entities; a missing source has no current notification target.
 		return []domain.Notification{}, nil
@@ -85,7 +96,17 @@ func (s *Service) ProcessDomainEvent(ctx context.Context, event domain.DomainEve
 	if len(candidates) == 0 {
 		return []domain.Notification{}, nil
 	}
-	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates})
+	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates, TimingRecorder: recorder})
+}
+
+func observeNotificationTiming(recorder store.TimingRecorder, label string) func() {
+	if recorder == nil || strings.TrimSpace(label) == "" {
+		return func() {}
+	}
+	start := time.Now()
+	return func() {
+		recorder.RecordTiming(label, time.Since(start))
+	}
 }
 
 func (s *Service) InitializeDomainEventCheckpoint(ctx context.Context, companyID string) error {
@@ -164,7 +185,7 @@ func (s *Service) ReplayDomainEvents(ctx context.Context, companyID string, limi
 	return result, all, nil
 }
 
-func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]store.NotificationCreateInput, error) {
+func (s *Service) notificationCandidates(event notificationProjectionEvent, recorder store.TimingRecorder) ([]store.NotificationCreateInput, error) {
 	actorID := ""
 	if event.ActorUserID != nil {
 		actorID = strings.TrimSpace(*event.ActorUserID)
@@ -183,7 +204,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		recipients[userID] = mergeNotificationRecipientMeta(recipients[userID], meta)
 	}
 	addEffectiveRecipientSubset := func(resourceType, resourceID string, userIDs []string, metaForUser func(string) notificationRecipientMeta) error {
+		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
 		eligible, err := s.notificationEffectiveUserSet(event.CompanyID, resourceType, resourceID)
+		stop()
 		if err != nil {
 			return err
 		}
@@ -195,7 +218,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		return nil
 	}
 	addLogicGateRecipients := func(logicGateID, nodeID string) error {
+		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
 		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		stop()
 		if err != nil {
 			return err
 		}
@@ -205,7 +230,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		return nil
 	}
 	addLogicGateWorkRecipients := func(logicGateID, nodeID string) error {
+		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
 		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		stop()
 		if err != nil {
 			return err
 		}
@@ -215,7 +242,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		return nil
 	}
 	addSharedTriageFolderRecipients := func(folderID string) error {
+		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
 		roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
+		stop()
 		if err != nil {
 			return err
 		}
@@ -244,7 +273,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent) ([]s
 		}
 		nodeTitle := payloadString(payload, "node_title")
 		if nodeTitle == "" {
-			nodeTitle = s.notificationNodeTitle(event.CompanyID, nodeID)
+			nodeTitle = s.notificationNodeTitle(event.CompanyID, nodeID, recorder)
 		}
 		if nodeTitle == "" {
 			nodeTitle = "This node"
@@ -605,13 +634,15 @@ func logicGateWorkNotificationTargets(logicGateID, nodeID string) []store.Notifi
 	return targets
 }
 
-func (s *Service) notificationNodeTitle(companyID, nodeID string) string {
+func (s *Service) notificationNodeTitle(companyID, nodeID string, recorder store.TimingRecorder) string {
 	companyID = strings.TrimSpace(companyID)
 	nodeID = strings.TrimSpace(nodeID)
 	if companyID == "" || nodeID == "" {
 		return ""
 	}
+	stop := observeNotificationTiming(recorder, "notifications.node_load")
 	node, err := s.Repo.GetNode(companyID, nodeID)
+	stop()
 	if err != nil {
 		return ""
 	}

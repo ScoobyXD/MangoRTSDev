@@ -20,12 +20,14 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var fields map[string]json.RawMessage
-	stop := timings.observe("request_decode_validation")
+	stop := timings.observeAccounted("request.decode")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	stop()
+	stop = timings.observeAccounted("request.validate")
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
 		stop()
@@ -38,13 +40,15 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 		return
 	}
 	stop()
-	stop = timings.observe("auth_access")
+	stop = timings.observeAccounted("request.auth")
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		stop()
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	stop()
+	stop = timings.observeAccounted("request.access_check")
 	if actorRoleForCompany(actor, companyID) == "" {
 		stop()
 		writeError(w, http.StatusForbidden, "company_access_denied")
@@ -53,7 +57,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	stop()
 
 	input := store.RacioMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID)}
-	stop = timings.observe("request_decode_validation")
+	stop = timings.observeAccounted("request.validate")
 	if nodeID, set, ok := parseOptionalStringField(fields, "node_id"); !ok {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_node_id")
@@ -127,13 +131,13 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 		input.CreatorLogicGateRaciRole = *role
 	}
 	stop()
-	stop = timings.observe("auth_access")
+	stop = timings.observeAccounted("request.access_check")
 	if input.LogicGateID != "" && !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, input.LogicGateID, store.EntityPermissionEdit) {
 		stop()
 		return
 	}
 	stop()
-	stop = timings.observe("request_decode_validation")
+	stop = timings.observeAccounted("request.validate")
 	if !parseRacioMatrixNodeCreateMutationFields(w, fields, &input) {
 		stop()
 		return
@@ -142,17 +146,17 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 
 	input.IdempotencyKey = r.Header.Get("Idempotency-Key")
 	input.TimingRecorder = timings
-	stop = timings.observe("repository_transaction")
+	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.CreateRacioMatrixNode(input)
 	stop()
 	if !writeRacioMatrixNodeCreateError(w, err) {
 		return
 	}
-	stop = timings.observe("domain_event_publish")
-	s.publishCommittedWorkspaceEvents(result.Events)
+	stop = timings.observeAccounted("events.publish.total")
+	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	stop()
-	stop = timings.observe("notification_projection")
-	s.projectCommittedNotificationEvents(result.Events)
+	stop = timings.observeAccounted("notifications.total")
+	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	stop()
 	writeJSON(w, http.StatusCreated, result)
 }
@@ -178,12 +182,14 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var fields map[string]json.RawMessage
-	stop := timings.observe("request_decode_validation")
+	stop := timings.observeAccounted("request.decode")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	stop()
+	stop = timings.observeAccounted("request.validate")
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
 		stop()
@@ -233,8 +239,10 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	stop()
+	stop = timings.observeAccounted("request.auth")
 	userID := s.entityPermissionActorUserID(r, input.CompanyID)
-	stop = timings.observe("auth_access")
+	stop()
+	stop = timings.observeAccounted("request.access_check")
 	if !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, userID, input.LogicGateID, store.EntityPermissionEdit) {
 		stop()
 		return
@@ -247,17 +255,17 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	input.TimingRecorder = timings
-	stop = timings.observe("repository_transaction")
+	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.MoveLogicGateNodeAssignment(input)
 	stop()
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_racio_matrix_node") {
 		return
 	}
-	stop = timings.observe("domain_event_publish")
-	s.publishCommittedWorkspaceEvents(result.Events)
+	stop = timings.observeAccounted("events.publish.total")
+	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	stop()
-	stop = timings.observe("notification_projection")
-	s.projectCommittedNotificationEvents(result.Events)
+	stop = timings.observeAccounted("notifications.total")
+	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	stop()
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }
