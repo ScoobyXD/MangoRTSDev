@@ -352,30 +352,32 @@ node_default as (
   from nodes
   where company_id=$1::uuid and node_id=$3::uuid
 ),
-gate_users as (
-  select user_id
+gate_policy as (
+  select user_id,
+         case when (select default_access from gate_default) = $4 then $5 else $4 end as access_level
   from resource_permissions
   where company_id=$1::uuid
     and resource_type='logic_gate'
     and resource_id=$2::uuid
 ),
-node_users as (
-  select user_id
+node_policy as (
+  select user_id,
+         case when (select default_access from node_default) = $4 then $5 else $4 end as access_level
   from resource_permissions
   where company_id=$1::uuid
     and resource_type='node'
     and resource_id=$3::uuid
 ),
-different_users as (
-  (select user_id from gate_users except select user_id from node_users)
+different_permission_rows as (
+  (select user_id, access_level from gate_policy except select user_id, access_level from node_policy)
   union
-  (select user_id from node_users except select user_id from gate_users)
+  (select user_id, access_level from node_policy except select user_id, access_level from gate_policy)
 )
 select exists(select 1 from gate_default)
    and exists(select 1 from node_default)
    and (select default_access from gate_default) = (select default_access from node_default)
-   and not exists(select 1 from different_users)`,
-		companyID, logicGateID, nodeID, ResourceDefaultAccessEdit,
+   and not exists(select 1 from different_permission_rows)`,
+		companyID, logicGateID, nodeID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess,
 	).Scan(&matches)
 	if err != nil {
 		return false, err
