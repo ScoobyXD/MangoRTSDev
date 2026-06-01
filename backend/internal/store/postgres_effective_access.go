@@ -101,6 +101,9 @@ where company_id=$1::uuid
   and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
 		return err
 	}
+	if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
 	for _, nodeID := range nodeIDs {
 		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err

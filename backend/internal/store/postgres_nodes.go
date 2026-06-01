@@ -476,6 +476,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return domain.Node{}, err
 	}
+	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return domain.Node{}, err
+	}
 	return item, nil
 }
 

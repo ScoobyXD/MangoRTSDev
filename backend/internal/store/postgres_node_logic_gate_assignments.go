@@ -198,13 +198,22 @@ func deleteNodeLogicGateAssignmentForCardSQL(ctx context.Context, execer nodeLog
 	if card.LogicGateID == nil || strings.TrimSpace(*card.LogicGateID) == "" {
 		return nil
 	}
-	_, err := execer.ExecContext(ctx, `
+	if _, err := execer.ExecContext(ctx, `
 delete from node_logic_gate_assignments
 where company_id=$1
   and node_id=$2
   and compatibility_board_id=$3
   and compatibility_card_id=$4`,
 		card.CompanyID, card.NodeID, card.BoardID, card.CardID,
+	); err != nil {
+		return err
+	}
+	_, err := execer.ExecContext(ctx, `
+delete from kanban_board_projection
+where company_id=$1::uuid
+  and node_id=$2::uuid
+  and logic_gate_id=$3::uuid`,
+		card.CompanyID, card.NodeID, *card.LogicGateID,
 	)
 	return err
 }

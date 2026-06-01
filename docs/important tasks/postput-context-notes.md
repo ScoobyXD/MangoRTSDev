@@ -1079,3 +1079,116 @@ Validation:
 - `go test ./...` from `backend/` passed.
 - `npm.cmd run build` from `frontend/` passed after installing frontend dependencies in this worktree.
 - `node scripts\run_all_tests.mjs` passed all frontend feature tests, production build, and backend Go tests.
+
+## Update: Kanban Board Projection First Pass
+
+This pass added a disposable, company-scoped Logic Gate Kanban projection and moved the main Logic Gate work/Kanban card read path onto it.
+
+Projection schema:
+
+```text
+kanban_board_projection
+  company_id
+  logic_gate_id
+  node_id
+  status
+  column_id
+  position
+  title
+  assignee_user_id
+  priority
+  is_issue
+  due_date
+  node_created_timestamp
+  node_updated_timestamp
+  assignment_id
+  assignment_created_timestamp
+  assignment_updated_timestamp
+  compatibility_board_id
+  compatibility_card_id
+  projection_updated_timestamp
+```
+
+Indexes added:
+
+- Primary key: `(company_id, logic_gate_id, node_id)`.
+- Hot board read: `(company_id, logic_gate_id, status, position, node_id)`.
+- Node delta maintenance: `(company_id, node_id)`.
+- Updated/keyset support: `(company_id, logic_gate_id, projection_updated_timestamp desc, node_id)`.
+
+Source truth is still:
+
+- `nodes` for title, assignee, priority, due date, and node existence.
+- `logic_gates` for board scope/existence.
+- `node_logic_gate_assignments` for Logic Gate assignment, status key, position, issue flag, compatibility card identity, and assignment timestamps.
+- RACI/access tables for authorization.
+
+What reads use now:
+
+- `PostgresRepo.GetLogicGateWork` reads card/node display fields from `kanban_board_projection`.
+- It only joins `node_logic_gate_assignments` for assignment metadata that the current work API still returns.
+- It no longer joins `nodes` or legacy `kanban_cards` for the Logic Gate work read.
+- `PostgresRepo.ListKanbanCards` uses `kanban_board_projection` for Logic Gate board IDs and keeps legacy table reads only for non-Logic-Gate legacy boards.
+
+Projection maintenance added:
+
+- Rebuild helpers:
+  - `RebuildKanbanBoardProjectionForLogicGate(companyID, logicGateID)`.
+  - `RebuildKanbanBoardProjectionForCompany(companyID)`.
+- Delta helpers:
+  - Upsert projection for one assigned node from source truth.
+  - Delete projection rows for one node.
+  - Delete projection rows for one Logic Gate.
+- Command hooks:
+  - Assign node to Logic Gate: upserts projection and rereads response card from projection.
+  - Move node within/between Logic Gates: upserts projection and rereads response card from projection.
+  - Toggle issue state: upserts projection and rereads response card from projection.
+  - Remove assignment: deletes projection row.
+  - Node update: refreshes projection rows for that node after title/due date/priority/assignee changes.
+  - Logic Gate assignment bulk delete and email-triage revert paths clean projection rows.
+  - Legacy card endpoints still refresh projection when they mutate assignment source through compatibility paths.
+
+Legacy dependencies still remaining:
+
+- `kanban_boards` and `kanban_columns` still exist because `node_logic_gate_assignments.column_id` has a compatibility FK to `kanban_columns`.
+- `kanban_cards` still exists for old legacy card endpoints, compatibility events, and `communications_email_nodes` FK compatibility.
+- New Logic Gate work reads no longer use `kanban_cards`, but assignment/move command paths still perform legacy card writes in this pass. They are compatibility writes, not source truth.
+- `kanban_card_*` events are still emitted for workspace/client compatibility. They are emitted from command results whose card shape is now reread from the projection on the main assignment paths.
+- The database trigger `trg_sync_node_logic_gate_assignment_from_kanban_card` remains for legacy direct card mutations.
+
+What hot-path work was removed or reduced:
+
+- Hot Logic Gate work/card reads no longer join `nodes` and no longer read `kanban_cards`.
+- Main assignment/move/issue responses no longer depend on the just-written legacy card row for response card shape; they reread from `kanban_board_projection`.
+- Projection deltas are bounded by company plus node or company plus Logic Gate. No broad rebuild is used on command paths.
+
+What was intentionally not removed yet:
+
+- Legacy card writes in assignment/move paths remain because the assignment schema still references legacy columns and communications email compatibility still references legacy cards.
+- Column/status source cleanup requires a later schema change to remove or loosen `node_logic_gate_assignments.column_id` from legacy `kanban_columns`.
+- Per-user Kanban projection rows were not added.
+
+Test coverage added/updated:
+
+- Source-level migration/schema tests assert `kanban_board_projection`, hot indexes, source backfill, and no per-user primary key shape.
+- Source-level helper tests assert bounded node/gate projection deltas, no OFFSET, and no `kanban_cards` dependency in projection helpers.
+- Logic Gate work source-shape tests assert the Postgres read uses `kanban_board_projection` and does not join legacy Kanban tables or `nodes`.
+
+Validation:
+
+- `go test ./...` from `backend/` passed.
+- `npm.cmd run build` from `frontend/` passed after installing frontend dependencies.
+- `node scripts\run_all_tests.mjs` passed all frontend feature tests, production build, and backend Go tests.
+
+Timing impact:
+
+- App timing logs were not captured in this pass.
+- Expected read impact: Logic Gate Kanban/work reads should be cheaper because hot card fields come from the projection.
+- Expected write impact: assignment/move paths add one bounded projection upsert but still retain legacy card writes, so this pass is primarily a read-model foundation and correctness step before the legacy write cleanup.
+
+Recommended next cleanup:
+
+1. Remove the `node_logic_gate_assignments.column_id` FK dependency on `kanban_columns` or replace it with status-key/source config, then delete the command-path `kanban.column_read` requirement.
+2. Move `communications_email_nodes` away from `kanban_cards` FK identity so cross-Logic-Gate moves can stop legacy card updates safely.
+3. Once those compatibility dependencies are gone, remove assignment/move hot-path writes to `kanban_cards` and keep `kanban_card_*` events as emitted compatibility events only if clients still require them.
+4. Add live app timing for create in Logic Gate Kanban column, move within same Logic Gate, move between Logic Gates, and create in matrix cell.

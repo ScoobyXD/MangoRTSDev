@@ -556,6 +556,9 @@ where company_id=$1 and board_id=$2 and column_id=$3`,
 
 func (r *PostgresRepo) ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error) {
 	ctx := context.Background()
+	if logicGateID := LogicGateIDFromKanbanBoardID(boardID); logicGateID != "" {
+		return listKanbanBoardProjectionCardsTx(ctx, r.db, companyID, logicGateID, query)
+	}
 	query = NormalizeKanbanCardQuery(query)
 	where := []string{"company_id=$1", "board_id=$2"}
 	args := []any{companyID, boardID}
@@ -746,6 +749,11 @@ returning `+kanbanCardSelectColumns,
 	}
 	if item.LogicGateID != nil {
 		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, item.CompanyID, *item.LogicGateID, item.NodeID); err != nil {
+			return domain.KanbanCard{}, err
+		}
+	}
+	if item.LogicGateID != nil {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, item.CompanyID, item.NodeID); err != nil {
 			return domain.KanbanCard{}, err
 		}
 	}
@@ -1023,6 +1031,16 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 			return LogicGateNodeAssignmentResult{}, err
 		}
 		stop()
+	}
+	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.kanban_projection_upsert")
+	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		stop()
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	card, err = kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	stop()
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.racio_projection_sync")
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
@@ -1425,6 +1443,16 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&curren
 		}
 		stop()
 	}
+	stop = observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.kanban_projection_upsert")
+	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		stop()
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	card, err = kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	stop()
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	stop = observeTiming(ctx, "repo.MoveLogicGateNodeAssignment.racio_projection_sync")
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		stop()
@@ -1488,6 +1516,9 @@ func (r *PostgresRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignme
 	if _, err := tx.ExecContext(ctx, `
 delete from node_logic_gate_assignments
 where company_id=$1 and node_id=$2 and assignment_id=$3`, assignment.CompanyID, assignment.NodeID, assignment.AssignmentID); err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	deleted, err := tx.ExecContext(ctx, `
@@ -1613,6 +1644,13 @@ returning `+kanbanCardSelectColumns,
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	card, err = kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -1695,6 +1733,11 @@ returning `+kanbanCardSelectColumns,
 	}
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
 		return domain.KanbanCard{}, err
+	}
+	if item.LogicGateID != nil {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, item.CompanyID, item.NodeID); err != nil {
+			return domain.KanbanCard{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.KanbanCard{}, err
@@ -2185,6 +2228,11 @@ returning `+kanbanCardSelectColumns,
 			return KanbanCardWorkspaceEventResult{}, err
 		}
 	}
+	if item.LogicGateID != nil {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, item.CompanyID, item.NodeID); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
+	}
 	derivedNode, events, err := r.appendKanbanCardWorkspaceEventsTx(ctx, tx, "kanban_card_upserted", item, true)
 	if err != nil {
 		return KanbanCardWorkspaceEventResult{}, err
@@ -2251,6 +2299,11 @@ returning `+kanbanCardSelectColumns,
 	}
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
 		return KanbanCardWorkspaceEventResult{}, err
+	}
+	if item.LogicGateID != nil {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, item.CompanyID, item.NodeID); err != nil {
+			return KanbanCardWorkspaceEventResult{}, err
+		}
 	}
 	derivedNode, events, err := r.appendKanbanCardWorkspaceEventsTx(ctx, tx, "kanban_card_moved", item, true)
 	if err != nil {

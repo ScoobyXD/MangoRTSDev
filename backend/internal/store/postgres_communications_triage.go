@@ -772,6 +772,9 @@ where company_id=$1
   and compatibility_card_id=$4`, input.CompanyID, link.NodeID, input.BoardID, input.CardID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
+	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, link.NodeID); err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from kanban_cards
 where company_id=$1 and board_id=$2 and card_id=$3`, input.CompanyID, input.BoardID, input.CardID); err != nil {
