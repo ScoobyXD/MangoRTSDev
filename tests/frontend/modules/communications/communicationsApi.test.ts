@@ -11,8 +11,12 @@ import {
   emailMessageMatchesListFilters,
   getEmailMessage,
   invalidateCommunicationsCache,
+  listLogicGates,
   listCommunicationsSharedInboxes,
   listEmailMessages,
+  listNodeFolderItems,
+  listNodes,
+  markCommunicationsWorkspacePanelStale,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   removeLogicGateRaciAssignments,
@@ -137,6 +141,39 @@ test("communications stream helpers prepend one new inbox message without replac
     mergeEmailMessageIntoMessageList(existing, created, { limit: 2, mailbox: "primary" }, { prependIfMissing: true }).map((item) => item.id),
     ["new-1", "old-1"],
   );
+});
+
+test("workspace panel scoped stale refetches only matching resource caches", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.startsWith("/v1/logic-gates?")) return jsonResponse({ logic_gates: [{ company_id: "company-1", logic_gate_id: "gate-1", header: "Gate 1", created_timestamp: "2026-01-01T00:00:00Z" }] });
+    if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, title: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
+    if (path.startsWith("/v1/company-explorer/folder-items?")) return jsonResponse({ folder_items: [{ company_id: "company-1", folder_id: "folder-1", item_type: "node", item_id: "node-1", position: 1000, created_timestamp: "2026-01-01T00:00:00Z", updated_timestamp: "2026-01-01T00:00:00Z" }] });
+    return jsonResponse({ folders: [], shortcuts: [], users: [] });
+  };
+  try {
+    await listLogicGates("company-1");
+    await listNodes("company-1");
+    await listNodeFolderItems("company-1");
+    markCommunicationsWorkspacePanelStale("company-1", { nodes: true });
+    await listLogicGates("company-1");
+    await listNodes("company-1");
+    await listNodeFolderItems("company-1");
+
+    assert.deepEqual(calls, [
+      "/v1/logic-gates?company_id=company-1",
+      "/v1/nodes?company_id=company-1",
+      "/v1/company-explorer/folder-items?company_id=company-1&item_type=node",
+      "/v1/nodes?company_id=company-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
 });
 
 test("communications stream helpers do not inject new messages into paged or searched lists", () => {

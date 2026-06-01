@@ -966,7 +966,8 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
   const cleanType = type.trim();
   if (!cleanType) return false;
   if (
-    cleanType === "company_explorer_folder_item_assign_requested"
+    cleanType === "workspace_derived_projection_requested"
+    || cleanType === "company_explorer_folder_item_assign_requested"
     || cleanType === "node_map_position_upsert_requested"
     || cleanType === "logic_gate_map_position_upsert_requested"
   ) {

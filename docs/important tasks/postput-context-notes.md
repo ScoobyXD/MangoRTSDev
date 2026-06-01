@@ -1049,3 +1049,33 @@ Latency implication:
 
 - The no-op optimization remains: policy copy is skipped only for exact matches.
 - Non-exact policies now pay the copy cost, which is required for correctness because assigning or moving a node into a Logic Gate must make the Logic Gate policy overwrite the node policy.
+
+## Update: Deferred Projection Correctness and Reload Storm Reduction
+
+This pass tightened the deferred workspace projection path and reduced broad frontend invalidation after derived events.
+
+Backend changes:
+
+- Added one durable internal `workspace_derived_projection_requested` event carrying ordered projection tasks, while preserving support for the older internal deferred event types during catch-up.
+- Batch entity creation now emits a single collapsed derived-projection request for Explorer folder items and map positions instead of one internal event per artifact.
+- Deferred Explorer folder item projection now inserts only if the item is missing. Existing placements are left untouched and do not emit a duplicate public assignment event.
+- Derived projection task processing now appends resulting public events in one transaction for a collapsed request, so partial public projection is avoided if a later task fails.
+- Immediate async derived projection now advances its checkpoint after each successful internal event, including missing-target no-ops, and leaves failed events for catch-up instead of checkpointing past them.
+- Workspace read-version bumps now ignore the new collapsed request event and the older internal deferred request events.
+
+Frontend changes:
+
+- Workspace stream reconciliation treats the new internal derived-projection request as non-user-visible, matching the old internal deferred events.
+- Home no longer schedules a full workspace panel reload for every workspace event or local Kanban bus update. It patches local Home state for node, Logic Gate, and Explorer folder/folder-item events and falls back to a full reload only for workspace-scope recovery.
+- App live freshness now invalidates communications workspace panel caches by resource scope instead of clearing the entire panel for Kanban and derived workspace events.
+
+Test coverage added:
+
+- Backend tests cover immediate projection checkpoint advancement on success, stopping at failures, checkpointing missing-target no-ops, internal read-version suppression, collapsed request payload shape, and source-level SQL coverage for insert-if-missing Explorer projection.
+- Frontend tests cover internal request event filtering, Home panel event filtering, and scoped communications workspace panel cache invalidation.
+
+Validation:
+
+- `go test ./...` from `backend/` passed.
+- `npm.cmd run build` from `frontend/` passed after installing frontend dependencies in this worktree.
+- `node scripts\run_all_tests.mjs` passed all frontend feature tests, production build, and backend Go tests.

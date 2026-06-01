@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"miraeopus/backend/internal/domain"
+	"testing"
+)
 
 func TestMemoryDomainEventsSequenceIdempotencyAndPublish(t *testing.T) {
 	repo := NewMemoryRepo()
@@ -218,6 +221,54 @@ func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
 	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 1, true)
 }
 
+func TestMemoryWorkspaceReadVersionsIgnoreInternalDerivedProjectionRequests(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-222222222223"
+
+	for _, eventType := range []string{
+		WorkspaceDerivedProjectionRequestedEventType,
+		WorkspaceDeferredFolderItemAssignEventType,
+		WorkspaceDeferredNodeMapPositionUpsertEventType,
+		WorkspaceDeferredLogicMapPositionUpsertEventType,
+	} {
+		if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: eventType}); err != nil {
+			t.Fatalf("AppendDomainEvent %s: %v", eventType, err)
+		}
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 0, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 0, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", "", 0, true)
+}
+
+func TestWorkspaceDerivedProjectionRequestedEventInputUsesTaskPayload(t *testing.T) {
+	input := WorkspaceDerivedProjectionRequestedEventInput(
+		"company-1",
+		[]WorkspaceDerivedProjectionTask{
+			DeferredCompanyExplorerFolderItemAssignTask("", CompanyExplorerSystemActiveNodesKey, "node", "node-1", 0),
+			DeferredNodeMapPositionUpsertTask(domainNodeMapPositionForTest("company-1", "node-1")),
+		},
+		"user-1",
+	)
+	if input.Type != WorkspaceDerivedProjectionRequestedEventType {
+		t.Fatalf("event type = %q, want %q", input.Type, WorkspaceDerivedProjectionRequestedEventType)
+	}
+	tasks, ok := input.Payload["tasks"].([]map[string]any)
+	if !ok {
+		t.Fatalf("tasks payload type = %T, want []map[string]any", input.Payload["tasks"])
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("task count = %d, want 2", len(tasks))
+	}
+	if tasks[0]["kind"] != WorkspaceDerivedTaskCompanyExplorerFolderItemAssign || tasks[1]["kind"] != WorkspaceDerivedTaskNodeMapPositionUpsert {
+		t.Fatalf("task kinds = %v, %v", tasks[0]["kind"], tasks[1]["kind"])
+	}
+
+	single := DeferredLogicGateMapPositionUpsertEventInput(domainLogicGateMapPositionForTest("company-1", "gate-1"), "user-1")
+	if single.Type != WorkspaceDerivedProjectionRequestedEventType {
+		t.Fatalf("single helper event type = %q, want %q", single.Type, WorkspaceDerivedProjectionRequestedEventType)
+	}
+}
+
 func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-333333333333"
@@ -238,6 +289,14 @@ func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
 	assertWorkspaceReadVersion(t, repo, companyID, "kanban-cards", boardB, 2, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:kanban", boardB, 2, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 2, true)
+}
+
+func domainNodeMapPositionForTest(companyID, nodeID string) domain.NodeMapPosition {
+	return domain.NodeMapPosition{CompanyID: companyID, NodeID: nodeID, X: 10, Y: 20}
+}
+
+func domainLogicGateMapPositionForTest(companyID, logicGateID string) domain.LogicGateMapPosition {
+	return domain.LogicGateMapPosition{CompanyID: companyID, LogicGateID: logicGateID, X: 30, Y: 40}
 }
 
 func assertWorkspaceReadVersion(t *testing.T, repo *MemoryRepo, companyID, scope, resourceKey string, want int64, wantFound bool) {

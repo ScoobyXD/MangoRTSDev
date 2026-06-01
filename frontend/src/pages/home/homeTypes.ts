@@ -50,6 +50,7 @@ export type CommunicationsStreamEnvelope = {
 export type WorkspaceStreamEnvelope = {
   company_id?: string;
   type?: string;
+  data?: Record<string, unknown>;
 };
 
 export type LoadMessagesOptions = {

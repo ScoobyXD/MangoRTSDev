@@ -258,14 +258,20 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	if len(result.LogicGateMapPositions) > 0 {
 		appendEvent("logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
 	}
+	deferredTasks := make([]store.WorkspaceDerivedProjectionTask, 0,
+		len(result.DeferredFolderItems)+len(result.DeferredNodeMapPositions)+len(result.DeferredLogicGateMapPositions),
+	)
 	for _, item := range result.DeferredFolderItems {
-		inputs = append(inputs, store.DeferredCompanyExplorerFolderItemAssignEventInput(result.CompanyID, item.FolderID, item.SystemFolderKey, item.ItemType, item.ItemID, item.Position, ""))
+		deferredTasks = append(deferredTasks, store.DeferredCompanyExplorerFolderItemAssignTask(item.FolderID, item.SystemFolderKey, item.ItemType, item.ItemID, item.Position))
 	}
 	for _, position := range result.DeferredNodeMapPositions {
-		inputs = append(inputs, store.DeferredNodeMapPositionUpsertEventInput(position, ""))
+		deferredTasks = append(deferredTasks, store.DeferredNodeMapPositionUpsertTask(position))
 	}
 	for _, position := range result.DeferredLogicGateMapPositions {
-		inputs = append(inputs, store.DeferredLogicGateMapPositionUpsertEventInput(position, ""))
+		deferredTasks = append(deferredTasks, store.DeferredLogicGateMapPositionUpsertTask(position))
+	}
+	if len(deferredTasks) > 0 {
+		inputs = append(inputs, store.WorkspaceDerivedProjectionRequestedEventInput(result.CompanyID, deferredTasks, ""))
 	}
 	for _, item := range result.Relationships {
 		appendEvent("relationship_created", map[string]any{

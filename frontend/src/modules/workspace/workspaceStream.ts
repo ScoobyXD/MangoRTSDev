@@ -88,6 +88,7 @@ const WORK_ITEM_ASSIGNMENT_EVENT_TYPES = new Set([
   "work_item.logic_gate_issue_toggled",
 ]);
 const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
+  "workspace_derived_projection_requested",
   "company_explorer_folder_item_assign_requested",
   "node_map_position_upsert_requested",
   "logic_gate_map_position_upsert_requested",

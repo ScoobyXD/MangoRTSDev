@@ -9,6 +9,7 @@ import {
   invalidateEmailMessageCache,
   markCommunicationsWorkspacePanelStale,
   removeEmailMessageFromCache,
+  type CommunicationsWorkspacePanelCacheScope,
 } from "../modules/communications/communicationsApi";
 import { subscribeCommunicationsStream } from "../modules/communications/communicationsStream";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../modules/kanban/kanbanApi";
@@ -126,20 +127,29 @@ function markWorkspaceCachesStaleForGap(gap: WorkspaceStreamGapSignal, apiBase: 
 
 function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[], apiBase: string, companyID: string): void {
   if (scopes.length === 0) return;
-  let workspacePanelTouched = false;
+  const workspacePanelScope: CommunicationsWorkspacePanelCacheScope = {};
+  const markPanelScope = (scope: CommunicationsWorkspacePanelCacheScope) => {
+    Object.assign(workspacePanelScope, scope);
+  };
   for (const scope of scopes) {
     switch (scope.kind) {
       case "node_graph":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
         invalidateNodeRelationshipGraphSnapshot(apiBase, companyID);
+        markPanelScope(scope.eventType === "node_deleted" || scope.eventType === "node_permissions_updated"
+          ? { nodes: true, nodeFolderItems: true }
+          : { nodes: true });
         break;
       case "logic_gate_graph":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "logic_gate_map" });
         invalidateLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        markPanelScope(scope.eventType === "logic_gate_deleted" || scope.eventType === "logic_gate_permissions_updated"
+          ? { logicGates: true, logicGateFolderItems: true }
+          : { logicGates: true });
         break;
       case "company_explorer":
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "company_explorer" });
-        workspacePanelTouched = true;
+        markPanelScope(workspacePanelCacheScopeForCompanyExplorerScope(scope));
         break;
       case "kanban_board":
         if (scope.boardID) {
@@ -147,12 +157,10 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
           invalidateKanbanBoardContentsCache(apiBase, companyID, scope.boardID);
         }
         if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
-        workspacePanelTouched = true;
         break;
       case "kanban_board_list":
         invalidateKanbanBoardListCache(apiBase, companyID);
         if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
-        workspacePanelTouched = true;
         break;
       case "work_item_assignment":
         if (scope.boardID) {
@@ -164,14 +172,14 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
           invalidateNodeRelationshipGraphSnapshot(apiBase, companyID);
         }
-        workspacePanelTouched = true;
+        markPanelScope({ nodes: true });
         break;
       case "workspace":
         markWorkspaceCachesStale(apiBase, companyID);
         return;
     }
   }
-  if (workspacePanelTouched) markCommunicationsWorkspacePanelStale(companyID);
+  if (Object.values(workspacePanelScope).some(Boolean)) markCommunicationsWorkspacePanelStale(companyID, workspacePanelScope);
 }
 
 function markWorkspaceCachesStale(apiBase: string, companyID: string): void {
@@ -180,6 +188,23 @@ function markWorkspaceCachesStale(apiBase: string, companyID: string): void {
   invalidateKanbanBoardListCache(apiBase, companyID);
   invalidateNodeRelationshipGraphSnapshot(apiBase, companyID);
   invalidateLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+}
+
+function workspacePanelCacheScopeForCompanyExplorerScope(scope: WorkspaceReconciliationScope): CommunicationsWorkspacePanelCacheScope {
+  const eventType = scope.eventType.trim();
+  if (eventType === "company_explorer_folder_item_assigned" || eventType === "company_explorer_folder_item_removed") {
+    if (scope.itemType === "node") return { nodeFolderItems: true };
+    if (scope.itemType === "logic_gate") return { logicGateFolderItems: true };
+    return {};
+  }
+  if (eventType.startsWith("company_explorer_folder_")) {
+    if (scope.folderKind === "node") return { nodeFolders: true, nodeFolderItems: true };
+    if (scope.folderKind === "logic_gate") return { logicGateFolders: true, logicGateFolderItems: true };
+    return {};
+  }
+  if (eventType === "node_deleted" || eventType === "node_permissions_updated") return { nodeFolderItems: true };
+  if (eventType === "logic_gate_deleted" || eventType === "logic_gate_permissions_updated") return { logicGateFolderItems: true };
+  return {};
 }
 
 function primeCreatedMessageFromStream(messageID: string, companyID: string): void {
