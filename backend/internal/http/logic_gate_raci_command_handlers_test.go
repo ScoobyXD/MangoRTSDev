@@ -66,10 +66,13 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 	}
 	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 1)
 	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 1)
-	responsibleNotifications, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
-	if err != nil {
-		t.Fatalf("ListNotifications responsible: %v", err)
-	}
+	responsibleNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		items, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
+		if err != nil {
+			t.Fatalf("ListNotifications responsible: %v", err)
+		}
+		return items
+	}, 1)
 	if len(responsibleNotifications) != 1 || responsibleNotifications[0].Type != domain.NotificationEventLogicGateRaciUpdated || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
 		t.Fatalf("responsible notifications after add = %+v, want one projected RACI notification", responsibleNotifications)
 	}

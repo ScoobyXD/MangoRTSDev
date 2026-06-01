@@ -281,7 +281,5 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
-	stop = timings.observeAccounted("events.publish.total")
 	s.publishCommittedWorkspaceEventsWithTiming(events, timings)
-	stop()
 }

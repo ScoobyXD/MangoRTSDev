@@ -140,12 +140,8 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
-	stop = timings.observeAccounted("events.publish.total")
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-	stop()
-	stop = timings.observeAccounted("notifications.total")
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
-	stop()
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
 
@@ -227,12 +223,8 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
-		stop = timings.observeAccounted("events.publish.total")
 		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-		stop()
-		stop = timings.observeAccounted("notifications.total")
 		s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
-		stop()
 	}
 	if issueSet {
 		stop = timings.observeAccounted("source.transaction")
@@ -248,12 +240,8 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_issue_state") {
 			return
 		}
-		stop = timings.observeAccounted("events.publish.total")
 		s.publishCommittedWorkspaceEventsWithTiming(issueResult.Events, timings)
-		stop()
-		stop = timings.observeAccounted("notifications.total")
 		s.projectCommittedNotificationEventsWithTiming(issueResult.Events, timings)
-		stop()
 		result = issueResult
 	}
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))

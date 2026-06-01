@@ -522,32 +522,85 @@ After that:
 - B6 still needs transaction cleanup.
 - B7/B8 need detailed latest accounting logs and likely share the same assignment/kanban/event issues.
 
-## Recommended Next Change
+## First Async Pipeline Pass Implemented
 
-Make committed workspace event publish and notification projection asynchronous relative to the HTTP response.
+The first pass now keeps source-of-truth writes and durable domain event append synchronous, but moves committed workspace fanout and notification projection out of the blocking request path.
 
-Keep durable event append synchronous for now.
+Changed code:
 
-Implementation direction:
+- `publishCommittedWorkspaceEventsWithTiming` now records only `events.publish.enqueue`, copies the event slice, and launches async publish work.
+- `publishCommittedWorkspaceEvent` now uses the same async committed-event path.
+- Async workspace publishing logs `async_workspace_events_publish ... events.publish.total=... event_types=...`.
+- `projectCommittedNotificationEventsWithTiming` now records only `notifications.enqueue`, copies the event slice, and launches async notification projection/publish.
+- Async notification projection logs `async_notification_projection ... notifications.total=... event_types=...`.
+- Notification projection still triggers `runNotificationDomainEventCatchupOnce` on processing errors, and the existing periodic catch-up remains in place.
+- Request timing recorders are not passed into the async goroutines.
+- The measured handlers no longer wrap post-commit side effects in accounted `events.publish.total` / `notifications.total` request spans.
 
-- Find `publishCommittedWorkspaceEventsWithTiming`.
-- It currently loops events and calls `publishCommittedWorkspaceEventWithTiming` synchronously.
-- Make post-commit publish happen outside the request critical path.
-- Find `projectCommittedNotificationEventsWithTiming`.
-- It currently processes notification events synchronously and then publishes notifications.
-- Move that to async/background processing after the response path.
+Validation:
 
-Careful details:
+- `go test ./...` passed from `backend/`.
+- Frontend was not touched, so no frontend build/test was run.
 
-- Copy event slices before passing to goroutines.
-- Use background context, not the request context, for async work.
-- Log errors inside async work.
-- Preserve existing catch-up behavior for notifications.
-- Do not use request timing recorders from goroutines after request logging completes.
-- After this change, request timing should no longer include `events.publish.total` and `notifications.total` as blocking accounted time. If desired, log async side-effect timings separately.
+Request timing after this change should show small enqueue spans instead of blocking publish/projection spans:
 
-## Caveat
+```text
+events.publish.enqueue=...
+notifications.enqueue=...
+```
 
-The user paused implementation after initially saying to take action. Do not make changes unless explicitly asked again.
+The async side-effect work should appear separately:
 
-The previous attempted backend patches did not apply. No backend code was changed during that interrupted turn.
+```text
+async_workspace_events_publish ... events.publish.total=...
+async_notification_projection ... notifications.total=...
+```
+
+## Event Type Inventory
+
+Exact event types for the benchmarked paths, based on the current emission code:
+
+| Case | Event count | Event types |
+| --- | ---: | --- |
+| Raw node create via `POST /v1/workspace/entity-batches` | 3 | `company_explorer_folder_item_assigned`, `node_created`, `node_map_positions_updated` |
+| Create node in empty matrix cell, creating Logic Gate plus node | 6 | `company_explorer_folder_item_assigned`, `logic_gate_created`, `node_created`, `work_item.logic_gate_assignment_saved`, `kanban_card_upserted`, `node_updated` |
+| Move node between Logic Gates | 3 | `work_item.logic_gate_assignment_moved`, `kanban_card_moved`, `node_updated` |
+| Create node in Logic Gate Kanban column | likely 4 when creating a new node | `node_created`, `work_item.logic_gate_assignment_saved`, `kanban_card_upserted`, `node_updated` |
+
+No event count reduction was made in this pass. The apparent duplicates are not obviously safe to collapse yet:
+
+- `work_item.logic_gate_assignment_*` feeds notification projection and work-item semantics.
+- `kanban_card_*` still drives legacy Kanban read versions and snapshot invalidation.
+- `node_updated` still drives node list/snapshot invalidation and may be consumed directly by clients.
+- Raw node create events separately invalidate explorer folder items, node lists/map snapshots, and map layout.
+
+Reducing these should wait until downstream consumers are audited or the legacy Kanban/read-model update path is replaced.
+
+## Before/After Timing
+
+The app benchmark actions were not rerun in this pass. Expected after values are calculated from the prior measured request totals by removing the now-async request-path publish/projection spans.
+
+| Case | Before | Expected request-path after this pass | Removed from blocking request |
+| --- | ---: | ---: | ---: |
+| Raw node create | `1.2032s` | about `492.4ms` | `events.publish.total=710.8ms` |
+| Matrix create Logic Gate plus node | `4.1662s` | about `1.8972s` | `events.publish.total=2.037s`, `notifications.total=232ms` |
+| Move node between Logic Gates | `2.2478s` | about `1.3918s` | `events.publish.total=675.9ms`, `notifications.total=180.1ms` |
+
+For the measured request timing logs, `events.publish.total` and `notifications.total` should no longer be blocking accounted request spans. The remaining visible request costs are now mostly:
+
+- `source.transaction`
+- durable `events.append.total`
+- legacy Kanban board/card reads and writes
+- RACIO projection sync/rereads
+- explorer folder item writes/position reads
+- assignment/access policy copy work
+
+## Next Bottlenecks
+
+After this pass, the main remaining backend work is transaction cleanup:
+
+- B3/B5 matrix create still pay combined Logic Gate creation, node creation, assignment writes, legacy Kanban work, RACIO projection, rereads, and durable append.
+- B6 move still pays Kanban reads/writes, email reference work, access policy copy, RACIO projection sync, rereads, and durable append.
+- B7/B8 still need fresh accounting logs, but likely share the same assignment/Kanban/event issues.
+
+Do not proceed into a major Kanban rewrite, command endpoint rewrite, or RACIO projection delta rewrite without a separate pass.
