@@ -70,26 +70,34 @@ Open design question:
 
 ## Phase 1: Timing Instrumentation And Benchmarks
 
-Status: Not started.
+Status: Instrumentation added; benchmark rerun pending.
 
 Goal: Stop guessing. Add internal timing spans to the slow endpoints and rerun the five baseline scenarios.
 
 Tasks:
 
-- [ ] Add per-section timing to `POST /v1/workspace/entity-batches`.
-- [ ] Add per-section timing to `POST /v2/logic-gates/{id}/nodes`.
-- [ ] Add per-section timing to `PUT /v2/logic-gates/{id}/nodes/{nodeID}/state`.
-- [ ] Add per-section timing to `POST /v2/racio-matrix/nodes`.
-- [ ] Add per-section timing to `POST /v2/racio-matrix/nodes/{nodeID}/move`.
-- [ ] Include timing for auth/access checks.
-- [ ] Include timing for main repository transaction.
-- [ ] Include timing for Kanban board/column/card work.
-- [ ] Include timing for RACIO projection sync and projection rereads.
-- [ ] Include timing for domain event append/publish.
-- [ ] Include timing for synchronous notification projection.
-- [ ] Include timing for response serialization.
-- [ ] Add frontend request timing around the same scenarios, including surrounding GET reloads.
+- [x] Add per-section timing to `POST /v1/workspace/entity-batches`.
+- [x] Add per-section timing to `POST /v2/logic-gates/{id}/nodes`.
+- [x] Add per-section timing to `PUT /v2/logic-gates/{id}/nodes/{nodeID}/state`.
+- [x] Add per-section timing to `POST /v2/racio-matrix/nodes`.
+- [x] Add per-section timing to `POST /v2/racio-matrix/nodes/{nodeID}/move`.
+- [x] Include timing for auth/access checks.
+- [x] Include timing for main repository transaction.
+- [x] Include timing for Kanban board/column/card work.
+- [x] Include timing for RACIO projection sync and projection rereads.
+- [x] Include timing for domain event append/publish.
+- [x] Include timing for synchronous notification projection.
+- [x] Include timing for response serialization.
+- [x] Add frontend request timing around the same scenarios, including surrounding GET reloads.
 - [ ] Rerun and record the five baseline scenarios.
+
+Implementation notes:
+
+- Backend now emits one `request_timing` log line for each targeted POST/PUT with method, path, normalized route, status, request/correlation header when present, total duration, and grouped section timings.
+- Repository nested timings were added for `CreateWorkspaceEntityBatch`, `CreateRacioMatrixNode`, `AssignNodeToLogicGateStatus`, `MoveLogicGateNodeAssignment`, `syncPostgresRacioProjectionForNodeTx`, `appendDomainEventsTx` / `appendDomainEventTx`, and `ensureLogicGateKanbanBoardSQL`.
+- Frontend `request_timing` console logs now cover the five mutation paths plus benchmark-relevant GET reload paths such as workspace snapshots, Kanban reads, explorer reads, and v2 node/Logic Gate views.
+- Verification run on 2026-06-01: `go test ./...` from `backend` passed; `node scripts\run_all_tests.mjs` passed after installing frontend dependencies with `npm.cmd install`.
+- No live benchmark workflow was rerun in this implementation pass, so the After Phase 1 table remains pending fresh scenario captures from the new timing logs.
 
 Success criteria:
 
@@ -197,11 +205,11 @@ Update this table after each phase.
 
 | Scenario | Baseline | After Phase 1 | After Phase 2 | After Phase 3 | After Phase 4 | After Phase 5 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Create node in Logic Gate Kanban column | `3.5826761s` |  |  |  |  |  |
-| Create raw node in Others section | `1.4209458s` |  |  |  |  |  |
-| Create new node on existing Logic Gate in RACIO matrix | `~4.066s logged, 3.2316668s writes` |  |  |  |  |  |
-| Create new Logic Gate on matrix | `~1.762s logged, 1.5507929s write` |  |  |  |  |  |
-| Create node on empty priority/status cell | `~4.603s logged, 3.9318806s write` |  |  |  |  |  |
+| Create node in Logic Gate Kanban column | `3.5826761s` | Pending rerun with `request_timing` logs |  |  |  |  |
+| Create raw node in Others section | `1.4209458s` | Pending rerun with `request_timing` logs |  |  |  |  |
+| Create new node on existing Logic Gate in RACIO matrix | `~4.066s logged, 3.2316668s writes` | Pending rerun with `request_timing` logs |  |  |  |  |
+| Create new Logic Gate on matrix | `~1.762s logged, 1.5507929s write` | Pending rerun with `request_timing` logs |  |  |  |  |
+| Create node on empty priority/status cell | `~4.603s logged, 3.9318806s write` | Pending rerun with `request_timing` logs |  |  |  |  |
 
 ## Notes
 

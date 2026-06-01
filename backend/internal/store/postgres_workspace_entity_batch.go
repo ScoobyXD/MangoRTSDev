@@ -9,7 +9,8 @@ import (
 )
 
 func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
-	ctx := context.Background()
+	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
+	defer observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.transaction")()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return WorkspaceEntityBatchResult{}, err
@@ -25,7 +26,9 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
 	var creatorAssignee postgresNodeAssigneeReadModel
 	if input.CreatorUserID != "" {
+		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.creator_assignee_read")
 		creatorAssignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
+		stop()
 		if err != nil {
 			return WorkspaceEntityBatchResult{}, err
 		}
@@ -34,9 +37,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
+	stopFolderSetup := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_setup")
 	if input.EntityKind == "node" {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if err != nil {
+			stopFolderSetup()
 			return WorkspaceEntityBatchResult{}, err
 		}
 		targetFolderID = activeFolder.FolderID
@@ -44,6 +49,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	} else if input.FolderID == "" {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
 		if err != nil {
+			stopFolderSetup()
 			return WorkspaceEntityBatchResult{}, err
 		}
 		targetFolderID = activeFolder.FolderID
@@ -56,11 +62,14 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			input.CompanyID, input.FolderID,
 		).Scan(&targetFolderKind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
+				stopFolderSetup()
 				return WorkspaceEntityBatchResult{}, ErrNotFound
 			}
+			stopFolderSetup()
 			return WorkspaceEntityBatchResult{}, err
 		}
 	}
+	stopFolderSetup()
 
 	clientToEntityID := make(map[string]string, len(input.Items))
 	for _, item := range input.Items {
@@ -71,14 +80,17 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 				Title:         item.Title,
 				DefaultAccess: ResourceDefaultAccessEdit,
 			}
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.node_writes")
 			if err := tx.QueryRowContext(ctx,
 				`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
 				 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
 				 returning company_id, node_id, title, created_timestamp`,
 				created.CompanyID, created.NodeID, created.Title, input.CreatorUserID,
 			).Scan(&created.CompanyID, &created.NodeID, &created.Title, &created.CreatedTimestamp); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 			if input.CreatorUserID != "" {
 				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
 			}
@@ -94,14 +106,17 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
 
 			var position domain.NodeMapPosition
+			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
 			if err := tx.QueryRowContext(ctx,
 				`insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 				 values ($1, $2, $3, $4, now())
 				 returning company_id, node_id, x, y, updated_timestamp`,
 				input.CompanyID, created.NodeID, item.X, item.Y,
 			).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 			result.NodeMapPositions = append(result.NodeMapPositions, position)
 			continue
 		}
@@ -112,14 +127,17 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			Header:        item.Title,
 			DefaultAccess: ResourceDefaultAccessEdit,
 		}
+		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.logic_gate_writes")
 		if err := tx.QueryRowContext(ctx,
 			`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
 			 values ($1, $2, $3, now())
 			 returning company_id, logic_gate_id, header, created_timestamp`,
 			created.CompanyID, created.LogicGateID, created.Header,
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
+			stop()
 			return WorkspaceEntityBatchResult{}, err
 		}
+		stop()
 		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
 			return WorkspaceEntityBatchResult{}, err
 		}
@@ -130,6 +148,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 				Role:        input.CreatorLogicGateRaciRole,
 				UserID:      input.CreatorUserID,
 			}
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.raci_assignment_writes")
 			if err := tx.QueryRowContext(ctx, `
 insert into logic_gate_raci_assignments
   (company_id, logic_gate_id, role, user_id, created_timestamp)
@@ -148,8 +167,10 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&assignment.UserID,
 				&assignment.CreatedTimestamp,
 			); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 			if creatorAssignee.Name != nil {
 				assignment.UserDisplayName = strings.TrimSpace(*creatorAssignee.Name)
 			}
@@ -157,9 +178,12 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				assignment.UserEmail = strings.TrimSpace(*creatorAssignee.Email)
 			}
 			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
+			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.racio_projection_sync")
 			if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, created.RaciAssignments); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 		}
 		if input.CreatorUserID != "" {
 			created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)
@@ -169,14 +193,17 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
 
 		var position domain.LogicGateMapPosition
+		stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
 		if err := tx.QueryRowContext(ctx,
 			`insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
 			 values ($1, $2, $3, $4, now())
 			 returning company_id, logic_gate_id, x, y, updated_timestamp`,
 			input.CompanyID, created.LogicGateID, item.X, item.Y,
 		).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+			stop()
 			return WorkspaceEntityBatchResult{}, err
 		}
+		stop()
 		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
 
@@ -191,6 +218,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				itemPosition = input.Items[index].Position
 			}
 			var item domain.CompanyExplorerFolderItem
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_item_writes")
 			if err := tx.QueryRowContext(ctx,
 				`insert into company_explorer_folder_items
 				 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
@@ -206,8 +234,10 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&item.CreatedTimestamp,
 				&item.UpdatedTimestamp,
 			); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 			if itemPosition >= position {
 				position = itemPosition + 1000
 			} else {
@@ -231,6 +261,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				APosition:          relationship.APosition,
 				BPosition:          relationship.BPosition,
 			}
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.relationship_writes")
 			if err := tx.QueryRowContext(ctx,
 				`insert into node_relationships
 				 (company_id, node_relationship_id, node_id_a, node_id_b, a_position, b_position, created_timestamp)
@@ -246,8 +277,10 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				&item.BPosition,
 				&item.CreatedTimestamp,
 			); err != nil {
+				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			stop()
 			result.Relationships = append(result.Relationships, item)
 			continue
 		}
@@ -260,6 +293,7 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			APosition:               relationship.APosition,
 			BPosition:               relationship.BPosition,
 		}
+		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.relationship_writes")
 		if err := tx.QueryRowContext(ctx,
 			`insert into logic_gate_relationships
 			 (company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position, created_timestamp)
@@ -275,14 +309,19 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			&item.BPosition,
 			&item.CreatedTimestamp,
 		); err != nil {
+			stop()
 			return WorkspaceEntityBatchResult{}, err
 		}
+		stop()
 		result.LogicGateRelationships = append(result.LogicGateRelationships, item)
 	}
 
+	stopCommit := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.commit")
 	if err := tx.Commit(); err != nil {
+		stopCommit()
 		return WorkspaceEntityBatchResult{}, err
 	}
+	stopCommit()
 	return result, nil
 }
 

@@ -9,12 +9,15 @@ import (
 )
 
 func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateResult, error) {
+	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
+	stop := observeTiming(ctx, "repo.CreateRacioMatrixNode.normalize_input")
 	input, err := NormalizeRacioMatrixNodeCreateInput(input)
+	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
 
-	ctx := context.Background()
+	defer observeTiming(ctx, "repo.CreateRacioMatrixNode.transaction")()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
@@ -25,7 +28,9 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	result := RacioMatrixNodeCreateResult{}
 	logicGateID := input.LogicGateID
 	if input.CreateLogicGateHeader != "" {
+		stop := observeTiming(ctx, "repo.CreateRacioMatrixNode.logic_gate_writes")
 		logicGate, folderItem, err := createRacioMatrixLogicGateTx(ctx, tx, input)
+		stop()
 		if err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
@@ -43,6 +48,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	}
 
 	if logicGateID != "" {
+		stop := observeTiming(ctx, "repo.CreateRacioMatrixNode.assignment_writes")
 		assignmentResult, err := r.assignNodeToLogicGateStatusTx(ctx, tx, LogicGateNodeAssignmentInput{
 			CompanyID:           input.CompanyID,
 			LogicGateID:         logicGateID,
@@ -61,6 +67,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 			ActorUserID:         input.ActorUserID,
 			IdempotencyKey:      input.IdempotencyKey,
 		})
+		stop()
 		if err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
@@ -72,29 +79,40 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 		result.Events = append(result.Events, assignmentResult.Events...)
 		result.RacioProjectionRows = assignmentResult.RacioProjectionRows
 		if result.LogicGate != nil {
+			stop := observeTiming(ctx, "repo.CreateRacioMatrixNode.projection_reread")
 			rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, []string{logicGateID})
+			stop()
 			if err != nil {
 				return RacioMatrixNodeCreateResult{}, err
 			}
 			result.RacioProjectionRows = rows
 		}
+		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
 		if err := tx.Commit(); err != nil {
+			stop()
 			return RacioMatrixNodeCreateResult{}, err
 		}
+		stop()
 		return result, nil
 	}
 
+	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.node_writes")
 	node, err := r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID)
+	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
+	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.folder_item_read")
 	folderItem, err := postgresCompanyExplorerFolderItemForEntityTx(ctx, tx, input.CompanyID, "node", node.NodeID)
+	stop()
 	if err == nil {
 		result.FolderItems = append(result.FolderItems, folderItem)
 	} else if !errors.Is(err, ErrNotFound) {
 		return RacioMatrixNodeCreateResult{}, err
 	}
+	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.projection_reread")
 	rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{node.NodeID}, nil)
+	stop()
 	if err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
@@ -105,9 +123,12 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	result.Node = node
 	result.RacioProjectionRows = rows
 	result.Events = append(result.Events, event)
+	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
 	if err := tx.Commit(); err != nil {
+		stop()
 		return RacioMatrixNodeCreateResult{}, err
 	}
+	stop()
 	return result, nil
 }
 
@@ -118,14 +139,17 @@ func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMa
 		Header:        input.CreateLogicGateHeader,
 		DefaultAccess: ResourceDefaultAccessEdit,
 	}
+	stop := observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.logic_gate_insert")
 	if err := tx.QueryRowContext(ctx,
 		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
 		 values ($1, $2, $3, now())
 		 returning company_id, logic_gate_id, header, created_timestamp`,
 		created.CompanyID, created.LogicGateID, created.Header,
 	).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
+		stop()
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
+	stop()
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
@@ -140,6 +164,7 @@ func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMa
 			Role:        input.CreatorLogicGateRaciRole,
 			UserID:      assignee.UserID,
 		}
+		stop := observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.raci_assignment_writes")
 		if err := tx.QueryRowContext(ctx, `
 insert into logic_gate_raci_assignments
   (company_id, logic_gate_id, role, user_id, created_timestamp)
@@ -149,8 +174,10 @@ on conflict (company_id, logic_gate_id, role, user_id) do update set
 returning company_id, logic_gate_id, role::text, user_id::text, created_timestamp`,
 			input.CompanyID, created.LogicGateID, input.CreatorLogicGateRaciRole, assignee.UserID,
 		).Scan(&assignment.CompanyID, &assignment.LogicGateID, &assignment.Role, &assignment.UserID, &assignment.CreatedTimestamp); err != nil {
+			stop()
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
+		stop()
 		if assignee.Name != nil {
 			assignment.UserDisplayName = strings.TrimSpace(*assignee.Name)
 		}
@@ -158,19 +185,26 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 			assignment.UserEmail = strings.TrimSpace(*assignee.Email)
 		}
 		created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
+		stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.racio_projection_sync")
 		if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, created.RaciAssignments); err != nil {
+			stop()
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
+		stop()
 		created.EffectiveAccess = EntityPermissionEdit
 	}
+	stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.folder_item_writes")
 	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
 	if err != nil {
+		stop()
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
 	folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeFolder.FolderID, "logic_gate", created.LogicGateID, 0)
 	if err != nil {
+		stop()
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
+	stop()
 	return created, folderItem, nil
 }
 

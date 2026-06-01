@@ -31,6 +31,7 @@ type DomainEventInput struct {
 	ActorUserID    string
 	IdempotencyKey string
 	Payload        map[string]any
+	TimingRecorder TimingRecorder
 }
 
 func NormalizeDomainEventListLimit(limit int) int {

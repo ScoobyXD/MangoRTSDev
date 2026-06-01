@@ -69,7 +69,8 @@ func normalizePostgresDomainEventInput(input DomainEventInput) (DomainEventInput
 }
 
 func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
-	ctx := context.Background()
+	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
+	defer observeTiming(ctx, "repo.AppendDomainEvent.transaction")()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.DomainEvent{}, err
@@ -90,7 +91,15 @@ func (r *PostgresRepo) AppendDomainEvents(inputs []DomainEventInput) ([]domain.D
 	if len(inputs) == 0 {
 		return []domain.DomainEvent{}, nil
 	}
-	ctx := context.Background()
+	var recorder TimingRecorder
+	for _, input := range inputs {
+		if input.TimingRecorder != nil {
+			recorder = input.TimingRecorder
+			break
+		}
+	}
+	ctx := ContextWithTimingRecorder(context.Background(), recorder)
+	defer observeTiming(ctx, "repo.AppendDomainEvents.transaction")()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -108,18 +117,26 @@ func (r *PostgresRepo) AppendDomainEvents(inputs []DomainEventInput) ([]domain.D
 }
 
 func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, error) {
+	defer observeTiming(ctx, "repo.appendDomainEventTx.total")()
+	stop := observeTiming(ctx, "repo.appendDomainEventTx.normalize_payload")
 	input, payloadBytes, err := normalizePostgresDomainEventInput(input)
+	stop()
 	if err != nil {
 		return domain.DomainEvent{}, err
 	}
 
+	stop = observeTiming(ctx, "repo.appendDomainEventTx.advisory_lock")
 	if _, err := tx.ExecContext(ctx,
 		`select pg_advisory_xact_lock(hashtext($1), hashtext($2 || ':' || $3))`,
 		input.CompanyID, input.StreamType, input.StreamID,
 	); err != nil {
+		stop()
 		return domain.DomainEvent{}, err
 	}
+	stop()
 
+	stop = observeTiming(ctx, "repo.appendDomainEventTx.insert")
+	defer stop()
 	return scanDomainEvent(tx.QueryRowContext(ctx, `
 with next_sequence as (
   select coalesce(max(sequence), 0) + 1 as sequence
@@ -142,6 +159,7 @@ returning `+domainEventSelectColumns,
 }
 
 func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	defer observeTiming(ctx, "repo.appendDomainEventsTx.total")()
 	events := make([]domain.DomainEvent, 0, len(inputs))
 	for _, input := range inputs {
 		event, err := r.appendDomainEventTx(ctx, tx, input)
