@@ -210,6 +210,110 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	}
 }
 
+func TestMemoryResourceAccessPolicyCrossGateMoveOverwritesNodePolicy(t *testing.T) {
+	cases := []struct {
+		name          string
+		nodeDefault   string
+		nodeOverrides []string
+		gateDefault   string
+		gateOverrides []string
+		wantDefault   string
+		wantRows      map[string]string
+	}{
+		{
+			name:          "same default and same rows",
+			nodeDefault:   ResourceDefaultAccessNoAccess,
+			nodeOverrides: []string{"allowed"},
+			gateDefault:   ResourceDefaultAccessNoAccess,
+			gateOverrides: []string{"allowed"},
+			wantDefault:   ResourceDefaultAccessNoAccess,
+			wantRows:      map[string]string{"allowed": EntityPermissionEdit},
+		},
+		{
+			name:          "same users with different access levels",
+			nodeDefault:   ResourceDefaultAccessNoAccess,
+			nodeOverrides: []string{"allowed"},
+			gateDefault:   ResourceDefaultAccessEdit,
+			gateOverrides: []string{"allowed"},
+			wantDefault:   ResourceDefaultAccessEdit,
+			wantRows:      map[string]string{"allowed": EntityPermissionNoAccess},
+		},
+		{
+			name:          "extra node user",
+			nodeDefault:   ResourceDefaultAccessNoAccess,
+			nodeOverrides: []string{"allowed", "other"},
+			gateDefault:   ResourceDefaultAccessNoAccess,
+			gateOverrides: []string{"allowed"},
+			wantDefault:   ResourceDefaultAccessNoAccess,
+			wantRows:      map[string]string{"allowed": EntityPermissionEdit},
+		},
+		{
+			name:          "missing node user",
+			nodeDefault:   ResourceDefaultAccessNoAccess,
+			nodeOverrides: nil,
+			gateDefault:   ResourceDefaultAccessNoAccess,
+			gateOverrides: []string{"allowed"},
+			wantDefault:   ResourceDefaultAccessNoAccess,
+			wantRows:      map[string]string{"allowed": EntityPermissionEdit},
+		},
+		{
+			name:          "different default access",
+			nodeDefault:   ResourceDefaultAccessEdit,
+			nodeOverrides: nil,
+			gateDefault:   ResourceDefaultAccessNoAccess,
+			gateOverrides: nil,
+			wantDefault:   ResourceDefaultAccessNoAccess,
+			wantRows:      map[string]string{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
+			userIDs := map[string]string{
+				"allowed": allowed.UserID,
+				"other":   other.UserID,
+			}
+			node, err := repo.CreateNode(companyID, "Move exact policy node")
+			if err != nil {
+				t.Fatalf("CreateNode: %v", err)
+			}
+			priority := 2
+			if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Priority: &priority, PrioritySet: true}); err != nil {
+				t.Fatalf("UpdateNode priority: %v", err)
+			}
+			sourceGate, err := repo.CreateLogicGate(companyID, "Source policy gate")
+			if err != nil {
+				t.Fatalf("CreateLogicGate source: %v", err)
+			}
+			targetGate, err := repo.CreateLogicGate(companyID, "Target policy gate")
+			if err != nil {
+				t.Fatalf("CreateLogicGate target: %v", err)
+			}
+			if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+				CompanyID:   companyID,
+				LogicGateID: sourceGate.LogicGateID,
+				NodeID:      node.NodeID,
+				Status:      "Pending",
+			}); err != nil {
+				t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+			}
+			setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeNode, node.NodeID, tc.nodeDefault, resourcePolicyOverrideIDsForTest(tc.nodeOverrides, userIDs))
+			setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeLogicGate, targetGate.LogicGateID, tc.gateDefault, resourcePolicyOverrideIDsForTest(tc.gateOverrides, userIDs))
+
+			if _, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+				CompanyID:       companyID,
+				FromLogicGateID: sourceGate.LogicGateID,
+				LogicGateID:     targetGate.LogicGateID,
+				NodeID:          node.NodeID,
+				Status:          "Pending",
+			}); err != nil {
+				t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
+			}
+			assertMemoryNodeResourcePolicyForTest(t, repo, companyID, node.NodeID, tc.wantDefault, resourcePolicyExpectedRowsForTest(tc.wantRows, userIDs))
+		})
+	}
+}
+
 func TestMemoryResourceAccessPolicyNewCompanyUserFollowsDefault(t *testing.T) {
 	repo, companyID, _, _, _ := setupResourceAccessPolicyTest(t)
 	node, err := repo.CreateNode(companyID, "New user policy node")
@@ -250,4 +354,61 @@ func TestMemoryResourceAccessPolicyNewCompanyUserFollowsDefault(t *testing.T) {
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, newUser.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("new user follows edit default = %v err = %v, want true", allowed, err)
 	}
+}
+
+func setMemoryResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, defaultAccess string, overrideUserIDs []string) {
+	t.Helper()
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       entityType,
+		EntityID:         entityID,
+		DefaultAccess:    defaultAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  overrideUserIDs,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions %s/%s: %v", entityType, entityID, err)
+	}
+}
+
+func assertMemoryNodeResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, nodeID, wantDefault string, wantRows map[string]string) {
+	t.Helper()
+	node, err := repo.GetNode(companyID, nodeID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.DefaultAccess != wantDefault {
+		t.Fatalf("node default_access = %q, want %q", node.DefaultAccess, wantDefault)
+	}
+	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, nodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions: %v", err)
+	}
+	got := make(map[string]string, len(permissions))
+	for _, permission := range permissions {
+		got[permission.SubjectID] = permission.AccessLevel
+	}
+	if len(got) != len(wantRows) {
+		t.Fatalf("node permissions = %+v, want %+v", permissions, wantRows)
+	}
+	for userID, accessLevel := range wantRows {
+		if got[userID] != accessLevel {
+			t.Fatalf("node permission for user %s = %q, want %q; all permissions = %+v", userID, got[userID], accessLevel, permissions)
+		}
+	}
+}
+
+func resourcePolicyOverrideIDsForTest(names []string, userIDs map[string]string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, userIDs[name])
+	}
+	return out
+}
+
+func resourcePolicyExpectedRowsForTest(rows map[string]string, userIDs map[string]string) map[string]string {
+	out := make(map[string]string, len(rows))
+	for name, accessLevel := range rows {
+		out[userIDs[name]] = accessLevel
+	}
+	return out
 }

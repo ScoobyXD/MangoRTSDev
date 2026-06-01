@@ -1024,3 +1024,28 @@ Recommended next pass:
 3. For moves, measure how often the access-policy no-op guard skips work. If the remaining cost is Kanban/email-reference dominated, add no-op guards there before attempting the full Kanban rewrite.
 4. For matrix create, target RACIO delta writes/reread reduction and then consider folding the separate Logic Gate/create-assignment append call sites while preserving event order.
 5. Keep the full Kanban projection rewrite as a separate larger pass unless the fresh timings prove it is the dominant remaining blocker.
+
+## Update: Access Policy Exact-Match Guard Fix
+
+This pass fixed the Logic Gate-to-node access policy copy guard added during the POST/PUT latency work.
+
+Bug fixed:
+
+- `postgresLogicGateAccessPolicyMatchesNodeTx` compared matching explicit permission rows by `user_id` only.
+- The guard now compares exact policy rows: same `default_access` and the same explicit `(user_id, access_level)` row set in both directions.
+- Extra node rows, missing node rows, changed row access, and changed defaults are all non-matches, so the Logic Gate policy copy still runs and overwrites the node policy.
+
+Implementation note:
+
+- No extra query was added. The existing match query now projects `gate_policy` and `node_policy` rows with their computed default-policy access level and uses `EXCEPT` both ways over `(user_id, access_level)`.
+- In the current default-policy schema, `resource_permissions` stores explicit user override rows and the explicit access value is derived from the resource default: default `edit` means row access `no_access`; default `no_access` means row access `edit`.
+
+Test coverage added:
+
+- A Postgres guard SQL test asserts the match query compares `default_access` and full `(user_id, access_level)` rows rather than only `user_id`.
+- Store policy movement coverage now includes: identical default and rows, same users with different access levels, extra node user, missing node user, and different default access.
+
+Latency implication:
+
+- The no-op optimization remains: policy copy is skipped only for exact matches.
+- Non-exact policies now pay the copy cost, which is required for correctness because assigning or moving a node into a Logic Gate must make the Logic Gate policy overwrite the node policy.
