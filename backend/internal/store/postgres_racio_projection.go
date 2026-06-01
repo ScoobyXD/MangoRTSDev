@@ -199,11 +199,13 @@ with user_raci as (
 )`
 
 func syncPostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
 	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
+	stop := observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.delete_stale")
 	if _, err := tx.ExecContext(ctx, postgresRacioNodeProjectionCTE+`
 delete from racio_matrix_projection_table entry
 where entry.company_id=$1::uuid
@@ -217,8 +219,11 @@ where entry.company_id=$1::uuid
       and projected.resource_type=entry.resource_type
       and projected.resource_id=entry.resource_id
   )`, companyID, nodeID); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.upsert")
 	_, err := tx.ExecContext(ctx, postgresRacioNodeProjectionCTE+`
 insert into racio_matrix_projection_table (
   company_id,
@@ -267,6 +272,7 @@ do update set
   assignee_email=excluded.assignee_email,
   resource_created_timestamp=excluded.resource_created_timestamp,
   updated_timestamp=now()`, companyID, nodeID)
+	stop()
 	return err
 }
 

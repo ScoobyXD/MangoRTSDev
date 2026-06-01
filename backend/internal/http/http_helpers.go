@@ -7,9 +7,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	start := time.Now()
+	defer func() {
+		if recorder, ok := w.(interface{ recordResponseSerialization(time.Duration) }); ok {
+			recorder.recordResponseSerialization(time.Since(start))
+		}
+	}()
 	w.Header().Set("Content-Type", "application/json")
 	if w.Header().Get("Cache-Control") == "" {
 		w.Header().Set("Cache-Control", "no-store")

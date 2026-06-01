@@ -405,6 +405,7 @@ type WorkspaceEntityBatchInput struct {
 	CreatorLogicGateRaciRole string
 	Items                    []WorkspaceEntityBatchItemInput
 	Relationships            []WorkspaceEntityBatchRelationshipInput
+	TimingRecorder           TimingRecorder
 }
 
 type WorkspaceEntityBatchEntityMapping struct {
@@ -443,6 +444,7 @@ type RacioMatrixNodeCreateInput struct {
 	AssigneePolicy           string
 	ActorUserID              string
 	IdempotencyKey           string
+	TimingRecorder           TimingRecorder
 }
 
 type RacioMatrixNodeCreateResult struct {
@@ -739,6 +741,7 @@ type LogicGateNodeAssignmentInput struct {
 	AssigneePolicy      string
 	ActorUserID         string
 	IdempotencyKey      string
+	TimingRecorder      TimingRecorder
 }
 
 type LogicGateNodeAssignmentMoveInput struct {
@@ -755,6 +758,7 @@ type LogicGateNodeAssignmentMoveInput struct {
 	AssigneePolicySet bool
 	ActorUserID       string
 	IdempotencyKey    string
+	TimingRecorder    TimingRecorder
 }
 
 type LogicGateNodeAssignmentRemoveInput struct {

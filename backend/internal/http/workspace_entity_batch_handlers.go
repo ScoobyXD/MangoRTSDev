@@ -36,6 +36,15 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Request) {
+	var timings *requestTimingRecorder
+	if r.URL.Path == "/v1/workspace/entity-batches" {
+		timedWriter, requestTimings := startTimedRequest(w)
+		w = timedWriter
+		timings = requestTimings
+		defer func() {
+			timings.log(r, timedWriter.status)
+		}()
+	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -49,16 +58,21 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
 	}
+	stop := timings.observe("request_decode_validation")
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 
 	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
 	if !ok {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
 	}
+	stop()
+	stop = timings.observe("auth_access")
 	if actor, ok := authenticatedActor(r); ok {
 		input.CreatorUserID = strings.TrimSpace(actor.User.UserID)
 	}
@@ -70,14 +84,20 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 			notFoundCode = "logic_gate_not_found"
 		}
 		if relationship.EntityIDA != "" && !s.requireEntityView(w, r, input.CompanyID, entityType, relationship.EntityIDA, notFoundCode) {
+			stop()
 			return
 		}
 		if relationship.EntityIDB != "" && !s.requireEntityView(w, r, input.CompanyID, entityType, relationship.EntityIDB, notFoundCode) {
+			stop()
 			return
 		}
 	}
+	stop()
 
+	input.TimingRecorder = timings
+	stop = timings.observe("repository_transaction")
 	result, err := s.repo.CreateWorkspaceEntityBatch(input)
+	stop()
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
@@ -104,7 +124,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	publishWorkspaceEntityBatchEvents(s, result)
+	publishWorkspaceEntityBatchEvents(s, result, timings)
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -203,17 +223,18 @@ func buildWorkspaceEntityBatchInput(
 	return input, true
 }
 
-func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult) {
+func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult, timings *requestTimingRecorder) {
 	inputs := make([]store.DomainEventInput, 0,
 		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships)+2,
 	)
 	appendEvent := func(eventType string, payload map[string]any) {
 		inputs = append(inputs, store.DomainEventInput{
-			CompanyID:  result.CompanyID,
-			StreamType: workspaceDomainStreamType,
-			StreamID:   result.CompanyID,
-			Type:       eventType,
-			Payload:    payload,
+			CompanyID:      result.CompanyID,
+			StreamType:     workspaceDomainStreamType,
+			StreamID:       result.CompanyID,
+			Type:           eventType,
+			Payload:        payload,
+			TimingRecorder: timings,
 		})
 	}
 	for _, item := range result.FolderItems {
@@ -250,10 +271,14 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	if len(inputs) == 0 {
 		return
 	}
+	stop := timings.observe("domain_event_append")
 	events, err := s.repo.AppendDomainEvents(inputs)
+	stop()
 	if err != nil {
 		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
+	stop = timings.observe("domain_event_publish")
 	s.publishCommittedWorkspaceEvents(events)
+	stop()
 }

@@ -65,59 +65,91 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 }
 
 func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.Request, logicGateID string) {
+	timedWriter, timings := startTimedRequest(w)
+	w = timedWriter
+	defer func() {
+		timings.log(r, timedWriter.status)
+	}()
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	var fields map[string]json.RawMessage
+	stop := timings.observe("request_decode_validation")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_company_id")
 		return
 	}
 	if !present {
+		stop()
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
 	nodeID, present, ok := parseRequiredStringJSONField(fields, "node_id")
 	if !ok {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_node_id")
 		return
 	}
 	if !present {
+		stop()
 		writeError(w, http.StatusBadRequest, "node_id_required")
 		return
 	}
 	if !isCanonicalUUID(nodeID) {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_node_id")
 		return
 	}
+	stop()
+	stop = timings.observe("auth_access")
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
+		stop()
 		return
 	}
 	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
+		stop()
 		return
 	}
+	stop()
 
 	input := store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
+	stop = timings.observe("request_decode_validation")
 	if !parseLogicGateWorkAssignmentCreateFields(w, fields, &input) {
+		stop()
 		return
 	}
+	stop()
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
+	input.TimingRecorder = timings
+	stop = timings.observe("repository_transaction")
 	result, err := s.repo.AssignNodeToLogicGateStatus(input)
+	stop()
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
+	stop = timings.observe("domain_event_publish")
 	s.publishCommittedWorkspaceEvents(result.Events)
+	stop()
+	stop = timings.observe("notification_projection")
 	s.projectCommittedNotificationEvents(result.Events)
+	stop()
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
 
 func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.Request, logicGateID, nodeID string) {
+	timedWriter, timings := startTimedRequest(w)
+	w = timedWriter
+	defer func() {
+		timings.log(r, timedWriter.status)
+	}()
 	if r.Method != http.MethodPut {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -127,52 +159,73 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		return
 	}
 	var fields map[string]json.RawMessage
+	stop := timings.observe("request_decode_validation")
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
 	if !ok {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_company_id")
 		return
 	}
 	if !present {
+		stop()
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
+	stop()
+	stop = timings.observe("auth_access")
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
+		stop()
 		return
 	}
+	stop()
 
 	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
 	mutateAssignment := false
+	stop = timings.observe("request_decode_validation")
 	if !parseLogicGateWorkAssignmentMoveFields(w, fields, &input, &mutateAssignment) {
+		stop()
 		return
 	}
 	isIssue, issueSet, ok := parseOptionalBoolField(fields, "is_issue")
 	if !ok {
+		stop()
 		writeError(w, http.StatusBadRequest, "invalid_is_issue")
 		return
 	}
 	if !mutateAssignment && !issueSet {
+		stop()
 		writeError(w, http.StatusBadRequest, "logic_gate_work_state_change_required")
 		return
 	}
+	stop()
 
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	var result store.LogicGateNodeAssignmentResult
 	if mutateAssignment {
 		input.ActorUserID = actorUserID
 		input.IdempotencyKey = idempotencyKey
+		input.TimingRecorder = timings
 		var err error
+		stop = timings.observe("repository_transaction")
 		result, err = s.repo.MoveLogicGateNodeAssignment(input)
+		stop()
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
+		stop = timings.observe("domain_event_publish")
 		s.publishCommittedWorkspaceEvents(result.Events)
+		stop()
+		stop = timings.observe("notification_projection")
 		s.projectCommittedNotificationEvents(result.Events)
+		stop()
 	}
 	if issueSet {
+		stop = timings.observe("repository_transaction")
 		issueResult, err := s.repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
 			CompanyID:      companyID,
 			LogicGateID:    logicGateID,
@@ -181,11 +234,16 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 			ActorUserID:    actorUserID,
 			IdempotencyKey: idempotencyKey,
 		})
+		stop()
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_issue_state") {
 			return
 		}
+		stop = timings.observe("domain_event_publish")
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
+		stop()
+		stop = timings.observe("notification_projection")
 		s.projectCommittedNotificationEvents(issueResult.Events)
+		stop()
 		result = issueResult
 	}
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
