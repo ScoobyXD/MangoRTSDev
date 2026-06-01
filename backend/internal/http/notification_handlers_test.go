@@ -294,17 +294,15 @@ func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignmen
 		{"role": domain.LogicGateRaciRoleResponsible, "user_id": responsible.UserID},
 	})
 
-	accountableNotifications := listNotifications(accountable)
-	if len(accountableNotifications) != 1 {
-		t.Fatalf("accountable notification count = %d, want 1: %+v", len(accountableNotifications), accountableNotifications)
-	}
+	accountableNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(accountable)
+	}, 1)
 	if accountableNotifications[0].Surface != domain.NotificationSurfaceACIInbox || accountableNotifications[0].Role != domain.LogicGateRaciRoleAccountable {
 		t.Fatalf("accountable notification metadata = %+v, want ACIO accountable", accountableNotifications[0])
 	}
-	responsibleNotifications := listNotifications(responsible)
-	if len(responsibleNotifications) != 1 {
-		t.Fatalf("responsible notification count = %d, want 1: %+v", len(responsibleNotifications), responsibleNotifications)
-	}
+	responsibleNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(responsible)
+	}, 1)
 	if responsibleNotifications[0].Surface != domain.NotificationSurfaceRInbox || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
 		t.Fatalf("responsible notification metadata = %+v, want responsible inbox", responsibleNotifications[0])
 	}
@@ -314,10 +312,9 @@ func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignmen
 		{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
 	})
 
-	accountableNotifications = listNotifications(accountable)
-	if len(accountableNotifications) != 2 {
-		t.Fatalf("accountable notification count after reassignment = %d, want 2: %+v", len(accountableNotifications), accountableNotifications)
-	}
+	accountableNotifications = waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(accountable)
+	}, 2)
 }
 
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
@@ -442,36 +439,25 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 1)
+	if notifications[0].Type != domain.NotificationEventMentionCreated {
+		t.Fatalf("notification type = %q", notifications[0].Type)
 	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
+	if !strings.Contains(notifications[0].Title, "Author User") {
+		t.Fatalf("notification title = %q, want author label", notifications[0].Title)
 	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
+	if !strings.Contains(notifications[0].Title, "has mentioned you in Review packet") {
+		t.Fatalf("notification title = %q, want mention target format", notifications[0].Title)
 	}
-	if len(payload.Notifications) != 1 {
-		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
+	if notifications[0].Surface != domain.NotificationSurfaceRInbox || notifications[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("notification routing = %+v, want responsible node mention", notifications[0])
 	}
-	if payload.Notifications[0].Type != domain.NotificationEventMentionCreated {
-		t.Fatalf("notification type = %q", payload.Notifications[0].Type)
-	}
-	if !strings.Contains(payload.Notifications[0].Title, "Author User") {
-		t.Fatalf("notification title = %q, want author label", payload.Notifications[0].Title)
-	}
-	if !strings.Contains(payload.Notifications[0].Title, "has mentioned you in Review packet") {
-		t.Fatalf("notification title = %q, want mention target format", payload.Notifications[0].Title)
-	}
-	if payload.Notifications[0].Surface != domain.NotificationSurfaceRInbox || payload.Notifications[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("notification routing = %+v, want responsible node mention", payload.Notifications[0])
-	}
-	if payload.Notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
-		t.Fatalf("notification information id = %q, want chat information id", payload.Notifications[0].InformationID)
+	if notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
+		t.Fatalf("notification information id = %q, want chat information id", notifications[0].InformationID)
 	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
@@ -538,24 +524,13 @@ func TestNodeChatMentionResolvesDevAdminOutsideCompany(t *testing.T) {
 		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-	listReq = requestWithActorForNotifications(listReq, devAdmin, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
-	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
-	}
-	if len(payload.Notifications) != 1 {
-		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
-	}
-	if payload.Notifications[0].RecipientUserID != devAdmin.UserID {
-		t.Fatalf("recipient = %q, want dev admin %q", payload.Notifications[0].RecipientUserID, devAdmin.UserID)
+	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, devAdmin, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 1)
+	if notifications[0].RecipientUserID != devAdmin.UserID {
+		t.Fatalf("recipient = %q, want dev admin %q", notifications[0].RecipientUserID, devAdmin.UserID)
 	}
 }
 
@@ -611,26 +586,15 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 		t.Fatalf("POST logic gate information status = %d body=%s", infoRec.Code, infoRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
-	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
-	}
-	if len(payload.Notifications) != 1 {
-		t.Fatalf("notification count = %d, want 1: %+v", len(payload.Notifications), payload.Notifications)
-	}
-	if item := payload.Notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
+	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 1)
+	if item := notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
 		t.Fatalf("mention notification = %+v, want logic gate mention", item)
 	}
-	if item := payload.Notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.LogicGateRaciRoleAccountable || item.LogicGateID != logicGate.LogicGateID {
+	if item := notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.LogicGateRaciRoleAccountable || item.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("logic gate mention routing = %+v, want accountable logic gate", item)
 	}
 }
@@ -692,24 +656,13 @@ func TestNodeTextBoxMentionsCreateFreshNotificationsAcrossSameInformationID(t *t
 
 	assertMentionCount := func(user domain.User, want int) {
 		t.Helper()
-		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-		listReq = requestWithActorForNotifications(listReq, user, companyID)
-		listRec := httptest.NewRecorder()
-		handler.ServeHTTP(listRec, listReq)
-		if listRec.Code != http.StatusOK {
-			t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
-		}
-		var payload struct {
-			Notifications []domain.Notification `json:"notifications"`
-		}
-		if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode notifications: %v", err)
-		}
-		if len(payload.Notifications) != want {
-			t.Fatalf("notification count for %s = %d, want %d: %+v", user.UserID, len(payload.Notifications), want, payload.Notifications)
-		}
-		if want > 0 && strings.Contains(payload.Notifications[0].BodyPreview, "mango-editor-html") {
-			t.Fatalf("body preview contains raw editor HTML: %q", payload.Notifications[0].BodyPreview)
+		notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+			listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+			listReq = requestWithActorForNotifications(listReq, user, companyID)
+			return listNotificationsForRequestForTest(t, handler, listReq)
+		}, want)
+		if want > 0 && strings.Contains(notifications[0].BodyPreview, "mango-editor-html") {
+			t.Fatalf("body preview contains raw editor HTML: %q", notifications[0].BodyPreview)
 		}
 	}
 	assertMentionCount(first, 2)
@@ -765,22 +718,11 @@ func TestNodeTextBoxRepeatedMentionOccurrenceCreatesFreshAndOccurrenceNotificati
 	postTextBox(`<span data-mango-mention=\"true\">@Repeat Mention</span> and <span data-mango-mention=\"true\">@Repeat Mention</span> please review.`)
 	postTextBox(`<span data-mango-mention=\"true\">@Repeat Mention</span> and <span data-mango-mention=\"true\">@Repeat Mention</span> please review.`)
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
-	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
-	}
-	if len(payload.Notifications) != 3 {
-		t.Fatalf("notification count = %d, want 3: %+v", len(payload.Notifications), payload.Notifications)
-	}
+	waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 3)
 }
 
 func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
@@ -993,24 +935,13 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 		t.Fatalf("PUT node fields status = %d body=%s", updateRec.Code, updateRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
-	listReq = requestWithActorForNotifications(listReq, assignee, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
-	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
-	}
-	if len(payload.Notifications) != 2 {
-		t.Fatalf("notification count = %d, want 2: %+v", len(payload.Notifications), payload.Notifications)
-	}
+	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+		listReq = requestWithActorForNotifications(listReq, assignee, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 2)
 	types := map[string]bool{}
-	for _, item := range payload.Notifications {
+	for _, item := range notifications {
 		types[item.Type] = true
 		if item.Surface != domain.NotificationSurfaceMyTriage || item.Role != domain.NotificationRoleOther || item.NodeID != node.NodeID {
 			t.Fatalf("notification metadata = %+v, want my triage other for node", item)

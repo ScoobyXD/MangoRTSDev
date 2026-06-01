@@ -248,13 +248,32 @@ func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent)
 }
 
 func (s *Server) projectCommittedNotificationEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
-	items, err := s.notifications.ProcessDomainEventsWithTiming(context.Background(), events, timings)
+	stop := timings.observeAccounted("notifications.enqueue")
+	events = cloneDomainEventsForAsync(events)
+	stop()
+	if len(events) == 0 {
+		return
+	}
+	go s.projectCommittedNotificationEventsAsync(events)
+}
+
+func (s *Server) projectCommittedNotificationEventsAsync(events []domain.DomainEvent) {
+	start := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("async notification projection failed count=%d event_types=%s panic=%v", len(events), domainEventTypesForLog(events), recovered)
+			go s.runNotificationDomainEventCatchupOnce(context.Background())
+		}
+	}()
+	items, err := s.notifications.ProcessDomainEventsWithTiming(context.Background(), events, nil)
 	if err != nil {
-		log.Printf("failed to project committed notification events: %v", err)
+		log.Printf("failed to project committed notification events asynchronously count=%d event_types=%s: %v", len(events), domainEventTypesForLog(events), err)
 		go s.runNotificationDomainEventCatchupOnce(context.Background())
 		return
 	}
-	s.publishNotificationsWithTiming(items, timings)
+	s.publishNotificationsWithTiming(items, nil)
+	duration := time.Since(start)
+	log.Printf("async_notification_projection count=%d notifications=%d duration=%s notifications.total=%s event_types=%s", len(events), len(items), formatTimingDuration(duration), formatTimingDuration(duration), domainEventTypesForLog(events))
 }
 
 func (s *Server) publishNotifications(items []domain.Notification) {

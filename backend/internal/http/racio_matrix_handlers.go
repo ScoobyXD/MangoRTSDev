@@ -152,12 +152,8 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	if !writeRacioMatrixNodeCreateError(w, err) {
 		return
 	}
-	stop = timings.observeAccounted("events.publish.total")
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-	stop()
-	stop = timings.observeAccounted("notifications.total")
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
-	stop()
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -261,12 +257,8 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_racio_matrix_node") {
 		return
 	}
-	stop = timings.observeAccounted("events.publish.total")
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-	stop()
-	stop = timings.observeAccounted("notifications.total")
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
-	stop()
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }
 

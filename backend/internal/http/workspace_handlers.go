@@ -1149,13 +1149,31 @@ func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
 }
 
 func (s *Server) publishCommittedWorkspaceEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
-	for _, event := range events {
-		s.publishCommittedWorkspaceEventWithTiming(event, timings)
+	stop := timings.observeAccounted("events.publish.enqueue")
+	events = cloneDomainEventsForAsync(events)
+	stop()
+	if len(events) == 0 {
+		return
 	}
+	go s.publishCommittedWorkspaceEventsAsync(events)
+}
+
+func (s *Server) publishCommittedWorkspaceEventsAsync(events []domain.DomainEvent) {
+	start := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("async workspace event publish failed count=%d event_types=%s panic=%v", len(events), domainEventTypesForLog(events), recovered)
+		}
+	}()
+	for _, event := range events {
+		s.publishCommittedWorkspaceEventWithTiming(event, nil)
+	}
+	duration := time.Since(start)
+	log.Printf("async_workspace_events_publish count=%d duration=%s events.publish.total=%s event_types=%s", len(events), formatTimingDuration(duration), formatTimingDuration(duration), domainEventTypesForLog(events))
 }
 
 func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
-	s.publishCommittedWorkspaceEventWithTiming(event, nil)
+	s.publishCommittedWorkspaceEventsWithTiming([]domain.DomainEvent{event}, nil)
 }
 
 func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEvent, timings *requestTimingRecorder) {
@@ -1184,6 +1202,59 @@ func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEve
 	stop = timings.observe("events.publish.listener_work")
 	s.notifyWorkspaceEventFanout(event)
 	stop()
+}
+
+func cloneDomainEventsForAsync(events []domain.DomainEvent) []domain.DomainEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]domain.DomainEvent, len(events))
+	for i, event := range events {
+		out[i] = event
+		if event.ActorUserID != nil {
+			actorUserID := *event.ActorUserID
+			out[i].ActorUserID = &actorUserID
+		}
+		if event.PublishedTimestamp != nil {
+			publishedTimestamp := *event.PublishedTimestamp
+			out[i].PublishedTimestamp = &publishedTimestamp
+		}
+		if event.Payload != nil {
+			payload := make(map[string]any, len(event.Payload))
+			for key, value := range event.Payload {
+				payload[key] = value
+			}
+			out[i].Payload = payload
+		}
+	}
+	return out
+}
+
+func domainEventTypesForLog(events []domain.DomainEvent) string {
+	if len(events) == 0 {
+		return "-"
+	}
+	counts := map[string]int{}
+	order := make([]string, 0, len(events))
+	for _, event := range events {
+		eventType := strings.TrimSpace(event.Type)
+		if eventType == "" {
+			eventType = "<unknown>"
+		}
+		if counts[eventType] == 0 {
+			order = append(order, eventType)
+		}
+		counts[eventType]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, eventType := range order {
+		if counts[eventType] > 1 {
+			parts = append(parts, fmt.Sprintf("%s(%dx)", eventType, counts[eventType]))
+			continue
+		}
+		parts = append(parts, eventType)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (s *Server) workspaceEventVisibleToUser(event domain.DomainEvent, userID string) bool {

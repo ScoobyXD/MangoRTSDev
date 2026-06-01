@@ -379,10 +379,9 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		t.Fatalf("PUT work state status = %d body=%s, want 200", rec.Code, rec.Body.String())
 	}
 
-	responsibleNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, responsible)
-	if len(responsibleNotifications) != 1 {
-		t.Fatalf("responsible notification count = %d, want 1: %+v", len(responsibleNotifications), responsibleNotifications)
-	}
+	responsibleNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listLogicGateWorkNotificationsForTest(t, handler, companyID, responsible)
+	}, 1)
 	item := responsibleNotifications[0]
 	if item.Type != store.WorkItemLogicGateAssignmentMovedEventType {
 		t.Fatalf("responsible notification type = %q, want %q", item.Type, store.WorkItemLogicGateAssignmentMovedEventType)
