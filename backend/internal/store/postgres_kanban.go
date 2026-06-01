@@ -842,7 +842,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 				return LogicGateNodeAssignmentResult{}, ErrNotFound
 			}
 			stop := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.node_writes")
-			createdNode, err = r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+			createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
 			stop()
 			if err != nil {
 				return LogicGateNodeAssignmentResult{}, err

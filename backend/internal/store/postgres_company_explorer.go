@@ -281,21 +281,23 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx,
-		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, null, $3, $4, $5, $6, now(), now())
-		 on conflict (company_id, system_key) where system_key is not null do nothing`,
-		companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
-	); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-
 	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp
+		`with inserted as (
+		   insert into company_explorer_folders
+		     (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+		   values ($1, $2, null, $3, $4, $5, $6, now(), now())
+		   on conflict (company_id, system_key) where system_key is not null do nothing
+		   returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp
+		 )
+		 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+		 from inserted
+		 union all
+		 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
-		 where company_id=$1 and system_key=$2`,
-		companyID, systemKey,
+		 where company_id=$1 and system_key=$4
+		   and not exists (select 1 from inserted)
+		 limit 1`,
+		companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
 	))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

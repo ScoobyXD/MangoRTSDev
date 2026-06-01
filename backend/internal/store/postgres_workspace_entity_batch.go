@@ -94,7 +94,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			if input.CreatorUserID != "" {
 				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
 			}
-			if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+			if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {

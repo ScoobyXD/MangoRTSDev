@@ -223,7 +223,21 @@ where entry.company_id=$1::uuid
 		return err
 	}
 	stop()
-	stop = observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.upsert")
+	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
+}
+
+func syncPostgresRacioProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.total")()
+	companyID = cleanUUIDText(companyID)
+	nodeID = cleanUUIDText(nodeID)
+	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
+		return ErrInvalid
+	}
+	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
+}
+
+func upsertPostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	stop := observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.upsert")
 	_, err := tx.ExecContext(ctx, postgresRacioNodeProjectionCTE+`
 insert into racio_matrix_projection_table (
   company_id,

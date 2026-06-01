@@ -867,3 +867,65 @@ Suggested scope:
 6. Improve matrix create third, targeting a measurable drop from `2.0932s` toward `1.3s` or better.
 
 Do not start the full Kanban rewrite in the next pass unless event append batching/count reduction is insufficient or directly blocked by Kanban event consumers.
+
+## Update: Durable Append Batching And New-Node Projection Slimming
+
+This pass focused on durable append cost first, then made two low-risk transaction reductions for raw/new-node creation.
+
+Code changes:
+
+- `postgres_domain_events.go`: `AppendDomainEvents` now batches normal non-idempotent event groups by stream. A command batch now takes one stream advisory lock, one `max(sequence)` lookup, and one multi-row `insert ... select` per contiguous stream group instead of looping through one lock and one insert per event.
+- Single-event appends and any batch with explicit `DomainEventInput.IdempotencyKey` still use the old per-event append path to preserve idempotency semantics.
+- Batch append keeps durable append synchronous and returns events in sequence/input order.
+- `postgres_racio_projection.go`: added a new-node projection path that upserts projection rows without first deleting stale rows. Newly inserted nodes cannot have stale projection rows.
+- `postgres_workspace_entity_batch.go` and `postgres_nodes.go`: raw/new node creation now uses the new-node projection path.
+- `postgres_kanban.go`: create-then-assign no longer projects the node once as standalone and then again after assignment; it skips the standalone projection and relies on the existing post-assignment projection.
+- `postgres_company_explorer.go`: system folder ensure now folds the insert-or-existing select into one CTE-backed query instead of an insert attempt plus a separate select.
+
+Event append behavior:
+
+- Raw node create should still emit 3 events, but append should show roughly one `events.sequence_lock` and one `events.insert` span for the batch instead of 3 each.
+- Move between Logic Gates should still emit 3 events, with one lock/insert batch for the moved/card/node events.
+- Matrix create still emits the same 6 events. Because the Logic Gate creation append and assignment append are still separate call sites, it should now pay one lock/insert for the first 2 events and one lock/insert for the later assignment batch, not one lock/insert per event.
+- `events.append.item_total` is not emitted on the new batch path; `events.append.batch_total`, `events.sequence_lock`, `events.insert`, and handler-level `events.append.total` remain.
+
+Event count changes:
+
+- No event types were removed in this pass.
+- The audited consumers still make collapse unsafe without a broader compatibility change:
+  - `workspace_read_versions.go` maps these event types to different list, map, explorer, Kanban, and snapshot scopes.
+  - `workspace_effective_fanout.go` derives visibility targets from event payloads such as `logic_gate_id`, `board_id`, `item_type`, and `node_id`.
+  - `notifications/service.go` consumes `work_item.logic_gate_assignment_*` for notification projection, and conditionally consumes `node_updated` when notification metadata is present.
+  - Existing tests assert durable event order and types for assignment, Kanban, inbox, and workspace flows.
+
+Expected timing impact:
+
+The app benchmark actions were not rerun in this pass. Expected values below are estimates from the prior timing buckets.
+
+| Case | Before this pass | Expected request-path after this pass | Expected savings |
+| --- | ---: | ---: | ---: |
+| Raw node create | `846.1ms` | roughly `550-650ms` | batched append, no stale projection delete for new node, one fewer system-folder query |
+| Move between Logic Gates | `774.8ms` | roughly `650-725ms` | batched append only |
+| Matrix create Logic Gate plus node | `2.0932s` | roughly `1.75-1.9s` | batched append, one fewer standalone node projection, one fewer system-folder query |
+
+The raw path may still miss the `<500ms` target until the remaining folder item write, projection upsert, event trigger/read-version work, or response/reread costs are reduced.
+
+Validation:
+
+- `go test ./internal/store` passed.
+- `go test ./internal/http` passed.
+- `go test ./...` from `backend/` passed.
+
+Remaining bottlenecks:
+
+- Raw node create likely still spends meaningful time in durable append triggers/read-version updates, `racio_projection.upsert`, folder item write/position read, and creator/effective-access reads.
+- Move still has `source.access_policy_copy`, `kanban.email_reference_work`, Kanban card work, RACIO sync/reread, and the now-batched durable append.
+- Matrix create remains dominated by assignment/Logic Gate/node transaction work, explorer folder item write, RACIO projection/rereads, Kanban compatibility writes, and two separate append call sites.
+
+Recommended next pass:
+
+1. Rerun the three app benchmark actions and capture fresh `request_timing` plus async logs.
+2. If raw is still above target, inspect the post-batch `events.append.total` breakdown and the `domain_events` read-version trigger cost.
+3. Consider folding matrix create durable events into one append call only if the assignment helper can be refactored without changing event order or removing events.
+4. For move, audit whether `copyPostgresLogicGateAccessPolicyToNodeTx` can be skipped when the target Logic Gate policy is unchanged or already equivalent on the node.
+5. For move, audit communications email reference updates for no-op guards before broad Kanban rewrites.

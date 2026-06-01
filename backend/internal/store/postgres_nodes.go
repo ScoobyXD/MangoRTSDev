@@ -280,6 +280,14 @@ func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx,
 }
 
 func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+	return r.createNodeWithAssigneeIDProjectionTx(ctx, tx, companyID, nodeID, title, assigneeUserID, true)
+}
+
+func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+	return r.createNodeWithAssigneeIDProjectionTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false)
+}
+
+func (r *PostgresRepo) createNodeWithAssigneeIDProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string, syncProjection bool) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	var assignee postgresNodeAssigneeReadModel
@@ -312,8 +320,10 @@ func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.T
 	}
 	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}
-	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, item.NodeID); err != nil {
-		return domain.Node{}, err
+	if syncProjection {
+		if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, companyID, item.NodeID); err != nil {
+			return domain.Node{}, err
+		}
 	}
 	return item, nil
 }
