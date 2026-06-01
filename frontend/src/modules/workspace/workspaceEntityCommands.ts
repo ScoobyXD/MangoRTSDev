@@ -2,6 +2,7 @@ export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
 export type WorkspaceEntityBatchCreatorLogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "node_map" | "logic_gate_map" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {
   client_id: string;
@@ -29,6 +30,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   companyID: string;
   entityKind: WorkspaceEntityBatchKind;
   folderID?: string;
+  mutationOrigin?: WorkspaceEntityBatchMutationOrigin;
   creatorLogicGateRaciRole?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
   items: WorkspaceEntityBatchItem[];
   relationships?: WorkspaceEntityBatchRelationship[];
@@ -38,6 +40,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     company_id: string;
     entity_kind: WorkspaceEntityBatchKind;
     folder_id: string;
+    mutation_origin?: WorkspaceEntityBatchMutationOrigin;
     creator_logic_gate_raci_role?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
     items: WorkspaceEntityBatchItem[];
     relationships: WorkspaceEntityBatchRelationship[];
@@ -50,6 +53,9 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   };
   if (args.entityKind === "logic_gate" && args.creatorLogicGateRaciRole) {
     body.creator_logic_gate_raci_role = args.creatorLogicGateRaciRole;
+  }
+  if (args.mutationOrigin) {
+    body.mutation_origin = args.mutationOrigin;
   }
   return args.requestJSON<TResponse>("/v1/workspace/entity-batches", {
     method: "POST",

@@ -840,6 +840,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,
+        mutationOrigin: "node_map",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("node"),
           title: value,
@@ -895,6 +896,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,
+        mutationOrigin: "node_map",
         items: [{
           client_id: clientID,
           title: "new node",
@@ -1039,6 +1041,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         companyID,
         entityKind: "node",
         folderID: activeFolderID,
+        mutationOrigin: "node_map",
         items: batchItems,
         relationships: batchRelationships,
         requestJSON,

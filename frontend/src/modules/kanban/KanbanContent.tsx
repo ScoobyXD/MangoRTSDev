@@ -1274,6 +1274,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               logicGateID,
               nodeID: card.node_id,
               columnID: targetColumnID,
+              mutationOrigin: "kanban",
               position,
               priority: priorityWasSet ? assignment.priority : undefined,
             });
@@ -1603,6 +1604,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         columnID,
         nodeTitle: title,
         createNodeTitle: title,
+        mutationOrigin: "kanban",
         position,
         priority,
       });

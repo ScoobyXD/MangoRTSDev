@@ -965,6 +965,13 @@ export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
 export function workspaceEventTouchesHomePanel(type: string): boolean {
   const cleanType = type.trim();
   if (!cleanType) return false;
+  if (
+    cleanType === "company_explorer_folder_item_assign_requested"
+    || cleanType === "node_map_position_upsert_requested"
+    || cleanType === "logic_gate_map_position_upsert_requested"
+  ) {
+    return false;
+  }
   return cleanType === "node_created"
     || cleanType === "node_updated"
     || cleanType === "node_deleted"

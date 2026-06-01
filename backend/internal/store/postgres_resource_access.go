@@ -288,6 +288,13 @@ func copyPostgresLogicGateAccessPolicyToNodeTx(ctx context.Context, tx *sql.Tx, 
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" || nodeID == "" {
 		return ErrInvalid
 	}
+	matches, err := postgresLogicGateAccessPolicyMatchesNodeTx(ctx, tx, companyID, logicGateID, nodeID)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return nil
+	}
 	defaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
 	if err != nil {
 		return err
@@ -330,6 +337,50 @@ order by user_id::text`, companyID, logicGateID)
 		}
 	}
 	return nil
+}
+
+func postgresLogicGateAccessPolicyMatchesNodeTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) (bool, error) {
+	var matches bool
+	err := tx.QueryRowContext(ctx, `
+with gate_default as (
+  select coalesce(default_access, $4) as default_access
+  from logic_gates
+  where company_id=$1::uuid and logic_gate_id=$2::uuid
+),
+node_default as (
+  select coalesce(default_access, $4) as default_access
+  from nodes
+  where company_id=$1::uuid and node_id=$3::uuid
+),
+gate_users as (
+  select user_id
+  from resource_permissions
+  where company_id=$1::uuid
+    and resource_type='logic_gate'
+    and resource_id=$2::uuid
+),
+node_users as (
+  select user_id
+  from resource_permissions
+  where company_id=$1::uuid
+    and resource_type='node'
+    and resource_id=$3::uuid
+),
+different_users as (
+  (select user_id from gate_users except select user_id from node_users)
+  union
+  (select user_id from node_users except select user_id from gate_users)
+)
+select exists(select 1 from gate_default)
+   and exists(select 1 from node_default)
+   and (select default_access from gate_default) = (select default_access from node_default)
+   and not exists(select 1 from different_users)`,
+		companyID, logicGateID, nodeID, ResourceDefaultAccessEdit,
+	).Scan(&matches)
+	if err != nil {
+		return false, err
+	}
+	return matches, nil
 }
 
 func (r *PostgresRepo) effectiveAccessLevelForUserTx(ctx context.Context, tx *sql.Tx, companyID, userID, resourceType, resourceID string) (string, error) {

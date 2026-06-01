@@ -830,6 +830,7 @@ order by kc.position asc, kc.created_timestamp asc, kc.column_id asc`, input.Com
 	var previousAssignee sql.NullString
 	var nodePriority sql.NullInt64
 	var createdNode domain.Node
+	deferCreatedNodeFolderItem := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if err := tx.QueryRowContext(ctx, `
 select title, assignee_user_id::text, priority
 from nodes
@@ -842,7 +843,11 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 				return LogicGateNodeAssignmentResult{}, ErrNotFound
 			}
 			stop := observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.node_writes")
-			createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+			if deferCreatedNodeFolderItem {
+				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+			} else {
+				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+			}
 			stop()
 			if err != nil {
 				return LogicGateNodeAssignmentResult{}, err
@@ -1077,6 +1082,11 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID, status, 
 	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
 	if createdNode.CompanyID != "" {
 		eventInputs = append([]DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(createdNode, meta)}, eventInputs...)
+		if deferCreatedNodeFolderItem {
+			eventInputs = append([]DomainEventInput{
+				DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveNodesKey, "node", createdNode.NodeID, 0, input.ActorUserID),
+			}, eventInputs...)
+		}
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.domain_event_append")
 	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)

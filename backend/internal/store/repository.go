@@ -401,6 +401,7 @@ type WorkspaceEntityBatchInput struct {
 	CompanyID                string
 	EntityKind               string
 	FolderID                 string
+	MutationOrigin           string
 	CreatorUserID            string
 	CreatorLogicGateRaciRole string
 	Items                    []WorkspaceEntityBatchItemInput
@@ -413,17 +414,28 @@ type WorkspaceEntityBatchEntityMapping struct {
 	EntityID string `json:"entity_id"`
 }
 
+type DeferredCompanyExplorerFolderItemAssignment struct {
+	FolderID        string
+	SystemFolderKey string
+	ItemType        string
+	ItemID          string
+	Position        int
+}
+
 type WorkspaceEntityBatchResult struct {
-	CompanyID              string                              `json:"company_id"`
-	EntityKind             string                              `json:"entity_kind"`
-	EntityMappings         []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
-	Nodes                  []domain.Node                       `json:"nodes,omitempty"`
-	LogicGates             []domain.LogicGate                  `json:"logic_gates,omitempty"`
-	Relationships          []domain.NodeRelationship           `json:"relationships,omitempty"`
-	LogicGateRelationships []domain.LogicGateRelationship      `json:"logic_gate_relationships,omitempty"`
-	FolderItems            []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
-	NodeMapPositions       []domain.NodeMapPosition            `json:"node_map_positions,omitempty"`
-	LogicGateMapPositions  []domain.LogicGateMapPosition       `json:"logic_gate_map_positions,omitempty"`
+	CompanyID                     string                                        `json:"company_id"`
+	EntityKind                    string                                        `json:"entity_kind"`
+	EntityMappings                []WorkspaceEntityBatchEntityMapping           `json:"entity_mappings"`
+	Nodes                         []domain.Node                                 `json:"nodes,omitempty"`
+	LogicGates                    []domain.LogicGate                            `json:"logic_gates,omitempty"`
+	Relationships                 []domain.NodeRelationship                     `json:"relationships,omitempty"`
+	LogicGateRelationships        []domain.LogicGateRelationship                `json:"logic_gate_relationships,omitempty"`
+	FolderItems                   []domain.CompanyExplorerFolderItem            `json:"folder_items,omitempty"`
+	NodeMapPositions              []domain.NodeMapPosition                      `json:"node_map_positions,omitempty"`
+	LogicGateMapPositions         []domain.LogicGateMapPosition                 `json:"logic_gate_map_positions,omitempty"`
+	DeferredFolderItems           []DeferredCompanyExplorerFolderItemAssignment `json:"-"`
+	DeferredNodeMapPositions      []domain.NodeMapPosition                      `json:"-"`
+	DeferredLogicGateMapPositions []domain.LogicGateMapPosition                 `json:"-"`
 }
 
 type RacioMatrixNodeCreateInput struct {
@@ -433,6 +445,7 @@ type RacioMatrixNodeCreateInput struct {
 	LogicGateID              string
 	CreateLogicGateHeader    string
 	CreatorLogicGateRaciRole string
+	MutationOrigin           string
 	Status                   string
 	ColumnID                 string
 	DescriptionSnapshot      string
@@ -730,6 +743,7 @@ type LogicGateNodeAssignmentInput struct {
 	NodeID              string
 	Status              string
 	ColumnID            string
+	MutationOrigin      string
 	NodeTitle           string
 	CreateNodeTitle     string
 	DescriptionSnapshot string
@@ -751,6 +765,7 @@ type LogicGateNodeAssignmentMoveInput struct {
 	NodeID            string
 	Status            string
 	ColumnID          string
+	MutationOrigin    string
 	Position          int
 	Priority          *int
 	PrioritySet       bool

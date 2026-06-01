@@ -87,6 +87,11 @@ const WORK_ITEM_ASSIGNMENT_EVENT_TYPES = new Set([
   "work_item.logic_gate_assignment_removed",
   "work_item.logic_gate_issue_toggled",
 ]);
+const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
+  "company_explorer_folder_item_assign_requested",
+  "node_map_position_upsert_requested",
+  "logic_gate_map_position_upsert_requested",
+]);
 
 function streamKey(apiBase: string, companyID: string): string {
   return `${apiBase}:${companyID}`;
@@ -214,6 +219,10 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   const folderKind = cleanString(data.folder_kind) || cleanString(folder.folder_kind);
   const itemType = cleanString(data.item_type) || cleanString(folderItem.item_type);
   const itemID = cleanString(data.item_id) || cleanString(folderItem.item_id);
+
+  if (INTERNAL_DERIVED_WORK_EVENT_TYPES.has(type)) {
+    return [];
+  }
 
   if (WORK_ITEM_ASSIGNMENT_EVENT_TYPES.has(type)) {
     addScope(scopes, seen, { kind: "work_item_assignment", eventType: type, boardID, logicGateID, nodeID, assignmentID, cardID, columnID });

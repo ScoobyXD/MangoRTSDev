@@ -909,6 +909,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const response = await createWorkspaceEntityBatchCommand<EditorNodeBatchResponse>({
         companyID,
         entityKind: "node",
+        mutationOrigin: "editor",
         items: [{
           client_id: clientID,
           title: titleByKind[kind],
@@ -964,6 +965,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const response = await createWorkspaceEntityBatchCommand<EditorNodeBatchResponse>({
       companyID,
       entityKind: "node",
+      mutationOrigin: "editor",
       items: [{
         client_id: clientID,
         title,

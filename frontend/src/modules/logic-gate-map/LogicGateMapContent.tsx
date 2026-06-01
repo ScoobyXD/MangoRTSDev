@@ -776,6 +776,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,
+        mutationOrigin: "logic_gate_map",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("logic-gate"),
           title: value,
@@ -835,6 +836,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,
+        mutationOrigin: "logic_gate_map",
         items: [{
           client_id: clientID,
           title: "new logic gate",
@@ -990,6 +992,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         companyID,
         entityKind: "logic_gate",
         folderID: activeFolderID,
+        mutationOrigin: "logic_gate_map",
         items: batchItems,
         relationships: batchRelationships,
         requestJSON,

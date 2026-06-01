@@ -655,6 +655,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         companyID,
         entityKind: "node",
         folderID: parentFolderID,
+        mutationOrigin: "company_explorer",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-node"),
           title: "new node",
@@ -686,6 +687,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         companyID,
         entityKind: "logic_gate",
         folderID: parentFolderID,
+        mutationOrigin: "company_explorer",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
           title: "new logic gate",

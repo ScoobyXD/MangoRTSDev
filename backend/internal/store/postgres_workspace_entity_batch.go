@@ -11,6 +11,7 @@ import (
 func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
 	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
 	defer observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.transaction")()
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return WorkspaceEntityBatchResult{}, err
@@ -35,41 +36,50 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		input.CreatorUserID = creatorAssignee.UserID
 	}
 
+	syncFolderItems := MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
+	if (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) && strings.TrimSpace(input.FolderID) != "" {
+		syncFolderItems = true
+	}
+	syncMapPositions := (input.EntityKind == "node" && MutationOriginNeedsNodeMapPosition(input.MutationOrigin)) ||
+		(input.EntityKind == "logic_gate" && MutationOriginNeedsLogicGateMapPosition(input.MutationOrigin))
+
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
-	stopFolderSetup := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_setup")
-	if input.EntityKind == "node" {
-		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-		if err != nil {
-			stopFolderSetup()
-			return WorkspaceEntityBatchResult{}, err
-		}
-		targetFolderID = activeFolder.FolderID
-		targetFolderKind = activeFolder.FolderKind
-	} else if input.FolderID == "" {
-		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
-		if err != nil {
-			stopFolderSetup()
-			return WorkspaceEntityBatchResult{}, err
-		}
-		targetFolderID = activeFolder.FolderID
-		targetFolderKind = activeFolder.FolderKind
-	} else if input.FolderID != "" {
-		if err := tx.QueryRowContext(ctx,
-			`select folder_kind
-			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2`,
-			input.CompanyID, input.FolderID,
-		).Scan(&targetFolderKind); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+	if syncFolderItems {
+		stopFolderSetup := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_setup")
+		if input.EntityKind == "node" {
+			activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+			if err != nil {
 				stopFolderSetup()
-				return WorkspaceEntityBatchResult{}, ErrNotFound
+				return WorkspaceEntityBatchResult{}, err
 			}
-			stopFolderSetup()
-			return WorkspaceEntityBatchResult{}, err
+			targetFolderID = activeFolder.FolderID
+			targetFolderKind = activeFolder.FolderKind
+		} else if input.FolderID == "" {
+			activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
+			if err != nil {
+				stopFolderSetup()
+				return WorkspaceEntityBatchResult{}, err
+			}
+			targetFolderID = activeFolder.FolderID
+			targetFolderKind = activeFolder.FolderKind
+		} else if input.FolderID != "" {
+			if err := tx.QueryRowContext(ctx,
+				`select folder_kind
+				 from company_explorer_folders
+				 where company_id=$1 and folder_id=$2`,
+				input.CompanyID, input.FolderID,
+			).Scan(&targetFolderKind); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					stopFolderSetup()
+					return WorkspaceEntityBatchResult{}, ErrNotFound
+				}
+				stopFolderSetup()
+				return WorkspaceEntityBatchResult{}, err
+			}
 		}
+		stopFolderSetup()
 	}
-	stopFolderSetup()
 
 	clientToEntityID := make(map[string]string, len(input.Items))
 	for _, item := range input.Items {
@@ -105,19 +115,23 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
 
-			var position domain.NodeMapPosition
-			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
-			if err := tx.QueryRowContext(ctx,
-				`insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
-				 values ($1, $2, $3, $4, now())
-				 returning company_id, node_id, x, y, updated_timestamp`,
-				input.CompanyID, created.NodeID, item.X, item.Y,
-			).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+			position := domain.NodeMapPosition{CompanyID: input.CompanyID, NodeID: created.NodeID, X: item.X, Y: item.Y}
+			if syncMapPositions {
+				stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
+				if err := tx.QueryRowContext(ctx,
+					`insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
+					 values ($1, $2, $3, $4, now())
+					 returning company_id, node_id, x, y, updated_timestamp`,
+					input.CompanyID, created.NodeID, item.X, item.Y,
+				).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+					stop()
+					return WorkspaceEntityBatchResult{}, err
+				}
 				stop()
-				return WorkspaceEntityBatchResult{}, err
+				result.NodeMapPositions = append(result.NodeMapPositions, position)
+			} else {
+				result.DeferredNodeMapPositions = append(result.DeferredNodeMapPositions, position)
 			}
-			stop()
-			result.NodeMapPositions = append(result.NodeMapPositions, position)
 			continue
 		}
 
@@ -192,22 +206,26 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
 
-		var position domain.LogicGateMapPosition
-		stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
-		if err := tx.QueryRowContext(ctx,
-			`insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
-			 values ($1, $2, $3, $4, now())
-			 returning company_id, logic_gate_id, x, y, updated_timestamp`,
-			input.CompanyID, created.LogicGateID, item.X, item.Y,
-		).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+		position := domain.LogicGateMapPosition{CompanyID: input.CompanyID, LogicGateID: created.LogicGateID, X: item.X, Y: item.Y}
+		if syncMapPositions {
+			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
+			if err := tx.QueryRowContext(ctx,
+				`insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
+				 values ($1, $2, $3, $4, now())
+				 returning company_id, logic_gate_id, x, y, updated_timestamp`,
+				input.CompanyID, created.LogicGateID, item.X, item.Y,
+			).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
+				stop()
+				return WorkspaceEntityBatchResult{}, err
+			}
 			stop()
-			return WorkspaceEntityBatchResult{}, err
+			result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
+		} else {
+			result.DeferredLogicGateMapPositions = append(result.DeferredLogicGateMapPositions, position)
 		}
-		stop()
-		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
 
-	if targetFolderID != "" {
+	if syncFolderItems && targetFolderID != "" {
 		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, targetFolderKind, targetFolderID)
 		if err != nil {
 			return WorkspaceEntityBatchResult{}, err
@@ -244,6 +262,19 @@ returning company_id, logic_gate_id, role::text, user_id::text, created_timestam
 				position += 1000
 			}
 			result.FolderItems = append(result.FolderItems, item)
+		}
+	} else if !syncFolderItems {
+		systemFolderKey := CompanyExplorerSystemActiveLogicGatesKey
+		if input.EntityKind == "node" {
+			systemFolderKey = CompanyExplorerSystemActiveNodesKey
+		}
+		for _, mapping := range result.EntityMappings {
+			result.DeferredFolderItems = append(result.DeferredFolderItems, DeferredCompanyExplorerFolderItemAssignment{
+				FolderID:        input.FolderID,
+				SystemFolderKey: systemFolderKey,
+				ItemType:        input.EntityKind,
+				ItemID:          mapping.EntityID,
+			})
 		}
 	}
 

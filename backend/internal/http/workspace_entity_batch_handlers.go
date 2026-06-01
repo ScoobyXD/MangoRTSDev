@@ -54,6 +54,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		CompanyID                string                                    `json:"company_id"`
 		EntityKind               string                                    `json:"entity_kind"`
 		FolderID                 string                                    `json:"folder_id"`
+		MutationOrigin           string                                    `json:"mutation_origin"`
 		CreatorLogicGateRaciRole string                                    `json:"creator_logic_gate_raci_role"`
 		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
@@ -66,7 +67,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 	}
 	stop()
 	stop = timings.observeAccounted("request.validate")
-	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
+	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.MutationOrigin, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
 	if !ok {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
@@ -135,6 +136,7 @@ func buildWorkspaceEntityBatchInput(
 	companyID string,
 	entityKind string,
 	folderID string,
+	mutationOrigin string,
 	creatorLogicGateRaciRole string,
 	items []workspaceEntityBatchItemRequest,
 	relationships []workspaceEntityBatchRelationshipRequest,
@@ -143,6 +145,7 @@ func buildWorkspaceEntityBatchInput(
 		CompanyID:                strings.TrimSpace(companyID),
 		EntityKind:               strings.TrimSpace(entityKind),
 		FolderID:                 strings.TrimSpace(folderID),
+		MutationOrigin:           store.NormalizeMutationOrigin(mutationOrigin),
 		CreatorLogicGateRaciRole: strings.TrimSpace(creatorLogicGateRaciRole),
 	}
 	if input.CompanyID == "" || (input.EntityKind != "node" && input.EntityKind != "logic_gate") {
@@ -255,6 +258,15 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	if len(result.LogicGateMapPositions) > 0 {
 		appendEvent("logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
 	}
+	for _, item := range result.DeferredFolderItems {
+		inputs = append(inputs, store.DeferredCompanyExplorerFolderItemAssignEventInput(result.CompanyID, item.FolderID, item.SystemFolderKey, item.ItemType, item.ItemID, item.Position, ""))
+	}
+	for _, position := range result.DeferredNodeMapPositions {
+		inputs = append(inputs, store.DeferredNodeMapPositionUpsertEventInput(position, ""))
+	}
+	for _, position := range result.DeferredLogicGateMapPositions {
+		inputs = append(inputs, store.DeferredLogicGateMapPositionUpsertEventInput(position, ""))
+	}
 	for _, item := range result.Relationships {
 		appendEvent("relationship_created", map[string]any{
 			"node_relationship_id": item.NodeRelationshipID,
@@ -281,5 +293,6 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
+	s.projectCommittedWorkspaceDerivedEventsWithTiming(events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(events, timings)
 }

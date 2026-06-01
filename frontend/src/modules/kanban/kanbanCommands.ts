@@ -186,6 +186,7 @@ export async function reorderKanbanCardsCommand(args: {
         logicGateID,
         nodeID: card.node_id,
         columnID: update.columnID,
+        mutationOrigin: "kanban",
         position: update.position,
       });
       return result.card;
@@ -270,6 +271,7 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
         nodeID: item.nodeID,
         columnID,
         nodeTitle: item.label,
+        mutationOrigin: "kanban",
         position,
         priority,
       });
