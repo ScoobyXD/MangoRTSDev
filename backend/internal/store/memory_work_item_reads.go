@@ -188,6 +188,13 @@ func (r *MemoryRepo) syncRacioProjectionForNodeLocked(companyID, nodeID string) 
 	r.deleteStaleRacioProjectionForNodeLocked(companyID, nodeID, desired)
 }
 
+func (r *MemoryRepo) syncRacioProjectionForNodeDeltasLocked(companyID, nodeID string) []ProjectionDelta {
+	before := r.racioProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
+	r.syncRacioProjectionForNodeLocked(companyID, nodeID)
+	after := r.racioProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
+	return diffRacioProjectionRows(before, after)
+}
+
 func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateID string) {
 	users := r.racioProjectionUsersForLogicGateLocked(companyID, logicGateID)
 	for _, userID := range r.logicGateRaciUserIDsLocked(companyID, logicGateID) {
@@ -199,6 +206,13 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateI
 func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) {
 	users := racioAssignmentChangedUserSet(before, after)
 	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
+}
+
+func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) []ProjectionDelta {
+	beforeRows := r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID)
+	r.syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, after)
+	afterRows := r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID)
+	return diffRacioProjectionRows(beforeRows, afterRows)
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID string, userIDs []string) {
@@ -347,6 +361,98 @@ func (r *MemoryRepo) racioProjectionRowsForResourcesLocked(companyID string, nod
 		return items[i].UserID < items[j].UserID
 	})
 	return items
+}
+
+func (r *MemoryRepo) racioProjectionRowsForLogicGateLocked(companyID, logicGateID string) []RacioMatrixProjectionRow {
+	items := make([]RacioMatrixProjectionRow, 0)
+	for _, row := range r.racioProjectionRows {
+		if row.CompanyID != companyID || row.LogicGateID != logicGateID {
+			continue
+		}
+		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+			continue
+		}
+		items = append(items, memoryRacioProjectionRowToDTO(row))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ResourceType != items[j].ResourceType {
+			return items[i].ResourceType < items[j].ResourceType
+		}
+		if items[i].ResourceID != items[j].ResourceID {
+			return items[i].ResourceID < items[j].ResourceID
+		}
+		return items[i].UserID < items[j].UserID
+	})
+	return items
+}
+
+func (r *MemoryRepo) ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.racioProjectionRowsForResourcesLocked(companyID, nodeIDs, logicGateIDs), nil
+}
+
+func (r *MemoryRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	if query.CompanyID == "" || query.UserID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]RacioMatrixProjectionRow, 0)
+	for _, row := range r.racioProjectionRows {
+		if row.CompanyID != query.CompanyID || row.UserID != query.UserID {
+			continue
+		}
+		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
+			continue
+		}
+		items = append(items, memoryRacioProjectionRowToDTO(row))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ResourceType != items[j].ResourceType {
+			return items[i].ResourceType < items[j].ResourceType
+		}
+		if !items[i].ResourceCreatedTimestamp.Equal(items[j].ResourceCreatedTimestamp) {
+			return items[i].ResourceCreatedTimestamp.Before(items[j].ResourceCreatedTimestamp)
+		}
+		return items[i].ResourceID < items[j].ResourceID
+	})
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+	companyID = strings.TrimSpace(companyID)
+	logicGateID = strings.TrimSpace(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
+}
+
+func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName string) (int64, error) {
+	companyID = strings.TrimSpace(companyID)
+	projectionName = strings.TrimSpace(projectionName)
+	if companyID == "" || projectionName == "" {
+		return 0, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := companyID + ":" + projectionName
+	r.projectionSequences[key]++
+	return r.projectionSequences[key], nil
 }
 
 func memoryRacioProjectionRowToDTO(row memoryRacioProjectionRow) RacioMatrixProjectionRow {

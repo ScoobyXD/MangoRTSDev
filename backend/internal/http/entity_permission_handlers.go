@@ -652,6 +652,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		payload["logic_gate_id"] = entityID
 	}
 	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
+	s.publishRacioPermissionProjectionDeltas(req.CompanyID, entityType, entityID)
 	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")

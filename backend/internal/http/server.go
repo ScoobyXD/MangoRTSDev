@@ -36,6 +36,7 @@ type Server struct {
 	hub                             *workspaceEventHub
 	emailHub                        *workspaceEventHub
 	notificationHub                 *workspaceEventHub
+	projectionHub                   *projectionDeltaHub
 	notifications                   *notifications.Service
 	kanban                          *kanban.Service
 	workspaceWakeHub                *workspaceEventNotificationHub
@@ -140,6 +141,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		hub:                             newWorkspaceEventHub(),
 		emailHub:                        newWorkspaceEventHub(),
 		notificationHub:                 newWorkspaceEventHub(),
+		projectionHub:                   newProjectionDeltaHub(),
 		notifications:                   notifications.NewService(repo),
 		kanban:                          kanban.NewService(repo),
 		workspaceWakeHub:                newWorkspaceEventNotificationHub(),
@@ -245,6 +247,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/work-items/aci-inbox", s.handleWorkItemACIInbox)
 	mux.HandleFunc("/v1/work-items/my-nodes", s.handleWorkItemMyNodes)
 	mux.HandleFunc("/v1/work-items/my-logic-gates", s.handleWorkItemMyLogicGates)
+	mux.HandleFunc("/v1/work-items/racio-matrix-projection", s.handleWorkItemRacioMatrixProjection)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/move", s.handleWorkItemLogicGateAssignmentMove)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/remove", s.handleWorkItemLogicGateAssignmentRemove)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/issue", s.handleWorkItemLogicGateAssignmentIssue)

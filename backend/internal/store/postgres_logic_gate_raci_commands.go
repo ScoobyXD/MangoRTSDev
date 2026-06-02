@@ -165,10 +165,13 @@ where company_id=$1::uuid
 		return LogicGateRaciAssignmentCommandResult{}, err
 	}
 	assignments := cloneLogicGateRaciAssignments(assignmentsByGate[logicGateID])
+	projectionDeltas := []ProjectionDelta{}
 	if changed {
-		if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, assignments); err != nil {
+		deltas, err := syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, before, assignments)
+		if err != nil {
 			return LogicGateRaciAssignmentCommandResult{}, err
 		}
+		projectionDeltas = deltas
 	}
 	result := LogicGateRaciAssignmentCommandResult{
 		CompanyID:         companyID,
@@ -177,6 +180,7 @@ where company_id=$1::uuid
 		Changed:           changed,
 		RaciAssignments:   assignments,
 		BeforeAssignments: before,
+		ProjectionDeltas:  projectionDeltas,
 		Events:            []domain.DomainEvent{},
 	}
 	if changed {

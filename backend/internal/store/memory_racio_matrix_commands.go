@@ -29,6 +29,9 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
+		r.mu.RLock()
+		result.ProjectionDeltas = append(result.ProjectionDeltas, diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, nil, []string{logicGateID}))...)
+		r.mu.RUnlock()
 		eventInputs := []DomainEventInput{
 			logicGateCreatedWorkspaceEventInput(logicGate, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)),
 		}
@@ -70,13 +73,10 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		result.Assignment = &assignment
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
-		result.RacioProjectionRows = assignmentResult.RacioProjectionRows
+		result.ProjectionDeltas = append(result.ProjectionDeltas, assignmentResult.ProjectionDeltas...)
 		r.mu.RLock()
 		if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", input.NodeID)]; ok {
 			result.FolderItems = append(result.FolderItems, folderItem)
-		}
-		if result.LogicGate != nil {
-			result.RacioProjectionRows = r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, []string{logicGateID})
 		}
 		r.mu.RUnlock()
 		return result, nil
@@ -94,7 +94,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 	if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", node.NodeID)]; ok {
 		result.FolderItems = append(result.FolderItems, folderItem)
 	}
-	result.RacioProjectionRows = r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil)
+	result.ProjectionDeltas = diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil))
 	event, err := r.appendDomainEventLocked(nodeCreatedWorkspaceEventInputWithMetadata(result.Node, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)

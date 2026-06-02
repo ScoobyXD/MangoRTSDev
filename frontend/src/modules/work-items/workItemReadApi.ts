@@ -1,4 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
+import type { RacioMatrixProjectionRow } from "../kanban/kanbanApi.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 
@@ -41,6 +42,13 @@ export type MyLogicGatesResponse = {
   logic_gates: WorkItemLogicGateInboxItem[];
 };
 
+export type RacioMatrixProjectionResponse = {
+  company_id: string;
+  user_id: string;
+  limit: number;
+  rows: RacioMatrixProjectionRow[];
+};
+
 export async function listResponsibleInboxNodes(params: WorkItemInboxReadParams): Promise<ResponsibleInboxNodesResponse> {
   return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/responsible-inbox");
 }
@@ -55,6 +63,10 @@ export async function listMyNodes(params: WorkItemInboxReadParams): Promise<MyNo
 
 export async function listMyLogicGates(params: WorkItemInboxReadParams): Promise<MyLogicGatesResponse> {
   return fetchWorkItemInboxRead<MyLogicGatesResponse>(params, "/v1/work-items/my-logic-gates");
+}
+
+export async function listRacioMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<RacioMatrixProjectionResponse> {
+  return fetchWorkItemInboxRead<RacioMatrixProjectionResponse>(params, "/v1/work-items/racio-matrix-projection");
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

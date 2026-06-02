@@ -218,6 +218,21 @@ where entry.company_id=$1::uuid
 	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
+func syncPostgresRacioProjectionForNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	before, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return nil, err
+	}
+	after, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return diffRacioProjectionRows(before, after), nil
+}
+
 func syncPostgresRacioProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
@@ -226,6 +241,21 @@ func syncPostgresRacioProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, co
 		return ErrInvalid
 	}
 	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
+}
+
+func syncPostgresRacioProjectionForNewNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	before, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return nil, err
+	}
+	after, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return diffRacioProjectionRows(before, after), nil
 }
 
 func upsertPostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
@@ -300,6 +330,21 @@ func syncPostgresRacioProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, 
 func syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) error {
 	users := racioAssignmentChangedUserSet(before, after)
 	return syncPostgresRacioProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
+}
+
+func syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) ([]ProjectionDelta, error) {
+	beforeRows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, after); err != nil {
+		return nil, err
+	}
+	afterRows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	return diffRacioProjectionRows(beforeRows, afterRows), nil
 }
 
 func syncPostgresRacioProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
@@ -411,6 +456,79 @@ where company_id=$1::uuid
 	return err
 }
 
+func (r *PostgresRepo) ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, nodeIDs, logicGateIDs)
+	if err != nil {
+		return nil, err
+	}
+	return rows, tx.Commit()
+}
+
+func (r *PostgresRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, tx.Commit()
+}
+
+func (r *PostgresRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	companyID := cleanUUIDText(query.CompanyID)
+	userID := cleanUUIDText(query.UserID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+select entry.company_id::text,
+       entry.user_id::text,
+       entry.resource_type,
+       entry.resource_id::text,
+       entry.logic_gate_id::text,
+       entry.display_title,
+       entry.status,
+       entry.status_color,
+       entry.due_date::text,
+       entry.priority,
+       entry.assignee_user_id::text,
+       entry.assignee_display_name,
+       entry.assignee_email,
+       entry.resource_created_timestamp,
+       entry.updated_timestamp
+from racio_matrix_projection_table entry
+where entry.company_id=$1::uuid
+  and entry.user_id=$2::uuid
+  and entry.resource_type in ('node', 'logic_gate')
+  and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, entry.user_id, 'edit')
+order by entry.resource_type asc, entry.resource_created_timestamp asc, entry.resource_id::text asc
+limit $3`, companyID, userID, query.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]RacioMatrixProjectionRow, 0)
+	for rows.Next() {
+		item, err := scanRacioMatrixProjectionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func postgresRacioProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	nodeIDs = cleanUUIDTextSlice(nodeIDs)
@@ -445,6 +563,47 @@ where company_id=$1::uuid
   )
 order by resource_type asc, resource_id::text asc, user_id::text asc`,
 		companyID, strings.Join(nodeIDs, ","), strings.Join(logicGateIDs, ","))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]RacioMatrixProjectionRow, 0)
+	for rows.Next() {
+		item, err := scanRacioMatrixProjectionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresRacioProjectionRowsForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select company_id::text,
+       user_id::text,
+       resource_type,
+       resource_id::text,
+       logic_gate_id::text,
+       display_title,
+       status,
+       status_color,
+       due_date::text,
+       priority,
+       assignee_user_id::text,
+       assignee_display_name,
+       assignee_email,
+       resource_created_timestamp,
+       updated_timestamp
+from racio_matrix_projection_table
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid
+order by resource_type asc, resource_id::text asc, user_id::text asc`, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
@@ -513,6 +672,23 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 		item.AssigneeEmail = &assigneeEmail.String
 	}
 	return item, err
+}
+
+func (r *PostgresRepo) NextProjectionSequence(companyID, projectionName string) (int64, error) {
+	companyID = cleanUUIDText(companyID)
+	projectionName = strings.TrimSpace(projectionName)
+	if companyID == "" || projectionName == "" {
+		return 0, ErrInvalid
+	}
+	var sequence int64
+	err := r.db.QueryRowContext(context.Background(), `
+insert into company_projection_sequences (company_id, projection_name, sequence, updated_timestamp)
+values ($1::uuid, $2::text, 1, now())
+on conflict (company_id, projection_name)
+do update set sequence=company_projection_sequences.sequence + 1,
+              updated_timestamp=now()
+returning sequence`, companyID, projectionName).Scan(&sequence)
+	return sequence, err
 }
 
 func postgresRacioProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {

@@ -178,6 +178,10 @@ type WorkItemReadRepository interface {
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error)
+	ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error)
+	ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error)
+	NextProjectionSequence(companyID, projectionName string) (int64, error)
 }
 
 type CompanyExplorerRepository interface {
@@ -349,6 +353,31 @@ type RacioMatrixProjectionRow struct {
 	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
 }
 
+const (
+	ProjectionNameRacioMatrix = "racio_matrix"
+
+	ProjectionDeltaOperationUpsert = "upsert"
+	ProjectionDeltaOperationDelete = "delete"
+	ProjectionDeltaOperationPatch  = "patch"
+)
+
+type ProjectionRowKey struct {
+	UserID       string `json:"user_id"`
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+}
+
+type ProjectionDelta struct {
+	CompanyID          string                    `json:"company_id"`
+	Projection         string                    `json:"projection"`
+	ProjectionSequence int64                     `json:"projection_sequence,omitempty"`
+	Operation          string                    `json:"operation"`
+	RowKey             ProjectionRowKey          `json:"row_key"`
+	Row                *RacioMatrixProjectionRow `json:"row,omitempty"`
+	Patch              map[string]any            `json:"patch,omitempty"`
+	ProjectedTimestamp time.Time                 `json:"projected_timestamp"`
+}
+
 const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
 
@@ -467,6 +496,7 @@ type RacioMatrixNodeCreateResult struct {
 	Card                *domain.KanbanCard                 `json:"card,omitempty"`
 	FolderItems         []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
 	RacioProjectionRows []RacioMatrixProjectionRow         `json:"racio_projection_rows,omitempty"`
+	ProjectionDeltas    []ProjectionDelta                  `json:"-"`
 	Events              []domain.DomainEvent               `json:"-"`
 }
 type NodeMapWindowBounds struct {
@@ -800,6 +830,7 @@ type LogicGateNodeAssignmentResult struct {
 	Node                domain.Node                    `json:"node"`
 	Assignment          domain.NodeLogicGateAssignment `json:"-"`
 	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	ProjectionDeltas    []ProjectionDelta              `json:"-"`
 	Events              []domain.DomainEvent           `json:"-"`
 }
 
@@ -808,6 +839,7 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	Node                domain.Node                    `json:"node"`
 	Assignment          domain.NodeLogicGateAssignment `json:"-"`
 	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	ProjectionDeltas    []ProjectionDelta              `json:"-"`
 	Events              []domain.DomainEvent           `json:"-"`
 }
 
@@ -985,6 +1017,7 @@ type LogicGateRaciAssignmentCommandResult struct {
 	Changed           bool                             `json:"changed"`
 	RaciAssignments   []domain.LogicGateRaciAssignment `json:"raci_assignments"`
 	BeforeAssignments []domain.LogicGateRaciAssignment `json:"-"`
+	ProjectionDeltas  []ProjectionDelta                `json:"-"`
 	Events            []domain.DomainEvent             `json:"-"`
 }
 

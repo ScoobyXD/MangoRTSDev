@@ -140,7 +140,7 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	}
 
 	r.logicGateRaci[raciKey] = assignments
-	r.syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, assignments)
+	result.ProjectionDeltas = r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID, before, assignments)
 	event, err := r.appendDomainEventLocked(logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))
 	if err != nil {
 		r.restoreLogicGateRaciCommandStateLocked(snapshot)
