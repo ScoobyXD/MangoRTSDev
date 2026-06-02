@@ -178,3 +178,25 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 		"logic_gates": items,
 	})
 }
+
+func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	query, ok := parseWorkItemInboxReadQuery(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.repo.ListRacioMatrixProjectionRowsForUser(query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_racio_matrix_projection")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"company_id": query.CompanyID,
+		"user_id":    query.UserID,
+		"limit":      query.Limit,
+		"rows":       rows,
+	})
+}

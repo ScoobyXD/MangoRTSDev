@@ -142,6 +142,7 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
+	s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
 }
@@ -226,6 +227,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		}
 		s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
+		s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 		s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	}
 	if issueSet {
@@ -243,6 +245,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 			return
 		}
 		s.publishCommittedWorkspaceEventsWithTiming(issueResult.Events, timings)
+		s.publishProjectionDeltasWithTiming(issueResult.ProjectionDeltas, timings)
 		s.projectCommittedNotificationEventsWithTiming(issueResult.Events, timings)
 		result = issueResult
 	}
@@ -282,6 +285,7 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
+	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	payload := logicGateWorkAssignmentRemoveResultPayload(result)
 	writeJSON(w, http.StatusOK, payload)

@@ -71,6 +71,12 @@ type WorkspaceStreamSubscriber = {
   onError?: (error: unknown) => void;
 };
 
+export type WorkspaceProjectionName = "racio_matrix";
+
+export type WorkspaceStreamOptions = {
+  projections?: WorkspaceProjectionName[];
+};
+
 type WorkspaceStreamEntry = {
   subscribers: Set<WorkspaceStreamSubscriber>;
   source?: SseConnection;
@@ -94,8 +100,14 @@ const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
   "logic_gate_map_position_upsert_requested",
 ]);
 
-function streamKey(apiBase: string, companyID: string): string {
-  return `${apiBase}:${companyID}`;
+function normalizeWorkspaceProjections(projections?: WorkspaceProjectionName[]): WorkspaceProjectionName[] {
+  return Array.from(new Set((projections ?? []).map((projection) => projection.trim()).filter((projection): projection is WorkspaceProjectionName => (
+    projection === "racio_matrix"
+  )))).sort();
+}
+
+function streamKey(apiBase: string, companyID: string, projections: WorkspaceProjectionName[]): string {
+  return `${apiBase}:${companyID}:${projections.join(",")}`;
 }
 
 function getEntry(key: string): WorkspaceStreamEntry {
@@ -106,9 +118,10 @@ function getEntry(key: string): WorkspaceStreamEntry {
   return created;
 }
 
-function buildWorkspaceStreamURL(apiBase: string, companyID: string, cursor: number | undefined): string {
+function buildWorkspaceStreamURL(apiBase: string, companyID: string, cursor: number | undefined, projections: WorkspaceProjectionName[]): string {
   const params = new URLSearchParams({ company_id: companyID });
   if (cursor !== undefined) params.set("after_sequence", String(cursor));
+  for (const projection of projections) params.append("projection", projection);
   return `${apiBase}/v1/workspace/stream?${params.toString()}`;
 }
 
@@ -347,10 +360,10 @@ function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, 
   };
 }
 
-function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry): void {
+function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, projections: WorkspaceProjectionName[]): void {
   if (entry.source) return;
   const cursor = workspaceCursors.get(key);
-  entry.source = connectAuthenticatedSse(() => buildWorkspaceStreamURL(apiBase, companyID, workspaceCursors.get(key)), {
+  entry.source = connectAuthenticatedSse(() => buildWorkspaceStreamURL(apiBase, companyID, workspaceCursors.get(key), projections), {
     lastEventId: cursor === undefined ? undefined : String(cursor),
     shouldStoreLastEventId: (event: SseEvent) => shouldStoreWorkspaceEventID(key, event),
     onEvent(event: SseEvent) {
@@ -376,15 +389,16 @@ function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, 
   });
 }
 
-export function subscribeWorkspaceStream(apiBase: string, companyID: string, subscriber: WorkspaceStreamSubscriber): () => void {
-  const key = streamKey(apiBase, companyID);
+export function subscribeWorkspaceStream(apiBase: string, companyID: string, subscriber: WorkspaceStreamSubscriber, options: WorkspaceStreamOptions = {}): () => void {
+  const projections = normalizeWorkspaceProjections(options.projections);
+  const key = streamKey(apiBase, companyID, projections);
   const entry = getEntry(key);
   if (entry.closeTimer !== undefined) {
     clearTimeout(entry.closeTimer);
     entry.closeTimer = undefined;
   }
   entry.subscribers.add(subscriber);
-  ensureWorkspaceStream(apiBase, companyID, key, entry);
+  ensureWorkspaceStream(apiBase, companyID, key, entry, projections);
 
   return () => {
     const current = workspaceStreams.get(key);

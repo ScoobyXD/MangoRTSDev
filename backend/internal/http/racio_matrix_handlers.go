@@ -161,6 +161,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
+	s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, result)
 }
@@ -274,6 +275,7 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
+	s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }

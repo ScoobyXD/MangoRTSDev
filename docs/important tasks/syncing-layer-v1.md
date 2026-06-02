@@ -119,7 +119,7 @@ Future Codex instances should inventory actual GET handlers and store methods be
 
 ### Phase 1: RACI Matrix
 
-Status: planned.
+Status: implemented for the first RACI matrix vertical slice.
 
 Goal: make the RACI matrix path projection-first and live-update through scoped, permission-filtered projection deltas.
 
@@ -142,6 +142,30 @@ Expected outputs:
 - permission filtering before sending row data
 - targeted matrix projection refetch fallback
 - tests or focused verification around write timing and UI delta application
+
+Completed in Phase 1:
+
+- Added `company_projection_sequences` for company-scoped projection cursors.
+- Added RACI projection delta structs and best-effort delta publishing for `racio_matrix_projection_table` changes.
+- Removed synchronous `racio_projection_rows` response rereads from RACI matrix and assignment mutation response paths; command responses now return fast and omit fresh projection rows.
+- Added a scoped projection SSE path on `/v1/workspace/stream?projection=racio_matrix`, keyed to active `user:<user_id>` matrix subscribers.
+- Fanout considers only active company/projection/user-scope subscribers and checks effective access before sending row payloads.
+- Added permission-change projection fanout for active RACI matrix subscribers by rereading only affected projection rows.
+- Added targeted fallback GET `/v1/work-items/racio-matrix-projection` for the current/target matrix viewer.
+- Added frontend subscription and handling for RACI projection `upsert`, `delete`, and `patch` envelopes.
+- Added targeted frontend fallback refetch for sequence gaps, unknown/corrupt deltas, logic-gate role changes, and matrix view refresh.
+
+Remaining or documented bottlenecks:
+
+- Projection diff generation still uses targeted before/after projection-row reads around affected nodes or logic gates. This is much smaller than rereading full UI aggregates, but it remains synchronous projection work inside the write transaction.
+- RACI projection rows do not carry full logic-gate RACI assignments, so frontend logic-gate role changes trigger targeted `racio-matrix-projection` plus `my-logic-gates` refetch instead of being fully patched from one row delta.
+- Projection delta delivery is still best-effort and not durable by design; missed live deltas recover through targeted projection refetch.
+
+Verification:
+
+- `go test ./...`
+- `npm.cmd run build` from `frontend/`
+- `node scripts\run_all_tests.mjs`
 
 ### Phase 2: Kanban
 

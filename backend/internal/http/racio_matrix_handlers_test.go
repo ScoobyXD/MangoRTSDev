@@ -44,11 +44,15 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	if createPayload.Assignment == nil || createPayload.Assignment.LogicGateID != createPayload.LogicGate.LogicGateID || createPayload.Assignment.StatusKey != store.LogicGateWorkStatusPending {
 		t.Fatalf("created assignment = %+v, want pending assignment in created gate", createPayload.Assignment)
 	}
-	if !projectionRowsContainResource(createPayload.RacioProjectionRows, "logic_gate", createPayload.LogicGate.LogicGateID) {
-		t.Fatalf("projection rows missing created gate row: %+v", createPayload.RacioProjectionRows)
+	if len(createPayload.RacioProjectionRows) != 0 {
+		t.Fatalf("create response projection rows = %+v, want fast-return response without projection rows", createPayload.RacioProjectionRows)
 	}
-	if !projectionRowsContainResource(createPayload.RacioProjectionRows, "node", createPayload.Node.NodeID) {
-		t.Fatalf("projection rows missing created node row: %+v", createPayload.RacioProjectionRows)
+	createProjectionRows := getRacioMatrixProjectionRowsForTest(t, handler, companyID, editor)
+	if !projectionRowsContainResource(createProjectionRows, "logic_gate", createPayload.LogicGate.LogicGateID) {
+		t.Fatalf("projection refetch rows missing created gate row: %+v", createProjectionRows)
+	}
+	if !projectionRowsContainResource(createProjectionRows, "node", createPayload.Node.NodeID) {
+		t.Fatalf("projection refetch rows missing created node row: %+v", createProjectionRows)
 	}
 
 	targetGate, err := repo.CreateRacioMatrixNode(store.RacioMatrixNodeCreateInput{
@@ -84,8 +88,12 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	if movePayload.Assignment.LogicGateID != targetGate.LogicGate.LogicGateID || movePayload.Assignment.StatusKey != store.LogicGateWorkStatusDone {
 		t.Fatalf("move assignment = %+v, want done in target gate", movePayload.Assignment)
 	}
-	if !projectionRowsContainNodeGate(movePayload.RacioProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
-		t.Fatalf("move projection rows = %+v, want node projected under target gate", movePayload.RacioProjectionRows)
+	if len(movePayload.RacioProjectionRows) != 0 {
+		t.Fatalf("move response projection rows = %+v, want fast-return response without projection rows", movePayload.RacioProjectionRows)
+	}
+	moveProjectionRows := getRacioMatrixProjectionRowsForTest(t, handler, companyID, editor)
+	if !projectionRowsContainNodeGate(moveProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
+		t.Fatalf("move projection refetch rows = %+v, want node projected under target gate", moveProjectionRows)
 	}
 }
 
@@ -105,6 +113,24 @@ func decodeRacioMatrixNodeCreatePayloadForTest(t *testing.T, rr *httptest.Respon
 		t.Fatalf("decode RACIO create response: %v body=%s", err, rr.Body.String())
 	}
 	return payload
+}
+
+func getRacioMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, companyID string, actor domain.User) []store.RacioMatrixProjectionRow {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/racio-matrix-projection?company_id="+companyID+"&limit=500", nil)
+	req = requestWithLogicGateWorkActorForTest(req, actor, companyID)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET RACI projection status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Rows []store.RacioMatrixProjectionRow `json:"rows"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode RACI projection response: %v body=%s", err, rr.Body.String())
+	}
+	return payload.Rows
 }
 
 func projectionRowsContainResource(rows []store.RacioMatrixProjectionRow, resourceType, resourceID string) bool {
