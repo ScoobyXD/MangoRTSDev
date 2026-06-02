@@ -10,6 +10,8 @@ The target workflow is:
 POST/PUT writes one or more source-of-truth records ->
 syncing/projection layer determines the affected projection rows ->
 syncing layer applies precise upsert/delete/patch changes to projection tables ->
+find active subscribers whose scope matches ->
+permission-check those specific users->
 committed projection deltas are streamed live to the frontend ->
 UI updates in place without refresh
 ```

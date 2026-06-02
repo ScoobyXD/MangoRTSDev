@@ -57,6 +57,8 @@ function Write-DbMigrationScript {
 
   if ($migrationNames.Count -gt 0) {
     Write-Host '$ErrorActionPreference = "Stop"'
+    Write-Host 'if ([string]::IsNullOrWhiteSpace($env:PGPASSWORD) -and -not [string]::IsNullOrWhiteSpace($env:DB_PASSWORD)) { $env:PGPASSWORD = $env:DB_PASSWORD }'
+    Write-Host 'if ([string]::IsNullOrWhiteSpace($env:PGSSLMODE)) { $env:PGSSLMODE = if ([string]::IsNullOrWhiteSpace($env:DB_SSLMODE)) { "require" } else { $env:DB_SSLMODE } }'
     foreach ($migrationName in $migrationNames) {
       Write-Host "psql -h `$env:DB_HOST -p `$env:DB_PORT -U `$env:DB_USER -d `$env:DB_NAME -v ON_ERROR_STOP=1 -f `".\db\migrations\$migrationName`""
     }

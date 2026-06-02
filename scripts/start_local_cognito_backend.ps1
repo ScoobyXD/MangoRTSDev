@@ -361,6 +361,8 @@ $env:DB_NAME = $dbName
 $env:DB_USER = $dbUser
 $env:DB_PASSWORD = $dbPassword.Trim()
 $env:DB_SSLMODE = "require"
+$env:PGPASSWORD = $env:DB_PASSWORD
+$env:PGSSLMODE = $env:DB_SSLMODE
 
 Remove-Item Env:\NYLAS_CLIENT_ID -ErrorAction SilentlyContinue
 Remove-Item Env:\NYLAS_API_KEY -ErrorAction SilentlyContinue
