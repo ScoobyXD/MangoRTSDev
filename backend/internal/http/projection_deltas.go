@@ -41,6 +41,23 @@ func projectionUserScope(userID string) string {
 	return "user:" + userID
 }
 
+func projectionKanbanBoardScopePrefix(boardID string) string {
+	boardID = strings.TrimSpace(boardID)
+	if boardID == "" {
+		return ""
+	}
+	return "board:" + boardID
+}
+
+func projectionKanbanBoardUserScope(boardID, userID string) string {
+	prefix := projectionKanbanBoardScopePrefix(boardID)
+	userID = strings.TrimSpace(userID)
+	if prefix == "" || userID == "" {
+		return ""
+	}
+	return prefix + "|user:" + userID
+}
+
 func projectionScopeUserID(scope string) string {
 	return strings.TrimPrefix(strings.TrimSpace(scope), "user:")
 }
@@ -80,6 +97,32 @@ func (h *projectionDeltaHub) hasSubscribers(companyID, projection, scope string)
 
 func (h *projectionDeltaHub) activeUserIDs(companyID, projection string) []string {
 	prefix := strings.TrimSpace(companyID) + "|" + strings.TrimSpace(projection) + "|user:"
+	seen := map[string]bool{}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for key, bucket := range h.subscribers {
+		if len(bucket) == 0 || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		userID := strings.TrimSpace(strings.TrimPrefix(key, prefix))
+		if userID != "" {
+			seen[userID] = true
+		}
+	}
+	userIDs := make([]string, 0, len(seen))
+	for userID := range seen {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	return userIDs
+}
+
+func (h *projectionDeltaHub) activeUserIDsForScopePrefix(companyID, projection, scopePrefix string) []string {
+	scopePrefix = strings.TrimSpace(scopePrefix)
+	if scopePrefix == "" {
+		return nil
+	}
+	prefix := strings.TrimSpace(companyID) + "|" + strings.TrimSpace(projection) + "|" + scopePrefix + "|user:"
 	seen := map[string]bool{}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -162,20 +205,41 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 	for _, delta := range deltas {
 		delta.CompanyID = strings.TrimSpace(delta.CompanyID)
 		delta.Projection = strings.TrimSpace(delta.Projection)
-		if delta.CompanyID == "" || delta.Projection != store.ProjectionNameRacioMatrix {
+		if delta.CompanyID == "" {
 			continue
 		}
-		userID := projectionDeltaUserID(delta)
-		scope := projectionUserScope(userID)
-		if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
-			continue
+		switch delta.Projection {
+		case store.ProjectionNameRacioMatrix:
+			userID := projectionDeltaUserID(delta)
+			scope := projectionUserScope(userID)
+			if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
+				continue
+			}
+			filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
+			if !ok {
+				continue
+			}
+			key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope}
+			grouped[key] = append(grouped[key], filtered)
+		case store.ProjectionNameKanbanBoard:
+			boardID := projectionDeltaBoardID(delta)
+			scopePrefix := projectionKanbanBoardScopePrefix(boardID)
+			if scopePrefix == "" {
+				continue
+			}
+			for _, userID := range s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix) {
+				scope := projectionKanbanBoardUserScope(boardID, userID)
+				if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
+					continue
+				}
+				filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
+				if !ok {
+					continue
+				}
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope}
+				grouped[key] = append(grouped[key], filtered)
+			}
 		}
-		filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
-		if !ok {
-			continue
-		}
-		key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope}
-		grouped[key] = append(grouped[key], filtered)
 	}
 	if len(grouped) == 0 {
 		return
@@ -214,10 +278,21 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		published += len(group)
 	}
 	duration := time.Since(start)
-	log.Printf("async_projection_deltas_publish input=%d published=%d duration=%s projection=%s", len(deltas), published, formatTimingDuration(duration), store.ProjectionNameRacioMatrix)
+	log.Printf("async_projection_deltas_publish input=%d published=%d duration=%s", len(deltas), published, formatTimingDuration(duration))
 }
 
 func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
+	switch strings.TrimSpace(delta.Projection) {
+	case store.ProjectionNameRacioMatrix:
+		return s.authorizedRacioProjectionDeltaForUser(delta, userID)
+	case store.ProjectionNameKanbanBoard:
+		return s.authorizedKanbanProjectionDeltaForUser(delta, userID)
+	default:
+		return store.ProjectionDelta{}, false
+	}
+}
+
+func (s *Server) authorizedRacioProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
 	userID = strings.TrimSpace(userID)
 	delta = cloneProjectionDelta(delta)
 	delta.RowKey.UserID = userID
@@ -251,6 +326,45 @@ func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, u
 	}
 	if delta.Row != nil {
 		delta.Row.UserID = userID
+	}
+	return delta, true
+}
+
+func (s *Server) authorizedKanbanProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
+	userID = strings.TrimSpace(userID)
+	delta = cloneProjectionDelta(delta)
+	logicGateID := projectionDeltaLogicGateID(delta)
+	nodeID := projectionDeltaNodeID(delta)
+	if logicGateID == "" || nodeID == "" {
+		return store.ProjectionDelta{}, false
+	}
+	switch delta.Operation {
+	case store.ProjectionDeltaOperationDelete:
+		delta.Row = nil
+		delta.Patch = nil
+		return delta, true
+	case store.ProjectionDeltaOperationUpsert, store.ProjectionDeltaOperationPatch:
+	default:
+		return store.ProjectionDelta{}, false
+	}
+	logicGateAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+	if err != nil {
+		log.Printf("failed to check kanban projection logic gate access company_id=%s user_id=%s logic_gate_id=%s: %v", delta.CompanyID, userID, logicGateID, err)
+		return store.ProjectionDelta{}, false
+	}
+	nodeAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionView)
+	if err != nil {
+		log.Printf("failed to check kanban projection node access company_id=%s user_id=%s node_id=%s: %v", delta.CompanyID, userID, nodeID, err)
+		return store.ProjectionDelta{}, false
+	}
+	if !logicGateAllowed || !nodeAllowed {
+		return store.ProjectionDelta{
+			CompanyID:          delta.CompanyID,
+			Projection:         store.ProjectionNameKanbanBoard,
+			Operation:          store.ProjectionDeltaOperationDelete,
+			RowKey:             delta.RowKey,
+			ProjectedTimestamp: time.Now().UTC(),
+		}, true
 	}
 	return delta, true
 }
@@ -317,12 +431,102 @@ func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityTy
 	s.publishProjectionDeltas(deltas)
 }
 
+func (s *Server) publishKanbanPermissionProjectionDeltas(companyID, entityType, entityID string) {
+	companyID = strings.TrimSpace(companyID)
+	entityType = strings.TrimSpace(entityType)
+	entityID = strings.TrimSpace(entityID)
+	if companyID == "" || entityID == "" {
+		return
+	}
+	go s.publishKanbanPermissionProjectionDeltasAsync(companyID, entityType, entityID)
+}
+
+func (s *Server) publishKanbanPermissionProjectionDeltasAsync(companyID, entityType, entityID string) {
+	var rows []store.KanbanBoardProjectionRow
+	var err error
+	switch entityType {
+	case store.EntityTypeNode:
+		rows, err = s.repo.ListKanbanBoardProjectionRowsForNode(companyID, entityID)
+	case store.EntityTypeLogicGate:
+		boardID := store.LogicGateKanbanBoardID(entityID)
+		if len(s.projectionHub.activeUserIDsForScopePrefix(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardScopePrefix(boardID))) == 0 {
+			return
+		}
+		rows, err = s.repo.ListKanbanBoardProjectionRowsForLogicGate(companyID, entityID)
+	default:
+		return
+	}
+	if err != nil {
+		log.Printf("failed to read Kanban projection rows for permission delta company_id=%s entity_type=%s entity_id=%s: %v", companyID, entityType, entityID, err)
+		return
+	}
+	s.publishProjectionDeltas(store.KanbanProjectionUpsertDeltas(rows))
+}
+
+func (s *Server) publishKanbanProjectionUpsertsForNode(companyID, nodeID string) {
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	if companyID == "" || nodeID == "" {
+		return
+	}
+	go s.publishKanbanProjectionUpsertsForNodeAsync(companyID, nodeID)
+}
+
+func (s *Server) publishKanbanProjectionUpsertsForNodeAsync(companyID, nodeID string) {
+	rows, err := s.repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeID)
+	if err != nil {
+		log.Printf("failed to read Kanban projection rows for node delta company_id=%s node_id=%s: %v", companyID, nodeID, err)
+		return
+	}
+	s.publishProjectionDeltas(store.KanbanProjectionUpsertDeltas(rows))
+}
+
 func projectionDeltaUserID(delta store.ProjectionDelta) string {
 	if userID := strings.TrimSpace(delta.RowKey.UserID); userID != "" {
 		return userID
 	}
 	if delta.Row != nil {
 		return strings.TrimSpace(delta.Row.UserID)
+	}
+	return ""
+}
+
+func projectionDeltaBoardID(delta store.ProjectionDelta) string {
+	if boardID := strings.TrimSpace(delta.RowKey.BoardID); boardID != "" {
+		return boardID
+	}
+	if delta.Row != nil {
+		return strings.TrimSpace(delta.Row.BoardID)
+	}
+	return ""
+}
+
+func projectionDeltaLogicGateID(delta store.ProjectionDelta) string {
+	if logicGateID := strings.TrimSpace(delta.RowKey.LogicGateID); logicGateID != "" {
+		return logicGateID
+	}
+	if delta.Row != nil && delta.Row.LogicGateID != nil {
+		return strings.TrimSpace(*delta.Row.LogicGateID)
+	}
+	return ""
+}
+
+func projectionDeltaNodeID(delta store.ProjectionDelta) string {
+	if nodeID := strings.TrimSpace(delta.RowKey.NodeID); nodeID != "" {
+		return nodeID
+	}
+	if resourceType := strings.TrimSpace(delta.RowKey.ResourceType); resourceType == store.EntityTypeNode {
+		if resourceID := strings.TrimSpace(delta.RowKey.ResourceID); resourceID != "" {
+			return resourceID
+		}
+	}
+	if delta.Row != nil {
+		if nodeID := strings.TrimSpace(delta.Row.NodeID); nodeID != "" {
+			return nodeID
+		}
+		if delta.Row.ResourceType == store.EntityTypeNode {
+			return strings.TrimSpace(delta.Row.ResourceID)
+		}
 	}
 	return ""
 }

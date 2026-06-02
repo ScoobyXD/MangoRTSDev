@@ -243,6 +243,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.publishCommittedWorkspaceEvent(event)
+			s.publishKanbanProjectionUpsertsForNode(input.CompanyID, nodeID)
 			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 			writeJSON(w, http.StatusOK, item)
 			return

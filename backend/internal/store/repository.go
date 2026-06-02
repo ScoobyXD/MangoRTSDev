@@ -181,6 +181,9 @@ type WorkItemReadRepository interface {
 	ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error)
 	ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error)
 	ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error)
+	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
+	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
+	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
 	CurrentProjectionSequence(companyID, projectionName string) (int64, error)
 	NextProjectionSequence(companyID, projectionName string) (int64, error)
 }
@@ -336,26 +339,46 @@ type WorkItemLogicGateInboxItem struct {
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
-type RacioMatrixProjectionRow struct {
-	CompanyID                string    `json:"company_id"`
-	UserID                   string    `json:"user_id"`
-	ResourceType             string    `json:"resource_type"`
-	ResourceID               string    `json:"resource_id"`
-	LogicGateID              *string   `json:"logic_gate_id,omitempty"`
-	DisplayTitle             string    `json:"display_title"`
-	Status                   *string   `json:"status,omitempty"`
-	StatusColor              *string   `json:"status_color,omitempty"`
-	DueDate                  *string   `json:"due_date,omitempty"`
-	Priority                 *int      `json:"priority,omitempty"`
-	AssigneeUserID           *string   `json:"assignee_user_id,omitempty"`
-	AssigneeDisplayName      *string   `json:"assignee_display_name,omitempty"`
-	AssigneeEmail            *string   `json:"assignee_email,omitempty"`
-	ResourceCreatedTimestamp time.Time `json:"resource_created_timestamp"`
-	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
+type ProjectionRow struct {
+	CompanyID                  string    `json:"company_id"`
+	UserID                     string    `json:"user_id,omitempty"`
+	ResourceType               string    `json:"resource_type,omitempty"`
+	ResourceID                 string    `json:"resource_id,omitempty"`
+	LogicGateID                *string   `json:"logic_gate_id,omitempty"`
+	DisplayTitle               string    `json:"display_title,omitempty"`
+	Status                     *string   `json:"status,omitempty"`
+	StatusColor                *string   `json:"status_color,omitempty"`
+	DueDate                    *string   `json:"due_date,omitempty"`
+	Priority                   *int      `json:"priority,omitempty"`
+	AssigneeUserID             *string   `json:"assignee_user_id,omitempty"`
+	AssigneeDisplayName        *string   `json:"assignee_display_name,omitempty"`
+	AssigneeEmail              *string   `json:"assignee_email,omitempty"`
+	ResourceCreatedTimestamp   time.Time `json:"resource_created_timestamp,omitempty"`
+	CreatedTimestamp           time.Time `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp           time.Time `json:"updated_timestamp,omitempty"`
+	BoardID                    string    `json:"board_id,omitempty"`
+	CardID                     string    `json:"card_id,omitempty"`
+	ColumnID                   string    `json:"column_id,omitempty"`
+	NodeID                     string    `json:"node_id,omitempty"`
+	NodeTitle                  string    `json:"node_title,omitempty"`
+	DescriptionSnapshot        string    `json:"description_snapshot,omitempty"`
+	IsIssue                    bool      `json:"is_issue,omitempty"`
+	Position                   int       `json:"position,omitempty"`
+	NodeCreatedTimestamp       time.Time `json:"node_created_timestamp,omitempty"`
+	NodeUpdatedTimestamp       time.Time `json:"node_updated_timestamp,omitempty"`
+	AssignmentID               string    `json:"assignment_id,omitempty"`
+	AssignmentCreatedTimestamp time.Time `json:"assignment_created_timestamp,omitempty"`
+	AssignmentUpdatedTimestamp time.Time `json:"assignment_updated_timestamp,omitempty"`
+	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 }
+
+type RacioMatrixProjectionRow = ProjectionRow
+
+type KanbanBoardProjectionRow = ProjectionRow
 
 const (
 	ProjectionNameRacioMatrix = "racio_matrix"
+	ProjectionNameKanbanBoard = "kanban_board"
 
 	ProjectionDeltaOperationUpsert = "upsert"
 	ProjectionDeltaOperationDelete = "delete"
@@ -363,20 +386,24 @@ const (
 )
 
 type ProjectionRowKey struct {
-	UserID       string `json:"user_id"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
+	UserID       string `json:"user_id,omitempty"`
+	ResourceType string `json:"resource_type,omitempty"`
+	ResourceID   string `json:"resource_id,omitempty"`
+	BoardID      string `json:"board_id,omitempty"`
+	LogicGateID  string `json:"logic_gate_id,omitempty"`
+	NodeID       string `json:"node_id,omitempty"`
+	CardID       string `json:"card_id,omitempty"`
 }
 
 type ProjectionDelta struct {
-	CompanyID          string                    `json:"company_id"`
-	Projection         string                    `json:"projection"`
-	ProjectionSequence int64                     `json:"projection_sequence,omitempty"`
-	Operation          string                    `json:"operation"`
-	RowKey             ProjectionRowKey          `json:"row_key"`
-	Row                *RacioMatrixProjectionRow `json:"row,omitempty"`
-	Patch              map[string]any            `json:"patch,omitempty"`
-	ProjectedTimestamp time.Time                 `json:"projected_timestamp"`
+	CompanyID          string           `json:"company_id"`
+	Projection         string           `json:"projection"`
+	ProjectionSequence int64            `json:"projection_sequence,omitempty"`
+	Operation          string           `json:"operation"`
+	RowKey             ProjectionRowKey `json:"row_key"`
+	Row                *ProjectionRow   `json:"row,omitempty"`
+	Patch              map[string]any   `json:"patch,omitempty"`
+	ProjectedTimestamp time.Time        `json:"projected_timestamp"`
 }
 
 const CommunicationsTriageBatchMaxItems = 50

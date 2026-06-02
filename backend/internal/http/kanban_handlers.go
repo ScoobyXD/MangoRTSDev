@@ -113,6 +113,46 @@ func filterKanbanCompatibilityCards(cards []domain.KanbanCard, query store.Kanba
 	return items
 }
 
+func (s *Server) filterKanbanCardsVisibleToActor(w http.ResponseWriter, r *http.Request, companyID string, cards []domain.KanbanCard) ([]domain.KanbanCard, bool) {
+	actor, hasActor := authenticatedActor(r)
+	if !hasActor || actorCanManageCompany(actor, companyID) {
+		return cards, true
+	}
+	userID := strings.TrimSpace(actor.User.UserID)
+	if userID == "" {
+		return cards, true
+	}
+	nodeIDs := make([]string, 0, len(cards))
+	seen := map[string]bool{}
+	for _, card := range cards {
+		nodeID := strings.TrimSpace(card.NodeID)
+		if nodeID == "" || seen[nodeID] {
+			continue
+		}
+		seen[nodeID] = true
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	if len(nodeIDs) == 0 {
+		return cards, true
+	}
+	allowed, err := s.repo.ListEffectiveResourceIDsForUser(companyID, userID, store.EntityTypeNode, store.EntityPermissionView, nodeIDs)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
+		return nil, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_kanban_cards")
+		return nil, false
+	}
+	filtered := make([]domain.KanbanCard, 0, len(cards))
+	for _, card := range cards {
+		if allowed[strings.TrimSpace(card.NodeID)] {
+			filtered = append(filtered, card)
+		}
+	}
+	return filtered, true
+}
+
 func logicGateWorkCardByID(work domain.LogicGateWorkView, cardID string) (domain.KanbanCard, bool) {
 	cardID = strings.TrimSpace(cardID)
 	for _, card := range work.Cards {
@@ -240,11 +280,23 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeLegacyKanbanDisabled(w)
 		return
 	}
-	work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, logicGateID, store.EntityPermissionView)
-	if !ok {
+	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"columns": work.Columns})
+	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_kanban_column_query")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "logic_gate_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_columns")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"columns": columns})
 }
 
 func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) {
@@ -269,11 +321,36 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 			writeLegacyKanbanDisabled(w)
 			return
 		}
-		work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, logicGateID, store.EntityPermissionView)
+		if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
+			return
+		}
+		cards, err := s.repo.ListKanbanCards(companyID, boardID, query)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
+			return
+		}
+		cards, ok = s.filterKanbanCardsVisibleToActor(w, r, companyID, cards)
 		if !ok {
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"cards": filterKanbanCompatibilityCards(work.Cards, query)})
+		sequence, err := s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"cards":               cards,
+			"projection":          store.ProjectionNameKanbanBoard,
+			"projection_sequence": sequence,
+		})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -337,7 +414,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	s.publishCommittedWorkspaceEvents(result.Events)
 	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
-	writeJSON(w, http.StatusCreated, s.logicGateWorkCompatibilityCardAfterMutation(req.CompanyID, logicGateID, result.Card))
+	writeJSON(w, http.StatusCreated, result.Card)
 }
 
 func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
@@ -395,13 +472,8 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		writeLegacyKanbanDisabled(w)
 		return
 	}
-	work, ok := s.logicGateWorkForKanbanCompatibility(w, r, companyID, logicGateID, store.EntityPermissionEdit)
+	card, ok := s.requireKanbanCardAccess(w, r, companyID, boardID, cardID, store.EntityPermissionEdit)
 	if !ok {
-		return
-	}
-	card, ok := logicGateWorkCardByID(work, cardID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "kanban_card_not_found")
 		return
 	}
 	if r.Method == http.MethodDelete {
@@ -442,7 +514,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		s.publishCommittedWorkspaceEvents(result.Events)
 		s.publishProjectionDeltas(result.ProjectionDeltas)
 		s.projectCommittedNotificationEvents(result.Events)
-		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, result.Card)
+		card = result.Card
 	}
 	if isIssue != nil {
 		issueResult, err := s.repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
@@ -459,11 +531,11 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
 		s.publishProjectionDeltas(issueResult.ProjectionDeltas)
 		s.projectCommittedNotificationEvents(issueResult.Events)
-		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, issueResult.Card)
+		card = issueResult.Card
 		result = issueResult
 	}
 	if result.Card.CardID != "" {
-		card = s.logicGateWorkCompatibilityCardAfterMutation(companyID, logicGateID, result.Card)
+		card = result.Card
 	}
 	writeJSON(w, http.StatusOK, card)
 }

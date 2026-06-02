@@ -1,9 +1,10 @@
-import { listKanbanCards, listKanbanColumns } from "./kanbanApi";
+import { listKanbanCardsResponse, listKanbanColumns } from "./kanbanApi";
 import type { KanbanCard, KanbanColumn } from "./shared";
 
 export type KanbanBoardContents = {
   columns: KanbanColumn[];
   cards: KanbanCard[];
+  projectionSequence?: number;
 };
 
 const contentCache = new Map<string, KanbanBoardContents>();
@@ -18,6 +19,7 @@ function cloneContents(contents: KanbanBoardContents): KanbanBoardContents {
   return {
     columns: contents.columns.map((column) => ({ ...column })),
     cards: contents.cards.map((card) => ({ ...card })),
+    projectionSequence: contents.projectionSequence,
   };
 }
 
@@ -59,9 +61,9 @@ export async function getKanbanBoardContentsSingleFlight(apiBase: string, compan
   const version = contentVersion(cacheKey);
   const promise = Promise.all([
     listKanbanColumns(apiBase, companyID, boardID),
-    listKanbanCards(apiBase, companyID, boardID, "", cardLimit),
-  ]).then(([columns, cards]) => {
-    const contents = { columns, cards };
+    listKanbanCardsResponse(apiBase, companyID, boardID, "", cardLimit),
+  ]).then(([columns, cardResponse]) => {
+    const contents = { columns, cards: cardResponse.cards, projectionSequence: cardResponse.projection_sequence };
     if (contentVersion(cacheKey) === version) contentCache.set(cacheKey, cloneContents(contents));
     return contents;
   }).finally(() => {

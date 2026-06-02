@@ -58,6 +58,12 @@ projection.title as title,
 ''::text as description_snapshot,
 projection.is_issue as is_issue,
 projection.position as position,
+projection.due_date::text as due_date,
+projection.priority as priority,
+projection.assignee_user_id::text as assignee_user_id,
+(select u.display_name from users u where u.user_id = projection.assignee_user_id) as assignee_display_name,
+(select u.email from users u where u.user_id = projection.assignee_user_id) as assignee_email,
+projection.projection_updated_timestamp as projection_updated_timestamp,
 projection.assignment_created_timestamp as assignment_created_timestamp,
 projection.projection_updated_timestamp as projection_updated_timestamp`
 
@@ -267,6 +273,201 @@ limit $5`, companyID, logicGateID, strings.TrimSpace(query.ColumnID), query.Afte
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+const kanbanBoardProjectionRowSelectColumns = `
+projection.company_id::text,
+projection.compatibility_board_id,
+projection.compatibility_card_id::text,
+` + kanbanProjectionCanonicalStatusSQL + ` as column_id,
+projection.column_id as source_column_id,
+projection.node_id::text,
+projection.logic_gate_id::text,
+projection.title,
+''::text as description_snapshot,
+projection.is_issue,
+projection.position,
+projection.due_date::text,
+projection.priority,
+projection.assignee_user_id::text,
+(select u.display_name from users u where u.user_id = projection.assignee_user_id) as assignee_display_name,
+(select u.email from users u where u.user_id = projection.assignee_user_id) as assignee_email,
+projection.node_created_timestamp,
+projection.node_updated_timestamp,
+projection.assignment_id::text,
+projection.assignment_created_timestamp,
+projection.assignment_updated_timestamp,
+projection.projection_updated_timestamp`
+
+func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (KanbanBoardProjectionRow, error) {
+	var item KanbanBoardProjectionRow
+	var logicGateID string
+	var dueDate sql.NullString
+	var priority sql.NullInt64
+	var assigneeUserID sql.NullString
+	var assigneeDisplayName sql.NullString
+	var assigneeEmail sql.NullString
+	var status string
+	err := row.Scan(
+		&item.CompanyID,
+		&item.BoardID,
+		&item.CardID,
+		&item.ColumnID,
+		&status,
+		&item.NodeID,
+		&logicGateID,
+		&item.NodeTitle,
+		&item.DescriptionSnapshot,
+		&item.IsIssue,
+		&item.Position,
+		&dueDate,
+		&priority,
+		&assigneeUserID,
+		&assigneeDisplayName,
+		&assigneeEmail,
+		&item.NodeCreatedTimestamp,
+		&item.NodeUpdatedTimestamp,
+		&item.AssignmentID,
+		&item.AssignmentCreatedTimestamp,
+		&item.AssignmentUpdatedTimestamp,
+		&item.ProjectionUpdatedTimestamp,
+	)
+	if err != nil {
+		return KanbanBoardProjectionRow{}, err
+	}
+	item.LogicGateID = &logicGateID
+	item.ResourceType = EntityTypeNode
+	item.ResourceID = item.NodeID
+	item.DisplayTitle = item.NodeTitle
+	item.Status = &status
+	item.CreatedTimestamp = item.AssignmentCreatedTimestamp
+	item.UpdatedTimestamp = item.ProjectionUpdatedTimestamp
+	if dueDate.Valid {
+		item.DueDate = &dueDate.String
+	}
+	if priority.Valid {
+		value := int(priority.Int64)
+		item.Priority = &value
+	}
+	if assigneeUserID.Valid {
+		item.AssigneeUserID = &assigneeUserID.String
+	}
+	if assigneeDisplayName.Valid {
+		item.AssigneeDisplayName = &assigneeDisplayName.String
+	}
+	if assigneeEmail.Valid {
+		item.AssigneeEmail = &assigneeEmail.String
+	}
+	return item, nil
+}
+
+func listKanbanBoardProjectionRowsTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error) {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	query = NormalizeKanbanCardQuery(query)
+	rows, err := db.QueryContext(ctx, `
+with projected as (
+  select
+    `+kanbanBoardProjectionRowSelectColumns+`,
+    `+kanbanProjectionStatusRankSQL+` as status_rank
+  from kanban_board_projection projection
+  where projection.company_id=$1::uuid
+    and projection.logic_gate_id=$2::uuid
+)
+select
+  company_id,
+  compatibility_board_id,
+  compatibility_card_id,
+  column_id,
+  source_column_id,
+  node_id,
+  logic_gate_id,
+  title,
+  description_snapshot,
+  is_issue,
+  position,
+  due_date,
+  priority,
+  assignee_user_id,
+  assignee_display_name,
+  assignee_email,
+  node_created_timestamp,
+  node_updated_timestamp,
+  assignment_id,
+  assignment_created_timestamp,
+  assignment_updated_timestamp,
+  projection_updated_timestamp
+from projected
+where ($3 = '' or column_id=$3 or source_column_id=$3)
+  and ($4 = 0 or position > $4)
+order by status_rank asc, position asc, assignment_created_timestamp asc, compatibility_card_id asc
+limit $5`, companyID, logicGateID, strings.TrimSpace(query.ColumnID), query.AfterPosition, query.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]KanbanBoardProjectionRow, 0)
+	for rows.Next() {
+		item, err := scanKanbanBoardProjectionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresKanbanProjectionRowsForNodeTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, nodeID string) ([]KanbanBoardProjectionRow, error) {
+	companyID = cleanUUIDText(companyID)
+	nodeID = cleanUUIDText(nodeID)
+	if companyID == "" || nodeID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := db.QueryContext(ctx, `
+select `+kanbanBoardProjectionRowSelectColumns+`
+from kanban_board_projection projection
+where projection.company_id=$1::uuid
+  and projection.node_id=$2::uuid
+order by projection.logic_gate_id, projection.node_id`, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]KanbanBoardProjectionRow, 0)
+	for rows.Next() {
+		item, err := scanKanbanBoardProjectionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresKanbanProjectionRowsForLogicGateTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, logicGateID string) ([]KanbanBoardProjectionRow, error) {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	return listKanbanBoardProjectionRowsTx(ctx, db, companyID, logicGateID, KanbanCardQuery{Limit: KanbanMaxCardsLimit})
+}
+
+func (r *PostgresRepo) ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error) {
+	return listKanbanBoardProjectionRowsTx(context.Background(), r.db, companyID, logicGateID, query)
+}
+
+func (r *PostgresRepo) ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error) {
+	return postgresKanbanProjectionRowsForNodeTx(context.Background(), r.db, companyID, nodeID)
+}
+
+func (r *PostgresRepo) ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error) {
+	return postgresKanbanProjectionRowsForLogicGateTx(context.Background(), r.db, companyID, logicGateID)
 }
 
 func rebuildKanbanBoardProjectionForLogicGateTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, logicGateID string) (int64, error) {

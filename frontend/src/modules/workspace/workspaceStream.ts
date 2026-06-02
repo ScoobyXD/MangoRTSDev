@@ -71,10 +71,11 @@ type WorkspaceStreamSubscriber = {
   onError?: (error: unknown) => void;
 };
 
-export type WorkspaceProjectionName = "racio_matrix";
+export type WorkspaceProjectionName = "racio_matrix" | "kanban_board";
 
 export type WorkspaceStreamOptions = {
   projections?: WorkspaceProjectionName[];
+  kanbanBoardID?: string;
 };
 
 type WorkspaceStreamEntry = {
@@ -102,12 +103,12 @@ const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
 
 function normalizeWorkspaceProjections(projections?: WorkspaceProjectionName[]): WorkspaceProjectionName[] {
   return Array.from(new Set((projections ?? []).map((projection) => projection.trim()).filter((projection): projection is WorkspaceProjectionName => (
-    projection === "racio_matrix"
+    projection === "racio_matrix" || projection === "kanban_board"
   )))).sort();
 }
 
-function streamKey(apiBase: string, companyID: string, projections: WorkspaceProjectionName[]): string {
-  return `${apiBase}:${companyID}:${projections.join(",")}`;
+function streamKey(apiBase: string, companyID: string, projections: WorkspaceProjectionName[], kanbanBoardID = ""): string {
+  return `${apiBase}:${companyID}:${projections.join(",")}:kanban_board=${encodeURIComponent(kanbanBoardID.trim())}`;
 }
 
 function getEntry(key: string): WorkspaceStreamEntry {
@@ -118,10 +119,11 @@ function getEntry(key: string): WorkspaceStreamEntry {
   return created;
 }
 
-function buildWorkspaceStreamURL(apiBase: string, companyID: string, cursor: number | undefined, projections: WorkspaceProjectionName[]): string {
+function buildWorkspaceStreamURL(apiBase: string, companyID: string, cursor: number | undefined, projections: WorkspaceProjectionName[], kanbanBoardID = ""): string {
   const params = new URLSearchParams({ company_id: companyID });
   if (cursor !== undefined) params.set("after_sequence", String(cursor));
   for (const projection of projections) params.append("projection", projection);
+  if (projections.includes("kanban_board") && kanbanBoardID.trim()) params.set("kanban_board_id", kanbanBoardID.trim());
   return `${apiBase}/v1/workspace/stream?${params.toString()}`;
 }
 
@@ -360,10 +362,10 @@ function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, 
   };
 }
 
-function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, projections: WorkspaceProjectionName[]): void {
+function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, projections: WorkspaceProjectionName[], kanbanBoardID = ""): void {
   if (entry.source) return;
   const cursor = workspaceCursors.get(key);
-  entry.source = connectAuthenticatedSse(() => buildWorkspaceStreamURL(apiBase, companyID, workspaceCursors.get(key), projections), {
+  entry.source = connectAuthenticatedSse(() => buildWorkspaceStreamURL(apiBase, companyID, workspaceCursors.get(key), projections, kanbanBoardID), {
     lastEventId: cursor === undefined ? undefined : String(cursor),
     shouldStoreLastEventId: (event: SseEvent) => shouldStoreWorkspaceEventID(key, event),
     onEvent(event: SseEvent) {
@@ -391,14 +393,15 @@ function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, 
 
 export function subscribeWorkspaceStream(apiBase: string, companyID: string, subscriber: WorkspaceStreamSubscriber, options: WorkspaceStreamOptions = {}): () => void {
   const projections = normalizeWorkspaceProjections(options.projections);
-  const key = streamKey(apiBase, companyID, projections);
+  const kanbanBoardID = options.kanbanBoardID?.trim() ?? "";
+  const key = streamKey(apiBase, companyID, projections, projections.includes("kanban_board") ? kanbanBoardID : "");
   const entry = getEntry(key);
   if (entry.closeTimer !== undefined) {
     clearTimeout(entry.closeTimer);
     entry.closeTimer = undefined;
   }
   entry.subscribers.add(subscriber);
-  ensureWorkspaceStream(apiBase, companyID, key, entry, projections);
+  ensureWorkspaceStream(apiBase, companyID, key, entry, projections, kanbanBoardID);
 
   return () => {
     const current = workspaceStreams.get(key);

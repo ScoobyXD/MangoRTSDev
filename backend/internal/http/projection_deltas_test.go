@@ -68,6 +68,172 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	}
 }
 
+func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777502"
+	repo.EnsureCompany(companyID, "Kanban Projection Fanout Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "kanban-projection-viewer")
+	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "kanban-projection-other")
+	blocked := mustLogicGateWorkHTTPUser(t, repo, companyID, "kanban-projection-blocked")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Visible Kanban Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Visible Kanban Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 2
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		NodeID:         node.NodeID,
+		Status:         "pending",
+		Priority:       &priority,
+		PrioritySet:    true,
+		AssigneePolicy: store.LogicGateAssignmentAssigneePolicyFirstResponsible,
+		ActorUserID:    viewer.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	viewerScope := projectionKanbanBoardUserScope(boardID, viewer.UserID)
+	blockedScope := projectionKanbanBoardUserScope(boardID, blocked.UserID)
+	otherScope := projectionKanbanBoardUserScope(store.LogicGateKanbanBoardID("other-gate"), other.UserID)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, viewerScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, viewerScope, viewerCh)
+	blockedCh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, blockedScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, blockedScope, blockedCh)
+	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, otherScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, otherScope, otherCh)
+
+	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+
+	envelope := readProjectionEnvelopeForTest(t, viewerCh)
+	if envelope.Projection != store.ProjectionNameKanbanBoard || envelope.ProjectionSequence <= 0 || len(envelope.Deltas) != 1 {
+		t.Fatalf("viewer envelope = %+v, want one sequenced Kanban delta", envelope)
+	}
+	if got := envelope.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID || got.Row.BoardID != boardID || got.Row.Priority == nil || *got.Row.Priority != priority {
+		t.Fatalf("viewer delta = %+v, want upsert row for visible Kanban card", got)
+	}
+	if envelope.Deltas[0].Row.AssigneeUserID != nil && *envelope.Deltas[0].Row.AssigneeUserID != viewer.UserID {
+		t.Fatalf("viewer delta assignee = %q, want empty or viewer", *envelope.Deltas[0].Row.AssigneeUserID)
+	}
+	assertNoProjectionPayloadForTest(t, otherCh)
+
+	blockedEnvelope := readProjectionEnvelopeForTest(t, blockedCh)
+	if len(blockedEnvelope.Deltas) != 1 {
+		t.Fatalf("blocked envelope = %+v, want one delta", blockedEnvelope)
+	}
+	if got := blockedEnvelope.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.BoardID != boardID {
+		t.Fatalf("blocked delta = %+v, want delete without Kanban row payload", got)
+	}
+}
+
+func TestKanbanProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777503"
+	repo.EnsureCompany(companyID, "Kanban Projection Revocation Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "kanban-revocation-viewer")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Revoked Kanban Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Revoked Kanban Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 3
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: viewer.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	viewerScope := projectionKanbanBoardUserScope(boardID, viewer.UserID)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, viewerScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, viewerScope, viewerCh)
+
+	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode grant: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+	initial := readProjectionEnvelopeForTest(t, viewerCh)
+	if len(initial.Deltas) != 1 || initial.Deltas[0].Operation != store.ProjectionDeltaOperationUpsert || initial.Deltas[0].Row == nil {
+		t.Fatalf("initial delta = %+v, want authorized upsert", initial)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+
+	server.publishKanbanPermissionProjectionDeltasAsync(companyID, store.EntityTypeNode, node.NodeID)
+	revoked := readProjectionEnvelopeForTest(t, viewerCh)
+	if len(revoked.Deltas) != 1 {
+		t.Fatalf("revoked envelope = %+v, want one delete delta", revoked)
+	}
+	if got := revoked.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.NodeID != node.NodeID {
+		t.Fatalf("revoked delta = %+v, want delete row key only", got)
+	}
+}
+
 func racioProjectionDeltaForTest(companyID, userID, nodeID, title string, created time.Time) store.ProjectionDelta {
 	row := store.RacioMatrixProjectionRow{
 		CompanyID:                companyID,
