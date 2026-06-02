@@ -136,12 +136,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		payload["logic_gate_map_positions"] = filterLogicGateMapPositionsByVisibleGates(logicGateMapPositions, logicGateIDs)
 	}
 	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
-		kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
-			return
-		}
-		payload["kanban_boards"] = kanbanBoards
+		payload["kanban_boards"] = logicGateProjectionBoards(logicGates, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
 	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, payload, etag)
 }
