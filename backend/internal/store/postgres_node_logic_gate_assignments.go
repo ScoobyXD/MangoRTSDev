@@ -14,7 +14,7 @@ company_id::text,
 node_id::text,
 logic_gate_id::text,
 status_key,
-column_id::text,
+  column_id,
 is_issue,
 position,
 compatibility_board_id,
@@ -112,7 +112,7 @@ insert into node_logic_gate_assignments (
   compatibility_card_id,
   created_timestamp,
   updated_timestamp
-) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6::uuid, $7, $8, $9, $10::uuid, now(), now())
+) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10::uuid, now(), now())
 on conflict (company_id, node_id)
 do update set
   logic_gate_id=excluded.logic_gate_id,
@@ -159,13 +159,27 @@ limit 1`, companyID, nodeID, strings.TrimSpace(logicGateID)))
 
 func nodeLogicGateAssignmentCardSQL(ctx context.Context, queryer nodeLogicGateAssignmentQueryRower, assignment domain.NodeLogicGateAssignment) (domain.KanbanCard, error) {
 	item, err := scanKanbanCard(queryer.QueryRowContext(ctx, `
-select `+kanbanCardSelectColumns+`
-from kanban_cards
-where company_id=$1
-  and board_id=$2
-  and card_id=$3`, assignment.CompanyID, assignment.CompatibilityBoardID, assignment.CompatibilityCardID))
+select `+kanbanBoardProjectionCardSelectColumns+`
+from kanban_board_projection projection
+where projection.company_id=$1::uuid
+  and projection.logic_gate_id=$2::uuid
+  and projection.node_id=$3::uuid
+  and projection.compatibility_card_id=$4::uuid`,
+		assignment.CompanyID, assignment.LogicGateID, assignment.NodeID, assignment.CompatibilityCardID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.KanbanCard{}, ErrNotFound
+		logicGateID := assignment.LogicGateID
+		return domain.KanbanCard{
+			CompanyID:        assignment.CompanyID,
+			BoardID:          LogicGateKanbanBoardID(assignment.LogicGateID),
+			CardID:           assignment.CompatibilityCardID,
+			ColumnID:         logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
+			NodeID:           assignment.NodeID,
+			LogicGateID:      &logicGateID,
+			IsIssue:          assignment.IsIssue,
+			Position:         assignment.Position,
+			CreatedTimestamp: assignment.CreatedTimestamp,
+			UpdatedTimestamp: assignment.UpdatedTimestamp,
+		}, nil
 	}
 	return item, err
 }
@@ -174,19 +188,13 @@ func syncNodeLogicGateAssignmentFromCardSQL(ctx context.Context, queryer nodeLog
 	if card.LogicGateID == nil || strings.TrimSpace(*card.LogicGateID) == "" {
 		return domain.NodeLogicGateAssignment{}, nil
 	}
-	var columnTitle string
-	if err := queryer.QueryRowContext(ctx, `
-select title
-from kanban_columns
-where company_id=$1 and board_id=$2 and column_id=$3`, card.CompanyID, card.BoardID, card.ColumnID).Scan(&columnTitle); err != nil {
-		return domain.NodeLogicGateAssignment{}, err
-	}
+	statusKey := logicGateWorkStatusKeyOrDefault(card.ColumnID, LogicGateWorkStatusPending)
 	return upsertNodeLogicGateAssignmentSQL(ctx, queryer, nodeLogicGateAssignmentSQLInput{
 		CompanyID:            card.CompanyID,
 		NodeID:               card.NodeID,
 		LogicGateID:          *card.LogicGateID,
-		StatusKey:            logicGateAssignmentStatusKey(columnTitle),
-		ColumnID:             card.ColumnID,
+		StatusKey:            statusKey,
+		ColumnID:             statusKey,
 		IsIssue:              card.IsIssue,
 		Position:             card.Position,
 		CompatibilityBoardID: card.BoardID,

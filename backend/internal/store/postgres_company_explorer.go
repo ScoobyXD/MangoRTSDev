@@ -980,7 +980,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			logicGateIDs[target.ID] = true
 			directLogicGateIDs[target.ID] = true
 		case "kanban":
-			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`, companyID, target.ID)
+			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, target.ID)
 			if err != nil {
 				return CompanyExplorerDeleteResult{}, err
 			}
@@ -1047,49 +1047,17 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			delete(logicGateIDs, logicGateID)
 			continue
 		}
-		boardRows, err := tx.QueryContext(ctx,
-			`select board_id
-			 from kanban_boards
-			 where company_id=$1 and (board_id=$2 or logic_gate_id=$3)`,
-			companyID, LogicGateKanbanBoardID(logicGateID), logicGateID,
-		)
+	}
+	for boardID := range kanbanBoardIDs {
+		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, boardID)
 		if err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
-		for boardRows.Next() {
-			var boardID string
-			if err := boardRows.Scan(&boardID); err != nil {
-				boardRows.Close()
-				return CompanyExplorerDeleteResult{}, err
-			}
-			kanbanBoardIDs[boardID] = true
-		}
-		if err := boardRows.Err(); err != nil {
-			boardRows.Close()
-			return CompanyExplorerDeleteResult{}, err
-		}
-		boardRows.Close()
-	}
-	for boardID := range kanbanBoardIDs {
-		var attachedLogicGateID sql.NullString
-		err := tx.QueryRowContext(ctx,
-			`select logic_gate_id::text
-			 from kanban_boards
-			 where company_id=$1 and board_id=$2`,
-			companyID, boardID,
-		).Scan(&attachedLogicGateID)
-		if errors.Is(err, sql.ErrNoRows) {
+		if !exists {
 			if directKanbanBoardIDs[boardID] {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
 			delete(kanbanBoardIDs, boardID)
-			continue
-		}
-		if err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-		if attachedLogicGateID.Valid && !logicGateIDs[attachedLogicGateID.String] {
-			return CompanyExplorerDeleteResult{}, ErrInvalid
 		}
 	}
 
@@ -1127,13 +1095,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 	}
 	for boardID := range kanbanBoardIDs {
-		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`, companyID, boardID)
-		if err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-		if !exists {
-			continue
-		}
 		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
@@ -1202,7 +1163,7 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_cards
+		`delete from kanban_board_projection
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	); err != nil {
@@ -1287,57 +1248,15 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 	}
 	boardID := LogicGateKanbanBoardID(logicGateID)
 	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2
-		 )
-		 delete from company_explorer_folder_items
+		`delete from company_explorer_folder_items
 		 where company_id=$1
 		   and item_type='kanban'
-		   and item_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
+		   and item_id=$2`,
+		companyID, boardID,
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2
-		 )
-		 delete from kanban_cards
-		 where company_id=$1
-		   and board_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2
-		 )
-		 delete from kanban_columns
-		 where company_id=$1
-		   and board_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_boards
-		 where company_id=$1
-		   and (board_id=$3 or logic_gate_id=$2)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
+	if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -1394,37 +1313,9 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteKanbanBoardTx(ctx context.Context, tx *sql.Tx, companyID, boardID string) error {
-	var attachedLogicGateID sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-select logic_gate_id::text
-from kanban_boards
-where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&attachedLogicGateID); errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if err != nil {
-		return err
-	}
-	if attachedLogicGateID.Valid {
-		return ErrInvalid
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-delete from company_explorer_folder_items
-where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from kanban_cards
-where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from kanban_columns
-where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
-		return err
-	}
 	deleted, err := tx.ExecContext(ctx, `
-delete from kanban_boards
-where company_id=$1 and board_id=$2`, companyID, boardID)
+delete from company_explorer_folder_items
+where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID)
 	if err != nil {
 		return err
 	}

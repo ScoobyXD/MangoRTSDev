@@ -160,27 +160,28 @@ func (r *MemoryRepo) ensureLogicGateKanbanBoardLocked(companyID, logicGateID, ti
 	logicGateIDCopy := logicGateID
 	board := r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, &logicGateIDCopy)
 	defaults := []struct {
+		key   string
 		title string
 		color string
 	}{
-		{title: "Pending", color: KanbanDefaultPendingColor},
-		{title: "In Progress", color: KanbanDefaultInProgressColor},
-		{title: "Verify", color: KanbanDefaultVerifyColor},
-		{title: "Done", color: KanbanDefaultDoneColor},
+		{key: LogicGateWorkStatusPending, title: "Pending", color: KanbanDefaultPendingColor},
+		{key: LogicGateWorkStatusInProgress, title: "In Progress", color: KanbanDefaultInProgressColor},
+		{key: LogicGateWorkStatusVerify, title: "Verify", color: KanbanDefaultVerifyColor},
+		{key: LogicGateWorkStatusDone, title: "Done", color: KanbanDefaultDoneColor},
 	}
 	existing := map[string]bool{}
 	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
-		existing[strings.ToLower(strings.TrimSpace(column.Title))] = true
+		existing[logicGateWorkStatusKeyOrDefault(column.ColumnID, column.Title)] = true
 	}
 	for index, column := range defaults {
-		if existing[strings.ToLower(column.title)] {
+		if existing[column.key] {
 			continue
 		}
 		now := time.Now().UTC()
 		r.kanbanColumns[boardKey(companyID, boardID)] = append(r.kanbanColumns[boardKey(companyID, boardID)], domain.KanbanColumn{
 			CompanyID:        companyID,
 			BoardID:          boardID,
-			ColumnID:         newUUIDv7String(),
+			ColumnID:         column.key,
 			Title:            column.title,
 			Position:         (index + 1) * 1000,
 			WidthPx:          normalizeKanbanColumnWidth(0),

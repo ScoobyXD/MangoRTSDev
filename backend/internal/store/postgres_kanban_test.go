@@ -1,120 +1,77 @@
 package store
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-var errColumnInsertWouldConflict = errors.New("column insert would conflict")
-
-type recordingKanbanBoardEnsurer struct {
-	queries []string
-}
-
-func (e *recordingKanbanBoardEnsurer) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
-	e.queries = append(e.queries, query)
-	normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
-	if strings.Contains(normalized, "insert into kanban_columns") &&
-		!strings.Contains(normalized, "on conflict (company_id, board_id, column_id)") {
-		return nil, errColumnInsertWouldConflict
-	}
-	return noopSQLResult{}, nil
-}
-
-type noopSQLResult struct{}
-
-func (noopSQLResult) LastInsertId() (int64, error) {
-	return 0, nil
-}
-
-func (noopSQLResult) RowsAffected() (int64, error) {
-	return 0, nil
-}
-
-func TestEnsureLogicGateKanbanBoardSQL_DefaultColumnsAreConflictSafe(t *testing.T) {
-	exec := &recordingKanbanBoardEnsurer{}
-
-	err := ensureLogicGateKanbanBoardSQL(
-		context.Background(),
-		exec,
-		"11111111-1111-1111-1111-111111111111",
-		"22222222-2222-4222-8222-222222222222",
-		"Assembly gate",
-	)
+func TestLegacyKanbanTablesAreRemovedFromCanonicalSchema(t *testing.T) {
+	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
+	raw, err := os.ReadFile(schemaPath)
 	if err != nil {
-		t.Fatalf("ensureLogicGateKanbanBoardSQL failed: %v", err)
+		t.Fatalf("ReadFile schema: %v", err)
 	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 
-	columnInsertCount := 0
-	sawAdvisoryLock := false
-	sawAttachedBoardLookup := false
-	for _, query := range exec.queries {
-		normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
-		if strings.Contains(normalized, "pg_advisory_xact_lock") {
-			sawAdvisoryLock = true
-		}
-		if strings.Contains(normalized, "kb.logic_gate_id = p.logic_gate_id") {
-			sawAttachedBoardLookup = true
-		}
-		if strings.Contains(normalized, "insert into kanban_columns") {
-			columnInsertCount++
-			if !strings.Contains(normalized, "do update set") {
-				t.Fatalf("default column insert should repair deterministic ID conflicts, query=%s", query)
-			}
+	for _, forbidden := range []string{
+		"create table if not exists kanban_boards",
+		"create table if not exists kanban_columns",
+		"create table if not exists kanban_cards",
+		"idx_kanban_boards_company_position",
+		"idx_kanban_columns_board_position",
+		"idx_kanban_cards_column_position",
+		"references kanban_cards",
+		"references kanban_columns",
+		"sync_node_logic_gate_assignment_from_kanban_card",
+		"trg_sync_node_logic_gate_assignment_from_kanban_card",
+	} {
+		if strings.Contains(normalized, forbidden) {
+			t.Fatalf("canonical schema still contains legacy Kanban artifact %q", forbidden)
 		}
 	}
-	if !sawAdvisoryLock {
-		t.Fatal("ensure should take a per-gate advisory lock before repairing arena state")
-	}
-	if !sawAttachedBoardLookup {
-		t.Fatal("ensure should reuse an existing board attached by logic_gate_id before creating a preferred board_id")
-	}
-	if columnInsertCount != 1 {
-		t.Fatalf("default column insert count = %d, want 1 set-based insert", columnInsertCount)
-	}
-	if normalized := strings.ToLower(strings.Join(strings.Fields(strings.Join(exec.queries, " ")), " ")); !strings.Contains(normalized, "('verify', 3000") || !strings.Contains(normalized, "('done', 4000") {
-		t.Fatalf("default column SQL does not put Verify between In Progress and Done: %s", normalized)
+	for _, required := range []string{
+		"create table if not exists node_logic_gate_assignments",
+		"column_id text not null",
+		"create table if not exists kanban_board_projection",
+		"idx_kanban_board_projection_hot_read",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("canonical schema missing %q", required)
+		}
 	}
 }
 
-func TestNodeLogicGateAssignmentMigrationBackfillsAndGuardsLegacyCards(t *testing.T) {
-	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260519_node_logic_gate_assignments.sql")
+func TestDropLegacyKanbanTablesMigration(t *testing.T) {
+	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260602_drop_legacy_kanban_tables.sql")
 	raw, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatalf("ReadFile migration: %v", err)
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-	required := []string{
-		"create table if not exists node_logic_gate_assignments",
-		"insert into node_logic_gate_assignments",
-		"from kanban_cards card join kanban_columns",
-		"where card.logic_gate_id is not null",
-		"on conflict (company_id, node_id)",
-		"create trigger trg_sync_node_logic_gate_assignment_from_kanban_card after insert or update or delete on kanban_cards",
-		"delete from node_logic_gate_assignments assignment",
-	}
-	for _, needle := range required {
-		if !strings.Contains(normalized, needle) {
-			t.Fatalf("migration missing %q", needle)
+
+	for _, required := range []string{
+		"drop trigger if exists trg_sync_node_logic_gate_assignment_from_kanban_card on kanban_cards",
+		"drop function if exists sync_node_logic_gate_assignment_from_kanban_card()",
+		"alter table if exists node_logic_gate_assignments alter column column_id type text using column_id::text",
+		"alter table if exists kanban_board_projection alter column column_id type text using column_id::text",
+		"drop table if exists kanban_cards cascade",
+		"drop table if exists kanban_columns cascade",
+		"drop table if exists kanban_boards cascade",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("drop migration missing %q", required)
 		}
 	}
-
-	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
-	schemaRaw, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("ReadFile schema: %v", err)
-	}
-	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
-	if !strings.Contains(schema, "create table if not exists node_logic_gate_assignments") {
-		t.Fatal("canonical schema is missing node_logic_gate_assignments")
-	}
-	if !strings.Contains(schema, "create trigger trg_sync_node_logic_gate_assignment_from_kanban_card after insert or update or delete on kanban_cards") {
-		t.Fatal("canonical schema is missing Kanban-card assignment sync trigger")
+	for _, forbidden := range []string{
+		"create table if not exists kanban_boards",
+		"create table if not exists kanban_columns",
+		"create table if not exists kanban_cards",
+	} {
+		if strings.Contains(normalized, forbidden) {
+			t.Fatalf("drop migration recreates legacy artifact %q", forbidden)
+		}
 	}
 }
 
@@ -166,6 +123,49 @@ func TestKanbanBoardProjectionMigrationAndSchemaAreBounded(t *testing.T) {
 	}
 }
 
+func TestPostgresKanbanRuntimeDoesNotQueryLegacyTables(t *testing.T) {
+	files := []string{
+		"postgres_kanban.go",
+		"postgres_node_logic_gate_assignments.go",
+		"postgres_communications_triage.go",
+		"postgres_logic_gates.go",
+		"postgres_company_explorer.go",
+		"postgres_nodes.go",
+		"postgres_racio_projection.go",
+		"postgres_racio_matrix_commands.go",
+		"postgres_workspace_entity_batch.go",
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+		for _, forbidden := range []string{
+			"from kanban_boards",
+			"join kanban_boards",
+			"into kanban_boards",
+			"update kanban_boards",
+			"delete from kanban_boards",
+			"from kanban_columns",
+			"join kanban_columns",
+			"into kanban_columns",
+			"update kanban_columns",
+			"delete from kanban_columns",
+			"from kanban_cards",
+			"join kanban_cards",
+			"into kanban_cards",
+			"update kanban_cards",
+			"delete from kanban_cards",
+			"ensurelogicgatekanbanboardsql",
+		} {
+			if strings.Contains(normalized, forbidden) {
+				t.Fatalf("%s still contains legacy Kanban table/process pattern %q", file, forbidden)
+			}
+		}
+	}
+}
+
 func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
 	raw, err := os.ReadFile("postgres_kanban_projection.go")
 	if err != nil {
@@ -202,46 +202,41 @@ func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
 	assignBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) assignNodeToLogicGateStatusTx")
 	moveBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
 	removeBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) RemoveLogicGateNodeAssignment")
-	if !strings.Contains(assignBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("assignNodeToLogicGateStatusTx does not upsert and reread the Kanban projection")
+	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment and reread the Kanban projection")
 	}
-	if !strings.Contains(moveBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("MoveLogicGateNodeAssignment does not upsert and reread the Kanban projection")
+	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment and reread the Kanban projection")
 	}
-	if !strings.Contains(removeBody, "deleteKanbanBoardProjectionForNodeTx") {
-		t.Fatal("RemoveLogicGateNodeAssignment does not delete the Kanban projection row")
+	if !strings.Contains(removeBody, "deleteKanbanBoardProjectionForNodeTx") || strings.Contains(removeBody, "delete from kanban_cards") {
+		t.Fatal("RemoveLogicGateNodeAssignment should delete only the Kanban projection row")
 	}
 }
 
-func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesAcrossCardIdentityChange(t *testing.T) {
+func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCards(t *testing.T) {
 	raw, err := os.ReadFile("postgres_kanban.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_kanban.go: %v", err)
 	}
 	body := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
-	takeIndex := strings.Index(body, "takePostgresCommunicationsEmailNodeReferenceForCardTx")
-	deleteIndex := strings.Index(body, "delete from kanban_cards\nwhere company_id=$1 and board_id=$2 and card_id=$3")
-	updateBoardIndex := strings.Index(body, "set board_id=$4,")
-	restoreIndex := strings.Index(body, "restorePostgresCommunicationsEmailNodeReferenceTx")
-	updatePrimaryIndex := strings.Index(body, "updatePostgresCommunicationsEmailNodeReferenceForNodeTx")
-	updateAttachmentIndex := strings.Index(body, "updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx")
-	for name, index := range map[string]int{
-		"take email reference":        takeIndex,
-		"delete source card":          deleteIndex,
-		"update moved card board":     updateBoardIndex,
-		"restore email reference":     restoreIndex,
-		"update primary placement":    updatePrimaryIndex,
-		"update attachment placement": updateAttachmentIndex,
+	for _, required := range []string{
+		"updatePostgresCommunicationsEmailNodeReferenceForNodeTx",
+		"updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx",
+		"syncKanbanBoardProjectionForNodeTx",
 	} {
-		if index < 0 {
-			t.Fatalf("MoveLogicGateNodeAssignment missing %s step", name)
+		if !strings.Contains(body, required) {
+			t.Fatalf("MoveLogicGateNodeAssignment missing %s", required)
 		}
 	}
-	if !(takeIndex < deleteIndex && takeIndex < updateBoardIndex) {
-		t.Fatal("MoveLogicGateNodeAssignment should detach email references before deleting or changing the old card identity")
-	}
-	if !(deleteIndex < restoreIndex && updateBoardIndex < restoreIndex && restoreIndex < updateAttachmentIndex && restoreIndex < updatePrimaryIndex) {
-		t.Fatal("MoveLogicGateNodeAssignment should restore/update email references after the final card exists")
+	for _, forbidden := range []string{
+		"takePostgresCommunicationsEmailNodeReferenceForCardTx",
+		"restorePostgresCommunicationsEmailNodeReferenceTx",
+		"delete from kanban_cards",
+		"update kanban_cards",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("MoveLogicGateNodeAssignment still contains legacy-card step %q", forbidden)
+		}
 	}
 }
 

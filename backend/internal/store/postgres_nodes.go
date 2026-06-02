@@ -18,14 +18,14 @@ n.title,
 coalesce(
   case
     when assignment.is_issue then 'Issue'
-    else column_row.title
+    when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
   end,
   nullif(n.status, '')
 ) as status,
 coalesce(
   case
     when assignment.is_issue then '#ffd400'
-    else column_row.item_color
+    when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
   end,
   nullif(n.status_color, '')
 ) as status_color,
@@ -46,10 +46,6 @@ left join lateral (
   order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
   limit 1
 ) assignment on true
-left join kanban_columns column_row
-  on column_row.company_id = assignment.company_id
- and column_row.board_id = assignment.compatibility_board_id
- and column_row.column_id = assignment.column_id
 left join company_memberships assignee_membership
   on assignee_membership.company_id = n.company_id
  and assignee_membership.user_id = n.assignee_user_id
@@ -446,16 +442,6 @@ where company_id = $1 and node_id = $2`,
 	)
 	if err != nil {
 		return domain.Node{}, err
-	}
-	if input.TitleSet {
-		if _, err := tx.ExecContext(ctx, `
-update kanban_cards
-set node_title=$3,
-    updated_timestamp=now()
-where company_id=$1 and node_id=$2
-`, input.CompanyID, input.NodeID, input.Title); err != nil {
-			return domain.Node{}, err
-		}
 	}
 	item, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`

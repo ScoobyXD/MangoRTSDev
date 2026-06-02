@@ -152,9 +152,6 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			return WorkspaceEntityBatchResult{}, err
 		}
 		stop()
-		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
-			return WorkspaceEntityBatchResult{}, err
-		}
 		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
 			assignment := domain.LogicGateRaciAssignment{
 				CompanyID:   input.CompanyID,

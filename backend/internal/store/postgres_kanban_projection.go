@@ -22,6 +22,22 @@ case
   else 'pending'
 end`
 
+const postgresLogicGateAssignmentStatusTitleSQL = `
+case
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
+  else 'Pending'
+end`
+
+const postgresLogicGateAssignmentStatusColorSQL = `
+case
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then '` + KanbanDefaultInProgressColor + `'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then '` + KanbanDefaultVerifyColor + `'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then '` + KanbanDefaultDoneColor + `'
+  else '` + KanbanDefaultPendingColor + `'
+end`
+
 const kanbanProjectionStatusRankSQL = `
 case
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 1

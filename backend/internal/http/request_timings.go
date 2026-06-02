@@ -97,7 +97,7 @@ func normalizeTimingLabel(label string) string {
 		return "source.assignment"
 	case "repo.assignNodeToLogicGateStatusTx.node_assignment_writes",
 		"repo.MoveLogicGateNodeAssignment.node_assignment_writes":
-		return "kanban.card_trigger_assignment_sync"
+		return "source.assignment"
 	case "repo.assignNodeToLogicGateStatusTx.access_policy_copy",
 		"repo.MoveLogicGateNodeAssignment.access_policy_copy":
 		return "source.access_policy_copy"
@@ -147,35 +147,6 @@ func normalizeTimingLabel(label string) string {
 	case "repo.assignNodeToLogicGateStatusTx.assignment_position_read",
 		"repo.MoveLogicGateNodeAssignment.assignment_position_read":
 		return "source.assignment_position_read"
-	case "repo.ensureLogicGateKanbanBoardSQL.total":
-		return "kanban.board_ensure"
-	case "repo.ensureLogicGateKanbanBoardSQL.advisory_lock":
-		return "kanban.board_ensure_lock"
-	case "repo.ensureLogicGateKanbanBoardSQL.board_column_upsert":
-		return "kanban.board_column_ensure"
-	case "repo.MoveLogicGateNodeAssignment.kanban_board_read":
-		return "kanban.board_read"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_column_read",
-		"repo.MoveLogicGateNodeAssignment.kanban_column_read":
-		return "kanban.column_read"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_read",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_read":
-		return "kanban.card_read"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_work",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_work":
-		return "kanban.card_work"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_insert",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_insert":
-		return "kanban.card_insert"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_update",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_update":
-		return "kanban.card_update"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_delete",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_delete":
-		return "kanban.card_delete"
-	case "repo.assignNodeToLogicGateStatusTx.kanban_card_trigger_assignment_sync",
-		"repo.MoveLogicGateNodeAssignment.kanban_card_trigger_assignment_sync":
-		return "kanban.card_trigger_assignment_sync"
 	case "repo.MoveLogicGateNodeAssignment.email_reference_work":
 		return "kanban.email_reference_work"
 	case "repo.assignNodeToLogicGateStatusTx.racio_projection_sync",

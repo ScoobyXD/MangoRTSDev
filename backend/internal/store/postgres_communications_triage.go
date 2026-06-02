@@ -308,9 +308,6 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		logicGate.RaciAssignments = []domain.LogicGateRaciAssignment{}
 	}
 	logicGate.DefaultAccess = defaultResourceAccessOrEdit(logicGate.DefaultAccess)
-	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, input.LogicGateID, logicGate.Header); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetExistingNode {
 		result, err := r.attachCommunicationsTriageItemsToExistingNodeTx(ctx, tx, input, logicGate)
 		if err != nil {
@@ -331,40 +328,8 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		return CommunicationsTriageConversionResult{}, err
 	}
 
-	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
-select company_id::text, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
-from kanban_boards
-where company_id=$1 and logic_gate_id=$2::uuid
-order by (board_id=$3) desc, created_timestamp asc, board_id asc
-limit 1`, input.CompanyID, input.LogicGateID, LogicGateKanbanBoardID(input.LogicGateID)))
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-
-	rows, err := tx.QueryContext(ctx, `
-select company_id::text, board_id, column_id::text, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp
-from kanban_columns
-where company_id=$1 and board_id=$2
-order by position asc, created_timestamp asc, column_id asc`, input.CompanyID, board.BoardID)
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-	columns := make([]domain.KanbanColumn, 0)
-	for rows.Next() {
-		column, err := scanKanbanColumn(rows)
-		if err != nil {
-			rows.Close()
-			return CommunicationsTriageConversionResult{}, err
-		}
-		columns = append(columns, column)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return CommunicationsTriageConversionResult{}, err
-	}
-	if err := rows.Close(); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
+	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
+	columns := synthesizeLogicGateWorkColumns(input.CompanyID, board.BoardID, logicGate.CreatedTimestamp)
 	column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
@@ -439,15 +404,13 @@ values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28),
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
-insert into kanban_cards (
-  company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
-  description_snapshot, is_issue, position, created_timestamp, updated_timestamp
-) values ($1, $2, $3, $4, $5, $6::uuid, $7, $8, false, $9, now(), now())
-returning `+kanbanCardSelectColumns,
-			input.CompanyID, board.BoardID, cardID, column.ColumnID, nodeID, input.LogicGateID, nodeTitle,
-			emailDescriptionSnapshot(message), position,
-		))
+		if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, nodeID, input.LogicGateID)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
@@ -469,10 +432,10 @@ delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
@@ -522,16 +485,7 @@ func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx conte
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
-	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
-select company_id::text, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
-from kanban_boards
-where company_id=$1 and board_id=$2`, input.CompanyID, assignment.CompatibilityBoardID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
-	}
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
+	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
 	updateResult, err := tx.ExecContext(ctx, `
 update nodes
 set priority=$3::smallint
@@ -773,11 +727,6 @@ where company_id=$1
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from kanban_cards
-where company_id=$1 and board_id=$2 and card_id=$3`, input.CompanyID, input.BoardID, input.CardID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `

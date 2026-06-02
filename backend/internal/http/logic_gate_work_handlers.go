@@ -420,6 +420,9 @@ func (s *Server) requireLogicGateWorkEffectiveAccess(w http.ResponseWriter, r *h
 		writeError(w, http.StatusForbidden, "company_access_denied")
 		return false
 	}
+	if actorCanManageCompany(actor, companyID) {
+		return true
+	}
 	hasAccess, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeLogicGate, logicGateID, accessLevel)
 	if err != nil {
 		log.Printf("failed to check v2 logic gate work access company_id=%s logic_gate_id=%s user_id=%s access=%s: %v", companyID, logicGateID, actor.User.UserID, accessLevel, err)

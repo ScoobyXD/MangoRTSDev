@@ -17,14 +17,14 @@ with node_row as (
     coalesce(
       case
         when assignment.is_issue then 'Issue'
-        else column_row.title
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
       end,
       nullif(n.status, '')
     ) as status,
     coalesce(
       case
         when assignment.is_issue then '#ffd400'
-        else column_row.item_color
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
       end,
       nullif(n.status_color, '')
     ) as status_color,
@@ -44,10 +44,6 @@ with node_row as (
     order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
     limit 1
   ) assignment on true
-  left join kanban_columns column_row
-    on column_row.company_id = assignment.company_id
-   and column_row.board_id = assignment.compatibility_board_id
-   and column_row.column_id = assignment.column_id
   left join company_memberships assignee_membership
     on assignee_membership.company_id = n.company_id
    and assignee_membership.user_id = n.assignee_user_id
@@ -127,14 +123,14 @@ with user_raci as (
     coalesce(
       case
         when assignment.is_issue then 'Issue'
-        else column_row.title
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
       end,
       nullif(n.status, '')
     ) as status,
     coalesce(
       case
         when assignment.is_issue then '#ffd400'
-        else column_row.item_color
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
       end,
       nullif(n.status_color, '')
     ) as status_color,
@@ -149,10 +145,6 @@ with user_raci as (
   join nodes n
     on n.company_id=assignment.company_id
    and n.node_id=assignment.node_id
-  left join kanban_columns column_row
-    on column_row.company_id = assignment.company_id
-   and column_row.board_id = assignment.compatibility_board_id
-   and column_row.column_id = assignment.column_id
   left join company_memberships assignee_membership
     on assignee_membership.company_id = n.company_id
    and assignee_membership.user_id = n.assignee_user_id

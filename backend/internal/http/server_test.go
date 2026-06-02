@@ -1054,7 +1054,7 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
-	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
+	server := NewServerWithOptions(repo, ServerOptions{})
 	companyID := "11111111-1111-4111-8111-333333333333"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
@@ -1153,20 +1153,27 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	if err := json.NewDecoder(issueRec.Body).Decode(&issueCard); err != nil {
 		t.Fatalf("decode issue card: %v", err)
 	}
-	if !issueCard.IsIssue || issueCard.ColumnID != columnID {
+	if !issueCard.IsIssue || issueCard.ColumnID != store.LogicGateWorkStatusInProgress {
 		t.Fatalf("issue card = %+v, want issue without move", issueCard)
 	}
-	cardEvent := readWorkspaceEventForTest(t, stream)
-	nodeEvent := readWorkspaceEventForTest(t, stream)
-	if cardEvent.Type != "kanban_card_moved" {
-		t.Fatalf("first workspace event type = %q, want kanban_card_moved", cardEvent.Type)
+	var cardEvent workspaceEventEnvelope
+	var nodeEvent workspaceEventEnvelope
+	for i := 0; i < 6 && (cardEvent.Type == "" || nodeEvent.Type == ""); i++ {
+		event := readWorkspaceEventForTest(t, stream)
+		if event.Type == "kanban_card_moved" {
+			cardEvent = event
+		}
+		if event.Type == "node_updated" && event.Data["node_id"] == node.NodeID {
+			if nodePayload, ok := event.Data["node"].(map[string]any); ok && nodePayload["status"] == "Issue" {
+				nodeEvent = event
+			}
+		}
 	}
-	if nodeEvent.Type != "node_updated" || nodeEvent.Data["node_id"] != node.NodeID {
-		t.Fatalf("second workspace event = %+v, want node_updated for %q", nodeEvent, node.NodeID)
+	if cardEvent.Type == "" {
+		t.Fatal("workspace events missing kanban_card_moved")
 	}
-	nodePayload, ok := nodeEvent.Data["node"].(map[string]any)
-	if !ok || nodePayload["status"] != "Issue" {
-		t.Fatalf("node_updated payload = %+v, want derived Issue status", nodeEvent.Data["node"])
+	if nodeEvent.Type == "" {
+		t.Fatalf("workspace events missing Issue node_updated for %q", node.NodeID)
 	}
 
 	updateNodeBody, _ := json.Marshal(map[string]any{
@@ -1228,8 +1235,8 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	deleteBoardReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
 	deleteBoardRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteBoardRec, deleteBoardReq)
-	if deleteBoardRec.Code != http.StatusConflict {
-		t.Fatalf("DELETE attached board status = %d, want %d body=%s", deleteBoardRec.Code, http.StatusConflict, deleteBoardRec.Body.String())
+	if deleteBoardRec.Code != http.StatusNotFound {
+		t.Fatalf("DELETE attached board status = %d, want %d body=%s", deleteBoardRec.Code, http.StatusNotFound, deleteBoardRec.Body.String())
 	}
 }
 
@@ -2940,14 +2947,19 @@ func TestNodesConditionalGetSkipsListWhenWorkspaceTokenMatches(t *testing.T) {
 
 func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
-	handler := server.Routes()
+	server := NewServerWithOptions(repo, ServerOptions{})
 	companyID := "company-scoped-etag-unrelated-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+	logicGate, err := repo.CreateLogicGate(companyID, "Snapshot gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
 
 	urls := []string{
 		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map",
 		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map",
-		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=board-a",
+		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + boardID,
 	}
 	etags := make(map[string]string, len(urls))
 	for _, url := range urls {
@@ -2990,9 +3002,18 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 
 func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	server := NewServerWithOptions(repo, ServerOptions{LegacyKanbanRoutesEnabled: true})
-	handler := server.Routes()
+	server := NewServerWithOptions(repo, ServerOptions{})
 	companyID := "company-scoped-etag-relevant-test"
+	admin, err := repo.UpsertAuthUser("etag-admin", "etag-admin@example.com", "ETag Admin")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("etag-admin", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership admin: %v", err)
+	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.Routes().ServeHTTP(w, requestWithActorForTest(r, admin, companyID))
+	})
 
 	nodeMapURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map"
 	firstNodeReq := httptest.NewRequest(http.MethodGet, nodeMapURL, nil)
@@ -3023,9 +3044,17 @@ func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 		t.Fatalf("node_map ETag did not change after node create")
 	}
 
-	boardID := "board-relevant"
-	if _, err := repo.CreateKanbanBoard(companyID, boardID, "Board", 1000); err != nil {
-		t.Fatalf("CreateKanbanBoard() error = %v", err)
+	logicGate, err := repo.CreateLogicGate(companyID, "Relevant gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	if _, err := repo.EnsureLogicGateKanbanBoard(companyID, logicGate.LogicGateID, logicGate.Header); err != nil {
+		t.Fatalf("EnsureLogicGateKanbanBoard() error = %v", err)
+	}
+	kanbanNode, err := repo.CreateNode(companyID, "Relevant kanban node")
+	if err != nil {
+		t.Fatalf("CreateNode kanban error = %v", err)
 	}
 	kanbanURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + boardID
 	firstKanbanReq := httptest.NewRequest(http.MethodGet, kanbanURL, nil)
@@ -3036,13 +3065,20 @@ func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 	}
 	kanbanETag := firstKanbanRec.Header().Get("ETag")
 
-	columnBody, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": boardID, "title": "Todo", "position": 1000})
-	createColumnReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(columnBody))
-	createColumnReq.Header.Set("Content-Type", "application/json")
-	createColumnRec := httptest.NewRecorder()
-	handler.ServeHTTP(createColumnRec, createColumnReq)
-	if createColumnRec.Code != http.StatusCreated {
-		t.Fatalf("create kanban column status = %d body=%s", createColumnRec.Code, createColumnRec.Body.String())
+	cardBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"column_id":  store.LogicGateWorkStatusPending,
+		"node_id":    kanbanNode.NodeID,
+		"node_title": kanbanNode.Title,
+		"priority":   3,
+	})
+	createCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(cardBody))
+	createCardReq.Header.Set("Content-Type", "application/json")
+	createCardRec := httptest.NewRecorder()
+	handler.ServeHTTP(createCardRec, createCardReq)
+	if createCardRec.Code != http.StatusCreated {
+		t.Fatalf("create kanban card status = %d body=%s", createCardRec.Code, createCardRec.Body.String())
 	}
 
 	staleKanbanReq := httptest.NewRequest(http.MethodGet, kanbanURL, nil)
@@ -3050,10 +3086,10 @@ func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 	staleKanbanRec := httptest.NewRecorder()
 	handler.ServeHTTP(staleKanbanRec, staleKanbanReq)
 	if staleKanbanRec.Code != http.StatusOK {
-		t.Fatalf("kanban snapshot after column create status = %d, want %d body=%s", staleKanbanRec.Code, http.StatusOK, staleKanbanRec.Body.String())
+		t.Fatalf("kanban snapshot after card create status = %d, want %d body=%s", staleKanbanRec.Code, http.StatusOK, staleKanbanRec.Body.String())
 	}
 	if staleKanbanRec.Header().Get("ETag") == kanbanETag {
-		t.Fatalf("kanban ETag did not change after column create")
+		t.Fatalf("kanban ETag did not change after card create")
 	}
 }
 

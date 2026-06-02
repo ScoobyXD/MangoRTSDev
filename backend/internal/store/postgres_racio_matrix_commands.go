@@ -174,9 +174,6 @@ func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMa
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
 	stop()
-	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
-		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
-	}
 	if input.ActorUserID != "" && input.CreatorLogicGateRaciRole != "" {
 		assignee, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.ActorUserID)
 		if err != nil {

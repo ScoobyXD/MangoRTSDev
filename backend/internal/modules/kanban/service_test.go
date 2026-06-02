@@ -359,8 +359,8 @@ func TestLogicGateAssignmentCrossGateMoveWithoutStatusResolvesTargetColumn(t *te
 	if targetColumnID == "" {
 		t.Fatalf("target in-progress column missing: %+v", targetColumns)
 	}
-	if assigned.Card.ColumnID == targetColumnID {
-		t.Fatalf("test setup expected source and target columns to have distinct ids")
+	if assigned.Card.ColumnID != targetColumnID {
+		t.Fatalf("stable status column id = %q, want target status id %q", assigned.Card.ColumnID, targetColumnID)
 	}
 
 	moved, err := service.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
