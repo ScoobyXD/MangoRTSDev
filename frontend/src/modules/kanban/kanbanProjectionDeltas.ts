@@ -83,6 +83,23 @@ export type KanbanProjectionApplyInput = {
 
 export const KANBAN_BOARD_PROJECTION_NAME = "kanban_board";
 
+export function nextKanbanProjectionCursor(currentSequence: number | undefined, projectionSequence: number | undefined): number | undefined {
+  if (projectionSequence === undefined) return currentSequence;
+  return Math.max(currentSequence ?? 0, projectionSequence);
+}
+
+export function beginKanbanProjectionFallback(inFlightBoards: Set<string>, boardID: string): boolean {
+  const cleanBoardID = cleanString(boardID);
+  if (!cleanBoardID || inFlightBoards.has(cleanBoardID)) return false;
+  inFlightBoards.add(cleanBoardID);
+  return true;
+}
+
+export function finishKanbanProjectionFallback(inFlightBoards: Set<string>, boardID: string): void {
+  const cleanBoardID = cleanString(boardID);
+  if (cleanBoardID) inFlightBoards.delete(cleanBoardID);
+}
+
 function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -221,7 +238,7 @@ export function applyKanbanProjectionEnvelope(input: KanbanProjectionApplyInput)
   const sequence = Number(input.envelope.projection_sequence);
   if (Number.isSafeInteger(sequence) && sequence > 0) {
     if (input.lastSequence !== undefined && sequence > input.lastSequence + 1) {
-      return requestFallback({ ...result, lastSequence: sequence }, "sequence_gap");
+      return requestFallback(result, "sequence_gap");
     }
     result.lastSequence = Math.max(input.lastSequence ?? 0, sequence);
   }

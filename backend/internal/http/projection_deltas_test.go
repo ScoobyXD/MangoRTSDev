@@ -68,6 +68,53 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	}
 }
 
+func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777404"
+	repo.EnsureCompany(companyID, "RACIO Projection Sequence Scope Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-sequence-viewer")
+	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-sequence-other")
+
+	node, err := repo.CreateNode(companyID, "Scoped RACI sequence node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+
+	viewerScope := projectionUserScope(viewer.UserID)
+	otherScope := projectionUserScope(other.UserID)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, viewerScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, viewerScope, viewerCh)
+	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, otherScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, otherScope, otherCh)
+
+	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
+		racioProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+	})
+	firstViewer := readProjectionEnvelopeForTest(t, viewerCh)
+	if firstViewer.ProjectionScope != viewerScope || firstViewer.ProjectionSequence != 1 {
+		t.Fatalf("first viewer envelope = %+v, want user scope %q sequence 1", firstViewer, viewerScope)
+	}
+
+	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
+		racioProjectionDeltaForTest(companyID, other.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+	})
+	firstOther := readProjectionEnvelopeForTest(t, otherCh)
+	if firstOther.ProjectionScope != otherScope || firstOther.ProjectionSequence != 1 {
+		t.Fatalf("first other envelope = %+v, want user scope %q sequence 1", firstOther, otherScope)
+	}
+
+	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
+		racioProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+	})
+	secondViewer := readProjectionEnvelopeForTest(t, viewerCh)
+	if secondViewer.ProjectionSequence != 2 {
+		t.Fatalf("second viewer sequence = %d, want 2", secondViewer.ProjectionSequence)
+	}
+}
+
 func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777502"
@@ -151,6 +198,106 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 	}
 	if got := blockedEnvelope.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.BoardID != boardID {
 		t.Fatalf("blocked delta = %+v, want delete without Kanban row payload", got)
+	}
+}
+
+func TestKanbanProjectionSequencesAreBoardScoped(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777504"
+	repo.EnsureCompany(companyID, "Kanban Projection Sequence Scope Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "kanban-sequence-viewer")
+
+	logicGateA, err := repo.CreateLogicGate(companyID, "Board A Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A: %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "Board A Node")
+	if err != nil {
+		t.Fatalf("CreateNode A: %v", err)
+	}
+	priorityA := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateA.LogicGateID,
+		NodeID:      nodeA.NodeID,
+		Status:      "pending",
+		Priority:    &priorityA,
+		PrioritySet: true,
+		ActorUserID: viewer.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus A: %v", err)
+	}
+
+	logicGateB, err := repo.CreateLogicGate(companyID, "Board B Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Board B Node")
+	if err != nil {
+		t.Fatalf("CreateNode B: %v", err)
+	}
+	priorityB := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateB.LogicGateID,
+		NodeID:      nodeB.NodeID,
+		Status:      "pending",
+		Priority:    &priorityB,
+		PrioritySet: true,
+		ActorUserID: viewer.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus B: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+
+	boardA := store.LogicGateKanbanBoardID(logicGateA.LogicGateID)
+	boardB := store.LogicGateKanbanBoardID(logicGateB.LogicGateID)
+	boardAScope := projectionKanbanBoardScopePrefix(boardA)
+	boardBScope := projectionKanbanBoardScopePrefix(boardB)
+	boardACh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardUserScope(boardA, viewer.UserID))
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardUserScope(boardA, viewer.UserID), boardACh)
+	boardBCh := server.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardUserScope(boardB, viewer.UserID))
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardUserScope(boardB, viewer.UserID), boardBCh)
+
+	rowsA, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeA.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode A: %v", err)
+	}
+	rowsB, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeB.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode B: %v", err)
+	}
+
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsA))
+	firstA := readProjectionEnvelopeForTest(t, boardACh)
+	if firstA.ProjectionScope != boardAScope || firstA.ProjectionSequence != 1 {
+		t.Fatalf("first board A envelope = %+v, want scope %q sequence 1", firstA, boardAScope)
+	}
+
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsB))
+	firstB := readProjectionEnvelopeForTest(t, boardBCh)
+	if firstB.ProjectionScope != boardBScope || firstB.ProjectionSequence != 1 {
+		t.Fatalf("first board B envelope = %+v, want scope %q sequence 1", firstB, boardBScope)
+	}
+
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsA))
+	secondA := readProjectionEnvelopeForTest(t, boardACh)
+	if secondA.ProjectionScope != boardAScope || secondA.ProjectionSequence != 2 {
+		t.Fatalf("second board A envelope = %+v, want scope %q sequence 2", secondA, boardAScope)
+	}
+
+	boardASequence, err := repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, boardAScope)
+	if err != nil {
+		t.Fatalf("CurrentProjectionSequence board A: %v", err)
+	}
+	boardBSequence, err := repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, boardBScope)
+	if err != nil {
+		t.Fatalf("CurrentProjectionSequence board B: %v", err)
+	}
+	if boardASequence != 2 || boardBSequence != 1 {
+		t.Fatalf("board sequences A=%d B=%d, want A=2 B=1", boardASequence, boardBSequence)
 	}
 }
 

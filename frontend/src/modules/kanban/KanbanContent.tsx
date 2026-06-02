@@ -43,6 +43,9 @@ import { KanbanColumnView } from "./KanbanColumnView";
 import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
 import {
   applyKanbanProjectionEnvelope,
+  beginKanbanProjectionFallback,
+  finishKanbanProjectionFallback,
+  nextKanbanProjectionCursor,
   seedKanbanProjectionVersions,
   type KanbanProjectionEnvelope,
   type KanbanProjectionFallbackReason,
@@ -220,6 +223,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const pendingBoardMutationsRef = useRef(new Map<string, number>());
   const kanbanProjectionVersionsRef = useRef(new Map<string, number>());
   const kanbanProjectionSequenceRef = useRef<number | undefined>(undefined);
+  const kanbanProjectionFallbackBoardsInFlightRef = useRef(new Set<string>());
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -761,9 +765,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       const { columns: nextColumns, cards: nextCards, projectionSequence } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500);
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
-      if (projectionSequence !== undefined) {
-        kanbanProjectionSequenceRef.current = Math.max(kanbanProjectionSequenceRef.current ?? 0, projectionSequence);
-      }
+      kanbanProjectionSequenceRef.current = nextKanbanProjectionCursor(kanbanProjectionSequenceRef.current, projectionSequence);
       applyColumns(sortColumns(nextColumns));
       applyCards(nextCards);
     } catch {
@@ -867,12 +869,19 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, refreshBoards]);
 
   const requestKanbanProjectionFallback = useCallback((reason: KanbanProjectionFallbackReason, streamBoardID = activeBoardIDRef.current, logicGateID = "") => {
+    void reason;
     const cleanBoardID = streamBoardID.trim();
     if (!cleanBoardID) return;
+    if (!beginKanbanProjectionFallback(kanbanProjectionFallbackBoardsInFlightRef.current, cleanBoardID)) return;
     invalidateArenaViewForBoard(cleanBoardID, logicGateID);
     invalidateKanbanBoardContentsCache(apiBase, companyID, cleanBoardID);
-    if (cleanBoardID === activeBoardIDRef.current) void refreshBoard(cleanBoardID);
-    if (reason === "sequence_gap") return;
+    if (cleanBoardID === activeBoardIDRef.current) {
+      void refreshBoard(cleanBoardID).finally(() => {
+        finishKanbanProjectionFallback(kanbanProjectionFallbackBoardsInFlightRef.current, cleanBoardID);
+      });
+      return;
+    }
+    finishKanbanProjectionFallback(kanbanProjectionFallbackBoardsInFlightRef.current, cleanBoardID);
   }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
 
   const removeCardsFromLocalSelection = useCallback((removedCardIDs: string[]) => {
@@ -903,11 +912,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             versions: kanbanProjectionVersionsRef.current,
             lastSequence: kanbanProjectionSequenceRef.current,
           });
-          kanbanProjectionSequenceRef.current = result.lastSequence;
           if (result.fallback) {
             requestKanbanProjectionFallback(result.fallbackReason ?? "invalid_delta");
             return;
           }
+          kanbanProjectionSequenceRef.current = result.lastSequence;
           if (!result.changed) return;
           applyCards(result.cards);
           removeCardsFromLocalSelection(result.removedCardIDs);
