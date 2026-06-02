@@ -47,6 +47,11 @@ func scanKanbanCard(row interface {
 	Scan(dest ...any) error
 }) (domain.KanbanCard, error) {
 	var item domain.KanbanCard
+	var dueDate sql.NullString
+	var priority sql.NullInt64
+	var assigneeUserID sql.NullString
+	var assigneeName sql.NullString
+	var assigneeEmail sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.BoardID,
@@ -58,9 +63,31 @@ func scanKanbanCard(row interface {
 		&item.DescriptionSnapshot,
 		&item.IsIssue,
 		&item.Position,
+		&dueDate,
+		&priority,
+		&assigneeUserID,
+		&assigneeName,
+		&assigneeEmail,
+		&item.ProjectionUpdatedTimestamp,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
+	if dueDate.Valid {
+		item.DueDate = &dueDate.String
+	}
+	if priority.Valid {
+		value := int(priority.Int64)
+		item.Priority = &value
+	}
+	if assigneeUserID.Valid {
+		item.AssigneeUserID = &assigneeUserID.String
+	}
+	if assigneeName.Valid {
+		item.AssigneeName = &assigneeName.String
+	}
+	if assigneeEmail.Valid {
+		item.AssigneeEmail = &assigneeEmail.String
+	}
 	return item, err
 }
 
@@ -441,6 +468,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if previousAssignmentErr != nil && !errors.Is(previousAssignmentErr, ErrNotFound) {
 		return LogicGateNodeAssignmentResult{}, previousAssignmentErr
 	}
+	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 
 	position := input.Position
 	if position <= 0 {
@@ -492,14 +523,20 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	projectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	racioProjectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
 	node, err := nodeForLogicGateAssignmentResultTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -542,6 +579,10 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 		sourceLogicGateID = input.FromLogicGateID
 	}
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, sourceLogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -634,14 +675,20 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	projectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	racioProjectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
 	node, err := nodeForLogicGateAssignmentResultTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -679,12 +726,20 @@ func (r *PostgresRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignme
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
+	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from node_logic_gate_assignments
 where company_id=$1 and node_id=$2 and assignment_id=$3`, assignment.CompanyID, assignment.NodeID, assignment.AssignmentID); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	var fallbackStatus any
@@ -702,10 +757,12 @@ set status=$3::text,
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStatus, fallbackStatusColor); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	projectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	racioProjectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
+	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
 	node, err := nodeForLogicGateAssignmentResultTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
@@ -739,6 +796,10 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
 		CompanyID:            input.CompanyID,
@@ -760,14 +821,20 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	projectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	racioProjectionDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
 	node, err := nodeForLogicGateAssignmentResultTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err

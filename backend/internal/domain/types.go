@@ -526,18 +526,24 @@ type KanbanColumn struct {
 }
 
 type KanbanCard struct {
-	CompanyID           string    `json:"company_id"`
-	BoardID             string    `json:"board_id"`
-	CardID              string    `json:"card_id"`
-	ColumnID            string    `json:"column_id"`
-	NodeID              string    `json:"node_id"`
-	LogicGateID         *string   `json:"logic_gate_id"`
-	NodeTitle           string    `json:"node_title"`
-	DescriptionSnapshot string    `json:"description_snapshot"`
-	IsIssue             bool      `json:"is_issue"`
-	Position            int       `json:"position"`
-	CreatedTimestamp    time.Time `json:"created_timestamp"`
-	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
+	CompanyID                  string    `json:"company_id"`
+	BoardID                    string    `json:"board_id"`
+	CardID                     string    `json:"card_id"`
+	ColumnID                   string    `json:"column_id"`
+	NodeID                     string    `json:"node_id"`
+	LogicGateID                *string   `json:"logic_gate_id"`
+	NodeTitle                  string    `json:"node_title"`
+	DescriptionSnapshot        string    `json:"description_snapshot"`
+	IsIssue                    bool      `json:"is_issue"`
+	Position                   int       `json:"position"`
+	DueDate                    *string   `json:"due_date,omitempty"`
+	Priority                   *int      `json:"priority,omitempty"`
+	AssigneeUserID             *string   `json:"assignee_user_id,omitempty"`
+	AssigneeName               *string   `json:"assignee_name,omitempty"`
+	AssigneeEmail              *string   `json:"assignee_email,omitempty"`
+	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
+	CreatedTimestamp           time.Time `json:"created_timestamp"`
+	UpdatedTimestamp           time.Time `json:"updated_timestamp"`
 }
 
 type NodeLogicGateAssignment struct {

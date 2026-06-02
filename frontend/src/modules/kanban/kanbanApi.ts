@@ -145,10 +145,32 @@ export async function deleteKanbanColumn(apiBase: string, companyID: string, boa
   markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
 }
 
-export async function listKanbanCards(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCard[]> {
+export type KanbanCardsResponse = {
+  cards: KanbanCard[];
+  projection?: "kanban_board";
+  projection_sequence?: number;
+};
+
+function normalizeProjectionSequence(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+export async function listKanbanCardsResponse(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCardsResponse> {
   const params = query({ company_id: companyID, board_id: boardID, column_id: columnID, limit, after_position: afterPosition > 0 ? afterPosition : undefined });
-  const payload = await requestJSON<{ cards?: KanbanCard[] }>(apiBase, `/v1/kanban/cards?${params}`);
-  return payload.cards ?? [];
+  const payload = await requestJSON<{ cards?: KanbanCard[]; projection?: unknown; projection_sequence?: unknown }>(apiBase, `/v1/kanban/cards?${params}`);
+  const projection = payload.projection === "kanban_board" ? "kanban_board" : undefined;
+  return {
+    cards: payload.cards ?? [],
+    projection,
+    projection_sequence: normalizeProjectionSequence(payload.projection_sequence),
+  };
+}
+
+export async function listKanbanCards(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCard[]> {
+  return (await listKanbanCardsResponse(apiBase, companyID, boardID, columnID, limit, afterPosition)).cards;
 }
 
 export async function upsertKanbanCard(args: {

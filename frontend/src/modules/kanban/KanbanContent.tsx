@@ -42,6 +42,12 @@ import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
 import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
 import {
+  applyKanbanProjectionEnvelope,
+  seedKanbanProjectionVersions,
+  type KanbanProjectionEnvelope,
+  type KanbanProjectionFallbackReason,
+} from "./kanbanProjectionDeltas";
+import {
   EXPLORER_ENTITY_DRAG_MIME,
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -72,7 +78,6 @@ import {
   parseKanbanColumnDragPayload,
   resolveKanbanGroupDropAssignment,
   serializeExplorerEntityDragPayload,
-  shouldRefreshKanbanBoardForNodeStatusChange,
   sortColumns,
   sortKanbanBoards,
   type KanbanBoard,
@@ -213,6 +218,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardRefreshRequestRef = useRef(0);
   const localBoardMutationSeqRef = useRef(0);
   const pendingBoardMutationsRef = useRef(new Map<string, number>());
+  const kanbanProjectionVersionsRef = useRef(new Map<string, number>());
+  const kanbanProjectionSequenceRef = useRef<number | undefined>(undefined);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -290,6 +297,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   useEffect(() => {
     activeBoardIDRef.current = activeBoardID;
+    kanbanProjectionSequenceRef.current = undefined;
+    kanbanProjectionVersionsRef.current = new Map();
   }, [activeBoardID]);
 
   useEffect(() => {
@@ -306,6 +315,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   useEffect(() => {
     cardsRef.current = cards;
+    seedKanbanProjectionVersions(cards, kanbanProjectionVersionsRef.current);
   }, [cards]);
 
   useEffect(() => {
@@ -383,7 +393,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    return new Map((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
+    const nodeByID = new Map<string, NodeRecord>((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
+    for (const card of cards) {
+      const existing = nodeByID.get(card.node_id);
+      nodeByID.set(card.node_id, {
+        company_id: existing?.company_id ?? card.company_id,
+        node_id: card.node_id,
+        title: existing?.title ?? card.node_title,
+        created_timestamp: existing?.created_timestamp ?? card.created_timestamp,
+        ...existing,
+        due_date: card.due_date ?? existing?.due_date ?? null,
+        priority: card.priority ?? existing?.priority ?? null,
+        assignee_user_id: card.assignee_user_id ?? existing?.assignee_user_id ?? null,
+        assignee_name: card.assignee_name ?? existing?.assignee_name ?? null,
+        assignee_email: card.assignee_email ?? existing?.assignee_email ?? null,
+      });
+    }
+    return nodeByID;
   }, [apiBase, cards, columns, companyID, nodeGraphRevision]);
   const normalizedContentSearchQuery = contentSearchQuery.trim().toLowerCase();
   const searchedCards = useMemo(() => {
@@ -402,6 +428,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         card.card_id,
         card.logic_gate_id ?? "",
         card.is_issue ? "issue" : "",
+        card.due_date ?? "",
+        card.priority != null ? String(card.priority) : "",
+        card.assignee_user_id ?? "",
+        card.assignee_name ?? "",
+        card.assignee_email ?? "",
         columnTitleByID.get(card.column_id) ?? "",
         node?.title ?? "",
         node?.status ?? "",
@@ -492,7 +523,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       const status = card.is_issue ? "Issue" : (column?.title.trim() || "Unknown");
       const statusColor = getKanbanConditionalColor(card, statusColorByColumnID);
       invalidateNodeRecordStoreCaches(apiBase, companyID, card.node_id);
-      upsertNodeRelationshipGraphNode(apiBase, companyID, { ...node, status, status_color: statusColor });
+      upsertNodeRelationshipGraphNode(apiBase, companyID, {
+        ...node,
+        status,
+        status_color: statusColor,
+        due_date: card.due_date ?? node.due_date ?? null,
+        priority: card.priority ?? node.priority ?? null,
+        assignee_user_id: card.assignee_user_id ?? node.assignee_user_id ?? null,
+        assignee_name: card.assignee_name ?? node.assignee_name ?? null,
+        assignee_email: card.assignee_email ?? node.assignee_email ?? null,
+      });
     }
   }, [apiBase, companyID]);
 
@@ -718,9 +758,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     try {
       // The UI renders a bounded first window. Headless agents should page by
       // column through the cards API instead of loading company-scale boards.
-      const { columns: nextColumns, cards: nextCards } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500);
+      const { columns: nextColumns, cards: nextCards, projectionSequence } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500);
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       if (localBoardMutationSeqRef.current !== mutationSeqAtStart) return;
+      if (projectionSequence !== undefined) {
+        kanbanProjectionSequenceRef.current = Math.max(kanbanProjectionSequenceRef.current ?? 0, projectionSequence);
+      }
       applyColumns(sortColumns(nextColumns));
       applyCards(nextCards);
     } catch {
@@ -736,7 +779,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [refreshBoard]);
 
   useEffect(() => {
-    primeKanbanBoardContentsCache(apiBase, companyID, boardID, { columns, cards });
+    primeKanbanBoardContentsCache(apiBase, companyID, boardID, { columns, cards, projectionSequence: kanbanProjectionSequenceRef.current });
   }, [apiBase, boardID, cards, columns, companyID]);
 
   useEffect(() => {
@@ -772,11 +815,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (!streamBoardID) return;
       invalidateArenaViewForBoard(streamBoardID, detail.logicGateID ?? "");
       invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-      if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
     };
     window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
-  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard]);
 
   const reconcileKanbanGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (gap.companyID !== companyID) return;
@@ -823,10 +865,55 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
     }
   }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, refreshBoards]);
+
+  const requestKanbanProjectionFallback = useCallback((reason: KanbanProjectionFallbackReason, streamBoardID = activeBoardIDRef.current, logicGateID = "") => {
+    const cleanBoardID = streamBoardID.trim();
+    if (!cleanBoardID) return;
+    invalidateArenaViewForBoard(cleanBoardID, logicGateID);
+    invalidateKanbanBoardContentsCache(apiBase, companyID, cleanBoardID);
+    if (cleanBoardID === activeBoardIDRef.current) void refreshBoard(cleanBoardID);
+    if (reason === "sequence_gap") return;
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
+
+  const removeCardsFromLocalSelection = useCallback((removedCardIDs: string[]) => {
+    if (removedCardIDs.length === 0) return;
+    const removed = new Set(removedCardIDs);
+    setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((selectedCardID) => !removed.has(selectedCardID))));
+    setSelectionAnchorCardID((current) => (removed.has(current) ? "" : current));
+  }, []);
+
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {
       onGap: reconcileKanbanGap,
       onEvent(event) {
+        if (event.event === "projection" && event.data.length > 0) {
+          let envelope: KanbanProjectionEnvelope;
+          try {
+            envelope = JSON.parse(event.data) as KanbanProjectionEnvelope;
+          } catch {
+            requestKanbanProjectionFallback("invalid_envelope");
+            return;
+          }
+          if (envelope.company_id !== companyID || envelope.projection !== "kanban_board") return;
+          const result = applyKanbanProjectionEnvelope({
+            envelope,
+            companyID,
+            boardID: activeBoardIDRef.current,
+            cards: cardsRef.current,
+            versions: kanbanProjectionVersionsRef.current,
+            lastSequence: kanbanProjectionSequenceRef.current,
+          });
+          kanbanProjectionSequenceRef.current = result.lastSequence;
+          if (result.fallback) {
+            requestKanbanProjectionFallback(result.fallbackReason ?? "invalid_delta");
+            return;
+          }
+          if (!result.changed) return;
+          applyCards(result.cards);
+          removeCardsFromLocalSelection(result.removedCardIDs);
+          syncNodeStatusesFromCards(result.upsertedCards);
+          return;
+        }
         if (event.event !== "workspace" || event.data.length === 0) return;
         try {
           const envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
@@ -907,11 +994,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID) return;
             invalidateArenaViewForBoard(streamBoardID, card?.logic_gate_id ?? "");
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-            if (streamBoardID !== activeBoardIDRef.current || !card?.card_id) return;
-            const nextCards = [...cardsRef.current.filter((item) => item.card_id !== card.card_id), card];
-            cardsRef.current = nextCards;
-            setCards(nextCards);
-            syncNodeStatusesFromCards([card]);
             return;
           }
           if (envelope.type === "kanban_card_deleted") {
@@ -920,24 +1002,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID || !cardID) return;
             invalidateArenaViewForBoard(streamBoardID);
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-            if (streamBoardID !== activeBoardIDRef.current) return;
-            const nextCards = cardsRef.current.filter((card) => card.card_id !== cardID);
-            cardsRef.current = nextCards;
-            setCards(nextCards);
-            setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((selectedCardID) => selectedCardID !== cardID)));
-            setSelectionAnchorCardID((current) => current === cardID ? "" : current);
             return;
           }
           if (envelope.type === "node_updated") {
             const node = data.node as NodeRecord | undefined;
             const nodeID = typeof node?.node_id === "string" ? node.node_id : (typeof data.node_id === "string" ? data.node_id : "");
             if (!nodeID) return;
-            if (node?.node_id && shouldRefreshKanbanBoardForNodeStatusChange({ node, columns: columnsRef.current, cards: cardsRef.current })) {
-              const currentBoardID = activeBoardIDRef.current;
-              invalidateArenaViewForBoard(currentBoardID);
-              invalidateKanbanBoardContentsCache(apiBase, companyID, currentBoardID);
-              void refreshBoard(currentBoardID);
-            }
             return;
           }
           if (envelope.type === "node_deleted") {
@@ -977,8 +1047,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           // The list can still be manually refreshed from the header.
         }
       },
-    });
-  }, [apiBase, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
+    }, { projections: ["kanban_board"], kanbanBoardID: activeBoardID });
+  }, [activeBoardID, apiBase, applyCards, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

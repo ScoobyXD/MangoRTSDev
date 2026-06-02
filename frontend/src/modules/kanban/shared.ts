@@ -101,6 +101,12 @@ export type KanbanCard = {
   description_snapshot: string;
   is_issue?: boolean;
   position: number;
+  due_date?: string | null;
+  priority?: number | null;
+  assignee_user_id?: string | null;
+  assignee_name?: string | null;
+  assignee_email?: string | null;
+  projection_updated_timestamp?: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -713,20 +719,20 @@ export function getKanbanGroupValue(
     return column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status", sortValue: Number.MAX_SAFE_INTEGER - 1 };
   }
   if (field === "person") {
-    const assignee = node?.assignee_user_id?.trim();
+    const assignee = (card.assignee_user_id ?? node?.assignee_user_id ?? "").trim();
     if (!assignee) return { key: "person:unassigned", label: "Unassigned", sortValue: "" };
     const user = userByID.get(assignee);
-    const name = user?.display_name?.trim();
-    const email = user?.email?.trim();
+    const name = user?.display_name?.trim() || card.assignee_name?.trim();
+    const email = user?.email?.trim() || card.assignee_email?.trim();
     const label = name || email || assignee;
     return { key: `person:${assignee}`, label, sortValue: label.toLowerCase() };
   }
   if (field === "priority") {
-    const priority = node?.priority ?? 0;
+    const priority = card.priority ?? node?.priority ?? 0;
     const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
     return { key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized, sortLast: normalized === 0 };
   }
-  const dueDate = node?.due_date?.trim();
+  const dueDate = (card.due_date ?? node?.due_date ?? "").trim();
   return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true };
 }
 

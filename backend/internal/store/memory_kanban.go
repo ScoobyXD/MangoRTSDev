@@ -121,6 +121,151 @@ func (r *MemoryRepo) syncNodeStatusFromKanbanCardLocked(card domain.KanbanCard) 
 	r.nodes[key(card.CompanyID, card.NodeID)] = node
 }
 
+func (r *MemoryRepo) withKanbanCardProjectionFieldsLocked(card domain.KanbanCard) domain.KanbanCard {
+	if node, ok := r.nodes[key(card.CompanyID, card.NodeID)]; ok {
+		if strings.TrimSpace(node.Title) != "" {
+			card.NodeTitle = node.Title
+		}
+		card.DueDate = cloneStringPointer(node.DueDate)
+		card.Priority = cloneIntPointer(node.Priority)
+		card.AssigneeUserID = cloneStringPointer(node.AssigneeUserID)
+		card.AssigneeName = cloneStringPointer(node.AssigneeName)
+		card.AssigneeEmail = cloneStringPointer(node.AssigneeEmail)
+		if card.AssigneeUserID != nil {
+			if user, ok := r.users[*card.AssigneeUserID]; ok {
+				if strings.TrimSpace(user.DisplayName) != "" {
+					card.AssigneeName = &user.DisplayName
+				}
+				if strings.TrimSpace(user.Email) != "" {
+					card.AssigneeEmail = &user.Email
+				}
+			}
+		}
+	}
+	if card.ProjectionUpdatedTimestamp.IsZero() {
+		card.ProjectionUpdatedTimestamp = card.UpdatedTimestamp
+	}
+	return card
+}
+
+func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) KanbanBoardProjectionRow {
+	card = r.withKanbanCardProjectionFieldsLocked(card)
+	logicGateID := ""
+	if card.LogicGateID != nil {
+		logicGateID = strings.TrimSpace(*card.LogicGateID)
+	}
+	status := logicGateWorkStatusKeyOrDefault(card.ColumnID, card.ColumnID)
+	row := KanbanBoardProjectionRow{
+		CompanyID:                  card.CompanyID,
+		ResourceType:               EntityTypeNode,
+		ResourceID:                 card.NodeID,
+		LogicGateID:                cloneStringPointer(card.LogicGateID),
+		DisplayTitle:               card.NodeTitle,
+		Status:                     &status,
+		DueDate:                    cloneStringPointer(card.DueDate),
+		Priority:                   cloneIntPointer(card.Priority),
+		AssigneeUserID:             cloneStringPointer(card.AssigneeUserID),
+		AssigneeDisplayName:        cloneStringPointer(card.AssigneeName),
+		AssigneeEmail:              cloneStringPointer(card.AssigneeEmail),
+		CreatedTimestamp:           card.CreatedTimestamp,
+		UpdatedTimestamp:           card.ProjectionUpdatedTimestamp,
+		BoardID:                    card.BoardID,
+		CardID:                     card.CardID,
+		ColumnID:                   card.ColumnID,
+		NodeID:                     card.NodeID,
+		NodeTitle:                  card.NodeTitle,
+		DescriptionSnapshot:        card.DescriptionSnapshot,
+		IsIssue:                    card.IsIssue,
+		Position:                   card.Position,
+		AssignmentID:               "",
+		AssignmentCreatedTimestamp: card.CreatedTimestamp,
+		AssignmentUpdatedTimestamp: card.UpdatedTimestamp,
+		ProjectionUpdatedTimestamp: card.ProjectionUpdatedTimestamp,
+	}
+	if node, ok := r.nodes[key(card.CompanyID, card.NodeID)]; ok {
+		row.NodeCreatedTimestamp = node.CreatedTimestamp
+		row.NodeUpdatedTimestamp = card.ProjectionUpdatedTimestamp
+		row.ResourceCreatedTimestamp = node.CreatedTimestamp
+	}
+	if assignment, ok := r.nodeLogicGateAssignmentLocked(card.CompanyID, card.NodeID, logicGateID); ok {
+		row.AssignmentID = assignment.AssignmentID
+		row.AssignmentCreatedTimestamp = assignment.CreatedTimestamp
+		row.AssignmentUpdatedTimestamp = assignment.UpdatedTimestamp
+	}
+	return row
+}
+
+func (r *MemoryRepo) kanbanProjectionRowsForNodeLocked(companyID, nodeID string) []KanbanBoardProjectionRow {
+	items := make([]KanbanBoardProjectionRow, 0)
+	for _, cards := range r.kanbanCards {
+		for _, card := range cards {
+			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
+				continue
+			}
+			items = append(items, r.kanbanProjectionRowFromCardLocked(card))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].BoardID != items[j].BoardID {
+			return items[i].BoardID < items[j].BoardID
+		}
+		return items[i].CardID < items[j].CardID
+	})
+	return items
+}
+
+func (r *MemoryRepo) kanbanProjectionRowsForLogicGateLocked(companyID, logicGateID string, query KanbanCardQuery) []KanbanBoardProjectionRow {
+	query = NormalizeKanbanCardQuery(query)
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	rows := make([]KanbanBoardProjectionRow, 0)
+	for _, card := range r.kanbanCards[boardKey(companyID, boardID)] {
+		if card.LogicGateID == nil || *card.LogicGateID != logicGateID {
+			continue
+		}
+		if query.ColumnID != "" && card.ColumnID != query.ColumnID {
+			continue
+		}
+		if query.AfterPosition > 0 && card.Position <= query.AfterPosition {
+			continue
+		}
+		rows = append(rows, r.kanbanProjectionRowFromCardLocked(card))
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].ColumnID != rows[j].ColumnID {
+			return rows[i].ColumnID < rows[j].ColumnID
+		}
+		if rows[i].Position != rows[j].Position {
+			return rows[i].Position < rows[j].Position
+		}
+		if !rows[i].CreatedTimestamp.Equal(rows[j].CreatedTimestamp) {
+			return rows[i].CreatedTimestamp.Before(rows[j].CreatedTimestamp)
+		}
+		return rows[i].CardID < rows[j].CardID
+	})
+	if len(rows) > query.Limit {
+		rows = rows[:query.Limit]
+	}
+	return rows
+}
+
+func (r *MemoryRepo) ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.kanbanProjectionRowsForLogicGateLocked(companyID, logicGateID, query), nil
+}
+
+func (r *MemoryRepo) ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.kanbanProjectionRowsForNodeLocked(companyID, nodeID), nil
+}
+
+func (r *MemoryRepo) ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.kanbanProjectionRowsForLogicGateLocked(companyID, logicGateID, KanbanCardQuery{Limit: KanbanMaxCardsLimit}), nil
+}
+
 func (r *MemoryRepo) ensureKanbanBoardLocked(companyID, boardID, title string) domain.KanbanBoard {
 	return r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, nil)
 }
@@ -424,10 +569,7 @@ func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCard
 		if query.AfterPosition > 0 && card.Position <= query.AfterPosition {
 			continue
 		}
-		if node, ok := r.nodes[key(companyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
-			card.NodeTitle = node.Title
-		}
-		items = append(items, card)
+		items = append(items, r.withKanbanCardProjectionFieldsLocked(card))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ColumnID != items[j].ColumnID {
@@ -460,10 +602,7 @@ func (r *MemoryRepo) GetKanbanCard(companyID, boardID, cardID string) (domain.Ka
 		if card.CardID != cardID {
 			continue
 		}
-		if node, ok := r.nodes[key(companyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
-			card.NodeTitle = node.Title
-		}
-		return card, nil
+		return r.withKanbanCardProjectionFieldsLocked(card), nil
 	}
 	return domain.KanbanCard{}, ErrNotFound
 }
@@ -631,6 +770,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	previousNode := r.nodes[nodeKey]
 	previousAssigneeUserID := nodeAssigneeUserID(previousNode)
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
+	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
@@ -666,7 +806,9 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		}
 	}
 	_ = previousAssigneeUserID
-	projectionDeltas := r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)
+	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
 
 	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -674,7 +816,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:             card,
+		Card:             r.withKanbanCardProjectionFieldsLocked(card),
 		Node:             r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment:       assignment,
 		ProjectionDeltas: projectionDeltas,
@@ -828,6 +970,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	crossLogicGateMove := assignment.LogicGateID != input.LogicGateID
 	targetBoardID := card.BoardID
 	if crossLogicGateMove {
@@ -938,7 +1081,9 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		_ = previousAssigneeUserID
 	}
 	r.syncNodeStatusFromKanbanCardLocked(resultCard)
-	projectionDeltas := r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)
+	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -946,7 +1091,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:             resultCard,
+		Card:             r.withKanbanCardProjectionFieldsLocked(resultCard),
 		Node:             r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment:       assignment,
 		ProjectionDeltas: projectionDeltas,
@@ -987,14 +1132,17 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	if assignment.CompatibilityBoardID != location.card.BoardID || assignment.CompatibilityCardID != location.card.CardID {
 		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
 	}
+	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID))
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus, input.FallbackStatusColor)
-	projectionDeltas := r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)
+	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
 
 	result := LogicGateNodeAssignmentRemoveResult{
-		Card:             location.card,
+		Card:             r.withKanbanCardProjectionFieldsLocked(location.card),
 		Node:             r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment:       assignment,
 		ProjectionDeltas: projectionDeltas,
@@ -1036,6 +1184,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	card.IsIssue = input.IsIssue
 	card.UpdatedTimestamp = time.Now().UTC()
 	r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
@@ -1052,7 +1201,9 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	r.syncNodeStatusFromKanbanCardLocked(card)
-	projectionDeltas := r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)
+	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1060,7 +1211,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:             card,
+		Card:             r.withKanbanCardProjectionFieldsLocked(card),
 		Node:             r.withNodeReadModelLocked(r.nodes[nodeKey]),
 		Assignment:       assignment,
 		ProjectionDeltas: projectionDeltas,
