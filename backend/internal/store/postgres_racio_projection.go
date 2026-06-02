@@ -674,9 +674,10 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 	return item, err
 }
 
-func (r *PostgresRepo) CurrentProjectionSequence(companyID, projectionName string) (int64, error) {
+func (r *PostgresRepo) CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
 	companyID = cleanUUIDText(companyID)
 	projectionName = strings.TrimSpace(projectionName)
+	projectionScope = strings.TrimSpace(projectionScope)
 	if companyID == "" || projectionName == "" {
 		return 0, ErrInvalid
 	}
@@ -687,24 +688,26 @@ select coalesce((
   from company_projection_sequences
   where company_id=$1::uuid
     and projection_name=$2::text
-), 0)`, companyID, projectionName).Scan(&sequence)
+    and projection_scope=$3::text
+), 0)`, companyID, projectionName, projectionScope).Scan(&sequence)
 	return sequence, err
 }
 
-func (r *PostgresRepo) NextProjectionSequence(companyID, projectionName string) (int64, error) {
+func (r *PostgresRepo) NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
 	companyID = cleanUUIDText(companyID)
 	projectionName = strings.TrimSpace(projectionName)
+	projectionScope = strings.TrimSpace(projectionScope)
 	if companyID == "" || projectionName == "" {
 		return 0, ErrInvalid
 	}
 	var sequence int64
 	err := r.db.QueryRowContext(context.Background(), `
-insert into company_projection_sequences (company_id, projection_name, sequence, updated_timestamp)
-values ($1::uuid, $2::text, 1, now())
-on conflict (company_id, projection_name)
+insert into company_projection_sequences (company_id, projection_name, projection_scope, sequence, updated_timestamp)
+values ($1::uuid, $2::text, $3::text, 1, now())
+on conflict (company_id, projection_name, projection_scope)
 do update set sequence=company_projection_sequences.sequence + 1,
               updated_timestamp=now()
-returning sequence`, companyID, projectionName).Scan(&sequence)
+returning sequence`, companyID, projectionName, projectionScope).Scan(&sequence)
 	return sequence, err
 }
 

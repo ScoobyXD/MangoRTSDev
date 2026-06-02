@@ -184,8 +184,8 @@ type WorkItemReadRepository interface {
 	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
-	CurrentProjectionSequence(companyID, projectionName string) (int64, error)
-	NextProjectionSequence(companyID, projectionName string) (int64, error)
+	CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
+	NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
 }
 
 type CompanyExplorerRepository interface {

@@ -341,7 +341,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		sequence, err := s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard)
+		sequence, err := s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardScopePrefix(boardID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
 			return

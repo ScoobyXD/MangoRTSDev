@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyKanbanProjectionEnvelope,
+  beginKanbanProjectionFallback,
+  finishKanbanProjectionFallback,
   kanbanCardFromProjectionRow,
+  nextKanbanProjectionCursor,
   seedKanbanProjectionVersions,
   type KanbanBoardProjectionRow,
   type KanbanProjectionEnvelope,
@@ -172,6 +175,7 @@ test("requests targeted fallback for projection sequence gaps and unknown delta 
 
   assert.equal(gap.fallback, true);
   assert.equal(gap.fallbackReason, "sequence_gap");
+  assert.equal(gap.lastSequence, 4);
 
   const unknown = applyKanbanProjectionEnvelope({
     envelope: envelope({ deltas: [{ operation: "replace", row: row() }] }),
@@ -183,4 +187,29 @@ test("requests targeted fallback for projection sequence gaps and unknown delta 
 
   assert.equal(unknown.fallback, true);
   assert.equal(unknown.fallbackReason, "unknown_delta_operation");
+});
+
+test("advances Kanban projection cursor only after successful fallback recovery", () => {
+  let cursor: number | undefined = 4;
+  const inFlightBoards = new Set<string>();
+
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-1"), true);
+  finishKanbanProjectionFallback(inFlightBoards, "board-1");
+  assert.equal(cursor, 4);
+
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-1"), true);
+  cursor = nextKanbanProjectionCursor(cursor, 10);
+  finishKanbanProjectionFallback(inFlightBoards, "board-1");
+  assert.equal(cursor, 10);
+});
+
+test("suppresses repeated Kanban projection fallback refetches while pending", () => {
+  const inFlightBoards = new Set<string>();
+
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-1"), true);
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-1"), false);
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-2"), true);
+
+  finishKanbanProjectionFallback(inFlightBoards, "board-1");
+  assert.equal(beginKanbanProjectionFallback(inFlightBoards, "board-1"), true);
 });

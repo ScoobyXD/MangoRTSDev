@@ -15,6 +15,7 @@ import (
 type projectionDeltaEnvelope struct {
 	CompanyID          string                  `json:"company_id"`
 	Projection         string                  `json:"projection"`
+	ProjectionScope    string                  `json:"projection_scope,omitempty"`
 	ProjectionSequence int64                   `json:"projection_sequence"`
 	Deltas             []store.ProjectionDelta `json:"deltas"`
 	ProjectedTimestamp time.Time               `json:"projected_timestamp"`
@@ -197,9 +198,10 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 	}()
 
 	type groupKey struct {
-		companyID  string
-		projection string
-		scope      string
+		companyID     string
+		projection    string
+		scope         string
+		sequenceScope string
 	}
 	grouped := map[groupKey][]store.ProjectionDelta{}
 	for _, delta := range deltas {
@@ -219,7 +221,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			if !ok {
 				continue
 			}
-			key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope}
+			key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope, sequenceScope: scope}
 			grouped[key] = append(grouped[key], filtered)
 		case store.ProjectionNameKanbanBoard:
 			boardID := projectionDeltaBoardID(delta)
@@ -236,7 +238,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				if !ok {
 					continue
 				}
-				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope}
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope, sequenceScope: scopePrefix}
 				grouped[key] = append(grouped[key], filtered)
 			}
 		}
@@ -248,12 +250,12 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 	sequences := map[string]int64{}
 	published := 0
 	for key, group := range grouped {
-		sequenceKey := key.companyID + "|" + key.projection
+		sequenceKey := key.companyID + "|" + key.projection + "|" + key.sequenceScope
 		sequence := sequences[sequenceKey]
 		if sequence == 0 {
-			next, err := s.repo.NextProjectionSequence(key.companyID, key.projection)
+			next, err := s.repo.NextProjectionSequence(key.companyID, key.projection, key.sequenceScope)
 			if err != nil {
-				log.Printf("failed to allocate projection sequence company_id=%s projection=%s: %v", key.companyID, key.projection, err)
+				log.Printf("failed to allocate projection sequence company_id=%s projection=%s scope=%s: %v", key.companyID, key.projection, key.sequenceScope, err)
 				continue
 			}
 			sequence = next
@@ -265,6 +267,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		envelope := projectionDeltaEnvelope{
 			CompanyID:          key.companyID,
 			Projection:         key.projection,
+			ProjectionScope:    key.sequenceScope,
 			ProjectionSequence: sequence,
 			Deltas:             group,
 			ProjectedTimestamp: time.Now().UTC(),

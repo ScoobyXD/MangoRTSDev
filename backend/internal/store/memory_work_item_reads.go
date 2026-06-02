@@ -442,26 +442,28 @@ func (r *MemoryRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicG
 	return r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
 }
 
-func (r *MemoryRepo) CurrentProjectionSequence(companyID, projectionName string) (int64, error) {
+func (r *MemoryRepo) CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
 	companyID = strings.TrimSpace(companyID)
 	projectionName = strings.TrimSpace(projectionName)
+	projectionScope = strings.TrimSpace(projectionScope)
 	if companyID == "" || projectionName == "" {
 		return 0, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.projectionSequences[companyID+":"+projectionName], nil
+	return r.projectionSequences[companyID+":"+projectionName+":"+projectionScope], nil
 }
 
-func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName string) (int64, error) {
+func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
 	companyID = strings.TrimSpace(companyID)
 	projectionName = strings.TrimSpace(projectionName)
+	projectionScope = strings.TrimSpace(projectionScope)
 	if companyID == "" || projectionName == "" {
 		return 0, ErrInvalid
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := companyID + ":" + projectionName
+	key := companyID + ":" + projectionName + ":" + projectionScope
 	r.projectionSequences[key]++
 	return r.projectionSequences[key], nil
 }
