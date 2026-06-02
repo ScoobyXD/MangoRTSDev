@@ -193,10 +193,17 @@ func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "failed_to_list_racio_matrix_projection")
 		return
 	}
+	sequence, err := s.repo.CurrentProjectionSequence(query.CompanyID, store.ProjectionNameRacioMatrix)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_racio_matrix_projection_sequence")
+		return
+	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-		"company_id": query.CompanyID,
-		"user_id":    query.UserID,
-		"limit":      query.Limit,
-		"rows":       rows,
+		"company_id":          query.CompanyID,
+		"user_id":             query.UserID,
+		"limit":               query.Limit,
+		"projection":          store.ProjectionNameRacioMatrix,
+		"projection_sequence": sequence,
+		"rows":                rows,
 	})
 }

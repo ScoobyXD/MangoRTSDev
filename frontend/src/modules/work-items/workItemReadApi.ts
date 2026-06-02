@@ -46,6 +46,8 @@ export type RacioMatrixProjectionResponse = {
   company_id: string;
   user_id: string;
   limit: number;
+  projection?: "racio_matrix";
+  projection_sequence?: number | string;
   rows: RacioMatrixProjectionRow[];
 };
 

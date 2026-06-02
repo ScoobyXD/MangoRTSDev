@@ -125,10 +125,18 @@ func getRacioMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, com
 		t.Fatalf("GET RACI projection status = %d body=%s, want 200", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Rows []store.RacioMatrixProjectionRow `json:"rows"`
+		Projection         string                           `json:"projection"`
+		ProjectionSequence *int64                           `json:"projection_sequence"`
+		Rows               []store.RacioMatrixProjectionRow `json:"rows"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode RACI projection response: %v body=%s", err, rr.Body.String())
+	}
+	if payload.Projection != store.ProjectionNameRacioMatrix {
+		t.Fatalf("projection = %q, want %q", payload.Projection, store.ProjectionNameRacioMatrix)
+	}
+	if payload.ProjectionSequence == nil {
+		t.Fatalf("projection_sequence missing from RACI projection response")
 	}
 	return payload.Rows
 }

@@ -674,6 +674,23 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 	return item, err
 }
 
+func (r *PostgresRepo) CurrentProjectionSequence(companyID, projectionName string) (int64, error) {
+	companyID = cleanUUIDText(companyID)
+	projectionName = strings.TrimSpace(projectionName)
+	if companyID == "" || projectionName == "" {
+		return 0, ErrInvalid
+	}
+	var sequence int64
+	err := r.db.QueryRowContext(context.Background(), `
+select coalesce((
+  select sequence
+  from company_projection_sequences
+  where company_id=$1::uuid
+    and projection_name=$2::text
+), 0)`, companyID, projectionName).Scan(&sequence)
+	return sequence, err
+}
+
 func (r *PostgresRepo) NextProjectionSequence(companyID, projectionName string) (int64, error) {
 	companyID = cleanUUIDText(companyID)
 	projectionName = strings.TrimSpace(projectionName)

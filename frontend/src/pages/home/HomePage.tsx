@@ -109,6 +109,13 @@ type RacioProjectionDeltaEnvelope = {
   deltas?: RacioProjectionDelta[];
 } & Partial<RacioProjectionDelta>;
 
+function parseRacioProjectionSequence(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
+}
+
 async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
   const cleanAccountEmail = accountEmail.trim().toLowerCase();
   if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(error)) return false;
@@ -2433,8 +2440,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         mode: "replace",
         logicGates: projectedLogicGates.logic_gates ?? [],
       });
-      if (minimumSequence > racioProjectionSequenceRef.current) {
-        racioProjectionSequenceRef.current = minimumSequence;
+      const sequence = Math.max(minimumSequence, parseRacioProjectionSequence(projection.projection_sequence));
+      if (sequence > racioProjectionSequenceRef.current) {
+        racioProjectionSequenceRef.current = sequence;
       }
     } catch (projectionError) {
       setError(formatError(projectionError, "Failed to refresh RACI matrix"));
@@ -2458,17 +2466,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       return;
     }
     if (envelope.company_id?.trim() !== companyID || envelope.projection !== "racio_matrix") return;
-    const sequence = typeof envelope.projection_sequence === "number" && Number.isFinite(envelope.projection_sequence)
-      ? envelope.projection_sequence
-      : typeof envelope.projection_sequence === "string" && /^(0|[1-9]\d*)$/.test(envelope.projection_sequence)
-        ? Number(envelope.projection_sequence)
-        : 0;
+    const sequence = parseRacioProjectionSequence(envelope.projection_sequence);
     if (sequence <= 0) {
       void refreshRacioMatrixProjection();
       return;
     }
     const previousSequence = racioProjectionSequenceRef.current;
-    if (previousSequence > 0 && sequence > previousSequence + 1) {
+    if (sequence > previousSequence + 1) {
       void refreshRacioMatrixProjection(sequence);
       return;
     }

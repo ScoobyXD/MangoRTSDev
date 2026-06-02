@@ -181,6 +181,7 @@ type WorkItemReadRepository interface {
 	ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error)
 	ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error)
 	ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error)
+	CurrentProjectionSequence(companyID, projectionName string) (int64, error)
 	NextProjectionSequence(companyID, projectionName string) (int64, error)
 }
 
