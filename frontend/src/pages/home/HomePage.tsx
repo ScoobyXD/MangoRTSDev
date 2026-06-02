@@ -1906,6 +1906,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
+  const logicGateByIDRef = useRef(logicGateByID);
+  logicGateByIDRef.current = logicGateByID;
   const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
@@ -2341,7 +2343,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           : new Set(previous
             .filter((node) => (
               node.assignee_user_id?.trim() === currentUserID ||
-              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByID.get(logicGateID), currentUserID))
+              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByIDRef.current.get(logicGateID), currentUserID))
             ))
             .map((node) => node.node_id))
         : new Set<string>();
@@ -2417,7 +2419,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       for (const nodeID of nextProjectedNodeIDs) racioProjectedNodeIDsRef.current.add(nodeID);
       for (const logicGateID of nextProjectedLogicGateIDs) racioProjectedLogicGateIDsRef.current.add(logicGateID);
     }
-  }, [apiBase, companyID, currentUserID, logicGateByID]);
+  }, [apiBase, companyID, currentUserID]);
   const refreshRacioMatrixProjection = useCallback(async (minimumSequence = 0) => {
     if (!companyID || !currentUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
     if (racioProjectionRefetchInFlightRef.current) return;
