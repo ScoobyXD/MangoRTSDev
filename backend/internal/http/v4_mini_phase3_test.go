@@ -280,6 +280,119 @@ func TestV4MiniPhase3KanbanBoardListProjectsVisibleLogicGates(t *testing.T) {
 	}
 }
 
+func TestV4MiniPhase3WorkspaceSnapshotKanbanPayloadProjectsVisibleLogicGates(t *testing.T) {
+	t.Parallel()
+
+	base := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777736"
+	base.EnsureCompany(companyID, "V4 Mini Kanban Snapshot Projection Co")
+	viewer := mustLogicGateWorkHTTPUser(t, base, companyID, "v4-mini-kanban-snapshot-viewer")
+	adminSubject := "v4-mini-kanban-snapshot-admin"
+	admin, err := base.UpsertAuthUser(adminSubject, "v4-mini-kanban-snapshot-admin@example.com", "V4 Mini Kanban Snapshot Admin")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser admin: %v", err)
+	}
+	if _, err := base.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership admin: %v", err)
+	}
+	visible, err := base.CreateLogicGate(companyID, "Visible Snapshot Projection Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate visible: %v", err)
+	}
+	hidden, err := base.CreateLogicGate(companyID, "Hidden Snapshot Projection Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate hidden: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   visible.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions visible snapshot gate: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeLogicGate,
+		EntityID:   hidden.LogicGateID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   viewer.UserID,
+			AccessLevel: store.EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden snapshot gate: %v", err)
+	}
+
+	repo := &phase3ForbiddenKanbanBoardListRepo{Repository: base}
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	viewerReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full&include_kanban_payloads=1", nil)
+	viewerReq = requestWithLogicGateWorkActorForTest(viewerReq, viewer, companyID)
+	viewerRec := httptest.NewRecorder()
+	handler.ServeHTTP(viewerRec, viewerReq)
+	if viewerRec.Code != http.StatusOK {
+		t.Fatalf("viewer full workspace snapshot status = %d body=%s", viewerRec.Code, viewerRec.Body.String())
+	}
+	if repo.boardListCalls != 0 {
+		t.Fatalf("viewer full workspace snapshot loaded legacy Kanban boards %d times", repo.boardListCalls)
+	}
+	viewerBody := viewerRec.Body.String()
+	if strings.Contains(viewerBody, hidden.LogicGateID) || strings.Contains(viewerBody, store.LogicGateKanbanBoardID(hidden.LogicGateID)) || strings.Contains(viewerBody, hidden.Header) {
+		t.Fatalf("viewer full workspace snapshot leaked hidden Logic Gate Kanban board: body=%s", viewerBody)
+	}
+	var viewerPayload struct {
+		KanbanBoards []domain.KanbanBoard `json:"kanban_boards"`
+	}
+	if err := json.NewDecoder(strings.NewReader(viewerBody)).Decode(&viewerPayload); err != nil {
+		t.Fatalf("decode viewer full workspace snapshot: %v body=%s", err, viewerBody)
+	}
+	if len(viewerPayload.KanbanBoards) != 1 {
+		t.Fatalf("viewer kanban_boards = %+v, want only visible Logic Gate board", viewerPayload.KanbanBoards)
+	}
+	viewerBoard := viewerPayload.KanbanBoards[0]
+	if viewerBoard.BoardID != store.LogicGateKanbanBoardID(visible.LogicGateID) || viewerBoard.LogicGateID == nil || *viewerBoard.LogicGateID != visible.LogicGateID || viewerBoard.Title != visible.Header {
+		t.Fatalf("viewer kanban board = %+v, want visible Logic Gate board", viewerBoard)
+	}
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full&include_kanban_payloads=1", nil)
+	adminReq = requestWithActorForTest(adminReq, admin, companyID)
+	adminRec := httptest.NewRecorder()
+	handler.ServeHTTP(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("admin full workspace snapshot status = %d body=%s", adminRec.Code, adminRec.Body.String())
+	}
+	if repo.boardListCalls != 0 {
+		t.Fatalf("admin full workspace snapshot loaded legacy Kanban boards %d times", repo.boardListCalls)
+	}
+	adminBody := adminRec.Body.String()
+	var adminPayload struct {
+		KanbanBoards []domain.KanbanBoard `json:"kanban_boards"`
+	}
+	if err := json.NewDecoder(strings.NewReader(adminBody)).Decode(&adminPayload); err != nil {
+		t.Fatalf("decode admin full workspace snapshot: %v body=%s", err, adminBody)
+	}
+	if len(adminPayload.KanbanBoards) != 2 {
+		t.Fatalf("admin kanban_boards = %+v, want both Logic Gate boards", adminPayload.KanbanBoards)
+	}
+	adminBoardsByID := make(map[string]domain.KanbanBoard, len(adminPayload.KanbanBoards))
+	for _, board := range adminPayload.KanbanBoards {
+		adminBoardsByID[board.BoardID] = board
+	}
+	for _, gate := range []domain.LogicGate{visible, hidden} {
+		board, ok := adminBoardsByID[store.LogicGateKanbanBoardID(gate.LogicGateID)]
+		if !ok || board.LogicGateID == nil || *board.LogicGateID != gate.LogicGateID || board.Title != gate.Header {
+			t.Fatalf("admin kanban_boards = %+v, missing Logic Gate board for %+v", adminPayload.KanbanBoards, gate)
+		}
+	}
+}
+
 type phase3ForbiddenKanbanCardListRepo struct {
 	store.Repository
 	cardListCalls int
