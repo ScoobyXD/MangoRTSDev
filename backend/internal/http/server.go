@@ -62,7 +62,6 @@ type Server struct {
 	nylasConfig                     NylasConfig
 	maxBodyBytes                    int64
 	legacyMapRoutesEnabled          bool
-	legacyKanbanRoutesEnabled       bool
 }
 
 type ServerOptions struct {
@@ -77,7 +76,6 @@ type ServerOptions struct {
 	NylasConfig                     NylasConfig
 	MaxRequestBodyBytes             int64
 	LegacyMapRoutesEnabled          bool
-	LegacyKanbanRoutesEnabled       bool
 	WorkspaceEventFanout            store.WorkspaceEventFanout
 	WorkspaceCatchupInterval        time.Duration
 	WorkspaceDerivedCatchupInterval time.Duration
@@ -165,7 +163,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasConfig:                     options.NylasConfig,
 		maxBodyBytes:                    options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:          options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
-		legacyKanbanRoutesEnabled:       options.LegacyKanbanRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_KANBAN_ROUTES")),
 	}
 	server.initializeNotificationDomainEventCheckpoints(context.Background())
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())

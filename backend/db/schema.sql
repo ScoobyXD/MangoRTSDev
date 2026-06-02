@@ -746,218 +746,15 @@ begin
     $sql$;
   end if;
 end $$;
-create table if not exists kanban_boards (
-  company_id uuid not null,
-  board_id text not null,
-  logic_gate_id uuid,
-  title text not null,
-  position integer not null,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint kanban_boards_title_nonblank_chk check (btrim(title) <> ''),
-  primary key (company_id, board_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
-);
-
-create table if not exists kanban_columns (
-  company_id uuid not null,
-  board_id text not null,
-  column_id uuid not null,
-  title text not null,
-  position integer not null,
-  width_px integer not null default 260,
-  height_px integer not null default 240,
-  item_color text not null default '#fbb152',
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
-  constraint kanban_columns_width_px_chk check (width_px between 180 and 2000),
-  constraint kanban_columns_height_px_chk check (height_px between 160 and 10000),
-  constraint kanban_columns_item_color_chk check (item_color ~ '^#[0-9A-Fa-f]{6}$'),
-  primary key (company_id, board_id, column_id)
-);
-
-create table if not exists kanban_cards (
-  company_id uuid not null,
-  board_id text not null,
-  card_id uuid not null,
-  column_id uuid not null,
-  node_id uuid not null,
-  logic_gate_id uuid,
-  node_title text not null,
-  description_snapshot text not null default '',
-  is_issue boolean not null default false,
-  position integer not null,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint kanban_cards_node_title_nonblank_chk check (btrim(node_title) <> ''),
-  primary key (company_id, board_id, card_id),
-  foreign key (company_id, board_id, column_id) references kanban_columns (company_id, board_id, column_id) on delete cascade,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  constraint kanban_cards_company_id_node_id_fkey foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
-);
-
-with ranked_attached_boards as (
-  select
-    company_id,
-    board_id,
-    logic_gate_id,
-    row_number() over (
-      partition by company_id, logic_gate_id
-      order by (board_id = 'logic-gate:' || logic_gate_id::text) desc, created_timestamp asc, board_id asc
-    ) as rn
-  from kanban_boards
-  where logic_gate_id is not null
-)
-update kanban_boards board
-set logic_gate_id = null,
-    updated_timestamp = now()
-from ranked_attached_boards ranked
-where board.company_id = ranked.company_id
-  and board.board_id = ranked.board_id
-  and ranked.rn > 1;
-
-with attached_boards as (
-  select distinct on (company_id, logic_gate_id)
-    company_id,
-    logic_gate_id,
-    board_id
-  from kanban_boards
-  where logic_gate_id is not null
-  order by company_id, logic_gate_id, (board_id = 'logic-gate:' || logic_gate_id::text) desc, created_timestamp asc, board_id asc
-),
-updated_attached as (
-  update kanban_boards board
-  set title = coalesce(nullif(btrim(logic_gate.header), ''), 'Logic Gate Kanban'),
-      updated_timestamp = now()
-  from logic_gates logic_gate
-  join attached_boards attached
-    on attached.company_id = logic_gate.company_id
-   and attached.logic_gate_id = logic_gate.logic_gate_id
-  where board.company_id = attached.company_id
-    and board.board_id = attached.board_id
-  returning board.company_id, board.board_id, board.logic_gate_id
-)
-insert into kanban_boards (
-  company_id,
-  board_id,
-  logic_gate_id,
-  title,
-  position,
-  created_timestamp,
-  updated_timestamp
-)
-select
-  logic_gate.company_id,
-  'logic-gate:' || logic_gate.logic_gate_id::text,
-  logic_gate.logic_gate_id,
-  coalesce(nullif(btrim(logic_gate.header), ''), 'Logic Gate Kanban'),
-  coalesce((
-    select max(existing.position)
-    from kanban_boards existing
-    where existing.company_id = logic_gate.company_id
-  ), 0) + row_number() over (partition by logic_gate.company_id order by logic_gate.created_timestamp, logic_gate.logic_gate_id) * 1000,
-  now(),
-  now()
-from logic_gates logic_gate
-where not exists (
-  select 1
-  from updated_attached attached
-  where attached.company_id = logic_gate.company_id
-    and attached.logic_gate_id = logic_gate.logic_gate_id
-)
-on conflict (company_id, board_id)
-do update set
-  logic_gate_id = excluded.logic_gate_id,
-  title = excluded.title,
-  updated_timestamp = now();
-
-with board_targets as (
-  select distinct on (logic_gate.company_id, logic_gate.logic_gate_id)
-    logic_gate.company_id,
-    logic_gate.logic_gate_id,
-    board.board_id
-  from logic_gates logic_gate
-  join kanban_boards board
-    on board.company_id = logic_gate.company_id
-   and board.logic_gate_id = logic_gate.logic_gate_id
-  order by logic_gate.company_id, logic_gate.logic_gate_id, (board.board_id = 'logic-gate:' || logic_gate.logic_gate_id::text) desc, board.created_timestamp asc, board.board_id asc
-)
-insert into kanban_columns (
-  company_id,
-  board_id,
-  column_id,
-  title,
-  position,
-  width_px,
-  height_px,
-  item_color,
-  created_timestamp,
-  updated_timestamp
-)
-select
-  target.company_id,
-  target.board_id,
-  md5((target.company_id::text || ':' || target.board_id || ':' || defaults.title))::uuid,
-  defaults.title,
-  defaults.position,
-  260,
-  240,
-  defaults.color,
-  now(),
-  now()
-from board_targets target
-cross join (
-  values
-    ('Pending', 1000, '#808080'),
-    ('In Progress', 2000, '#ff9500'),
-    ('Verify', 3000, '#00aaff'),
-    ('Done', 4000, '#39ff14')
-) as defaults(title, position, color)
-where not exists (
-  select 1
-  from kanban_columns column_row
-  where column_row.company_id = target.company_id
-    and column_row.board_id = target.board_id
-    and lower(btrim(column_row.title)) = lower(btrim(defaults.title))
-)
-on conflict (company_id, board_id, column_id)
-do update set
-  title = excluded.title,
-  updated_timestamp = now();
-
-update kanban_cards card
-set logic_gate_id = board.logic_gate_id
-from kanban_boards board
-where card.company_id = board.company_id
-  and card.board_id = board.board_id
-  and board.logic_gate_id is not null
-  and card.logic_gate_id is distinct from board.logic_gate_id;
-
-with ranked_logic_gate_cards as (
-  select
-    ctid,
-    row_number() over (
-      partition by company_id, node_id
-      order by updated_timestamp desc, created_timestamp desc, card_id desc
-    ) as rn
-  from kanban_cards
-  where logic_gate_id is not null
-)
-delete from kanban_cards target
-using ranked_logic_gate_cards ranked
-where target.ctid = ranked.ctid
-  and ranked.rn > 1;
-
 -- Source table for node-to-Logic-Gate work assignment.
--- Kanban cards remain compatibility/projection rows for the existing board UI.
+-- Kanban board/card API shapes are synthesized from this source and kanban_board_projection.
 create table if not exists node_logic_gate_assignments (
   assignment_id uuid not null,
   company_id uuid not null,
   node_id uuid not null,
   logic_gate_id uuid not null,
   status_key text not null,
-  column_id uuid not null,
+  column_id text not null,
   is_issue boolean not null default false,
   position integer not null,
   compatibility_board_id text not null,
@@ -969,8 +766,7 @@ create table if not exists node_logic_gate_assignments (
   constraint node_logic_gate_assignments_version_positive_chk check (version > 0),
   primary key (company_id, assignment_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, compatibility_board_id, column_id) references kanban_columns (company_id, board_id, column_id)
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
 );
 
 create unique index if not exists idx_node_logic_gate_assignments_one_active_node
@@ -981,72 +777,6 @@ create index if not exists idx_node_logic_gate_assignments_logic_gate_position
 
 create unique index if not exists idx_node_logic_gate_assignments_compat_card
   on node_logic_gate_assignments(company_id, compatibility_board_id, compatibility_card_id);
-
-with ranked_logic_gate_cards as (
-  select
-    card.company_id,
-    card.board_id,
-    card.card_id,
-    card.column_id,
-    card.node_id,
-    card.logic_gate_id,
-    card.is_issue,
-    card.position,
-    card.created_timestamp,
-    card.updated_timestamp,
-    regexp_replace(lower(btrim(translate(column_row.title, '_-', '  '))), '[[:space:]]+', ' ', 'g') as status_key,
-    row_number() over (
-      partition by card.company_id, card.node_id
-      order by card.updated_timestamp desc, card.created_timestamp desc, card.card_id desc
-    ) as rn
-  from kanban_cards card
-  join kanban_columns column_row
-    on column_row.company_id = card.company_id
-   and column_row.board_id = card.board_id
-   and column_row.column_id = card.column_id
-  where card.logic_gate_id is not null
-)
-insert into node_logic_gate_assignments (
-  assignment_id,
-  company_id,
-  node_id,
-  logic_gate_id,
-  status_key,
-  column_id,
-  is_issue,
-  position,
-  compatibility_board_id,
-  compatibility_card_id,
-  version,
-  created_timestamp,
-  updated_timestamp
-)
-select
-  md5(card.company_id::text || ':' || card.node_id::text || ':' || card.logic_gate_id::text)::uuid,
-  card.company_id,
-  card.node_id,
-  card.logic_gate_id,
-  coalesce(nullif(card.status_key, ''), 'unknown'),
-  card.column_id,
-  card.is_issue,
-  card.position,
-  card.board_id,
-  card.card_id,
-  1,
-  card.created_timestamp,
-  card.updated_timestamp
-from ranked_logic_gate_cards card
-where card.rn = 1
-on conflict (company_id, node_id)
-do update set
-  logic_gate_id = excluded.logic_gate_id,
-  status_key = excluded.status_key,
-  column_id = excluded.column_id,
-  is_issue = excluded.is_issue,
-  position = excluded.position,
-  compatibility_board_id = excluded.compatibility_board_id,
-  compatibility_card_id = excluded.compatibility_card_id,
-  updated_timestamp = excluded.updated_timestamp;
 
 create or replace function enforce_node_logic_gate_assignment_priority()
 returns trigger
@@ -1073,131 +803,6 @@ before insert or update of company_id, node_id on node_logic_gate_assignments
 for each row
 execute function enforce_node_logic_gate_assignment_priority();
 
-create or replace function sync_node_logic_gate_assignment_from_kanban_card()
-returns trigger as $$
-declare
-  next_status_key text;
-  next_assignment_id uuid;
-begin
-  if tg_op = 'DELETE' then
-    if old.logic_gate_id is not null then
-      delete from node_logic_gate_assignments assignment
-      where assignment.company_id = old.company_id
-        and assignment.node_id = old.node_id
-        and assignment.compatibility_board_id = old.board_id
-        and assignment.compatibility_card_id = old.card_id;
-    end if;
-    return old;
-  end if;
-
-  if tg_op = 'UPDATE'
-     and old.logic_gate_id is not null
-     and (
-       new.logic_gate_id is null
-       or old.company_id is distinct from new.company_id
-       or old.node_id is distinct from new.node_id
-       or old.board_id is distinct from new.board_id
-       or old.card_id is distinct from new.card_id
-     ) then
-    delete from node_logic_gate_assignments assignment
-    where assignment.company_id = old.company_id
-      and assignment.node_id = old.node_id
-      and assignment.compatibility_board_id = old.board_id
-      and assignment.compatibility_card_id = old.card_id;
-  end if;
-
-  if new.logic_gate_id is not null then
-    select regexp_replace(lower(btrim(translate(column_row.title, '_-', '  '))), '[[:space:]]+', ' ', 'g')
-    into next_status_key
-    from kanban_columns column_row
-    where column_row.company_id = new.company_id
-      and column_row.board_id = new.board_id
-      and column_row.column_id = new.column_id;
-
-    next_status_key := coalesce(nullif(next_status_key, ''), 'unknown');
-
-    select assignment.assignment_id
-    into next_assignment_id
-    from node_logic_gate_assignments assignment
-    where assignment.company_id = new.company_id
-      and assignment.node_id = new.node_id;
-
-    next_assignment_id := coalesce(
-      next_assignment_id,
-      md5(new.company_id::text || ':' || new.node_id::text || ':' || new.logic_gate_id::text)::uuid
-    );
-
-    insert into node_logic_gate_assignments (
-      assignment_id,
-      company_id,
-      node_id,
-      logic_gate_id,
-      status_key,
-      column_id,
-      is_issue,
-      position,
-      compatibility_board_id,
-      compatibility_card_id,
-      version,
-      created_timestamp,
-      updated_timestamp
-    ) values (
-      next_assignment_id,
-      new.company_id,
-      new.node_id,
-      new.logic_gate_id,
-      next_status_key,
-      new.column_id,
-      new.is_issue,
-      new.position,
-      new.board_id,
-      new.card_id,
-      1,
-      new.created_timestamp,
-      new.updated_timestamp
-    )
-    on conflict (company_id, node_id)
-    do update set
-      logic_gate_id = excluded.logic_gate_id,
-      status_key = excluded.status_key,
-      column_id = excluded.column_id,
-      is_issue = excluded.is_issue,
-      position = excluded.position,
-      compatibility_board_id = excluded.compatibility_board_id,
-      compatibility_card_id = excluded.compatibility_card_id,
-      version = case
-        when node_logic_gate_assignments.logic_gate_id is distinct from excluded.logic_gate_id
-          or node_logic_gate_assignments.status_key is distinct from excluded.status_key
-          or node_logic_gate_assignments.column_id is distinct from excluded.column_id
-          or node_logic_gate_assignments.is_issue is distinct from excluded.is_issue
-          or node_logic_gate_assignments.position is distinct from excluded.position
-          or node_logic_gate_assignments.compatibility_board_id is distinct from excluded.compatibility_board_id
-          or node_logic_gate_assignments.compatibility_card_id is distinct from excluded.compatibility_card_id
-        then node_logic_gate_assignments.version + 1
-        else node_logic_gate_assignments.version
-      end,
-      updated_timestamp = case
-        when node_logic_gate_assignments.logic_gate_id is distinct from excluded.logic_gate_id
-          or node_logic_gate_assignments.status_key is distinct from excluded.status_key
-          or node_logic_gate_assignments.column_id is distinct from excluded.column_id
-          or node_logic_gate_assignments.is_issue is distinct from excluded.is_issue
-          or node_logic_gate_assignments.position is distinct from excluded.position
-          or node_logic_gate_assignments.compatibility_board_id is distinct from excluded.compatibility_board_id
-          or node_logic_gate_assignments.compatibility_card_id is distinct from excluded.compatibility_card_id
-        then now()
-        else node_logic_gate_assignments.updated_timestamp
-      end;
-  end if;
-
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_sync_node_logic_gate_assignment_from_kanban_card on kanban_cards;
-create trigger trg_sync_node_logic_gate_assignment_from_kanban_card
-after insert or update or delete on kanban_cards
-for each row execute function sync_node_logic_gate_assignment_from_kanban_card();
-
 -- Disposable Logic Gate Kanban read model. Source truth remains nodes,
 -- logic_gates, node_logic_gate_assignments, and access/RACI tables.
 create table if not exists kanban_board_projection (
@@ -1205,7 +810,7 @@ create table if not exists kanban_board_projection (
   logic_gate_id uuid not null,
   node_id uuid not null,
   status text not null,
-  column_id uuid not null,
+  column_id text not null,
   position integer not null,
   title text not null,
   assignee_user_id uuid,
@@ -1373,16 +978,6 @@ create unique index if not exists idx_logic_gate_projection_table_one_text_box o
 create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
-create index if not exists idx_kanban_boards_company_position on kanban_boards(company_id, position, board_id);
-create unique index if not exists idx_kanban_boards_logic_gate
-  on kanban_boards(company_id, logic_gate_id)
-  where logic_gate_id is not null;
-create index if not exists idx_kanban_columns_board_position on kanban_columns(company_id, board_id, position);
-create index if not exists idx_kanban_cards_column_position on kanban_cards(company_id, board_id, column_id, position);
-create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id);
-create unique index if not exists idx_kanban_cards_one_logic_gate_card_per_node
-  on kanban_cards(company_id, node_id)
-  where logic_gate_id is not null;
 create index if not exists idx_kanban_board_projection_hot_read
   on kanban_board_projection(company_id, logic_gate_id, status, position, node_id);
 create index if not exists idx_kanban_board_projection_node
@@ -1406,7 +1001,6 @@ create table if not exists communications_email_nodes (
   unique (company_id, board_id, card_id),
   foreign key (user_id) references users (user_id) on delete cascade,
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (company_id, board_id, card_id) references kanban_cards (company_id, board_id, card_id) on delete cascade,
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
 );
 

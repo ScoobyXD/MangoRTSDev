@@ -155,9 +155,6 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
-	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, item.LogicGateID, item.Header); err != nil {
-		return domain.LogicGate{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -187,14 +184,6 @@ RETURNING company_id, logic_gate_id, header, created_timestamp
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.LogicGate{}, ErrNotFound
 		}
-		return domain.LogicGate{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-update kanban_boards
-set title=$3,
-    updated_timestamp=now()
-where company_id=$1 and logic_gate_id=$2::uuid`,
-		companyID, logicGateID, normalizeKanbanBoardTitle(LogicGateKanbanBoardID(logicGateID), header)); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
@@ -744,57 +733,15 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	boardID := LogicGateKanbanBoardID(logicGateID)
 	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2::uuid
-		 )
-		 delete from company_explorer_folder_items
+		`delete from company_explorer_folder_items
 		 where company_id=$1
 		   and item_type='kanban'
-		   and item_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
+		   and item_id=$2`,
+		companyID, boardID,
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2::uuid
-		 )
-		 delete from kanban_cards
-		 where company_id=$1
-		   and board_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`with target_boards as (
-		   select $3::text as board_id
-		   union
-		   select board_id
-		   from kanban_boards
-		   where company_id=$1 and logic_gate_id=$2::uuid
-		 )
-		 delete from kanban_columns
-		 where company_id=$1
-		   and board_id in (select board_id from target_boards)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_boards
-		 where company_id=$1
-		   and (board_id=$3 or logic_gate_id=$2::uuid)`,
-		companyID, logicGateID, boardID,
-	); err != nil {
+	if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 		return err
 	}
 
