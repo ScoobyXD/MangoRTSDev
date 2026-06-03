@@ -767,7 +767,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       applyCards(nextCards);
     } catch {
       if (boardRefreshRequestRef.current !== requestID) return;
-      setError("Kanban board API unavailable");
+      if (columnsRef.current.length === 0 && cardsRef.current.length === 0 && !logicGateIDFromKanbanBoardID(requestedBoardID)) {
+        setError("Kanban board API unavailable");
+      }
     } finally {
       if (boardRefreshRequestRef.current === requestID) setLoading(false);
     }

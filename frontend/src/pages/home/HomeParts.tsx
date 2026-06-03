@@ -29,6 +29,7 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
+const HOME_COMPACT_CONTEXT_MENU_WIDTH = 210;
 const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 1, label: "1  URGENT(<1hr)" },
   { value: 2, label: "2  By end of day" },
@@ -3086,7 +3087,7 @@ export function RaciRoleInboxMatrix({
     </section>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
     {cellContextMenu && (
-      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
         <button
           type="button"
           style={sharedInboxContextMenuButtonStyle}
@@ -3399,7 +3400,7 @@ export function AciInboxMatrix({
     </section>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
     {cellContextMenu && (
-      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
         <button
           type="button"
           style={sharedInboxContextMenuButtonStyle}
@@ -3714,7 +3715,7 @@ export function ResponsibleInboxMatrix({
     </section>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
     {cellContextMenu && (
-      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)}>
+      <FrameRightClickMenu x={cellContextMenu.x} y={cellContextMenu.y} onClose={() => setCellContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
         <button
           type="button"
           style={sharedInboxContextMenuButtonStyle}
@@ -3999,7 +4000,7 @@ export function LogicGateInboxNodeGroupCard({
         </div>
       )}
       {groupContextMenu && (
-        <FrameRightClickMenu x={groupContextMenu.x} y={groupContextMenu.y} onClose={() => setGroupContextMenu(null)}>
+        <FrameRightClickMenu x={groupContextMenu.x} y={groupContextMenu.y} onClose={() => setGroupContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
           {onCreateLogicGate && (
             <button
               type="button"
