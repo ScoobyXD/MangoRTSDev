@@ -132,6 +132,8 @@ test("Home workspace panel ignores internal derived projection request events", 
   assert.equal(workspaceEventTouchesHomePanel("node_map_position_upsert_requested"), false);
   assert.equal(workspaceEventTouchesHomePanel("logic_gate_map_position_upsert_requested"), false);
   assert.equal(workspaceEventTouchesHomePanel("node_created"), true);
+  assert.equal(workspaceEventTouchesHomePanel("relationship_created"), true);
+  assert.equal(workspaceEventTouchesHomePanel("relationship_deleted"), true);
 });
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {
