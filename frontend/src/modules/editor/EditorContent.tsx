@@ -81,6 +81,7 @@ import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
+import { listCompanyUsers } from "../communications/communicationsApi";
 import {
   createEditorCollaborationClientID,
   editorCollaborationLabel,
@@ -402,14 +403,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     (async () => {
       try {
-        const payload = await requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
-        if (!cancelled) setCompanyUsers(payload.users ?? []);
+        const users = await listCompanyUsers(companyID);
+        if (!cancelled) setCompanyUsers(users);
       } catch {
         if (!cancelled) setCompanyUsers([]);
       }
     })();
     return () => { cancelled = true; };
-  }, [companyID, requestJSON]);
+  }, [companyID]);
 
   const companyUserByID = useMemo(() => {
     const items = new Map<string, CompanyUser>();
@@ -1464,6 +1465,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [applyLinkedLogicGate, applyLinkedNode, companyID, forcedEntityID, forcedEntityKind, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope, shouldApplySelectionChangedAt]);
 
   useEffect(() => {
+    if (forcedEntityKind) return;
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     const syncTitleFromGraph = () => {
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
@@ -1485,9 +1487,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
     syncTitleFromGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, syncNodeAssignee]);
+  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID, syncNodeAssignee]);
 
   useEffect(() => {
+    if (forcedEntityKind) return;
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     const syncTitleFromGraph = () => {
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
@@ -1504,7 +1507,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
     syncTitleFromGraph();
     return subscribeLogicGateRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     let cancelled = false;

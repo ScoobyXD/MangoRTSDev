@@ -299,15 +299,19 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	view, _ := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
+	view, viewBody := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
 	if !view.CanView || !view.CanEdit || view.CanAdmin {
 		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.RaciAssignmentCount != 1 {
 		t.Fatalf("logic gate view = %+v, want details, projection, and RACI", view)
 	}
-	if view.NodeCount != 1 || len(view.Work.Nodes) != 1 || view.Work.Nodes[0].NodeID != assignedNode.NodeID {
-		t.Fatalf("logic gate work nodes = %+v, want assigned node through logic gate context", view.Work.Nodes)
+	if strings.Contains(viewBody, `"work"`) || view.NodeCount != 0 || view.AssignmentCount != 0 {
+		t.Fatalf("default logic gate view included work payload: %s", viewBody)
+	}
+	viewWithWork, _ := getLogicGateViewV2ForTestWithQuery(t, handler, companyID, logicGate.LogicGateID, viewer, "include_work=1", http.StatusOK)
+	if viewWithWork.NodeCount != 1 || len(viewWithWork.Work.Nodes) != 1 || viewWithWork.Work.Nodes[0].NodeID != assignedNode.NodeID {
+		t.Fatalf("logic gate work nodes = %+v, want assigned node through explicit include_work", viewWithWork.Work.Nodes)
 	}
 
 	getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
@@ -354,7 +358,16 @@ func getNodeViewV2ForTest(t *testing.T, handler http.Handler, companyID, nodeID 
 
 func getLogicGateViewV2ForTest(t *testing.T, handler http.Handler, companyID, logicGateID string, actor domain.User, wantStatus int) (domain.LogicGateView, string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGateID+"/view?company_id="+companyID, nil)
+	return getLogicGateViewV2ForTestWithQuery(t, handler, companyID, logicGateID, actor, "", wantStatus)
+}
+
+func getLogicGateViewV2ForTestWithQuery(t *testing.T, handler http.Handler, companyID, logicGateID string, actor domain.User, extraQuery string, wantStatus int) (domain.LogicGateView, string) {
+	t.Helper()
+	path := "/v2/logic-gates/" + logicGateID + "/view?company_id=" + companyID
+	if strings.TrimSpace(extraQuery) != "" {
+		path += "&" + extraQuery
+	}
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req = requestWithLogicGateWorkActorForTest(req, actor, companyID)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

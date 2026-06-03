@@ -265,38 +265,7 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeLegacyKanbanDisabled(w)
-		return
-	}
-	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
-	if companyID == "" || boardID == "" {
-		writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
-		return
-	}
-	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
-	if logicGateID == "" {
-		writeLegacyKanbanDisabled(w)
-		return
-	}
-	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
-		return
-	}
-	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_kanban_column_query")
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "logic_gate_not_found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_columns")
-		return
-	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"columns": columns})
+	writeLegacyKanbanDisabled(w)
 }
 
 func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) {
@@ -305,52 +274,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
-		query, ok, errCode := parseKanbanCardQueryParams(r)
-		if !ok {
-			writeError(w, http.StatusBadRequest, errCode)
-			return
-		}
-		if companyID == "" || boardID == "" {
-			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
-			return
-		}
-		logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
-		if logicGateID == "" {
-			writeLegacyKanbanDisabled(w)
-			return
-		}
-		if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
-			return
-		}
-		cards, err := s.repo.ListKanbanCards(companyID, boardID, query)
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "logic_gate_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
-			return
-		}
-		cards, ok = s.filterKanbanCardsVisibleToActor(w, r, companyID, cards)
-		if !ok {
-			return
-		}
-		sequence, err := s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardScopePrefix(boardID))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
-			return
-		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-			"cards":               cards,
-			"projection":          store.ProjectionNameKanbanBoard,
-			"projection_sequence": sequence,
-		})
+		writeLegacyKanbanDisabled(w)
 		return
 	}
 	if r.Method != http.MethodPost {

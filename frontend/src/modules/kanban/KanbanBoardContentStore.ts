@@ -1,5 +1,6 @@
-import { listKanbanCardsResponse, listKanbanColumns } from "./kanbanApi";
-import type { KanbanCard, KanbanColumn } from "./shared";
+import { getLogicGateArenaView } from "./kanbanApi.js";
+import type { KanbanCard, KanbanColumn } from "./shared.js";
+import { logicGateIDFromKanbanBoardID } from "./shared.js";
 
 export type KanbanBoardContents = {
   columns: KanbanColumn[];
@@ -59,11 +60,15 @@ export async function getKanbanBoardContentsSingleFlight(apiBase: string, compan
   if (inflight) return inflight.then(cloneContents);
 
   const version = contentVersion(cacheKey);
-  const promise = Promise.all([
-    listKanbanColumns(apiBase, companyID, boardID),
-    listKanbanCardsResponse(apiBase, companyID, boardID, "", cardLimit),
-  ]).then(([columns, cardResponse]) => {
-    const contents = { columns, cards: cardResponse.cards, projectionSequence: cardResponse.projection_sequence };
+  const logicGateID = logicGateIDFromKanbanBoardID(boardID);
+  const promise = (logicGateID
+    ? getLogicGateArenaView(apiBase, companyID, logicGateID).then((view) => ({
+      columns: view.columns ?? [],
+      cards: (view.cards ?? []).slice(0, cardLimit),
+      projectionSequence: undefined,
+    }))
+    : Promise.resolve({ columns: [], cards: [], projectionSequence: undefined })
+  ).then((contents) => {
     if (contentVersion(cacheKey) === version) contentCache.set(cacheKey, cloneContents(contents));
     return contents;
   }).finally(() => {

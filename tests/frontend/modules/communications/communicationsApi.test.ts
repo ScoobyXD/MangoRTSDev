@@ -11,6 +11,7 @@ import {
   emailMessageMatchesListFilters,
   getEmailMessage,
   invalidateCommunicationsCache,
+  listCompanyUsers,
   listLogicGates,
   listCommunicationsSharedInboxes,
   listEmailMessages,
@@ -170,6 +171,37 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
       "/v1/company-explorer/folder-items?company_id=company-1&item_type=node",
       "/v1/nodes?company_id=company-1",
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("listCompanyUsers shares concurrent requests and caches per auth session company", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  let releaseGate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    await gate;
+    return jsonResponse({ users: [{ company_id: "company-1", user_id: "user-1", email: "user@example.test", role: "company_user" }] });
+  }) as typeof fetch;
+
+  try {
+    const first = listCompanyUsers("company-1");
+    const second = listCompanyUsers("company-1");
+    releaseGate();
+    const [firstUsers, secondUsers] = await Promise.all([first, second]);
+    const cachedUsers = await listCompanyUsers("company-1");
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(firstUsers.map((user) => user.user_id), ["user-1"]);
+    assert.deepEqual(secondUsers.map((user) => user.user_id), ["user-1"]);
+    assert.deepEqual(cachedUsers.map((user) => user.user_id), ["user-1"]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

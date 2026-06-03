@@ -41,6 +41,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanProjectionDeltas.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanBoardContentStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
@@ -84,6 +85,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas"', '"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/richTextEditing"', '"../../../../frontend/src/modules/editor/richTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorUndoHistory"', '"../../../../frontend/src/modules/editor/editorUndoHistory.js"');

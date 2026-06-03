@@ -47,6 +47,14 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
 		return
 	}
+	etag, err := s.logicGateWorkETag(r, companyID, logicGateID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_work_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
 	work, err := s.repo.GetLogicGateWork(companyID, logicGateID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_request")
@@ -61,7 +69,17 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_work")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, work)
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, work, etag)
+}
+
+func (s *Server) logicGateWorkETag(r *http.Request, companyID, logicGateID string) (string, error) {
+	boardID := store.LogicGateKanbanBoardID(logicGateID)
+	return s.workspaceEventETag(r, companyID, "logic-gate-work:"+logicGateID, []store.DomainEventStreamQuery{
+		workspaceEventQuery(nodeListWorkspaceEventTypes...),
+		workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+		workspaceEventQueryPayload(kanbanColumnWorkspaceEventTypes, boardIDPayload(boardID)),
+		workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
+	})
 }
 
 func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.Request, logicGateID string) {

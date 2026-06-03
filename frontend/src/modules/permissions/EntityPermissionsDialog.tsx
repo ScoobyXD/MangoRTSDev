@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { BoundRequestJSON } from "../api/requestJSON";
+import { listCompanyUsers } from "../communications/communicationsApi";
 
 type PermissionEntityType = "node" | "logic_gate" | "shared_triage_folder";
 type PermissionSubjectType = "user" | "group";
@@ -113,13 +114,13 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       setBusy(true);
       setError("");
       try {
-        const [usersPayload, groupsPayload, permissionsPayload] = await Promise.all([
-          requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
+        const [companyUsers, groupsPayload, permissionsPayload] = await Promise.all([
+          listCompanyUsers(companyID),
           requestJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
           requestJSON<PermissionPayload>(`${permissionsPath}?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (cancelled) return;
-        setUsers(usersPayload.users ?? []);
+        setUsers(companyUsers.map((user) => ({ ...user, email: user.email ?? "", role: user.role ?? "company_user" })));
         setGroups(groupsPayload.groups ?? []);
         setMembers(groupsPayload.members ?? []);
         const loadedDefaultAccess = permissionsPayload.default_access === "no_access" ? "no_access" : "edit";

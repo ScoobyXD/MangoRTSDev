@@ -21,6 +21,7 @@ import {
   type LoginResult,
 } from "./cognitoAuth";
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
+import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
@@ -1120,7 +1121,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     }
     setError("");
     const [usersResult, onboardingResult, groupsResult] = await Promise.allSettled([
-      apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
+      listCompanyUsers(companyID),
       apiFetchJSON<{ onboarding: CompanyUserOnboarding[] }>(`/v1/companies/${encodeURIComponent(companyID)}/onboarding`),
       apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
     ]);
@@ -1134,7 +1135,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
       setError(formatAuthError(usersResult.reason, "Failed to load users"));
       return;
     }
-    setUsers(usersResult.value.users ?? []);
+    setUsers(usersResult.value.map((user) => ({ ...user, email: user.email ?? "", role: user.role ?? "company_user" })));
 
     const warnings: string[] = [];
     if (onboardingResult.status === "fulfilled") {
@@ -1569,6 +1570,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                   setError("");
                   try {
                     await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/users/${encodeURIComponent(deleteConfirmation.user_id)}`, { method: "DELETE" });
+                    markCommunicationsWorkspacePanelStale(companyID, { companyUsers: true });
                     setUsers((previous) => previous.filter((user) => user.user_id !== deleteConfirmation.user_id));
                     setDeleteConfirmation(null);
                     setDeleteAcknowledged(false);
