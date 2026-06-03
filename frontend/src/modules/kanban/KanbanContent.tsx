@@ -162,10 +162,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
-  const initialLogicGateID = logicGateIDFromKanbanBoardID(frameBoardID);
-  const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
+  const initialArenaLogicGateID = arenaMode ? forcedLogicGateID.trim() : "";
+  const initialBoardID = initialArenaLogicGateID ? logicGateKanbanBoardID(initialArenaLogicGateID) : frameBoardID;
+  const initialLogicGateID = initialArenaLogicGateID || logicGateIDFromKanbanBoardID(initialBoardID);
+  const [activeBoardID, setActiveBoardID] = useState(initialBoardID);
   const [activeLogicGateID, setActiveLogicGateID] = useState(initialLogicGateID);
-  const [activeLogicGateLabel, setActiveLogicGateLabel] = useState("");
+  const [activeLogicGateLabel, setActiveLogicGateLabel] = useState(() => initialArenaLogicGateID ? humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate") : "");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
@@ -226,6 +228,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const kanbanProjectionSequenceRef = useRef<number | undefined>(undefined);
   const kanbanProjectionFallbackBoardsInFlightRef = useRef(new Set<string>());
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
+  const arenaViewLoadKeyRef = useRef("");
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
@@ -288,12 +291,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
 
   useEffect(() => {
+    if (arenaMode) {
+      setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID, { allowHorizontalOverflow: true }));
+      return;
+    }
     const nextLogicGateID = logicGateIDFromKanbanBoardID(frameBoardID);
     setActiveBoardID(frameBoardID);
     setActiveLogicGateID(nextLogicGateID);
     setActiveLogicGateLabel("");
     setNodeEditorOverlay(null);
-    setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID, { allowHorizontalOverflow: arenaMode }));
+    setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID, { allowHorizontalOverflow: false }));
   }, [arenaMode, companyID, frameBoardID]);
 
   useEffect(() => {
@@ -607,6 +614,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!arenaMode) return;
     const logicGateID = forcedLogicGateID.trim();
     if (!logicGateID) {
+      arenaViewLoadKeyRef.current = "";
       if (activeLogicGateID) {
         setActiveLogicGateID("");
         setActiveLogicGateLabel("");
@@ -614,18 +622,32 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       return;
     }
     const nextBoardID = logicGateKanbanBoardID(logicGateID);
-    if (activeBoardIDRef.current === nextBoardID && activeLogicGateID === logicGateID) return;
+    const loadKey = `${logicGateID}\x1f${nextBoardID}`;
+    const nextLabel = humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate");
+    const nextHighlightedEntity = forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null;
+    if (activeBoardIDRef.current === nextBoardID && activeLogicGateID === logicGateID) {
+      setHighlightedEntity(nextHighlightedEntity);
+      setActiveLogicGateLabel(nextLabel);
+      if (arenaViewLoadKeyRef.current !== loadKey) {
+        arenaViewLoadKeyRef.current = loadKey;
+        loadLogicGateArenaView(logicGateID, nextBoardID);
+      }
+      return;
+    }
     activeBoardIDRef.current = nextBoardID;
     setSelectedCardIDs(new Set());
     setSelectionAnchorCardID("");
-    setHighlightedEntity(forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null);
+    setHighlightedEntity(nextHighlightedEntity);
     setActiveLogicGateID(logicGateID);
-    setActiveLogicGateLabel(humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate"));
+    setActiveLogicGateLabel(nextLabel);
     setNodeEditorOverlay(null);
     setActiveBoardID(nextBoardID);
     const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
     if (cachedBoard) upsertBoardInList(cachedBoard);
-    loadLogicGateArenaView(logicGateID, nextBoardID);
+    if (arenaViewLoadKeyRef.current !== loadKey) {
+      arenaViewLoadKeyRef.current = loadKey;
+      loadLogicGateArenaView(logicGateID, nextBoardID);
+    }
   }, [activeLogicGateID, arenaMode, forcedHighlightedNodeID, forcedLogicGateID, forcedLogicGateLabel, loadLogicGateArenaView, upsertBoardInList]);
 
   useEffect(() => {
@@ -893,6 +915,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, []);
 
   useEffect(() => {
+    const streamBoardID = activeBoardID.trim();
+    if (!streamBoardID) return undefined;
+    if (arenaMode) {
+      const logicGateID = activeLogicGateID.trim();
+      if (!logicGateID || streamBoardID !== logicGateKanbanBoardID(logicGateID)) return undefined;
+    }
     return subscribeWorkspaceStream(apiBase, companyID, {
       onGap: reconcileKanbanGap,
       onEvent(event) {
@@ -1057,8 +1085,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           // The list can still be manually refreshed from the header.
         }
       },
-    }, { projections: ["kanban_board"], kanbanBoardID: activeBoardID });
-  }, [activeBoardID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
+    }, { projections: ["kanban_board"], kanbanBoardID: streamBoardID });
+  }, [activeBoardID, activeLogicGateID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

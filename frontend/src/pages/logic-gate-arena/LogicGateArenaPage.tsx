@@ -5,7 +5,7 @@ import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
-import { consumePendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
+import { consumePendingLogicGateArenaSelection, readPendingLogicGateArenaSelection, type PendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
   frames: FrameDataModel[];
@@ -59,6 +59,55 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+function emptyArenaLogicGateSelection(): ArenaLogicGateSelection {
+  return { id: "", label: "", emptyMessage: "" };
+}
+
+function selectionFromTargetLogicGate(targetLogicGate: LogicGateArenaPageProps["targetLogicGate"]): ArenaLogicGateSelection | null {
+  if (!targetLogicGate) return null;
+  const logicGateID = targetLogicGate.logicGateID.trim();
+  if (!logicGateID) return null;
+  return {
+    id: logicGateID,
+    label: humanLabelOrFallback(targetLogicGate.label, ""),
+    emptyMessage: "",
+    nodeID: targetLogicGate.nodeID,
+    informationID: targetLogicGate.informationID,
+    requestID: targetLogicGate.requestID,
+  };
+}
+
+function selectionFromPendingLogicGateArenaSelection(pending: PendingLogicGateArenaSelection | null): ArenaLogicGateSelection | null {
+  if (!pending) return null;
+  return {
+    id: pending.logicGateID,
+    label: humanLabelOrFallback(pending.label, ""),
+    emptyMessage: "",
+    nodeID: pending.nodeID,
+    informationID: pending.informationID,
+    requestID: pending.createdAt,
+  };
+}
+
+function readInitialArenaLogicGateSelection(companyID: string, targetLogicGate: LogicGateArenaPageProps["targetLogicGate"]): ArenaLogicGateSelection {
+  return selectionFromTargetLogicGate(targetLogicGate)
+    ?? selectionFromPendingLogicGateArenaSelection(readPendingLogicGateArenaSelection(companyID))
+    ?? emptyArenaLogicGateSelection();
+}
+
+function arenaSelectionChangedAt(selection: ArenaLogicGateSelection): number {
+  return selection.requestID && selection.requestID > 0 ? selection.requestID : Date.now();
+}
+
+function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: ArenaLogicGateSelection): boolean {
+  return current.id === next.id
+    && current.label === next.label
+    && current.emptyMessage === next.emptyMessage
+    && (current.nodeID ?? "") === (next.nodeID ?? "")
+    && (current.informationID ?? "") === (next.informationID ?? "")
+    && (current.requestID ?? 0) === (next.requestID ?? 0);
+}
+
 function getArenaFrames(frames: FrameDataModel[]) {
   return {
     editor: frames.find((frame) => frame.kind === "editor") ?? null,
@@ -71,7 +120,11 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
   const lastArenaSelectionChangedAtRef = useRef(0);
-  const [selectedLogicGate, setSelectedLogicGate] = useState<ArenaLogicGateSelection>({ id: "", label: "", emptyMessage: "" });
+  const [selectedLogicGate, setSelectedLogicGate] = useState<ArenaLogicGateSelection>(() => {
+    const initialSelection = readInitialArenaLogicGateSelection(companyID, targetLogicGate);
+    if (initialSelection.id) lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(initialSelection);
+    return initialSelection;
+  });
 
   const arenaFrames = useMemo(() => getArenaFrames(frames), [frames]);
   const editorFrame = arenaFrames.editor;
@@ -80,24 +133,19 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const kanbanUnits = Math.max(1, kanbanFrame?.w ?? 44);
 
   useEffect(() => {
-    const pending = consumePendingLogicGateArenaSelection(companyID);
-    if (!pending) return;
-    lastArenaSelectionChangedAtRef.current = pending.createdAt;
-    setSelectedLogicGate({ id: pending.logicGateID, label: humanLabelOrFallback(pending.label, ""), emptyMessage: "", nodeID: pending.nodeID, informationID: pending.informationID, requestID: pending.createdAt });
+    const pendingSelection = selectionFromPendingLogicGateArenaSelection(consumePendingLogicGateArenaSelection(companyID));
+    if (!pendingSelection) return;
+    const changedAt = arenaSelectionChangedAt(pendingSelection);
+    if (changedAt <= lastArenaSelectionChangedAtRef.current) return;
+    lastArenaSelectionChangedAtRef.current = changedAt;
+    setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, pendingSelection) ? current : pendingSelection);
   }, [companyID]);
 
   useEffect(() => {
-    if (!targetLogicGate) return;
-    const logicGateID = targetLogicGate.logicGateID.trim();
-    lastArenaSelectionChangedAtRef.current = Date.now();
-    setSelectedLogicGate({
-      id: logicGateID,
-      label: logicGateID ? humanLabelOrFallback(targetLogicGate.label, "") : "",
-      emptyMessage: "",
-      nodeID: targetLogicGate.nodeID,
-      informationID: targetLogicGate.informationID,
-      requestID: targetLogicGate.requestID,
-    });
+    const nextSelection = selectionFromTargetLogicGate(targetLogicGate);
+    if (!nextSelection) return;
+    lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(nextSelection);
+    setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, nextSelection) ? current : nextSelection);
   }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {

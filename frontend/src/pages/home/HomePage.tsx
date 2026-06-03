@@ -2326,12 +2326,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
+    const cleanNodeID = nodeID?.trim() ?? "";
     const cleanInformationID = informationID?.trim() ?? "";
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
       label,
-      nodeID,
+      nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
     });
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
@@ -2341,6 +2342,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       id: cleanLogicGateID,
       label,
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
+      nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
       changedAt: Date.now(),
     });
