@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAuthConfig } from "../../auth/cognitoAuth";
-import { createRequestJSON } from "../../modules/api/requestJSON";
+import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
 import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
@@ -52,7 +52,7 @@ import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gat
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
-import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
+import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
@@ -260,6 +260,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const foldersRequestSeqRef = useRef(0);
   const sharedInboxesRequestInFlightRef = useRef(false);
   const logicGatePanelRequestInFlightRef = useRef(false);
+  const nodeRelationshipRequestSeqRef = useRef(0);
   const messageRequestKeyRef = useRef("");
   const pendingMessageReloadRef = useRef(false);
   const pendingMessageRefreshRef = useRef(false);
@@ -283,6 +284,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const racioProjectionSequenceRef = useRef(0);
   const racioProjectionRefetchInFlightRef = useRef(false);
   const racioProjectionInitializedRef = useRef(false);
+  const racioProjectionDeltaHandlerRef = useRef<((eventData: string) => void) | null>(null);
   const racioProjectedNodeIDsRef = useRef<Set<string>>(new Set());
   const racioProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef<EmailMessage[]>([]);
@@ -306,19 +308,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const connection = status?.connection;
-
-  useEffect(() => {
-    if (!companyID || !isInboxMatrixView) {
-      setNodeRelationships([]);
-      return undefined;
-    }
-    const updateRelationships = () => {
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      setNodeRelationships(snapshot.relationships ?? []);
-    };
-    updateRelationships();
-    return subscribeNodeRelationshipGraph(apiBase, companyID, updateRelationships);
-  }, [apiBase, companyID, isInboxMatrixView]);
 
   const activeSharedInbox = useMemo(
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
@@ -748,6 +737,28 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setLoadingNodes(false);
     }
   }, [companyID]);
+  const refreshNodeRelationshipsForMatrix = useCallback(async (): Promise<boolean> => {
+    const cleanCompanyID = companyID.trim();
+    nodeRelationshipRequestSeqRef.current += 1;
+    const requestSeq = nodeRelationshipRequestSeqRef.current;
+    if (!cleanCompanyID || !isInboxMatrixViewID(activeViewIDRef.current)) {
+      setNodeRelationships([]);
+      return false;
+    }
+    try {
+      const query = new URLSearchParams({ company_id: cleanCompanyID });
+      const payload = await requestJSON<{ relationships?: NodeRelationship[] }>(apiBase, `/v1/node-relationships?${query.toString()}`);
+      if (nodeRelationshipRequestSeqRef.current === requestSeq && isInboxMatrixViewID(activeViewIDRef.current)) {
+        setNodeRelationships(payload.relationships ?? []);
+      }
+      return true;
+    } catch (relationshipError) {
+      if (nodeRelationshipRequestSeqRef.current === requestSeq && isInboxMatrixViewID(activeViewIDRef.current)) {
+        setError(formatError(relationshipError, "Failed to load node relationships"));
+      }
+      return false;
+    }
+  }, [apiBase, companyID]);
   const scheduleWorkspacePanelReload = useCallback(() => {
     if (!companyID || !isWorkspacePanelHomeViewID(activeViewIDRef.current)) return;
     invalidateCommunicationsWorkspacePanelCache(companyID);
@@ -757,8 +768,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     workspacePanelReloadTimerRef.current = window.setTimeout(() => {
       workspacePanelReloadTimerRef.current = null;
       void loadLogicGatePanel();
+      void refreshNodeRelationshipsForMatrix();
     }, 250);
-  }, [companyID, loadLogicGatePanel]);
+  }, [companyID, loadLogicGatePanel, refreshNodeRelationshipsForMatrix]);
+  useEffect(() => {
+    if (!companyID || !isInboxMatrixView) {
+      nodeRelationshipRequestSeqRef.current += 1;
+      setNodeRelationships([]);
+      return undefined;
+    }
+    void refreshNodeRelationshipsForMatrix();
+    return undefined;
+  }, [companyID, isInboxMatrixView, refreshNodeRelationshipsForMatrix]);
   const clearPrefetchedMessagePage = useCallback(() => {
     prefetchedMessagePageRef.current = null;
     prefetchMessageTokenRef.current = "";
@@ -1262,6 +1283,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
       },
       onEvent(event, context) {
+        if (event.event === "projection") {
+          if (isInboxMatrixViewID(activeViewIDRef.current)) racioProjectionDeltaHandlerRef.current?.(event.data);
+          return;
+        }
         if (event.event !== "workspace") return;
         let envelope: WorkspaceStreamEnvelope;
         try {
@@ -1295,8 +1320,26 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           const nodeID = typeof data.node_id === "string" ? data.node_id.trim() : "";
           if (nodeID) {
             setNodes((previous) => previous.filter((node) => node.node_id !== nodeID));
+            setNodeRelationships((previous) => previous.filter((relationship) => relationship.node_id_a !== nodeID && relationship.node_id_b !== nodeID));
             setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== nodeID));
             removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
+          }
+        } else if (type === "relationship_created") {
+          const relationship = data.relationship && typeof data.relationship === "object" ? data.relationship as NodeRelationship : null;
+          if (relationship?.node_relationship_id) {
+            setNodeRelationships((previous) => {
+              const next = previous.filter((item) => item.node_relationship_id !== relationship.node_relationship_id);
+              return [...next, relationship];
+            });
+          } else {
+            void refreshNodeRelationshipsForMatrix();
+          }
+        } else if (type === "relationship_deleted") {
+          const relationshipID = typeof data.node_relationship_id === "string" ? data.node_relationship_id.trim() : "";
+          if (relationshipID) {
+            setNodeRelationships((previous) => previous.filter((relationship) => relationship.node_relationship_id !== relationshipID));
+          } else {
+            void refreshNodeRelationshipsForMatrix();
           }
         } else if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_raci_updated" || type === "logic_gate_permissions_updated") {
           const logicGate = data.logic_gate && typeof data.logic_gate === "object" ? data.logic_gate as LogicGateRecord : null;
@@ -1351,11 +1394,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
           scheduleWorkspacePanelReload();
         }
+        if (type === "node_permissions_updated") {
+          void refreshNodeRelationshipsForMatrix();
+        }
       },
       onError() {
         // Workspace SSE reconnects automatically; visible errors come from reloads.
       },
-    });
+    }, isInboxMatrixView ? { projections: ["racio_matrix"] } : {});
     return () => {
       unsubscribe();
       if (workspacePanelReloadTimerRef.current !== null) {
@@ -1363,7 +1409,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         workspacePanelReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, loadSharedInboxes, scheduleWorkspacePanelReload]);
+  }, [apiBase, companyID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleWorkspacePanelReload]);
   useEffect(() => {
     if (!selectedMessageID) return;
     let cancelled = false;
@@ -2534,19 +2580,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
     racioProjectionSequenceRef.current = sequence;
   }, [applyRacioProjectionRows, companyID, currentUserID, refreshRacioMatrixProjection, removeRacioProjectionNode]);
+  racioProjectionDeltaHandlerRef.current = handleRacioProjectionDeltaEvent;
   useEffect(() => {
     if (!companyID || !currentUserID || !isInboxMatrixView) return undefined;
     void refreshRacioMatrixProjection();
-    const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
-      onEvent(event) {
-        if (event.event === "projection") handleRacioProjectionDeltaEvent(event.data);
-      },
-      onError() {
-        // SSE reconnects automatically; targeted projection fallback handles corrupt local state.
-      },
-    }, { projections: ["racio_matrix"] });
-    return () => { unsubscribe(); };
-  }, [apiBase, companyID, currentUserID, handleRacioProjectionDeltaEvent, isInboxMatrixView, refreshRacioMatrixProjection]);
+    return undefined;
+  }, [companyID, currentUserID, isInboxMatrixView, refreshRacioMatrixProjection]);
   const attachMessagesToNode = useCallback(async (logicGateID: string, nodeID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     const cleanLogicGateID = logicGateID.trim();

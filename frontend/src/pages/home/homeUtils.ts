@@ -977,6 +977,8 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
     || cleanType === "node_updated"
     || cleanType === "node_deleted"
     || cleanType === "node_permissions_updated"
+    || cleanType === "relationship_created"
+    || cleanType === "relationship_deleted"
     || cleanType === "logic_gate_created"
     || cleanType === "logic_gate_updated"
     || cleanType === "logic_gate_deleted"
