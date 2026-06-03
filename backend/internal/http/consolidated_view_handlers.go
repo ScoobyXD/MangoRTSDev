@@ -61,7 +61,35 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 	if !ok {
 		return
 	}
-	view, err := s.repo.GetLogicGateView(companyID, logicGateID)
+	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_view_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
+	includeWork := strings.TrimSpace(r.URL.Query().Get("include_work")) == "1"
+	if includeWork {
+		view, err := s.repo.GetLogicGateView(companyID, logicGateID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_logic_gate_view_request")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			log.Printf("failed to load v2 logic gate view company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_view")
+			return
+		}
+		view.EffectiveAccessFlags = flags
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateViewResponseWithWork(view), etag)
+		return
+	}
+	details, err := s.repo.GetLogicGateDetails(companyID, logicGateID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_view_request")
 		return
@@ -71,12 +99,92 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 	if err != nil {
-		log.Printf("failed to load v2 logic gate view company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
+		log.Printf("failed to load v2 logic gate details company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_view")
 		return
 	}
-	view.EffectiveAccessFlags = flags
-	writeJSONMaybeNotModified(w, r, http.StatusOK, view)
+	projections, err := s.repo.ListLogicGateProjections(companyID, logicGateID)
+	if err != nil {
+		log.Printf("failed to load v2 logic gate projections company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_view")
+		return
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateCoreViewResponse(companyID, logicGateID, details, projections, flags), etag)
+}
+
+func (s *Server) consolidatedViewETag(r *http.Request, companyID, resource string) (string, error) {
+	return s.workspaceEventETagWithReadVersion(r, companyID, resource, []store.DomainEventStreamQuery{{}}, store.WorkspaceReadVersionQuery{
+		CompanyID: companyID,
+		Scope:     "workspace-snapshot:full",
+	})
+}
+
+type logicGateViewHTTPResponse struct {
+	CompanyID           string                           `json:"company_id"`
+	LogicGateID         string                           `json:"logic_gate_id"`
+	LogicGate           domain.LogicGate                 `json:"logic_gate"`
+	Information         []domain.LogicGateInformation    `json:"information"`
+	Projections         []domain.LogicGateProjection     `json:"projections"`
+	RaciAssignments     []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+	Relationships       []domain.LogicGateRelationship   `json:"relationships"`
+	Work                *domain.LogicGateWorkView        `json:"work,omitempty"`
+	InformationCount    int                              `json:"information_count"`
+	ProjectionCount     int                              `json:"projection_count"`
+	RaciAssignmentCount int                              `json:"raci_assignment_count"`
+	RelationshipsCount  int                              `json:"relationships_count"`
+	AssignmentCount     int                              `json:"assignment_count,omitempty"`
+	NodeCount           int                              `json:"node_count,omitempty"`
+	domain.EffectiveAccessFlags
+}
+
+func logicGateCoreViewResponse(companyID, logicGateID string, details domain.LogicGateDetails, projections []domain.LogicGateProjection, flags domain.EffectiveAccessFlags) logicGateViewHTTPResponse {
+	if details.Information == nil {
+		details.Information = []domain.LogicGateInformation{}
+	}
+	if details.Relationships == nil {
+		details.Relationships = []domain.LogicGateRelationship{}
+	}
+	if details.LogicGate.RaciAssignments == nil {
+		details.LogicGate.RaciAssignments = []domain.LogicGateRaciAssignment{}
+	}
+	if projections == nil {
+		projections = []domain.LogicGateProjection{}
+	}
+	return logicGateViewHTTPResponse{
+		CompanyID:            companyID,
+		LogicGateID:          logicGateID,
+		LogicGate:            details.LogicGate,
+		Information:          details.Information,
+		Projections:          projections,
+		RaciAssignments:      details.LogicGate.RaciAssignments,
+		Relationships:        details.Relationships,
+		InformationCount:     len(details.Information),
+		ProjectionCount:      len(projections),
+		RaciAssignmentCount:  len(details.LogicGate.RaciAssignments),
+		RelationshipsCount:   len(details.Relationships),
+		EffectiveAccessFlags: flags,
+	}
+}
+
+func logicGateViewResponseWithWork(view domain.LogicGateView) logicGateViewHTTPResponse {
+	work := view.Work
+	return logicGateViewHTTPResponse{
+		CompanyID:            view.CompanyID,
+		LogicGateID:          view.LogicGateID,
+		LogicGate:            view.LogicGate,
+		Information:          view.Information,
+		Projections:          view.Projections,
+		RaciAssignments:      view.RaciAssignments,
+		Relationships:        view.Relationships,
+		Work:                 &work,
+		InformationCount:     view.InformationCount,
+		ProjectionCount:      view.ProjectionCount,
+		RaciAssignmentCount:  view.RaciAssignmentCount,
+		RelationshipsCount:   view.RelationshipsCount,
+		AssignmentCount:      view.AssignmentCount,
+		NodeCount:            view.NodeCount,
+		EffectiveAccessFlags: view.EffectiveAccessFlags,
+	}
 }
 
 func (s *Server) requireV2RootEffectiveAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID, notFoundCode string) (domain.EffectiveAccessFlags, string, bool) {

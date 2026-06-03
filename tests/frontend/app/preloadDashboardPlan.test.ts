@@ -28,12 +28,12 @@ test("planLikelyDashboardPreload preloads only visible dashboard frame kinds", (
   });
 });
 
-test("planLikelyDashboardPreload keeps logic-gate arena page and frame modules together", () => {
+test("planLikelyDashboardPreload keeps logic-gate arena on editor and kanban only", () => {
   assert.deepEqual(planLikelyDashboardPreload({
     page: "logic-gate-arena",
     frames: [],
   }), {
-    moduleKinds: ["company-explorer", "editor", "kanban"],
+    moduleKinds: ["editor", "kanban"],
     routeSurfaces: ["logic-gate-arena"],
   });
 });

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
+import { listCompanyUsers } from "../communications/communicationsApi";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -264,14 +265,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     (async () => {
       try {
-        const payload = await requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
-        if (!cancelled) setCompanyUsers(payload.users ?? []);
+        const users = await listCompanyUsers(companyID);
+        if (!cancelled) setCompanyUsers(users);
       } catch {
         if (!cancelled) setCompanyUsers([]);
       }
     })();
     return () => { cancelled = true; };
-  }, [companyID, requestJSON]);
+  }, [companyID]);
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : KANBAN_PANEL_BACKGROUND;
@@ -646,16 +647,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
     try {
-      const [nextBoards, folderPayload, folderItemPayload] = await Promise.all([
-        listKanbanBoards(apiBase, companyID, 200),
-        requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}`).catch(() => null),
-        requestJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?company_id=${encodeURIComponent(companyID)}&item_type=kanban`).catch(() => null),
-      ]);
+      const nextBoards = await listKanbanBoards(apiBase, companyID, 200);
       const sortedBoards = sortKanbanBoards(nextBoards);
       boardsRef.current = sortedBoards;
       setBoards(sortedBoards);
-      if (folderPayload) setExplorerFolders(folderPayload.folders ?? []);
-      if (folderItemPayload) setExplorerFolderItems(folderItemPayload.folder_items ?? []);
+      setExplorerFolders([]);
+      setExplorerFolderItems([]);
       const currentBoardID = activeBoardIDRef.current;
       const currentBoardVisible = sortedBoards.some((board) => board.board_id === currentBoardID);
       if ((!logicGateIDFromKanbanBoardID(currentBoardID) || !currentBoardVisible) && sortedBoards.length > 0) {
@@ -678,7 +675,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     } finally {
       setBoardsLoading(false);
     }
-  }, [apiBase, companyID, requestJSON]);
+  }, [apiBase, companyID]);
 
   const saveCurrentBoardView = useCallback(async () => {
     setError("");
@@ -777,16 +774,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [apiBase, applyCards, applyColumns, boardID, companyID]);
 
   useEffect(() => {
+    if (arenaMode) return;
     refreshBoard();
-  }, [refreshBoard]);
+  }, [arenaMode, refreshBoard]);
 
   useEffect(() => {
     primeKanbanBoardContentsCache(apiBase, companyID, boardID, { columns, cards, projectionSequence: kanbanProjectionSequenceRef.current });
   }, [apiBase, boardID, cards, columns, companyID]);
 
   useEffect(() => {
+    if (arenaMode) return;
     refreshBoards();
-  }, [refreshBoards]);
+  }, [arenaMode, refreshBoards]);
 
   useEffect(() => {
     const onKanbanBoardsUpdated = (event: Event) => {
@@ -803,11 +802,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         return;
       }
       invalidateKanbanBoardListCache(apiBase, companyID);
-      void refreshBoards();
+      if (!arenaMode) void refreshBoards();
     };
     window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
-  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoards, removeBoardFromList, upsertBoardInList]);
+  }, [apiBase, arenaMode, companyID, invalidateArenaViewForBoard, refreshBoards, removeBoardFromList, upsertBoardInList]);
 
   useEffect(() => {
     const onKanbanBoardContentsUpdated = (event: Event) => {
@@ -857,7 +856,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
 
     for (const nodeID of nodeIDs) invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-    if (refreshBoardList) {
+    if (refreshBoardList && !arenaMode) {
       invalidateKanbanBoardListCache(apiBase, companyID);
       void refreshBoards();
     }
@@ -866,7 +865,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
       if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
     }
-  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, refreshBoards]);
+  }, [apiBase, arenaMode, companyID, invalidateArenaViewForBoard, refreshBoard, refreshBoards]);
 
   const requestKanbanProjectionFallback = useCallback((reason: KanbanProjectionFallbackReason, streamBoardID = activeBoardIDRef.current, logicGateID = "") => {
     void reason;
@@ -943,7 +942,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           }
           if (envelope.type === "logic_gate_created") {
             invalidateKanbanBoardListCache(apiBase, companyID);
-            void refreshBoards();
+            if (!arenaMode) void refreshBoards();
             return;
           }
           if (envelope.type === "logic_gate_updated") {
@@ -1057,7 +1056,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     }, { projections: ["kanban_board"], kanbanBoardID: activeBoardID });
-  }, [activeBoardID, apiBase, applyCards, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [activeBoardID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
@@ -1076,13 +1075,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [apiBase, companyID]);
 
   useEffect(() => {
+    if (arenaMode) return;
     const applyNodeGraphChange = () => {
       setNodeGraphRevision((revision) => revision + 1);
       syncCardTitlesFromNodeGraph();
     };
     applyNodeGraphChange();
     return subscribeNodeRelationshipGraph(apiBase, companyID, applyNodeGraphChange);
-  }, [apiBase, companyID, syncCardTitlesFromNodeGraph]);
+  }, [apiBase, arenaMode, companyID, syncCardTitlesFromNodeGraph]);
 
   useEffect(() => {
     const applyLiveSelection = (selection: LiveSelectionChange) => {

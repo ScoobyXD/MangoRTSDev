@@ -31,23 +31,23 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 		t.Fatalf("EnsureLogicGateKanbanBoard() error = %v", err)
 	}
 
-	columnsReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/columns?company_id="+companyID+"&board_id="+boardID, nil)
-	columnsRec := httptest.NewRecorder()
-	handler.ServeHTTP(columnsRec, columnsReq)
-	if columnsRec.Code != http.StatusOK {
-		t.Fatalf("GET kanban columns status = %d body=%s", columnsRec.Code, columnsRec.Body.String())
+	workReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
+	workRec := httptest.NewRecorder()
+	handler.ServeHTTP(workRec, workReq)
+	if workRec.Code != http.StatusOK {
+		t.Fatalf("GET v2 logic gate work status = %d body=%s", workRec.Code, workRec.Body.String())
 	}
-	var columnsPayload struct {
+	var workPayload struct {
 		Columns []struct {
 			ColumnID string `json:"column_id"`
 			Title    string `json:"title"`
 		} `json:"columns"`
 	}
-	if err := json.NewDecoder(columnsRec.Body).Decode(&columnsPayload); err != nil {
-		t.Fatalf("decode columns: %v", err)
+	if err := json.NewDecoder(workRec.Body).Decode(&workPayload); err != nil {
+		t.Fatalf("decode work: %v", err)
 	}
-	if len(columnsPayload.Columns) != 4 || columnsPayload.Columns[0].ColumnID != store.LogicGateWorkStatusPending || columnsPayload.Columns[3].ColumnID != store.LogicGateWorkStatusDone {
-		t.Fatalf("columns = %+v, want synthesized logic-gate work statuses", columnsPayload.Columns)
+	if len(workPayload.Columns) != 4 || workPayload.Columns[0].ColumnID != store.LogicGateWorkStatusPending || workPayload.Columns[3].ColumnID != store.LogicGateWorkStatusDone {
+		t.Fatalf("columns = %+v, want synthesized logic-gate work statuses", workPayload.Columns)
 	}
 
 	priority := 3
@@ -80,11 +80,11 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 		t.Fatalf("created card = %+v, want projection card for assigned node", createdCard)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+store.LogicGateWorkStatusPending+"&limit=50", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET kanban cards status = %d body=%s", listRec.Code, listRec.Body.String())
+		t.Fatalf("GET v2 logic gate work after card create status = %d body=%s", listRec.Code, listRec.Body.String())
 	}
 	var listPayload struct {
 		Cards []struct {
@@ -93,7 +93,7 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 		} `json:"cards"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
-		t.Fatalf("decode cards: %v", err)
+		t.Fatalf("decode work cards: %v", err)
 	}
 	if len(listPayload.Cards) != 1 || listPayload.Cards[0].CardID != createdCard.CardID {
 		t.Fatalf("listed cards = %+v, want created projection card", listPayload.Cards)
@@ -128,6 +128,18 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("DELETE kanban card status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	for _, target := range []string{
+		"/v1/kanban/columns?company_id=" + companyID + "&board_id=" + boardID,
+		"/v1/kanban/cards?company_id=" + companyID + "&board_id=" + boardID,
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d body=%s, want disabled 404", target, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -214,5 +226,12 @@ func TestKanbanStandaloneLegacyRoutesAreDisabled(t *testing.T) {
 	handler.ServeHTTP(cardsRec, cardsReq)
 	if cardsRec.Code != http.StatusNotFound {
 		t.Fatalf("GET standalone cards status = %d body=%s", cardsRec.Code, cardsRec.Body.String())
+	}
+
+	columnsReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/columns?company_id="+companyID+"&board_id=standalone-board", nil)
+	columnsRec := httptest.NewRecorder()
+	handler.ServeHTTP(columnsRec, columnsReq)
+	if columnsRec.Code != http.StatusNotFound {
+		t.Fatalf("GET standalone columns status = %d body=%s", columnsRec.Code, columnsRec.Body.String())
 	}
 }

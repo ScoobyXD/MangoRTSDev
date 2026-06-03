@@ -217,6 +217,46 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}
 }
 
+func TestLogicGateWorkV2ConditionalGetSkipsWorkPayloadBuild(t *testing.T) {
+	t.Parallel()
+
+	base := store.NewMemoryRepo()
+	repo := &countingLogicGateWorkRepo{Repository: base}
+	companyID := "66666666-6666-4666-8666-666666666407"
+	base.EnsureCompany(companyID, "Logic Gate Work ETag Co")
+	logicGate, err := base.CreateLogicGate(companyID, "Conditional Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{})
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first GET work status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("first GET work ETag is empty")
+	}
+	if repo.getWorkCalls != 1 {
+		t.Fatalf("GetLogicGateWork calls after first GET = %d, want 1", repo.getWorkCalls)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("conditional GET work status = %d body=%s, want 304", secondRec.Code, secondRec.Body.String())
+	}
+	if repo.getWorkCalls != 1 {
+		t.Fatalf("GetLogicGateWork calls after conditional GET = %d, want 1", repo.getWorkCalls)
+	}
+}
+
 func TestLogicGateWorkV2CreateRequiresExistingSourceLogicGateEditAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666412"
@@ -477,6 +517,16 @@ func listLogicGateWorkNotificationsForTest(t *testing.T, handler http.Handler, c
 		t.Fatalf("decode notifications response: %v body=%s", err, rr.Body.String())
 	}
 	return payload.Notifications
+}
+
+type countingLogicGateWorkRepo struct {
+	store.Repository
+	getWorkCalls int
+}
+
+func (r *countingLogicGateWorkRepo) GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error) {
+	r.getWorkCalls++
+	return r.Repository.GetLogicGateWork(companyID, logicGateID)
 }
 
 type logicGateWorkMutationPayloadForTest struct {

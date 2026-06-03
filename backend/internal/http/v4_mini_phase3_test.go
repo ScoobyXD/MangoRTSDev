@@ -104,7 +104,6 @@ func TestV4MiniPhase3LogicGateWorkAndKanbanReadDeniedResponses(t *testing.T) {
 
 	for _, target := range []string{
 		"/v2/logic-gates/" + logicGate.LogicGateID + "/work?company_id=" + companyID,
-		"/v1/kanban/cards?company_id=" + companyID + "&board_id=" + store.LogicGateKanbanBoardID(logicGate.LogicGateID),
 		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + store.LogicGateKanbanBoardID(logicGate.LogicGateID),
 	} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
