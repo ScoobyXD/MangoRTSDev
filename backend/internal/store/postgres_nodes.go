@@ -367,12 +367,24 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
 	item, err := r.updateNodeTx(ctx, tx, input)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
 	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	kanbanProjectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", kanbanProjectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	if err := tx.Commit(); err != nil {

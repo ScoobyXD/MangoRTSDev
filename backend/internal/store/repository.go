@@ -41,6 +41,7 @@ type Repository interface {
 	KanbanRepository
 	NotificationRepository
 	DomainEventRepository
+	EventRepository
 }
 
 type IdentityRepository interface {
@@ -289,6 +290,15 @@ type DomainEventRepository interface {
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
 	MarkDomainEventPublished(companyID, eventID string) error
+}
+
+type EventRepository interface {
+	AppendEventRow(input EventRowInput) (EventRow, error)
+	AppendEventRows(inputs []EventRowInput) ([]EventRow, error)
+	ListEventRows(companyID string, limit int) ([]EventRow, error)
+	ClaimAvailableEventRows(limit int) ([]EventRow, error)
+	MarkEventRowProcessed(companyID, eventID string) error
+	MarkEventRowFailed(companyID, eventID, lastError string, availableAt time.Time) error
 }
 
 type DeleteCompanyUserResult struct {
@@ -1064,6 +1074,7 @@ type EntityPermissionUpdateInput struct {
 	DefaultAccessSet bool
 	OverrideUserIDs  []string
 	Permissions      []EntityPermissionInput
+	ActorUserID      string
 }
 
 type CreateInvitationInput struct {

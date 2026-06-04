@@ -832,6 +832,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	return result, nil
 }
 
@@ -1102,6 +1106,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	return result, nil
 }
 
@@ -1153,6 +1161,10 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
 	return result, nil
 }
 
@@ -1222,6 +1234,10 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	return result, nil
 }
 func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
@@ -1298,6 +1314,7 @@ type memoryKanbanWorkspaceEventSnapshot struct {
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
 	racioProjectionRows      map[string]memoryRacioProjectionRow
 	domainEvents             map[string]domain.DomainEvent
+	eventRows                map[string]EventRow
 	workspaceReadVersions    map[string]int64
 }
 
@@ -1311,6 +1328,7 @@ func (r *MemoryRepo) snapshotKanbanWorkspaceEventStateLocked() memoryKanbanWorks
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
 		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
+		eventRows:                cloneMemoryMap(r.eventRows),
 		workspaceReadVersions:    cloneMemoryMap(r.workspaceReadVersions),
 	}
 }
@@ -1324,6 +1342,7 @@ func (r *MemoryRepo) restoreKanbanWorkspaceEventStateLocked(snapshot memoryKanba
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.racioProjectionRows = snapshot.racioProjectionRows
 	r.domainEvents = snapshot.domainEvents
+	r.eventRows = snapshot.eventRows
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }
 

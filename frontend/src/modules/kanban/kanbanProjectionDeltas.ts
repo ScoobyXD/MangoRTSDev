@@ -58,6 +58,7 @@ export type KanbanProjectionFallbackReason =
   | "invalid_envelope"
   | "invalid_delta"
   | "unknown_delta_operation"
+  | "permission_revoked"
   | "missing_row"
   | "missing_existing_card"
   | "missing_row_key";

@@ -12,6 +12,7 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
 	racioProjectionRows      map[string]memoryRacioProjectionRow
 	domainEvents             map[string]domain.DomainEvent
+	eventRows                map[string]EventRow
 }
 
 func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItemAssignmentEventSnapshot {
@@ -25,6 +26,7 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
 		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
+		eventRows:                cloneMemoryMap(r.eventRows),
 	}
 }
 
@@ -38,4 +40,5 @@ func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWo
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.racioProjectionRows = snapshot.racioProjectionRows
 	r.domainEvents = snapshot.domainEvents
+	r.eventRows = snapshot.eventRows
 }

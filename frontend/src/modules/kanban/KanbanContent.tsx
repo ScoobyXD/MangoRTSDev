@@ -950,6 +950,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       getAfterSequence: () => kanbanProjectionSequenceRef.current,
       onRejected: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
       onRefetch: () => requestKanbanProjectionFallback("sequence_gap", streamBoardID, activeLogicGateID),
+      onPermissionRevoked: () => requestKanbanProjectionFallback("permission_revoked", streamBoardID, activeLogicGateID),
       onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
       onDelta: applyRealtimeKanbanProjectionDelta,
     });

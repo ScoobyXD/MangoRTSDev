@@ -1,4 +1,5 @@
 import { getApiAccessToken } from "../../auth/cognitoAuth.js";
+import { requestJSON } from "../api/requestJSON.js";
 
 export type RealtimeMessageType =
   | "ready"
@@ -6,6 +7,7 @@ export type RealtimeMessageType =
   | "subscription.rejected"
   | "projection.delta"
   | "snapshot.refetch"
+  | "permission.revoked"
   | "ping"
   | "pong"
   | "error";
@@ -53,6 +55,14 @@ export type RealtimeSnapshotRefetchMessage = RealtimeBaseMessage & {
   reason?: string;
 };
 
+export type RealtimePermissionRevokedMessage = RealtimeBaseMessage & {
+  type: "permission.revoked";
+  scope: string;
+  resource_type?: string;
+  resource_id?: string;
+  reason?: string;
+};
+
 export type RealtimeErrorMessage = RealtimeBaseMessage & {
   type: "error";
   error?: string;
@@ -65,6 +75,7 @@ export type RealtimeInboundMessage =
   | RealtimeSubscriptionRejectedMessage
   | RealtimeProjectionDeltaMessage
   | RealtimeSnapshotRefetchMessage
+  | RealtimePermissionRevokedMessage
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
@@ -76,6 +87,7 @@ export type RealtimeSubscriptionHandlers = {
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
   onDelta?: (message: RealtimeProjectionDeltaMessage) => void;
   onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
+  onPermissionRevoked?: (message: RealtimePermissionRevokedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
 };
 
@@ -85,8 +97,13 @@ type RealtimeSubscription = RealtimeSubscriptionHandlers & {
 
 type RealtimeClientOptions = {
   getAccessToken?: () => Promise<string>;
+  getTicket?: () => Promise<string>;
   WebSocketCtor?: typeof WebSocket;
   reconnectDelayMs?: number;
+};
+
+type RealtimeTicketResponse = {
+  ticket?: string;
 };
 
 const realtimeClients = new Map<string, MangoRealtimeClient>();
@@ -164,6 +181,18 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         reason: stringValue(payload.reason) || undefined,
       };
     }
+    case "permission.revoked": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      return {
+        ...base,
+        type,
+        scope,
+        resource_type: stringValue(payload.resource_type) || undefined,
+        resource_id: stringValue(payload.resource_id) || undefined,
+        reason: stringValue(payload.reason) || undefined,
+      };
+    }
     case "error":
       return {
         ...base,
@@ -179,18 +208,30 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
   }
 }
 
-export function realtimeWebSocketURL(apiBase: string, companyID: string, token = ""): string {
+export function realtimeWebSocketURL(apiBase: string, companyID: string, ticket = ""): string {
   const url = new URL("/v1/realtime/ws", apiBase || window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("company_id", companyID);
-  if (token) url.searchParams.set("access_token", token);
+  if (ticket) url.searchParams.set("ticket", ticket);
   return url.toString();
+}
+
+export async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string, getAccessToken: () => Promise<string> = getApiAccessToken): Promise<string> {
+  const response = await requestJSON<RealtimeTicketResponse>(apiBase, "/v1/realtime/ticket", {
+    method: "POST",
+    json: { company_id: companyID },
+    getAccessToken,
+  });
+  const ticket = stringValue(response.ticket);
+  if (!ticket) throw new Error("realtime_ticket_required");
+  return ticket;
 }
 
 export class MangoRealtimeClient {
   private readonly apiBase: string;
   private readonly companyID: string;
   private readonly getAccessToken: () => Promise<string>;
+  private readonly getTicket: () => Promise<string>;
   private readonly WebSocketCtor: typeof WebSocket;
   private readonly reconnectDelayMs: number;
   private readonly subscriptions = new Map<string, Set<RealtimeSubscription>>();
@@ -204,6 +245,7 @@ export class MangoRealtimeClient {
     this.apiBase = apiBase;
     this.companyID = companyID;
     this.getAccessToken = options.getAccessToken ?? getApiAccessToken;
+    this.getTicket = options.getTicket ?? (() => requestRealtimeWebSocketTicket(this.apiBase, this.companyID, this.getAccessToken));
     this.WebSocketCtor = options.WebSocketCtor ?? WebSocket;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 1_000;
   }
@@ -243,10 +285,10 @@ export class MangoRealtimeClient {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
-    void this.getAccessToken()
-      .then((token) => {
+    void this.getTicket()
+      .then((ticket) => {
         if (this.manualClose) return;
-        const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID, token));
+        const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID, ticket));
         this.socket = socket;
         socket.onopen = () => {
           this.opening = false;
@@ -352,6 +394,9 @@ export class MangoRealtimeClient {
           break;
         case "snapshot.refetch":
           sub.onRefetch?.(message);
+          break;
+        case "permission.revoked":
+          sub.onPermissionRevoked?.(message);
           break;
       }
     }

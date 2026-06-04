@@ -582,6 +582,11 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 		if err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID); err != nil {
 			return nil, err
 		}
+		if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
+			if _, err := r.appendEventRowTx(ctx, tx, eventInput); err != nil {
+				return nil, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
@@ -698,6 +703,11 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 	}
 	if entityType == EntityTypeLogicGate {
 		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, []string{entityID}, nil); err != nil {
+			return nil, err
+		}
+	}
+	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
+		if _, err := r.appendEventRowTx(ctx, tx, eventInput); err != nil {
 			return nil, err
 		}
 	}

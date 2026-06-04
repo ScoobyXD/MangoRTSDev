@@ -171,17 +171,24 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
+	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	kanbanProjectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
 		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
 	}
 	event, err := r.appendDomainEventLocked(eventInput)
 	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", kanbanProjectionDeltas)); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
