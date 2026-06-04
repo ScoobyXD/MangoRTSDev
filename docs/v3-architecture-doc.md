@@ -1,3 +1,18 @@
+# V3 Architecture Notes
+
+Status: historical scratch notes.
+
+This file is not the source of truth for the V5 backend refactor. Use `docs/important tasks/v5-backend-refactor.md` for implementation direction.
+
+Important terminology for V5:
+
+- Use `subscription`, not `watching`.
+- Use `WebSocket connection`, not a generic `stream`, when talking about the new realtime transport.
+- Use `event table`, `event row`, and `event worker`, not a separate `outbox` concept.
+- Do not implement from this file without checking the V5 tracker first.
+
+Original notes start below.
+
 I'm hand writting this
 
 POST/PUT happens, backend already knows the hardcoded projection rule, and inside the same transaction it writes source + exact projection rows ->

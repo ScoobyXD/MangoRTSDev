@@ -553,27 +553,93 @@ Keep the project in a few large phases.
 
 ### Phase 1: Snapshot And WebSocket Contract
 
-Goal: define and implement the new frontend/backend contract while keeping most current write internals.
+Goal: implement the first real WebSocket/subscription contract while keeping most current write internals and keeping existing SSE streams working during migration.
+
+This phase is not complete if it only changes docs, adds frontend flags, or disables existing streams. Phase 1 must include backend WebSocket code, frontend WebSocket usage, subscription authorization, at least one migrated live-update vertical slice, and tests.
+
+Recommended first vertical slice:
+
+```text
+Kanban board projection deltas
+```
+
+Reason: Kanban already has projection delta logic and scoped board state. Moving this one surface first proves the contract without trying to migrate every live path at once.
 
 Objectives:
 
-- Define scoped snapshot endpoints for node, logic gate, Kanban board, RACIO, company explorer, and notifications.
-- Reduce normal use of whole-company snapshot to first login, manual refresh, and recovery.
-- Add a WebSocket endpoint.
-- Open one WebSocket connection per browser tab/app session/company context.
-- Add subscription messages over WebSocket.
-- Authorize each subscription.
-- Track active subscriptions in memory.
-- Move at least one existing live surface from SSE to WebSocket as the first vertical slice.
-- Keep existing SSE temporarily during migration.
-- Add sequence/cursor behavior for scoped snapshots and deltas.
-- Add frontend gap handling that triggers scoped snapshot refetch.
+Backend:
+
+- Add a WebSocket endpoint in the Go backend.
+- Authenticate the WebSocket handshake using the existing Level 1 auth path.
+- Resolve the Mango user and company context for the connection.
+- Define typed WebSocket message envelopes for:
+  - `ready`
+  - `subscribe`
+  - `unsubscribe`
+  - `subscription.accepted`
+  - `subscription.rejected`
+  - `projection.delta`
+  - `snapshot.refetch`
+  - `ping`
+  - `pong`
+  - `error`
+- Add an in-memory subscription registry keyed by company and scope.
+- Track both directions:
+  - connection to subscribed scopes
+  - scope to subscribed connections
+- Authorize each subscription with existing Level 2 resource permission logic before adding it to the registry.
+- Remove all subscriptions for a connection when the WebSocket closes.
+- Verify or add the scoped snapshot endpoint for the chosen vertical slice, including the latest projection sequence/cursor in the response.
+- Route the chosen vertical slice's deltas only to connections subscribed to the affected scope.
+- Include `scope` and `sequence` on live delta messages.
+- If a client cannot be brought current by sequence, send `snapshot.refetch` for the scoped resource.
+
+Frontend:
+
+- Add a WebSocket client that opens one connection per browser tab/app session/company context.
+- Keep the connection available after login/app bootstrap.
+- Add subscribe/unsubscribe calls for the chosen vertical slice.
+- For the chosen vertical slice, load the current state with a scoped GET snapshot, then subscribe over WebSocket.
+- Store the latest sequence/cursor from the scoped snapshot for reconnect and gap handling.
+- Apply `projection.delta` messages to the existing local cache/UI for that slice.
+- On reconnect, rejected subscription, sequence gap, or `snapshot.refetch`, reload the scoped snapshot, not a whole-company snapshot unless the backend explicitly requires broad recovery.
+- Leave old SSE paths in place for surfaces that have not moved yet.
+
+Tests:
+
+- Backend test: unauthenticated WebSocket handshake is rejected.
+- Backend test: authorized WebSocket handshake sends `ready`.
+- Backend test: unauthorized subscription sends `subscription.rejected` and is not stored.
+- Backend test: authorized subscription sends `subscription.accepted` and is stored.
+- Backend test: closing a connection removes its subscriptions.
+- Backend test: a delta for `board:A` is sent only to connections subscribed to `board:A`, not `board:B`.
+- Frontend/unit test: WebSocket message parsing handles accepted, rejected, delta, refetch, and error messages.
+- Frontend/unit test: the chosen vertical slice applies an upsert/delete delta without a full refresh.
 
 Do not:
 
 - Replace all projection writes yet.
 - Build a large distributed realtime gateway yet.
 - Add broad company-wide live streams for every user by default.
+- Add the event table yet. That is Phase 2.
+- Move notifications yet. That is Phase 2 or Phase 3.
+- Disable existing SSE/workspace streams before the replacement WebSocket path for that exact surface is implemented and tested.
+- Add flags whose main effect is suppressing current live updates without providing the new WebSocket subscription path.
+- Mark Phase 1 complete because the architecture document changed.
+
+Acceptance gate:
+
+```text
+Phase 1 is done only when:
+  backend WebSocket endpoint exists
+  backend subscription registry exists
+  backend subscription authorization exists
+  frontend opens one WebSocket per tab/session/company
+  one live surface uses WebSocket subscriptions end to end
+  old SSE still works for unmigrated surfaces
+  tests cover the subscription lifecycle and routed delta delivery
+  no local logs, credential errors, or scratch files are committed
+```
 
 ### Phase 2: Event Table And Async Event Worker
 
