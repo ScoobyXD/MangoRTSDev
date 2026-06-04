@@ -15,6 +15,7 @@ type LogicGateViewResponse = LogicGateDetails & {
   company_id?: string;
   logic_gate_id?: string;
   projections?: LogicGateProjectionItem[];
+  editor_sequence?: number | string;
 };
 
 const viewCache = new Map<string, LogicGateViewResponse>();
@@ -109,5 +110,17 @@ export async function getLogicGateInformationProjectionSingleFlight(apiBase: str
   if (cached) return cached;
   const payload = await getLogicGateViewPayloadSingleFlight(apiBase, companyID, logicGateID);
   return payload.projections ?? [];
+}
+
+export async function getLogicGateEditorSequenceSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<number> {
+  const payload = await getLogicGateViewPayloadSingleFlight(apiBase, companyID, logicGateID);
+  return parseEditorSequence(payload.editor_sequence);
+}
+
+function parseEditorSequence(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
 }
 

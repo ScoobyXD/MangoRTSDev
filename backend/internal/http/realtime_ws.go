@@ -88,6 +88,18 @@ type realtimeProjectionDeltaMessage struct {
 	ProjectedTimestamp time.Time               `json:"projected_timestamp"`
 }
 
+type realtimeEditorProjectionDeltaMessage struct {
+	Type               string                        `json:"type"`
+	CompanyID          string                        `json:"company_id"`
+	Scope              string                        `json:"scope"`
+	Sequence           int64                         `json:"sequence"`
+	Projection         string                        `json:"projection"`
+	ResourceType       string                        `json:"resource_type"`
+	ResourceID         string                        `json:"resource_id"`
+	Deltas             []store.EditorProjectionDelta `json:"deltas"`
+	ProjectedTimestamp time.Time                     `json:"projected_timestamp"`
+}
+
 func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -324,6 +336,23 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if resourceType, resourceID := realtimeEditorResourceFromScope(scope); resourceID != "" {
+		if actorCanManageCompany(actor, companyID) {
+			return true, "", nil
+		}
+		userID := strings.TrimSpace(actor.User.UserID)
+		if userID == "" {
+			return false, "unauthorized", nil
+		}
+		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, store.EntityPermissionEdit)
+		if err != nil {
+			return false, "", err
+		}
+		if !allowed {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	if userID := realtimeNotificationUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
@@ -353,6 +382,26 @@ func realtimeBoardIDFromScope(scope string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(scope, "board:"))
+}
+
+func realtimeEditorScope(resourceType, resourceID string) string {
+	return store.EditorRealtimeScope(resourceType, resourceID)
+}
+
+func realtimeEditorResourceFromScope(scope string) (string, string) {
+	scope = strings.TrimSpace(scope)
+	for _, candidate := range []struct {
+		prefix       string
+		resourceType string
+	}{
+		{prefix: "editor:node:", resourceType: store.EntityTypeNode},
+		{prefix: "editor:logic_gate:", resourceType: store.EntityTypeLogicGate},
+	} {
+		if strings.HasPrefix(scope, candidate.prefix) {
+			return candidate.resourceType, strings.TrimSpace(strings.TrimPrefix(scope, candidate.prefix))
+		}
+	}
+	return "", ""
 }
 
 func realtimeNotificationScope(userID string) string {
@@ -388,6 +437,8 @@ func realtimeScopeType(scope string) string {
 	switch {
 	case realtimeBoardIDFromScope(scope) != "":
 		return "board"
+	case realtimeEditorResourceIDFromScope(scope) != "":
+		return "editor"
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
 	case realtimeRacioUserIDFromScope(scope) != "":
@@ -398,6 +449,11 @@ func realtimeScopeType(scope string) string {
 		}
 		return scope
 	}
+}
+
+func realtimeEditorResourceIDFromScope(scope string) string {
+	_, resourceID := realtimeEditorResourceFromScope(scope)
+	return resourceID
 }
 
 func (s *Server) recordRealtimeActiveConnections() {
@@ -432,6 +488,13 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameRacioMatrix
 		projectionScope = store.RacioProjectionUserScope(userID)
+	} else if realtimeEditorResourceIDFromScope(scope) != "" {
+		sequence, err := s.repo.CurrentEventRowSequence(companyID, scope)
+		if err != nil {
+			log.Printf("failed to read realtime editor scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
+			return 0
+		}
+		return sequence
 	} else {
 		return 0
 	}

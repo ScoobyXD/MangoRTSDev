@@ -262,6 +262,128 @@ func TestEventWorkerRacioPermissionLossSendsDeleteWithoutRowPayload(t *testing.T
 	}
 }
 
+func TestEventWorkerPublishesEditorDeltaToResourceScopeOnly(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777607"
+	token := "event-worker-editor-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "event-worker-editor-user", domain.RoleCompanyAdmin)
+	nodeA, err := repo.CreateNode(companyID, "Worker editor node A")
+	if err != nil {
+		t.Fatalf("CreateNode A: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Worker editor node B")
+	if err != nil {
+		t.Fatalf("CreateNode B: %v", err)
+	}
+	server := newEventWorkerAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer clientA.close()
+	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer clientB.close()
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+	scopeA := store.EditorRealtimeScope(store.EntityTypeNode, nodeA.NodeID)
+	scopeB := store.EditorRealtimeScope(store.EntityTypeNode, nodeB.NodeID)
+	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
+	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+
+	informationID := "77777777-7777-4777-8777-777777777608"
+	if _, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
+		CompanyID:     companyID,
+		NodeID:        nodeA.NodeID,
+		InformationID: informationID,
+		Type:          "Text block chat",
+		Information:   "chat update",
+		ActorUserID:   user.UserID,
+	}); err != nil {
+		t.Fatalf("AddNodeInformationWithActor: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v, want event processed", processed, err)
+	}
+
+	message := clientA.readJSON(t)
+	if message["type"] != realtimeMessageProjectionDelta || message["projection"] != "editor" || message["scope"] != scopeA || message["resource_type"] != store.EntityTypeNode || message["resource_id"] != nodeA.NodeID {
+		t.Fatalf("editor worker delta = %+v, want node A scoped editor delta", message)
+	}
+	if sequence, ok := message["sequence"].(float64); !ok || sequence != 1 {
+		t.Fatalf("editor worker sequence = %v, want 1", message["sequence"])
+	}
+	deltas, ok := message["deltas"].([]any)
+	if !ok || len(deltas) != 1 {
+		t.Fatalf("editor worker deltas = %+v, want one delta", message["deltas"])
+	}
+	delta, ok := deltas[0].(map[string]any)
+	if !ok || delta["operation"] != store.ProjectionDeltaOperationUpsert {
+		t.Fatalf("editor worker delta payload = %+v, want upsert", deltas[0])
+	}
+	row, ok := delta["row"].(map[string]any)
+	if !ok || row["node_id"] != nodeA.NodeID || row["information_id"] != informationID || row["information"] != "chat update" {
+		t.Fatalf("editor worker row = %+v, want node A row payload", delta["row"])
+	}
+	clientB.assertNoMessage(t)
+}
+
+func TestEventWorkerPermissionChangeRevokesEditorRealtimeSubscription(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777608"
+	token := "event-worker-editor-revoke-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "event-worker-editor-revoke-user", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Worker editor revoke node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	drainEventRowsForTest(t, repo, companyID)
+	server := newEventWorkerAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	scope := store.EditorRealtimeScope(store.EntityTypeNode, node.NodeID)
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
+	}
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessagePermissionRevoked || message["scope"] != scope || message["resource_type"] != store.EntityTypeNode || message["resource_id"] != node.NodeID {
+		t.Fatalf("editor permission message = %+v, want permission.revoked for %s", message, scope)
+	}
+	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+		t.Fatalf("revoked editor subscription still stored")
+	}
+}
+
 func TestEventWorkerPermissionChangeRevokesRealtimeSubscription(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777603"

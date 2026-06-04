@@ -33,12 +33,16 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
     sequence: 8,
     projection: "kanban_board",
     projection_sequence: 8,
+    resource_type: "logic_gate",
+    resource_id: "gate-1",
     deltas: [{ operation: "delete", row_key: { board_id: "A", card_id: "card-1" } }],
   })) as RealtimeProjectionDeltaMessage;
   assert.equal(delta.type, "projection.delta");
   assert.equal(delta.scope, "board:A");
   assert.equal(delta.sequence, 8);
   assert.equal(delta.projection_sequence, 8);
+  assert.equal(delta.resource_type, "logic_gate");
+  assert.equal(delta.resource_id, "gate-1");
   assert.equal(delta.deltas.length, 1);
 
   const created = parseRealtimeMessage(JSON.stringify({

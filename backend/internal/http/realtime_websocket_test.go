@@ -248,6 +248,76 @@ func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess
 	}
 }
 
+func TestRealtimeWebSocketEditorSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &recordingRealtimeAccessRepo{Repository: base}
+	companyID := "88888888-8888-4888-8888-888888888013"
+	token := "editor-subscription-token"
+	base.EnsureCompany(companyID, "Editor Realtime Auth Co")
+	user := mustRealtimeAuthUser(t, base, companyID, "editor-subscription-user", domain.RoleCompanyUser)
+	node, err := base.CreateNode(companyID, "Editor realtime node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions deny: %v", err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
+	}}})
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	scope := store.EditorRealtimeScope(store.EntityTypeNode, node.NodeID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+
+	rejected := client.readJSON(t)
+	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope {
+		t.Fatalf("editor subscription rejected = %+v, want rejection for %s", rejected, scope)
+	}
+	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+		t.Fatalf("unauthorized editor subscription was stored")
+	}
+
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
+		t.Fatalf("editor subscription accepted = %+v, want accepted for %s", accepted, scope)
+	}
+	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+		t.Fatalf("authorized editor subscription was not stored")
+	}
+	if !repo.sawAccessCheck(store.EntityTypeNode, store.EntityPermissionEdit) {
+		t.Fatalf("editor subscription access checks = %+v, want node edit", repo.accessChecks())
+	}
+	if repo.sawAccessCheck(store.EntityTypeNode, store.EntityPermissionView) {
+		t.Fatalf("editor subscription authorization used view access: %+v", repo.accessChecks())
+	}
+}
+
 func TestRealtimeWebSocketCloseRemovesSubscriptions(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888005"

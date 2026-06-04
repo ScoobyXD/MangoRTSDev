@@ -47,6 +47,8 @@ export type RealtimeProjectionDeltaMessage = RealtimeBaseMessage & {
   projection?: string;
   projection_scope?: string;
   projection_sequence?: number;
+  resource_type?: string;
+  resource_id?: string;
   projected_timestamp?: string;
   deltas: unknown[];
 };
@@ -193,6 +195,8 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         projection: stringValue(payload.projection) || undefined,
         projection_scope: stringValue(payload.projection_scope) || undefined,
         projection_sequence: optionalNumber(payload.projection_sequence) ?? sequence,
+        resource_type: stringValue(payload.resource_type) || undefined,
+        resource_id: stringValue(payload.resource_id) || undefined,
         projected_timestamp: stringValue(payload.projected_timestamp) || undefined,
         deltas: Array.isArray(payload.deltas) ? payload.deltas : [],
       };

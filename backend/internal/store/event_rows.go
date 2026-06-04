@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ const DefaultEventRowProcessingLeaseTimeout = 5 * time.Minute
 const (
 	EventTypeKanbanProjectionDelta = "kanban.projection_delta"
 	EventTypeRacioProjectionDelta  = "racio.projection_delta"
+	EventTypeEditorProjectionDelta = "editor.projection_delta"
 	EventTypePermissionChanged     = "permission.changed"
 )
 
@@ -70,6 +72,39 @@ type RacioProjectionDeltaEventPayload struct {
 type PermissionChangedEventPayload struct {
 	EntityType string `json:"entity_type"`
 	EntityID   string `json:"entity_id"`
+}
+
+type EditorProjectionRowKey struct {
+	ResourceType  string `json:"resource_type"`
+	ResourceID    string `json:"resource_id"`
+	InformationID string `json:"information_id"`
+}
+
+type EditorProjectionRow struct {
+	CompanyID        string    `json:"company_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	NodeID           string    `json:"node_id,omitempty"`
+	LogicGateID      string    `json:"logic_gate_id,omitempty"`
+	InformationID    string    `json:"information_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type EditorProjectionDelta struct {
+	Operation string                 `json:"operation"`
+	RowKey    EditorProjectionRowKey `json:"row_key"`
+	Row       *EditorProjectionRow   `json:"row,omitempty"`
+	Patch     map[string]any         `json:"patch,omitempty"`
+}
+
+type EditorProjectionDeltaEventPayload struct {
+	Scope        string                  `json:"scope"`
+	ResourceType string                  `json:"resource_type"`
+	ResourceID   string                  `json:"resource_id"`
+	Deltas       []EditorProjectionDelta `json:"deltas"`
 }
 
 func NormalizeEventRowListLimit(limit int) int {
@@ -148,6 +183,161 @@ func ProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, d
 	inputs := KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)
 	inputs = append(inputs, RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	return inputs
+}
+
+func EditorProjectionRowFromNode(row domain.NodeProjection) EditorProjectionRow {
+	return EditorProjectionRow{
+		CompanyID:        strings.TrimSpace(row.CompanyID),
+		ResourceType:     EntityTypeNode,
+		ResourceID:       strings.TrimSpace(row.NodeID),
+		NodeID:           strings.TrimSpace(row.NodeID),
+		InformationID:    strings.TrimSpace(row.InformationID),
+		Type:             strings.TrimSpace(row.Type),
+		Information:      row.Information,
+		CreatedTimestamp: row.CreatedTimestamp,
+		UpdatedTimestamp: row.UpdatedTimestamp,
+	}
+}
+
+func EditorProjectionRowFromLogicGate(row domain.LogicGateProjection) EditorProjectionRow {
+	return EditorProjectionRow{
+		CompanyID:        strings.TrimSpace(row.CompanyID),
+		ResourceType:     EntityTypeLogicGate,
+		ResourceID:       strings.TrimSpace(row.LogicGateID),
+		LogicGateID:      strings.TrimSpace(row.LogicGateID),
+		InformationID:    strings.TrimSpace(row.InformationID),
+		Type:             strings.TrimSpace(row.Type),
+		Information:      row.Information,
+		CreatedTimestamp: row.CreatedTimestamp,
+		UpdatedTimestamp: row.UpdatedTimestamp,
+	}
+}
+
+func EditorProjectionUpsertEventInput(companyID, actorUserID, idempotencyKey string, row EditorProjectionRow) (EventRowInput, bool) {
+	resourceType, ok := NormalizeEntityType(row.ResourceType)
+	resourceID := strings.TrimSpace(row.ResourceID)
+	informationID := strings.TrimSpace(row.InformationID)
+	if companyID == "" {
+		companyID = strings.TrimSpace(row.CompanyID)
+	}
+	if !ok || companyID == "" || resourceID == "" || informationID == "" {
+		return EventRowInput{}, false
+	}
+	row.CompanyID = strings.TrimSpace(companyID)
+	row.ResourceType = resourceType
+	row.ResourceID = resourceID
+	row.InformationID = informationID
+	if resourceType == EntityTypeNode {
+		row.NodeID = resourceID
+		row.LogicGateID = ""
+	} else if resourceType == EntityTypeLogicGate {
+		row.LogicGateID = resourceID
+		row.NodeID = ""
+	}
+	return EditorProjectionDeltaEventInput(companyID, actorUserID, idempotencyKey, resourceType, resourceID, []EditorProjectionDelta{{
+		Operation: ProjectionDeltaOperationUpsert,
+		RowKey:    editorProjectionRowKey(resourceType, resourceID, informationID),
+		Row:       &row,
+	}})
+}
+
+func EditorProjectionDeleteEventInput(companyID, actorUserID, idempotencyKey, resourceType, resourceID, informationID string) (EventRowInput, bool) {
+	resourceType, ok := NormalizeEntityType(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	informationID = strings.TrimSpace(informationID)
+	if companyID == "" || !ok || resourceID == "" || informationID == "" {
+		return EventRowInput{}, false
+	}
+	return EditorProjectionDeltaEventInput(companyID, actorUserID, idempotencyKey, resourceType, resourceID, []EditorProjectionDelta{{
+		Operation: ProjectionDeltaOperationDelete,
+		RowKey:    editorProjectionRowKey(resourceType, resourceID, informationID),
+	}})
+}
+
+func EditorProjectionDeltaEventInput(companyID, actorUserID, idempotencyKey, resourceType, resourceID string, deltas []EditorProjectionDelta) (EventRowInput, bool) {
+	resourceType, ok := NormalizeEntityType(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	scope := EditorRealtimeScope(resourceType, resourceID)
+	if companyID == "" || !ok || resourceID == "" || scope == "" || len(deltas) == 0 {
+		return EventRowInput{}, false
+	}
+	normalized := make([]EditorProjectionDelta, 0, len(deltas))
+	for _, delta := range deltas {
+		operation := strings.TrimSpace(delta.Operation)
+		if operation != ProjectionDeltaOperationUpsert && operation != ProjectionDeltaOperationPatch && operation != ProjectionDeltaOperationDelete {
+			continue
+		}
+		informationID := strings.TrimSpace(delta.RowKey.InformationID)
+		if informationID == "" && delta.Row != nil {
+			informationID = strings.TrimSpace(delta.Row.InformationID)
+		}
+		if informationID == "" {
+			continue
+		}
+		delta.Operation = operation
+		delta.RowKey = editorProjectionRowKey(resourceType, resourceID, informationID)
+		if delta.Row != nil {
+			row := *delta.Row
+			row.CompanyID = strings.TrimSpace(companyID)
+			row.ResourceType = resourceType
+			row.ResourceID = resourceID
+			row.InformationID = informationID
+			if resourceType == EntityTypeNode {
+				row.NodeID = resourceID
+				row.LogicGateID = ""
+			} else {
+				row.LogicGateID = resourceID
+				row.NodeID = ""
+			}
+			delta.Row = &row
+		}
+		normalized = append(normalized, delta)
+	}
+	if len(normalized) == 0 {
+		return EventRowInput{}, false
+	}
+	payloadBytes, _ := json.Marshal(EditorProjectionDeltaEventPayload{
+		Scope:        scope,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Deltas:       normalized,
+	})
+	return EventRowInput{
+		CompanyID:      companyID,
+		EventType:      EventTypeEditorProjectionDelta,
+		ResourceType:   resourceType,
+		ResourceID:     resourceID,
+		PrimaryScope:   scope,
+		AffectedScopes: []string{scope},
+		ActorUserID:    actorUserID,
+		IdempotencyKey: scopedEventIdempotencyKey(idempotencyKey, scope),
+		SequenceScope:  scope,
+		Payload:        NormalizeEventRowPayload(payloadBytes),
+	}, true
+}
+
+func EditorRealtimeScope(resourceType, resourceID string) string {
+	resourceType, ok := NormalizeEntityType(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if !ok || resourceID == "" {
+		return ""
+	}
+	switch resourceType {
+	case EntityTypeNode:
+		return "editor:node:" + resourceID
+	case EntityTypeLogicGate:
+		return "editor:logic_gate:" + resourceID
+	default:
+		return ""
+	}
+}
+
+func editorProjectionRowKey(resourceType, resourceID, informationID string) EditorProjectionRowKey {
+	return EditorProjectionRowKey{
+		ResourceType:  strings.TrimSpace(resourceType),
+		ResourceID:    strings.TrimSpace(resourceID),
+		InformationID: strings.TrimSpace(informationID),
+	}
 }
 
 func KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
@@ -332,6 +522,21 @@ func DecodeRacioProjectionDeltaEventPayload(row EventRow) (RacioProjectionDeltaE
 	payload.Projection = strings.TrimSpace(payload.Projection)
 	payload.Scope = strings.TrimSpace(payload.Scope)
 	payload.ProjectionScope = strings.TrimSpace(payload.ProjectionScope)
+	return payload, nil
+}
+
+func DecodeEditorProjectionDeltaEventPayload(row EventRow) (EditorProjectionDeltaEventPayload, error) {
+	payloadBytes, err := json.Marshal(row.Payload)
+	if err != nil {
+		return EditorProjectionDeltaEventPayload{}, err
+	}
+	var payload EditorProjectionDeltaEventPayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return EditorProjectionDeltaEventPayload{}, err
+	}
+	payload.Scope = strings.TrimSpace(payload.Scope)
+	payload.ResourceType = strings.TrimSpace(payload.ResourceType)
+	payload.ResourceID = strings.TrimSpace(payload.ResourceID)
 	return payload, nil
 }
 
