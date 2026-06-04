@@ -62,11 +62,14 @@ export async function getKanbanBoardContentsSingleFlight(apiBase: string, compan
   const version = contentVersion(cacheKey);
   const logicGateID = logicGateIDFromKanbanBoardID(boardID);
   const promise = (logicGateID
-    ? getLogicGateArenaView(apiBase, companyID, logicGateID).then((view) => ({
-      columns: view.columns ?? [],
-      cards: (view.cards ?? []).slice(0, cardLimit),
-      projectionSequence: undefined,
-    }))
+    ? getLogicGateArenaView(apiBase, companyID, logicGateID).then((view) => {
+      const projectionSequence = view.projection_sequence;
+      return {
+        columns: view.columns ?? [],
+        cards: (view.cards ?? []).slice(0, cardLimit),
+        projectionSequence: typeof projectionSequence === "number" && Number.isSafeInteger(projectionSequence) && projectionSequence > 0 ? projectionSequence : undefined,
+      };
+    })
     : Promise.resolve({ columns: [], cards: [], projectionSequence: undefined })
   ).then((contents) => {
     if (contentVersion(cacheKey) === version) contentCache.set(cacheKey, cloneContents(contents));

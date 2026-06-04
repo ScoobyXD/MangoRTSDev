@@ -47,7 +47,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := s.authValidator.Validate(r.Context(), bearerToken(r.Header.Get("Authorization")))
+		claims, err := s.authValidator.Validate(r.Context(), requestAuthToken(r))
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -177,6 +177,22 @@ func bearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+func requestAuthToken(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
+		return token
+	}
+	if r.URL != nil && r.URL.Path == "/v1/realtime/ws" && isWebSocketUpgradeRequest(r) {
+		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" {
+			return token
+		}
+		return strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	return ""
 }
 
 func requestCompanyID(r *http.Request) (string, error) {

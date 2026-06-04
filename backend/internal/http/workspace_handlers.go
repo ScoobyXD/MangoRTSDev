@@ -815,13 +815,19 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
 		return
 	}
+	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, boardID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
+		return
+	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
-		"scope":       "kanban",
-		"company_id":  companyID,
-		"board_id":    boardID,
-		"columns":     columns,
-		"cards":       cards,
-		"cards_limit": cardQuery.Limit,
+		"scope":               "kanban",
+		"company_id":          companyID,
+		"board_id":            boardID,
+		"columns":             columns,
+		"cards":               cards,
+		"cards_limit":         cardQuery.Limit,
+		"projection_sequence": sequence,
 	}, etag)
 }
 

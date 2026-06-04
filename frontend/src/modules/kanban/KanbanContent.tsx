@@ -5,6 +5,7 @@ import { listCompanyUsers } from "../communications/communicationsApi";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import {
@@ -915,6 +916,45 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setSelectionAnchorCardID((current) => (removed.has(current) ? "" : current));
   }, []);
 
+  const applyRealtimeKanbanProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
+    const envelope = message as unknown as KanbanProjectionEnvelope;
+    if (envelope.company_id !== companyID || envelope.projection !== "kanban_board") return;
+    const result = applyKanbanProjectionEnvelope({
+      envelope,
+      companyID,
+      boardID: activeBoardIDRef.current,
+      cards: cardsRef.current,
+      versions: kanbanProjectionVersionsRef.current,
+      lastSequence: kanbanProjectionSequenceRef.current,
+    });
+    if (result.fallback) {
+      requestKanbanProjectionFallback(result.fallbackReason ?? "invalid_delta");
+      return;
+    }
+    kanbanProjectionSequenceRef.current = result.lastSequence;
+    if (!result.changed) return;
+    applyCards(result.cards);
+    removeCardsFromLocalSelection(result.removedCardIDs);
+    syncNodeStatusesFromCards(result.upsertedCards);
+  }, [applyCards, companyID, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards]);
+
+  useEffect(() => {
+    const streamBoardID = activeBoardID.trim();
+    if (!companyID || !streamBoardID) return undefined;
+    if (arenaMode) {
+      const logicGateID = activeLogicGateID.trim();
+      if (!logicGateID || streamBoardID !== logicGateKanbanBoardID(logicGateID)) return undefined;
+    }
+    const scope = `board:${streamBoardID}`;
+    return subscribeRealtimeScope(apiBase, companyID, scope, {
+      getAfterSequence: () => kanbanProjectionSequenceRef.current,
+      onRejected: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
+      onRefetch: () => requestKanbanProjectionFallback("sequence_gap", streamBoardID, activeLogicGateID),
+      onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
+      onDelta: applyRealtimeKanbanProjectionDelta,
+    });
+  }, [activeBoardID, activeLogicGateID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, requestKanbanProjectionFallback]);
+
   useEffect(() => {
     if (arenaMode && suppressWorkspaceStream) return undefined;
     const streamBoardID = activeBoardID.trim();
@@ -1087,7 +1127,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           // The list can still be manually refreshed from the header.
         }
       },
-    }, { projections: ["kanban_board"], kanbanBoardID: streamBoardID });
+    });
   }, [activeBoardID, activeLogicGateID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, suppressWorkspaceStream, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {

@@ -37,6 +37,7 @@ type Server struct {
 	emailHub                        *workspaceEventHub
 	notificationHub                 *workspaceEventHub
 	projectionHub                   *projectionDeltaHub
+	realtimeRegistry                *realtimeSubscriptionRegistry
 	notifications                   *notifications.Service
 	kanban                          *kanban.Service
 	workspaceWakeHub                *workspaceEventNotificationHub
@@ -142,6 +143,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		emailHub:                        newWorkspaceEventHub(),
 		notificationHub:                 newWorkspaceEventHub(),
 		projectionHub:                   newProjectionDeltaHub(),
+		realtimeRegistry:                newRealtimeSubscriptionRegistry(),
 		notifications:                   notifications.NewService(repo),
 		kanban:                          kanban.NewService(repo),
 		workspaceWakeHub:                newWorkspaceEventNotificationHub(),
@@ -228,6 +230,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
+	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
 	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)
 	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)
 	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)

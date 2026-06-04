@@ -16,6 +16,7 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } fro
 import { invalidateKanbanBoardContentsCache } from "../modules/kanban/KanbanBoardContentStore";
 import { invalidateLogicGateRelationshipGraphSnapshot } from "../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/NodeRelationshipGraph";
+import { ensureMangoRealtimeConnection } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
 import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceStream, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceStream";
 
@@ -53,6 +54,11 @@ export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppL
     });
     return unsubscribe;
   }, [companyID]);
+
+  useEffect(() => {
+    if (!companyID) return undefined;
+    return ensureMangoRealtimeConnection(apiBase, companyID);
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     if (!companyID || suppressWorkspaceStream) return undefined;
