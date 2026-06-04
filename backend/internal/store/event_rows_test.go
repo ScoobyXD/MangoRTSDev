@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"testing"
 	"time"
 )
@@ -105,6 +106,116 @@ func TestKanbanMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	}
 	if card.ColumnID != "pending" {
 		t.Fatalf("card column after rollback = %q, want pending", card.ColumnID)
+	}
+}
+
+func TestRacioMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999109"
+	repo.EnsureCompany(companyID, "RACIO Event Rows Co")
+	user, err := repo.UpsertAuthUser("racio-event-user", "racio-event-user@example.com", "RACIO Event User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "RACIO event row gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+
+	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		ActorUserID:    user.UserID,
+		IdempotencyKey: "racio-add-event-row",
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+
+	rows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows: %v", err)
+	}
+	var row EventRow
+	for _, candidate := range rows {
+		if candidate.EventType == EventTypeRacioProjectionDelta {
+			row = candidate
+			break
+		}
+	}
+	wantScope := RacioRealtimeUserScope(user.UserID)
+	wantSequenceScope := RacioProjectionUserScope(user.UserID)
+	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != 1 {
+		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s", row, wantScope, wantSequenceScope)
+	}
+	payload, err := DecodeRacioProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Projection != ProjectionNameRacioMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
+		t.Fatalf("payload = %+v, want RACIO projection deltas", payload)
+	}
+}
+
+func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999110"
+	repo.EnsureCompany(companyID, "RACIO Rollback Co")
+	user, err := repo.UpsertAuthUser("racio-rollback-user", "racio-rollback-user@example.com", "RACIO Rollback User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "RACIO rollback gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	beforeRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+
+	repo.eventRowAppendErr = errors.New("forced racio event row failure")
+	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	})
+	if !errors.Is(err, repo.eventRowAppendErr) {
+		t.Fatalf("AddLogicGateRaciAssignments error = %v, want forced event row failure", err)
+	}
+	repo.eventRowAppendErr = nil
+	afterRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("event rows after rollback = %d, want %d", len(afterRows), len(beforeRows))
+	}
+	assignments, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments after rollback: %v", err)
+	}
+	if !assignments.Changed {
+		t.Fatalf("RACIO assignment was not rolled back")
 	}
 }
 

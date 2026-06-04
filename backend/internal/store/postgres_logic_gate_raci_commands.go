@@ -189,6 +189,9 @@ where company_id=$1::uuid
 			return LogicGateRaciAssignmentCommandResult{}, err
 		}
 		result.Events = []domain.DomainEvent{event}
+		if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+			return LogicGateRaciAssignmentCommandResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateRaciAssignmentCommandResult{}, err

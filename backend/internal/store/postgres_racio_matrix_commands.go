@@ -26,6 +26,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	result := RacioMatrixNodeCreateResult{}
+	ownedProjectionDeltas := []ProjectionDelta{}
 	logicGateID := input.LogicGateID
 	deferCompanyExplorerFolderItems := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if input.CreateLogicGateHeader != "" {
@@ -38,6 +39,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
 		eventInputs := []DomainEventInput{logicGateCreatedWorkspaceEventInput(logicGate, meta)}
 		if deferCompanyExplorerFolderItems {
 			eventInputs = append([]DomainEventInput{
@@ -88,6 +90,9 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
 		result.ProjectionDeltas = append(result.ProjectionDeltas, assignmentResult.ProjectionDeltas...)
+		if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
+			return RacioMatrixNodeCreateResult{}, err
+		}
 		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
 		if err := tx.Commit(); err != nil {
 			stop()
@@ -139,6 +144,9 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	result.Node = node
 	result.ProjectionDeltas = append(result.ProjectionDeltas, diffRacioProjectionRows(nil, rows)...)
 	result.Events = append(result.Events, events...)
+	if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+		return RacioMatrixNodeCreateResult{}, err
+	}
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
 	if err := tx.Commit(); err != nil {
 		stop()

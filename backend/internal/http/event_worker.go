@@ -92,6 +92,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 	switch strings.TrimSpace(row.EventType) {
 	case store.EventTypeKanbanProjectionDelta:
 		return s.processKanbanProjectionDeltaEvent(row)
+	case store.EventTypeRacioProjectionDelta:
+		return s.processRacioProjectionDeltaEvent(row)
 	case store.EventTypePermissionChanged:
 		return s.processPermissionChangedEvent(row)
 	default:
@@ -105,6 +107,21 @@ func (s *Server) processKanbanProjectionDeltaEvent(row store.EventRow) error {
 		return err
 	}
 	if payload.Projection != store.ProjectionNameKanbanBoard {
+		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
+	}
+	if len(payload.Deltas) == 0 {
+		return nil
+	}
+	s.publishProjectionDeltasAsync(payload.Deltas)
+	return nil
+}
+
+func (s *Server) processRacioProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeRacioProjectionDeltaEventPayload(row)
+	if err != nil {
+		return err
+	}
+	if payload.Projection != store.ProjectionNameRacioMatrix {
 		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
 	}
 	if len(payload.Deltas) == 0 {
@@ -129,10 +146,12 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 	}
 	switch entityType {
 	case store.EntityTypeNode:
+		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	case store.EntityTypeLogicGate:
 		s.revalidateKanbanBoardSubscriptionsForLogicGate(row.CompanyID, entityID)
+		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	default:

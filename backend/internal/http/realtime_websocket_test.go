@@ -162,6 +162,44 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 	}
 }
 
+func TestRealtimeWebSocketRacioSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888011"
+	tokenA := "racio-subscription-a-token"
+	tokenB := "racio-subscription-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "racio-subscription-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "racio-subscription-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+		tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+	}}})
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	otherScope := realtimeRacioScope(userB.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
+	rejected := client.readJSON(t)
+	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
+		t.Fatalf("RACIO subscription rejected = %+v, want rejection for %s", rejected, otherScope)
+	}
+	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
+		t.Fatalf("unauthorized RACIO subscription was stored")
+	}
+
+	ownScope := realtimeRacioScope(userA.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": ownScope})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != ownScope {
+		t.Fatalf("RACIO subscription accepted = %+v, want accepted for %s", accepted, ownScope)
+	}
+	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, ownScope) {
+		t.Fatalf("authorized RACIO subscription was not stored")
+	}
+}
+
 func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &recordingRealtimeAccessRepo{Repository: base}

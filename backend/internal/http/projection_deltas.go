@@ -196,7 +196,8 @@ func requestPathProjectionDeltas(deltas []store.ProjectionDelta) []store.Project
 	}
 	out := deltas[:0]
 	for _, delta := range deltas {
-		if strings.TrimSpace(delta.Projection) == store.ProjectionNameKanbanBoard {
+		switch strings.TrimSpace(delta.Projection) {
+		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix:
 			continue
 		}
 		out = append(out, delta)
@@ -218,6 +219,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		scope         string
 		sequenceScope string
 		connectionID  string
+		realtime      bool
 	}
 	grouped := map[groupKey][]store.ProjectionDelta{}
 	for _, delta := range deltas {
@@ -229,16 +231,28 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		switch delta.Projection {
 		case store.ProjectionNameRacioMatrix:
 			userID := projectionDeltaUserID(delta)
-			scope := projectionUserScope(userID)
-			if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
+			projectionScope := projectionUserScope(userID)
+			realtimeScope := realtimeRacioScope(userID)
+			if projectionScope == "" || realtimeScope == "" {
+				continue
+			}
+			hasRealtimeSubscribers := s.realtimeRegistry.hasSubscribers(delta.CompanyID, realtimeScope)
+			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
+			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
 				continue
 			}
 			filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
 			if !ok {
 				continue
 			}
-			key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope, sequenceScope: scope}
-			grouped[key] = append(grouped[key], filtered)
+			if hasRealtimeSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: projectionScope, realtime: true}
+				grouped[key] = append(grouped[key], filtered)
+			}
+			if hasProjectionSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: projectionScope, sequenceScope: projectionScope}
+				grouped[key] = append(grouped[key], filtered)
+			}
 		case store.ProjectionNameKanbanBoard:
 			boardID := projectionDeltaBoardID(delta)
 			scopePrefix := projectionKanbanBoardScopePrefix(boardID)
@@ -254,7 +268,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				if !ok {
 					continue
 				}
-				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: scopePrefix, connectionID: conn.id}
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: scopePrefix, connectionID: conn.id, realtime: true}
 				grouped[key] = append(grouped[key], filtered)
 			}
 			for _, userID := range s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix) {
@@ -305,7 +319,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			log.Printf("failed to marshal projection delta company_id=%s projection=%s sequence=%d: %v", key.companyID, key.projection, sequence, err)
 			continue
 		}
-		if key.connectionID == "" {
+		if !key.realtime {
 			s.projectionHub.publish(key.companyID, key.projection, key.scope, payload)
 		} else {
 			realtimePayload, err := json.Marshal(realtimeProjectionDeltaMessage{
@@ -321,6 +335,8 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			})
 			if err != nil {
 				log.Printf("failed to marshal realtime projection delta company_id=%s projection=%s sequence=%d: %v", key.companyID, key.projection, sequence, err)
+			} else if key.connectionID == "" {
+				s.realtimeRegistry.publish(key.companyID, key.scope, realtimePayload)
 			} else {
 				s.realtimeRegistry.publishToConnection(key.connectionID, key.companyID, key.scope, realtimePayload)
 			}
@@ -430,24 +446,10 @@ func (s *Server) publishRacioPermissionProjectionDeltas(companyID, entityType, e
 	if companyID == "" || entityID == "" {
 		return
 	}
-	activeUserIDs := s.projectionHub.activeUserIDs(companyID, store.ProjectionNameRacioMatrix)
-	if len(activeUserIDs) == 0 {
-		return
-	}
-	go s.publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID, activeUserIDs)
+	go s.publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID)
 }
 
-func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID string, activeUserIDs []string) {
-	active := map[string]bool{}
-	for _, userID := range activeUserIDs {
-		userID = strings.TrimSpace(userID)
-		if userID != "" {
-			active[userID] = true
-		}
-	}
-	if len(active) == 0 {
-		return
-	}
+func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID string) {
 	var rows []store.RacioMatrixProjectionRow
 	var err error
 	switch entityType {
@@ -465,9 +467,6 @@ func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityTy
 	now := time.Now().UTC()
 	deltas := make([]store.ProjectionDelta, 0, len(rows))
 	for _, row := range rows {
-		if !active[strings.TrimSpace(row.UserID)] {
-			continue
-		}
 		copied := row
 		deltas = append(deltas, store.ProjectionDelta{
 			CompanyID:  companyID,
@@ -482,7 +481,7 @@ func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityTy
 			ProjectedTimestamp: now,
 		})
 	}
-	s.publishProjectionDeltas(deltas)
+	s.publishProjectionDeltasAsync(deltas)
 }
 
 func (s *Server) publishKanbanPermissionProjectionDeltas(companyID, entityType, entityID string) {
