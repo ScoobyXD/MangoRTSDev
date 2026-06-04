@@ -4,6 +4,7 @@ export type PendingLogicGateArenaSelection = {
   label: string;
   nodeID?: string;
   informationID?: string;
+  suppressWorkspaceStream?: boolean;
   createdAt: number;
 };
 
@@ -23,6 +24,7 @@ function parsePendingLogicGateArenaSelection(companyID: string, raw: string): Pe
     label: typeof parsed.label === "string" ? parsed.label.trim() : "",
     nodeID: typeof parsed.nodeID === "string" ? parsed.nodeID.trim() : undefined,
     informationID: typeof parsed.informationID === "string" ? parsed.informationID.trim() : undefined,
+    suppressWorkspaceStream: parsed.suppressWorkspaceStream === true,
     createdAt: typeof parsed.createdAt === "number" && Number.isFinite(parsed.createdAt) ? parsed.createdAt : Date.now(),
   };
 }
@@ -37,6 +39,7 @@ export function writePendingLogicGateArenaSelection(selection: Omit<PendingLogic
       label: selection.label.trim(),
       nodeID: selection.nodeID?.trim() || undefined,
       informationID: selection.informationID?.trim() || undefined,
+      suppressWorkspaceStream: selection.suppressWorkspaceStream === true || undefined,
       createdAt: Date.now(),
     }));
   } catch {

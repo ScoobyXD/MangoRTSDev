@@ -175,6 +175,7 @@ type EditorContentProps = {
   forcedEmptyMessage?: string;
   focusInformationID?: string;
   focusRequestID?: number;
+  suppressWorkspaceStream?: boolean;
 };
 
 type CompanyUser = {
@@ -236,7 +237,7 @@ function workspaceEventDataString(data: Record<string, unknown> | undefined, key
 }
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressWorkspaceStream = false }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1230,7 +1231,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [activeTab, hasLinkedDocument, linkedEntityKind]);
 
   useEffect(() => {
-    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
+    if (suppressWorkspaceStream || !companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
       setCollaborators([]);
       return;
     }
@@ -1266,10 +1267,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         }
       },
     });
-  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID, suppressWorkspaceStream]);
 
   useEffect(() => {
-    if (!companyID || linkedEntityKind !== "node" || !linkedNodeID) return;
+    if (suppressWorkspaceStream || !companyID || linkedEntityKind !== "node" || !linkedNodeID) return;
     let cancelled = false;
     let refreshToken = 0;
     const refreshNodeWorkspaceProjections = () => {
@@ -1309,7 +1310,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       cancelled = true;
       unsubscribe();
     };
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, suppressWorkspaceStream]);
 
   useEffect(() => {
     const intervalID = window.setInterval(() => {
@@ -1694,7 +1695,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, suppressWorkspaceStream]);
   const markNodeContentChangeSeen = useCallback((changeID: string) => {
     if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
     const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);

@@ -15,6 +15,7 @@ type LogicGateArenaPageProps = {
     label: string;
     nodeID?: string;
     informationID?: string;
+    suppressWorkspaceStream?: boolean;
     requestID?: number;
   } | null;
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
@@ -33,6 +34,7 @@ type ArenaLogicGateSelection = {
   emptyMessage: string;
   nodeID?: string;
   informationID?: string;
+  suppressWorkspaceStream?: boolean;
   requestID?: number;
 };
 
@@ -50,6 +52,7 @@ const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/Edi
     forcedEmptyMessage?: string;
     focusInformationID?: string;
     focusRequestID?: number;
+    suppressWorkspaceStream?: boolean;
   }>,
 })));
 const arenaPanelFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -73,6 +76,7 @@ function selectionFromTargetLogicGate(targetLogicGate: LogicGateArenaPageProps["
     emptyMessage: "",
     nodeID: targetLogicGate.nodeID,
     informationID: targetLogicGate.informationID,
+    suppressWorkspaceStream: targetLogicGate.suppressWorkspaceStream === true,
     requestID: targetLogicGate.requestID,
   };
 }
@@ -85,6 +89,7 @@ function selectionFromPendingLogicGateArenaSelection(pending: PendingLogicGateAr
     emptyMessage: "",
     nodeID: pending.nodeID,
     informationID: pending.informationID,
+    suppressWorkspaceStream: pending.suppressWorkspaceStream === true,
     requestID: pending.createdAt,
   };
 }
@@ -105,6 +110,7 @@ function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: Are
     && current.emptyMessage === next.emptyMessage
     && (current.nodeID ?? "") === (next.nodeID ?? "")
     && (current.informationID ?? "") === (next.informationID ?? "")
+    && current.suppressWorkspaceStream === next.suppressWorkspaceStream
     && (current.requestID ?? 0) === (next.requestID ?? 0);
 }
 
@@ -146,7 +152,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     if (!nextSelection) return;
     lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(nextSelection);
     setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, nextSelection) ? current : nextSelection);
-  }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
+  }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID, targetLogicGate?.suppressWorkspaceStream]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -274,6 +280,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
             forcedEmptyMessage={selectedLogicGate.emptyMessage}
             focusInformationID={selectedLogicGate.informationID}
             focusRequestID={selectedLogicGate.requestID}
+            suppressWorkspaceStream={selectedLogicGate.suppressWorkspaceStream}
           />
         </React.Suspense>
       </section>
@@ -293,6 +300,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           forcedLogicGateID={selectedLogicGate.id}
           forcedLogicGateLabel={selectedLogicGate.label}
           forcedHighlightedNodeID={selectedLogicGate.nodeID}
+          suppressWorkspaceStream={selectedLogicGate.suppressWorkspaceStream}
           onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
         />
       </section>

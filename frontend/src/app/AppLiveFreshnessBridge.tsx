@@ -34,7 +34,11 @@ type WorkspaceStreamEnvelope = {
   type?: string;
 };
 
-export function AppLiveFreshnessBridge() {
+type AppLiveFreshnessBridgeProps = {
+  suppressWorkspaceStream?: boolean;
+};
+
+export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppLiveFreshnessBridgeProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
 
@@ -51,7 +55,7 @@ export function AppLiveFreshnessBridge() {
   }, [companyID]);
 
   useEffect(() => {
-    if (!companyID) return undefined;
+    if (!companyID || suppressWorkspaceStream) return undefined;
     const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
       onEvent(event, context: WorkspaceStreamEventContext) {
         markWorkspaceCachesStaleForEvent(event, apiBase, companyID, context.scopes);
@@ -64,7 +68,7 @@ export function AppLiveFreshnessBridge() {
       },
     });
     return unsubscribe;
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, suppressWorkspaceStream]);
 
   return null;
 }

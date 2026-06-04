@@ -157,6 +157,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
   forcedHighlightedNodeID = "",
+  suppressWorkspaceStream = false,
   onCollapseArenaToTab,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -915,6 +916,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, []);
 
   useEffect(() => {
+    if (arenaMode && suppressWorkspaceStream) return undefined;
     const streamBoardID = activeBoardID.trim();
     if (!streamBoardID) return undefined;
     if (arenaMode) {
@@ -1086,7 +1088,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     }, { projections: ["kanban_board"], kanbanBoardID: streamBoardID });
-  }, [activeBoardID, activeLogicGateID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [activeBoardID, activeLogicGateID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, suppressWorkspaceStream, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

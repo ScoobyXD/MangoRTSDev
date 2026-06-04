@@ -2328,12 +2328,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!cleanLogicGateID) return;
     const cleanNodeID = nodeID?.trim() ?? "";
     const cleanInformationID = informationID?.trim() ?? "";
+    const suppressWorkspaceStream = isInboxMatrixView && !!cleanNodeID;
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
       label,
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
+      suppressWorkspaceStream,
     });
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
       companyID,
@@ -2344,12 +2346,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
+      suppressWorkspaceStream,
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();
     if (onNavigate) onNavigate("/logic-gate-arena");
     else window.location.assign("/logic-gate-arena");
-  }, [companyID, onNavigate]);
+  }, [companyID, isInboxMatrixView, onNavigate]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];

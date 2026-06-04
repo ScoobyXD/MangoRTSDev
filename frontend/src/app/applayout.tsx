@@ -74,6 +74,7 @@ type ExplorerEntityActivatedDetail = {
   label?: string;
   nodeID?: string;
   informationID?: string;
+  suppressWorkspaceStream?: boolean;
 };
 type NodeEditorPopupState = {
   nodeID: string;
@@ -86,6 +87,7 @@ type LogicGateArenaTarget = {
   label: string;
   nodeID?: string;
   informationID?: string;
+  suppressWorkspaceStream?: boolean;
   requestID: number;
 };
 
@@ -1122,12 +1124,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       const label = typeof detail.label === "string" && detail.label.trim() ? detail.label.trim() : id;
 
       if (detail.kind === "logic_gate") {
+        const suppressWorkspaceStream = detail.suppressWorkspaceStream === true;
         setExplorerNodePopup(null);
         setLogicGateArenaTarget({
           logicGateID: id,
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          suppressWorkspaceStream,
           requestID: Date.now(),
         });
         writePendingLogicGateArenaSelection({
@@ -1136,6 +1140,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          suppressWorkspaceStream,
         });
         selectPrimaryPage("logic-gate-arena");
         return;
@@ -1201,7 +1206,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
-      <AppLiveFreshnessBridge />
+      <AppLiveFreshnessBridge suppressWorkspaceStream={isLogicGateArenaView && logicGateArenaTarget?.suppressWorkspaceStream === true} />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
         accent={UI_THEME.panel}
