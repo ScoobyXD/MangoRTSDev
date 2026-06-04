@@ -477,5 +477,6 @@ function cloneLogicGateArenaView(view: LogicGateArenaView): LogicGateArenaView {
     columns: view.columns.map((column) => ({ ...column })),
     cards: view.cards.map((card) => ({ ...card })),
     cards_limit: view.cards_limit,
+    projection_sequence: view.projection_sequence,
   };
 }

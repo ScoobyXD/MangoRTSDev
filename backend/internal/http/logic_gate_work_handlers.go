@@ -69,6 +69,12 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_work")
 		return
 	}
+	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, work.Board.BoardID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
+		return
+	}
+	work.ProjectionSequence = sequence
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, work, etag)
 }
 

@@ -38,13 +38,19 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
+	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, work.Board.BoardID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
+		return
+	}
 
 	writeJSONMaybeNotModified(w, r, http.StatusOK, domain.LogicGateArenaView{
-		LogicGate:  work.LogicGate,
-		Board:      work.Board,
-		Columns:    work.Columns,
-		Cards:      work.Cards,
-		CardsLimit: work.CardsLimit,
+		LogicGate:          work.LogicGate,
+		Board:              work.Board,
+		Columns:            work.Columns,
+		Cards:              work.Cards,
+		CardsLimit:         work.CardsLimit,
+		ProjectionSequence: sequence,
 	})
 }
 

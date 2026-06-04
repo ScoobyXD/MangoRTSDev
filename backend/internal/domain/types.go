@@ -403,24 +403,26 @@ type LogicGateView struct {
 }
 
 type LogicGateArenaView struct {
-	LogicGate  LogicGate      `json:"logic_gate"`
-	Board      KanbanBoard    `json:"board"`
-	Columns    []KanbanColumn `json:"columns"`
-	Cards      []KanbanCard   `json:"cards"`
-	CardsLimit int            `json:"cards_limit"`
+	LogicGate          LogicGate      `json:"logic_gate"`
+	Board              KanbanBoard    `json:"board"`
+	Columns            []KanbanColumn `json:"columns"`
+	Cards              []KanbanCard   `json:"cards"`
+	CardsLimit         int            `json:"cards_limit"`
+	ProjectionSequence int64          `json:"projection_sequence,omitempty"`
 }
 
 type LogicGateWorkView struct {
-	CompanyID   string                    `json:"company_id"`
-	LogicGateID string                    `json:"logic_gate_id"`
-	LogicGate   LogicGate                 `json:"logic_gate"`
-	Statuses    []LogicGateWorkStatus     `json:"statuses"`
-	Assignments []LogicGateWorkAssignment `json:"assignments"`
-	Nodes       []Node                    `json:"nodes"`
-	Board       KanbanBoard               `json:"board"`
-	Columns     []KanbanColumn            `json:"columns"`
-	Cards       []KanbanCard              `json:"cards"`
-	CardsLimit  int                       `json:"cards_limit"`
+	CompanyID          string                    `json:"company_id"`
+	LogicGateID        string                    `json:"logic_gate_id"`
+	LogicGate          LogicGate                 `json:"logic_gate"`
+	Statuses           []LogicGateWorkStatus     `json:"statuses"`
+	Assignments        []LogicGateWorkAssignment `json:"assignments"`
+	Nodes              []Node                    `json:"nodes"`
+	Board              KanbanBoard               `json:"board"`
+	Columns            []KanbanColumn            `json:"columns"`
+	Cards              []KanbanCard              `json:"cards"`
+	CardsLimit         int                       `json:"cards_limit"`
+	ProjectionSequence int64                     `json:"projection_sequence,omitempty"`
 }
 
 type LogicGateWorkStatus struct {

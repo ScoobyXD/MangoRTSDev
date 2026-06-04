@@ -229,6 +229,10 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			if scopePrefix == "" {
 				continue
 			}
+			if s.realtimeRegistry.hasSubscribers(delta.CompanyID, realtimeBoardScope(boardID)) {
+				key := groupKey{companyID: delta.CompanyID, projection: delta.Projection, scope: realtimeBoardScope(boardID), sequenceScope: scopePrefix}
+				grouped[key] = append(grouped[key], delta)
+			}
 			for _, userID := range s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix) {
 				scope := projectionKanbanBoardUserScope(boardID, userID)
 				if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
@@ -278,10 +282,32 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			continue
 		}
 		s.projectionHub.publish(key.companyID, key.projection, key.scope, payload)
+		if s.realtimeRegistry.hasSubscribers(key.companyID, key.scope) {
+			realtimePayload, err := json.Marshal(realtimeProjectionDeltaMessage{
+				Type:               realtimeMessageProjectionDelta,
+				CompanyID:          key.companyID,
+				Scope:              key.scope,
+				Sequence:           sequence,
+				Projection:         key.projection,
+				ProjectionScope:    key.sequenceScope,
+				ProjectionSequence: sequence,
+				Deltas:             group,
+				ProjectedTimestamp: envelope.ProjectedTimestamp,
+			})
+			if err != nil {
+				log.Printf("failed to marshal realtime projection delta company_id=%s projection=%s sequence=%d: %v", key.companyID, key.projection, sequence, err)
+			} else {
+				s.realtimeRegistry.publish(key.companyID, key.scope, realtimePayload)
+			}
+		}
 		published += len(group)
 	}
 	duration := time.Since(start)
 	log.Printf("async_projection_deltas_publish input=%d published=%d duration=%s", len(deltas), published, formatTimingDuration(duration))
+}
+
+func (s *Server) currentKanbanBoardProjectionSequence(companyID, boardID string) (int64, error) {
+	return s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardScopePrefix(boardID))
 }
 
 func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {

@@ -124,6 +124,7 @@ export type LogicGateArenaView = {
   columns: KanbanColumn[];
   cards: KanbanCard[];
   cards_limit: number;
+  projection_sequence?: number;
 };
 
 export type KanbanCardDragPayload = {
