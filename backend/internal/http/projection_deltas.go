@@ -202,6 +202,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		projection    string
 		scope         string
 		sequenceScope string
+		connectionID  string
 	}
 	grouped := map[groupKey][]store.ProjectionDelta{}
 	for _, delta := range deltas {
@@ -229,9 +230,17 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			if scopePrefix == "" {
 				continue
 			}
-			if s.realtimeRegistry.hasSubscribers(delta.CompanyID, realtimeBoardScope(boardID)) {
-				key := groupKey{companyID: delta.CompanyID, projection: delta.Projection, scope: realtimeBoardScope(boardID), sequenceScope: scopePrefix}
-				grouped[key] = append(grouped[key], delta)
+			realtimeScope := realtimeBoardScope(boardID)
+			for _, conn := range s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope) {
+				if conn == nil {
+					continue
+				}
+				filtered, ok := s.authorizedProjectionDeltaForUser(delta, conn.userID)
+				if !ok {
+					continue
+				}
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: scopePrefix, connectionID: conn.id}
+				grouped[key] = append(grouped[key], filtered)
 			}
 			for _, userID := range s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix) {
 				scope := projectionKanbanBoardUserScope(boardID, userID)
@@ -281,8 +290,9 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			log.Printf("failed to marshal projection delta company_id=%s projection=%s sequence=%d: %v", key.companyID, key.projection, sequence, err)
 			continue
 		}
-		s.projectionHub.publish(key.companyID, key.projection, key.scope, payload)
-		if s.realtimeRegistry.hasSubscribers(key.companyID, key.scope) {
+		if key.connectionID == "" {
+			s.projectionHub.publish(key.companyID, key.projection, key.scope, payload)
+		} else {
 			realtimePayload, err := json.Marshal(realtimeProjectionDeltaMessage{
 				Type:               realtimeMessageProjectionDelta,
 				CompanyID:          key.companyID,
@@ -297,7 +307,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			if err != nil {
 				log.Printf("failed to marshal realtime projection delta company_id=%s projection=%s sequence=%d: %v", key.companyID, key.projection, sequence, err)
 			} else {
-				s.realtimeRegistry.publish(key.companyID, key.scope, realtimePayload)
+				s.realtimeRegistry.publishToConnection(key.connectionID, key.companyID, key.scope, realtimePayload)
 			}
 		}
 		published += len(group)
@@ -376,12 +386,12 @@ func (s *Server) authorizedKanbanProjectionDeltaForUser(delta store.ProjectionDe
 	default:
 		return store.ProjectionDelta{}, false
 	}
-	logicGateAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+	logicGateAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 	if err != nil {
 		log.Printf("failed to check kanban projection logic gate access company_id=%s user_id=%s logic_gate_id=%s: %v", delta.CompanyID, userID, logicGateID, err)
 		return store.ProjectionDelta{}, false
 	}
-	nodeAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionView)
+	nodeAllowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	if err != nil {
 		log.Printf("failed to check kanban projection node access company_id=%s user_id=%s node_id=%s: %v", delta.CompanyID, userID, nodeID, err)
 		return store.ProjectionDelta{}, false
@@ -478,7 +488,9 @@ func (s *Server) publishKanbanPermissionProjectionDeltasAsync(companyID, entityT
 		rows, err = s.repo.ListKanbanBoardProjectionRowsForNode(companyID, entityID)
 	case store.EntityTypeLogicGate:
 		boardID := store.LogicGateKanbanBoardID(entityID)
-		if len(s.projectionHub.activeUserIDsForScopePrefix(companyID, store.ProjectionNameKanbanBoard, projectionKanbanBoardScopePrefix(boardID))) == 0 {
+		scopePrefix := projectionKanbanBoardScopePrefix(boardID)
+		if len(s.projectionHub.activeUserIDsForScopePrefix(companyID, store.ProjectionNameKanbanBoard, scopePrefix)) == 0 &&
+			!s.realtimeRegistry.hasSubscribers(companyID, realtimeBoardScope(boardID)) {
 			return
 		}
 		rows, err = s.repo.ListKanbanBoardProjectionRowsForLogicGate(companyID, entityID)

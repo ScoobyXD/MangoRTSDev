@@ -154,7 +154,7 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions node: %v", err)
@@ -337,7 +337,7 @@ func TestKanbanProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t 
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)

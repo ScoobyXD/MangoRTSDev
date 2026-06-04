@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -104,7 +105,7 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -125,6 +126,54 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 	}
 	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
 		t.Fatalf("authorized subscription was not stored")
+	}
+}
+
+func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &recordingRealtimeAccessRepo{Repository: base}
+	companyID := "88888888-8888-4888-8888-888888888007"
+	token := "edit-subscription-token"
+	base.EnsureCompany(companyID, "Realtime Edit Auth Co")
+	user := mustRealtimeAuthUser(t, base, companyID, "edit-subscription-user", domain.RoleCompanyUser)
+	logicGate, err := base.CreateLogicGate(companyID, "Edit required realtime gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
+	}}})
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
+		t.Fatalf("subscription accepted message = %+v, want accepted for %s", accepted, scope)
+	}
+	if !repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionEdit) {
+		t.Fatalf("subscription authorization access checks = %+v, want logic_gate edit", repo.accessChecks())
+	}
+	if repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionView) {
+		t.Fatalf("subscription authorization used view access: %+v", repo.accessChecks())
 	}
 }
 
@@ -195,6 +244,20 @@ func TestRealtimeWebSocketKanbanBoardDeltaRoutesOnlyToSubscribedBoard(t *testing
 	if err != nil {
 		t.Fatalf("CreateLogicGate B: %v", err)
 	}
+	nodeB, err := repo.CreateNode(companyID, "Realtime Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateB.LogicGateID,
+		NodeID:      nodeB.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus B: %v", err)
+	}
 
 	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
 	defer clientA.close()
@@ -223,6 +286,178 @@ func TestRealtimeWebSocketKanbanBoardDeltaRoutesOnlyToSubscribedBoard(t *testing
 		t.Fatalf("board A delta = %+v, want scoped projection delta", deltaA)
 	}
 	clientB.assertNoMessage(t)
+
+	rowsB, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeB.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode B: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsB))
+
+	deltaB := clientB.readJSON(t)
+	if deltaB["type"] != realtimeMessageProjectionDelta || deltaB["scope"] != scopeB || deltaB["sequence"].(float64) <= 0 {
+		t.Fatalf("board B delta = %+v, want scoped projection delta", deltaB)
+	}
+	clientA.assertNoMessage(t)
+}
+
+func TestRealtimeWebSocketKanbanBoardDeltaFiltersPerUserForSameBoard(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888008"
+	tokenVisible := "same-board-visible-token"
+	tokenBlocked := "same-board-blocked-token"
+	repo.EnsureCompany(companyID, "Realtime Same Board Filter Co")
+	visible := mustRealtimeAuthUser(t, repo, companyID, "same-board-visible", domain.RoleCompanyUser)
+	blocked := mustRealtimeAuthUser(t, repo, companyID, "same-board-blocked", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
+		tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
+	}}})
+	defer server.Close()
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Per-user realtime gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Per-user realtime node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    testPriority(2),
+		PrioritySet: true,
+		ActorUserID: visible.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions logic gate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   visible.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+
+	clientVisible := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenVisible)
+	defer clientVisible.close()
+	clientBlocked := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
+	defer clientBlocked.close()
+	clientVisible.readJSON(t)
+	clientBlocked.readJSON(t)
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	scope := realtimeBoardScope(boardID)
+	clientVisible.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	clientBlocked.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	clientVisible.readJSON(t)
+	clientBlocked.readJSON(t)
+
+	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+
+	visibleDelta := clientVisible.readProjectionDelta(t)
+	blockedDelta := clientBlocked.readProjectionDelta(t)
+	if visibleDelta.Scope != scope || blockedDelta.Scope != scope || visibleDelta.Sequence <= 0 || blockedDelta.Sequence != visibleDelta.Sequence {
+		t.Fatalf("realtime sequences visible=%+v blocked=%+v, want same scoped board sequence", visibleDelta, blockedDelta)
+	}
+	if len(visibleDelta.Deltas) != 1 {
+		t.Fatalf("visible delta = %+v, want one delta", visibleDelta.Deltas)
+	}
+	if got := visibleDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
+		t.Fatalf("visible delta = %+v, want upsert row for visible card", visibleDelta.Deltas)
+	}
+	if len(blockedDelta.Deltas) != 1 {
+		t.Fatalf("blocked delta = %+v, want one delta", blockedDelta.Deltas)
+	}
+	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.BoardID != boardID {
+		t.Fatalf("blocked delta = %+v, want delete without row payload", blockedDelta.Deltas)
+	}
+}
+
+func TestRealtimeWebSocketKanbanBoardDeltaHidesInaccessibleCardAsDeleteWithoutRowPayload(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888009"
+	token := "hidden-card-token"
+	repo.EnsureCompany(companyID, "Realtime Hidden Card Co")
+	user := mustRealtimeAuthUser(t, repo, companyID, "hidden-card-user", domain.RoleCompanyUser)
+	logicGate, err := repo.CreateLogicGate(companyID, "Visible gate hidden card")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Hidden card node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    testPriority(3),
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	scope := realtimeBoardScope(boardID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListKanbanBoardProjectionRowsForNode: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+
+	message := client.readProjectionDelta(t)
+	if message.Scope != scope || message.Projection != store.ProjectionNameKanbanBoard || len(message.Deltas) != 1 {
+		t.Fatalf("hidden card delta = %+v, want one scoped Kanban delta", message)
+	}
+	if got := message.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.NodeID != node.NodeID {
+		t.Fatalf("hidden card delta = %+v, want delete row key only", got)
+	}
 }
 
 func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, role string) domain.User {
@@ -241,6 +476,41 @@ func newRealtimeAuthServerForTest(repo *store.MemoryRepo, token string, user dom
 	return NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
 	}}})
+}
+
+type realtimeAccessCheckForTest struct {
+	ResourceType string
+	AccessLevel  string
+}
+
+type recordingRealtimeAccessRepo struct {
+	store.Repository
+	mu     sync.Mutex
+	checks []realtimeAccessCheckForTest
+}
+
+func (r *recordingRealtimeAccessRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
+	r.mu.Lock()
+	r.checks = append(r.checks, realtimeAccessCheckForTest{ResourceType: resourceType, AccessLevel: accessLevel})
+	r.mu.Unlock()
+	return r.Repository.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel)
+}
+
+func (r *recordingRealtimeAccessRepo) sawAccessCheck(resourceType, accessLevel string) bool {
+	for _, check := range r.accessChecks() {
+		if check.ResourceType == resourceType && check.AccessLevel == accessLevel {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *recordingRealtimeAccessRepo) accessChecks() []realtimeAccessCheckForTest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]realtimeAccessCheckForTest, len(r.checks))
+	copy(out, r.checks)
+	return out
 }
 
 type realtimeWSClientForTest struct {
@@ -377,6 +647,25 @@ func (c *realtimeWSClientForTest) readJSON(t *testing.T) map[string]any {
 	var payload map[string]any
 	if err := json.Unmarshal(frame.payload, &payload); err != nil {
 		t.Fatalf("decode websocket JSON: %v payload=%s", err, string(frame.payload))
+	}
+	return payload
+}
+
+func (c *realtimeWSClientForTest) readProjectionDelta(t *testing.T) realtimeProjectionDeltaMessage {
+	t.Helper()
+	frame, ok := c.readFrame(t, time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for websocket projection delta")
+	}
+	if frame.opcode != webSocketOpcodeText {
+		t.Fatalf("websocket opcode = %d, want text", frame.opcode)
+	}
+	var payload realtimeProjectionDeltaMessage
+	if err := json.Unmarshal(frame.payload, &payload); err != nil {
+		t.Fatalf("decode websocket projection delta: %v payload=%s", err, string(frame.payload))
+	}
+	if payload.Type != realtimeMessageProjectionDelta {
+		t.Fatalf("websocket message = %+v, want projection delta", payload)
 	}
 	return payload
 }

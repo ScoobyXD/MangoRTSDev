@@ -304,7 +304,7 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		if userID == "" {
 			return false, "unauthorized", nil
 		}
-		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 		if err != nil {
 			return false, "", err
 		}

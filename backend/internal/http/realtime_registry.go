@@ -159,6 +159,23 @@ func (r *realtimeSubscriptionRegistry) publish(companyID, scope string, payload 
 	return published
 }
 
+func (r *realtimeSubscriptionRegistry) publishToConnection(connectionID, companyID, scope string, payload []byte) bool {
+	conn := r.connectionForSubscription(connectionID, companyID, scope)
+	return conn != nil && conn.sendText(payload) == nil
+}
+
+func (r *realtimeSubscriptionRegistry) connectionForSubscription(connectionID, companyID, scope string) *realtimeConnection {
+	connectionID = strings.TrimSpace(connectionID)
+	companyID = strings.TrimSpace(companyID)
+	scope = strings.TrimSpace(scope)
+	if r == nil || connectionID == "" || companyID == "" || scope == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.scopeConnections[realtimeScopeKey{companyID: companyID, scope: scope}][connectionID]
+}
+
 func (r *realtimeSubscriptionRegistry) connectionsForScope(companyID, scope string) []*realtimeConnection {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
