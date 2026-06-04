@@ -53,8 +53,8 @@ func TestNodeCreateDoesNotPublishHubEventWhenAtomicMutationFails(t *testing.T) {
 	companyID := "44444444-4444-4444-4444-444444444444"
 	repo := &failingNodeCreateWorkspaceEventRepo{MemoryRepo: store.NewMemoryRepo(), err: errors.New("commit failed")}
 	server := NewServer(repo)
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	body, _ := json.Marshal(map[string]any{"company_id": companyID, "title": "Should not publish"})
 	rec := httptest.NewRecorder()

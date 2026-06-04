@@ -41,7 +41,7 @@ export function AppLiveFreshnessBridge() {
   const apiBase = readAuthConfig().apiBase;
 
   useEffect(() => {
-    const unsubscribe = subscribeCommunicationsStream({
+    const unsubscribe = subscribeCommunicationsStream(apiBase, companyID, {
       onEvent(event) {
         markCommunicationsCachesStaleForEvent(event, companyID);
       },
@@ -50,7 +50,7 @@ export function AppLiveFreshnessBridge() {
       },
     });
     return unsubscribe;
-  }, [companyID]);
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     if (!companyID) return undefined;

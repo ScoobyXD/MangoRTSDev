@@ -831,7 +831,7 @@ type workspaceEventEnvelope struct {
 	Data       map[string]any `json:"data,omitempty"`
 }
 
-type workspaceEventHub struct {
+type localWorkspaceEventBus struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[chan []byte]struct{}
 }
@@ -845,15 +845,15 @@ func workspaceSubscriptionKey(companyID, userID string) string {
 	return companyID + ":" + userID
 }
 
-func newWorkspaceEventHub() *workspaceEventHub {
-	return &workspaceEventHub{subscribers: map[string]map[chan []byte]struct{}{}}
+func newLocalWorkspaceEventBus() *localWorkspaceEventBus {
+	return &localWorkspaceEventBus{subscribers: map[string]map[chan []byte]struct{}{}}
 }
 
-func (h *workspaceEventHub) subscribe(companyID string) chan []byte {
+func (h *localWorkspaceEventBus) subscribe(companyID string) chan []byte {
 	return h.subscribeUser(companyID, "")
 }
 
-func (h *workspaceEventHub) subscribeUser(companyID, userID string) chan []byte {
+func (h *localWorkspaceEventBus) subscribeUser(companyID, userID string) chan []byte {
 	ch := make(chan []byte, 24)
 	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
@@ -867,11 +867,11 @@ func (h *workspaceEventHub) subscribeUser(companyID, userID string) chan []byte 
 	return ch
 }
 
-func (h *workspaceEventHub) unsubscribe(companyID string, ch chan []byte) {
+func (h *localWorkspaceEventBus) unsubscribe(companyID string, ch chan []byte) {
 	h.unsubscribeUser(companyID, "", ch)
 }
 
-func (h *workspaceEventHub) unsubscribeUser(companyID, userID string, ch chan []byte) {
+func (h *localWorkspaceEventBus) unsubscribeUser(companyID, userID string, ch chan []byte) {
 	key := workspaceSubscriptionKey(companyID, userID)
 	h.mu.Lock()
 	if bucket := h.subscribers[key]; bucket != nil {
@@ -884,17 +884,17 @@ func (h *workspaceEventHub) unsubscribeUser(companyID, userID string, ch chan []
 	close(ch)
 }
 
-func (h *workspaceEventHub) hasSubscribers(companyID string) bool {
+func (h *localWorkspaceEventBus) hasSubscribers(companyID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.subscribers[companyID]) > 0
 }
 
-func (h *workspaceEventHub) publish(companyID string, payload []byte) {
+func (h *localWorkspaceEventBus) publish(companyID string, payload []byte) {
 	h.publishUser(companyID, "", payload)
 }
 
-func (h *workspaceEventHub) publishUser(companyID, userID string, payload []byte) {
+func (h *localWorkspaceEventBus) publishUser(companyID, userID string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subscribers[workspaceSubscriptionKey(companyID, userID)] {
@@ -962,6 +962,10 @@ func (s *Server) publishCommittedWorkspaceEventFromFanout(event domain.DomainEve
 }
 
 func (s *Server) publishCommittedWorkspaceEventLocal(event domain.DomainEvent, timings *requestTimingRecorder, notifyFanout bool) {
+	if s.workspacePublishDedupe != nil && !s.workspacePublishDedupe.mark(event.CompanyID, event.Sequence) {
+		s.recordOperationalMetric("realtime.fanout_duplicate_suppression_count", "", 1, 0)
+		return
+	}
 	stop := timings.observe("events.publish.serialize")
 	envelope := workspaceEventEnvelopeFromDomainEvent(event)
 	payload, err := json.Marshal(envelope)
@@ -971,7 +975,7 @@ func (s *Server) publishCommittedWorkspaceEventLocal(event domain.DomainEvent, t
 		return
 	}
 	stop = timings.observe("events.publish.client_send")
-	s.hub.publish(event.CompanyID, payload)
+	s.workspaceEvents.publish(event.CompanyID, payload)
 	stop()
 	stop = timings.observe("events.publish.fanout")
 	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
@@ -981,7 +985,7 @@ func (s *Server) publishCommittedWorkspaceEventLocal(event domain.DomainEvent, t
 	} else {
 		for _, userID := range userIDs {
 			stop = timings.observe("events.publish.client_send")
-			s.hub.publishUser(event.CompanyID, userID, payload)
+			s.workspaceEvents.publishUser(event.CompanyID, userID, payload)
 			stop()
 		}
 	}
@@ -1003,7 +1007,11 @@ func (s *Server) publishWorkspaceRealtimeEvent(event domain.DomainEvent, envelop
 	}
 	publishScope := func(scope string) {
 		scope = strings.TrimSpace(scope)
-		if scope == "" || !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+		if scope == "" {
+			return
+		}
+		if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
 			return
 		}
 		payload, err := json.Marshal(realtimeWorkspaceEventMessage{
@@ -1017,7 +1025,12 @@ func (s *Server) publishWorkspaceRealtimeEvent(event domain.DomainEvent, envelop
 			log.Printf("failed to marshal realtime workspace event company_id=%s scope=%s sequence=%d event_id=%s: %v", companyID, scope, event.Sequence, event.EventID, err)
 			return
 		}
-		s.realtimeRegistry.publish(companyID, scope, payload)
+		published := s.realtimeRegistry.publish(companyID, scope, payload)
+		if published == 0 {
+			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+			return
+		}
+		s.recordOperationalMetric("realtime.workspace_events_published", realtimeScopeType(scope), int64(published), 0)
 	}
 	for _, userID := range userIDs {
 		userID = strings.TrimSpace(userID)

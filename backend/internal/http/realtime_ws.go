@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net"
 	"net/http"
@@ -21,12 +22,13 @@ import (
 )
 
 const (
-	webSocketGUID                = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	maxRealtimeMessageBytes      = 1 << 20
-	webSocketOpcodeText     byte = 0x1
-	webSocketOpcodeClose    byte = 0x8
-	webSocketOpcodePing     byte = 0x9
-	webSocketOpcodePong     byte = 0xA
+	webSocketGUID                     = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxRealtimeMessageBytes           = 1 << 20
+	realtimeWorkspaceReplayLimit      = 100
+	webSocketOpcodeText          byte = 0x1
+	webSocketOpcodeClose         byte = 0x8
+	webSocketOpcodePing          byte = 0x9
+	webSocketOpcodePong          byte = 0xA
 )
 
 const (
@@ -39,6 +41,7 @@ const (
 	realtimeMessageWorkspaceEvent       = "workspace.event"
 	realtimeMessageNotificationCreated  = "notification.created"
 	realtimeMessageNotificationDeleted  = "notification.deleted"
+	realtimeMessageCommunicationsEvent  = "communications.event"
 	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
 	realtimeMessagePermissionRevoked    = "permission.revoked"
 	realtimeMessagePing                 = "ping"
@@ -107,6 +110,13 @@ type realtimeWorkspaceEventMessage struct {
 	Scope     string                 `json:"scope"`
 	Sequence  int64                  `json:"sequence"`
 	Event     workspaceEventEnvelope `json:"event"`
+}
+
+type realtimeCommunicationsEventMessage struct {
+	Type      string                      `json:"type"`
+	CompanyID string                      `json:"company_id"`
+	Scope     string                      `json:"scope"`
+	Event     communicationsEventEnvelope `json:"event"`
 }
 
 func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -309,14 +319,10 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		CurrentSequence: currentSequence,
 	})
 	if message.AfterSequence != nil && currentSequence > *message.AfterSequence {
-		_ = conn.sendJSON(realtimeServerMessage{
-			Type:      realtimeMessageSnapshotRefetch,
-			CompanyID: conn.companyID,
-			Scope:     scope,
-			Sequence:  currentSequence,
-			Reason:    "sequence_unavailable",
-		})
-		s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+		if realtimeWorkspaceDomainEventScopeType(scope) != "" && s.replayWorkspaceEventsForSubscription(conn, scope, *message.AfterSequence, currentSequence) {
+			return
+		}
+		s.sendRealtimeSnapshotRefetch(conn, scope, currentSequence, "sequence_unavailable")
 	}
 }
 
@@ -363,6 +369,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		return true, "", nil
 	}
 	if userID := realtimeNotificationUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
+	if userID := realtimeCommunicationsUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
 		}
@@ -433,6 +445,22 @@ func realtimeNotificationUserIDFromScope(scope string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(scope, "notifications:user:"))
+}
+
+func realtimeCommunicationsScope(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	return "communications:user:" + userID
+}
+
+func realtimeCommunicationsUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "communications:user:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "communications:user:"))
 }
 
 func realtimeRacioScope(userID string) string {
@@ -511,6 +539,8 @@ func realtimeScopeType(scope string) string {
 		return "editor"
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
+	case realtimeCommunicationsUserIDFromScope(scope) != "":
+		return "communications"
 	case realtimeWorkspaceDomainEventScopeType(scope) != "":
 		return realtimeWorkspaceDomainEventScopeType(scope)
 	case realtimeRacioUserIDFromScope(scope) != "":
@@ -540,15 +570,102 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"board", "notifications", "racio"} {
+	for _, scopeType := range []string{"board", "communications", "notifications", "racio", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 	for scopeType, count := range counts {
-		if scopeType == "board" || scopeType == "notifications" || scopeType == "racio" {
+		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "racio" ||
+			scopeType == "workspace" || scopeType == "company_explorer" || scopeType == "node_graph" || scopeType == "logic_gate_graph" {
 			continue
 		}
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(count), 0)
 	}
+}
+
+func (s *Server) sendRealtimeSnapshotRefetch(conn *realtimeConnection, scope string, sequence int64, reason string) {
+	if conn == nil {
+		return
+	}
+	_ = conn.sendJSON(realtimeServerMessage{
+		Type:      realtimeMessageSnapshotRefetch,
+		CompanyID: conn.companyID,
+		Scope:     scope,
+		Sequence:  sequence,
+		Reason:    reason,
+	})
+	s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+	if realtimeWorkspaceDomainEventScopeType(scope) != "" {
+		s.recordOperationalMetric("realtime.workspace_replay_refetch_count", realtimeScopeType(scope), 1, 0)
+	}
+}
+
+func (s *Server) replayWorkspaceEventsForSubscription(conn *realtimeConnection, scope string, afterSequence, currentSequence int64) bool {
+	if s == nil || s.repo == nil || conn == nil || realtimeWorkspaceDomainEventScopeType(scope) == "" {
+		return false
+	}
+	if afterSequence < 0 || currentSequence-afterSequence > realtimeWorkspaceReplayLimit {
+		return false
+	}
+	events, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{
+		CompanyID:     conn.companyID,
+		StreamType:    workspaceDomainStreamType,
+		StreamID:      conn.companyID,
+		AfterSequence: afterSequence,
+		Limit:         realtimeWorkspaceReplayLimit + 1,
+	})
+	if err != nil {
+		log.Printf("failed to replay realtime workspace events company_id=%s user_id=%s scope=%s after_sequence=%d: %v", conn.companyID, conn.userID, scope, afterSequence, err)
+		return false
+	}
+	if len(events) > realtimeWorkspaceReplayLimit {
+		return false
+	}
+	for _, event := range events {
+		if event.Sequence <= afterSequence || event.Sequence > currentSequence {
+			continue
+		}
+		visible, err := s.workspaceEventVisibleForRealtimeScope(event, scope)
+		if err != nil {
+			log.Printf("failed to filter realtime workspace replay company_id=%s scope=%s sequence=%d event_id=%s: %v", conn.companyID, scope, event.Sequence, event.EventID, err)
+			return false
+		}
+		if !visible {
+			continue
+		}
+		payload, err := json.Marshal(realtimeWorkspaceEventMessage{
+			Type:      realtimeMessageWorkspaceEvent,
+			CompanyID: conn.companyID,
+			Scope:     scope,
+			Sequence:  event.Sequence,
+			Event:     workspaceEventEnvelopeFromDomainEvent(event),
+		})
+		if err != nil {
+			log.Printf("failed to marshal realtime workspace replay company_id=%s scope=%s sequence=%d event_id=%s: %v", conn.companyID, scope, event.Sequence, event.EventID, err)
+			return false
+		}
+		if err := conn.sendText(payload); err != nil {
+			return true
+		}
+		s.recordOperationalMetric("realtime.workspace_events_replayed", realtimeScopeType(scope), 1, 0)
+	}
+	return true
+}
+
+func (s *Server) workspaceEventVisibleForRealtimeScope(event domain.DomainEvent, scope string) (bool, error) {
+	userID := realtimeWorkspaceUserIDFromScope(scope)
+	if userID == "" {
+		return true, nil
+	}
+	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
+	if err != nil {
+		return false, err
+	}
+	for _, candidate := range userIDs {
+		if strings.TrimSpace(candidate) == userID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {

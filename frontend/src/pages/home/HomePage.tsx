@@ -1155,7 +1155,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       }));
       if (selectedMessageIDRef.current === message.id) setSelectedMessage(message);
     };
-    const unsubscribe = subscribeCommunicationsStream({
+    const unsubscribe = subscribeCommunicationsStream(apiBase, companyID, {
       onEvent(event) {
         if (event.event !== "communications") return;
         let envelope: CommunicationsStreamEnvelope;
@@ -1231,7 +1231,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           });
       },
       onError() {
-        // SSE reconnects automatically; keep the UI quiet unless an API reload fails.
+        // The realtime client reconnects automatically; keep the UI quiet unless an API reload fails.
       },
     });
     return () => {
@@ -1241,7 +1241,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         folderReloadTimerRef.current = null;
       }
     };
-  }, [companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
+  }, [apiBase, companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
   useEffect(() => {
     if (!companyID || !currentUserID) return undefined;
     const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {

@@ -198,7 +198,14 @@ func (s *Server) consumeRealtimeTicketActor(r *http.Request) (ActorContext, bool
 	if s == nil || r == nil || r.URL == nil || r.URL.Path != "/v1/realtime/ws" || !isWebSocketUpgradeRequest(r) {
 		return ActorContext{}, false
 	}
-	ticket := strings.TrimSpace(r.URL.Query().Get("ticket"))
+	if strings.TrimSpace(r.URL.Query().Get("ticket")) != "" {
+		return ActorContext{}, false
+	}
+	cookie, err := r.Cookie(realtimeTicketCookieName)
+	if err != nil {
+		return ActorContext{}, false
+	}
+	ticket := strings.TrimSpace(cookie.Value)
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	return s.realtimeTickets.consume(ticket, companyID)
 }

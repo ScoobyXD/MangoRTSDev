@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -27,47 +28,6 @@ type nylasWebhookChange struct {
 	Trigger   string
 	GrantID   string
 	MessageID string
-}
-
-func (s *Server) handleCommunicationsStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	actor, ok := authenticatedActor(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "stream_unsupported")
-		return
-	}
-
-	prepareSSEHeaders(w)
-
-	ch := s.emailHub.subscribe(actor.User.UserID)
-	defer s.emailHub.unsubscribe(actor.User.UserID, ch)
-
-	fmt.Fprintf(w, "event: ready\ndata: {\"user_id\":%q}\n\n", actor.User.UserID)
-	flusher.Flush()
-
-	heartbeat := time.NewTicker(sseHeartbeatInterval)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-heartbeat.C:
-			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
-			flusher.Flush()
-		case payload := <-ch:
-			fmt.Fprintf(w, "event: communications\ndata: %s\n\n", payload)
-			flusher.Flush()
-		}
-	}
 }
 
 func (s *Server) handleNylasWebhook(w http.ResponseWriter, r *http.Request) {
@@ -155,9 +115,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			grantUserIDs[grantID] = userID
 		}
 		s.applyNylasWebhookCacheInvalidation(userID, change)
-		if s.emailHub.hasSubscribers(userID) {
-			s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
-		}
+		s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -267,20 +225,53 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasW
 
 func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageID string) {
 	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	if userID == "" || s == nil || s.realtimeRegistry == nil {
 		return
 	}
-	payload, err := json.Marshal(communicationsEventEnvelope{
+	scope := realtimeCommunicationsScope(userID)
+	if scope == "" {
+		return
+	}
+	envelope := communicationsEventEnvelope{
 		UserID:    userID,
 		Type:      strings.TrimSpace(eventType),
 		Trigger:   strings.TrimSpace(trigger),
 		MessageID: strings.TrimSpace(messageID),
 		TS:        time.Now().UTC(),
-	})
+	}
+	memberships, err := s.repo.ListUserMemberships(userID)
 	if err != nil {
+		log.Printf("failed to load communications realtime memberships user_id=%s: %v", userID, err)
 		return
 	}
-	s.emailHub.publish(userID, payload)
+	if len(memberships) == 0 {
+		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+	}
+	for _, membership := range memberships {
+		companyID := strings.TrimSpace(membership.CompanyID)
+		if companyID == "" {
+			continue
+		}
+		if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		payload, err := json.Marshal(realtimeCommunicationsEventMessage{
+			Type:      realtimeMessageCommunicationsEvent,
+			CompanyID: companyID,
+			Scope:     scope,
+			Event:     envelope,
+		})
+		if err != nil {
+			continue
+		}
+		published := s.realtimeRegistry.publish(companyID, scope, payload)
+		if published == 0 {
+			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		s.recordOperationalMetric("realtime.communications_events_published", realtimeScopeType(scope), int64(published), 0)
+	}
 }
 
 func firstStringValue(values map[string]any, keys ...string) string {

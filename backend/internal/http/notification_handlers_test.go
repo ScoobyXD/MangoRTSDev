@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -1001,48 +1000,6 @@ func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T)
 	otherListReq = requestWithActorForNotifications(otherListReq, other, companyID)
 	if got := listNotificationsForRequestForTest(t, handler, otherListReq); len(got) != 1 || got[0].RecipientUserID != other.UserID {
 		t.Fatalf("other user notifications after clear all = %+v, want untouched other notification", got)
-	}
-}
-
-func TestNotificationSSEStreamStillReceivesCreatedNotifications(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
-	companyID := "60606060-6060-4060-8060-606060606060"
-	user, err := repo.UpsertAuthUser("notification-sse-subject", "notification-sse@example.com", "Notification SSE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership("notification-sse-subject", companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
-	streamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		server.handleNotificationStream(w, requestWithActorForNotifications(r, user, companyID))
-	})
-	reader, cancel := openSSEStreamForTest(t, streamHandler, "/v1/notifications/stream", nil)
-	defer cancel()
-	ready := readSSEEventForTest(t, reader)
-	if ready.Event != "ready" {
-		t.Fatalf("notification SSE first event = %q data=%s, want ready", ready.Event, ready.Data)
-	}
-	created := domain.Notification{
-		NotificationID:   "60606060-6060-4060-8060-000000000001",
-		CompanyID:        companyID,
-		RecipientUserID:  user.UserID,
-		Type:             domain.NotificationEventMentionCreated,
-		Title:            "SSE notification",
-		CreatedTimestamp: time.Now().UTC(),
-	}
-	server.publishNotifications([]domain.Notification{created})
-	event := readSSEEventForTest(t, reader)
-	if event.Event != "notification" {
-		t.Fatalf("notification SSE event = %q data=%s, want notification", event.Event, event.Data)
-	}
-	var envelope notificationStreamEnvelope
-	if err := json.Unmarshal([]byte(event.Data), &envelope); err != nil {
-		t.Fatalf("decode notification SSE payload: %v", err)
-	}
-	if envelope.Type != "notification.created" || envelope.Notification.NotificationID != created.NotificationID {
-		t.Fatalf("notification SSE payload = %+v, want created notification", envelope)
 	}
 }
 

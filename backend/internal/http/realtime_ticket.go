@@ -9,6 +9,7 @@ import (
 )
 
 const realtimeTicketTTL = 30 * time.Second
+const realtimeTicketCookieName = "mangorts_realtime_ticket"
 
 type realtimeTicket struct {
 	Actor     ActorContext
@@ -103,8 +104,30 @@ func (s *Server) handleRealtimeTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_realtime_ticket")
 		return
 	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     realtimeTicketCookieName,
+		Value:    ticket,
+		Path:     "/v1/realtime/ws",
+		Expires:  expiresAt,
+		MaxAge:   int(realtimeTicketTTL / time.Second),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   realtimeTicketCookieSecure(r),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ticket":     ticket,
 		"expires_at": expiresAt,
 	})
+}
+
+func realtimeTicketCookieSecure(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.Header.Get("Forwarded")), "proto=https")
 }

@@ -1,4 +1,4 @@
-import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 
 export type NotificationRaciRole = "responsible" | "accountable" | "consulted" | "informed" | "other";
 export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
@@ -142,10 +142,6 @@ export async function markNotificationsRead(input: NotificationClearInput = {}):
   });
   emitNotificationsUpdated(payload.company_id);
   return normalizeCount(result.updated_count);
-}
-
-export function notificationStreamURL(): string {
-  return `${readAuthConfig().apiBase}/v1/notifications/stream`;
 }
 
 function normalizeNotificationSummary(summary: NotificationSummary, companyID: string): NotificationSummary {

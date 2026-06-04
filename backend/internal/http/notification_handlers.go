@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	htmlpkg "html"
 	"log"
 	"miraeopus/backend/internal/domain"
@@ -17,20 +16,6 @@ import (
 	"strings"
 	"time"
 )
-
-type notificationStreamEnvelope struct {
-	Type         string              `json:"type"`
-	Notification domain.Notification `json:"notification"`
-	TS           time.Time           `json:"ts"`
-}
-
-type notificationDeletedStreamEnvelope struct {
-	Type            string    `json:"type"`
-	CompanyID       string    `json:"company_id,omitempty"`
-	RecipientUserID string    `json:"recipient_user_id,omitempty"`
-	NotificationID  string    `json:"notification_id"`
-	TS              time.Time `json:"ts"`
-}
 
 type realtimeNotificationCreatedMessage struct {
 	Type         string              `json:"type"`
@@ -297,46 +282,6 @@ func (s *Server) handleNotificationDeleteByID(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"deleted_count": len(deleted), "notification_id": notificationID})
 }
 
-func (s *Server) handleNotificationStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	actor, ok := authenticatedActor(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "stream_unsupported")
-		return
-	}
-
-	prepareSSEHeaders(w)
-	ch := s.notificationHub.subscribe(actor.User.UserID)
-	defer s.notificationHub.unsubscribe(actor.User.UserID, ch)
-
-	fmt.Fprintf(w, "event: ready\ndata: {\"user_id\":%q}\n\n", actor.User.UserID)
-	flusher.Flush()
-
-	heartbeat := time.NewTicker(sseHeartbeatInterval)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-heartbeat.C:
-			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
-			flusher.Flush()
-		case payload := <-ch:
-			fmt.Fprintf(w, "event: notification\ndata: %s\n\n", payload)
-			flusher.Flush()
-		}
-	}
-}
-
 func (s *Server) projectCommittedNotificationEvents(events []domain.DomainEvent) {
 	s.projectCommittedNotificationEventsWithTiming(events, nil)
 }
@@ -380,17 +325,8 @@ func (s *Server) publishNotificationsWithTiming(items []domain.Notification, tim
 	}
 	for _, item := range items {
 		stop := timings.observe("notifications.publish.serialize")
-		payload, err := json.Marshal(notificationStreamEnvelope{
-			Type:         "notification.created",
-			Notification: item,
-			TS:           time.Now().UTC(),
-		})
 		stop()
-		if err != nil {
-			continue
-		}
 		stop = timings.observe("notifications.publish")
-		s.notificationHub.publish(item.RecipientUserID, payload)
 		s.publishNotificationCreatedRealtime(item)
 		stop()
 	}
@@ -401,17 +337,6 @@ func (s *Server) publishNotificationDeletions(items []domain.Notification) {
 		s.recordOperationalMetric("notifications.deleted_count", "", int64(len(items)), 0)
 	}
 	for _, item := range items {
-		payload, err := json.Marshal(notificationDeletedStreamEnvelope{
-			Type:            "notification.deleted",
-			CompanyID:       item.CompanyID,
-			RecipientUserID: item.RecipientUserID,
-			NotificationID:  item.NotificationID,
-			TS:              time.Now().UTC(),
-		})
-		if err != nil {
-			continue
-		}
-		s.notificationHub.publish(item.RecipientUserID, payload)
 		s.publishNotificationDeletedRealtime(item)
 	}
 }

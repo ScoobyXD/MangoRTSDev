@@ -620,9 +620,9 @@ node changed
 logic gate changed
 Kanban card changed
 folder item changed
-They go to /v1/workspace/stream as:
+They go to /v1/realtime/ws subscriptions as:
 
-event: workspace
+message type: workspace.event
 These are more durable. The stream can catch up from stored domain events if it missed something.
 
 Lane 2: Projection deltas
@@ -630,9 +630,9 @@ These are the precise projection row changes:
 
 upsert this Kanban card row
 delete this RACIO row
-They also go through /v1/workspace/stream, but as:
+They also go through /v1/realtime/ws, but as:
 
-event: projection
+message type: projection.delta
 Before sending them, the Go backend:
 
 finds active subscribers
@@ -652,13 +652,13 @@ text
 user was assigned
 user was mentioned
 RACI assignment changed
-Those go to notification storage, then to the notification stream:
+Those go to notification storage, then to the shared realtime WebSocket:
 
 text
 
 
-/v1/notifications/stream
-event: notification
+/v1/realtime/ws scope notifications:user:<user_id>
+message type: notification.created or notification.deleted
 text
 
 
@@ -670,19 +670,19 @@ So your log line:
 text
 
 
-GET /v1/workspace/stream status=200 ...
-is the stream connection itself.
+GET /v1/realtime/ws status=101 ...
+is the WebSocket connection itself.
 
 That stream can carry:
 
 text
 
 
-event: ready
-event: ping
-event: workspace
-event: projection
-It is not one HTTP request per delta. It is one open SSE connection, and the backend pushes many events through it.
+message type: ready
+message type: ping
+message type: workspace.event
+message type: projection.delta
+It is not one HTTP request per delta. It is one open WebSocket connection, and the backend pushes many events through it.
 
 -----------------------------------------------------------
 
@@ -946,12 +946,12 @@ So:
 
 GET snapshot = initial truth
 stream deltas = keep it fresh
-If /v1/workspace/stream currently carries projection deltas, that is not necessarily wrong. But the name is confusing. It is not a snapshot stream. It is a realtime stream.
+If /v1/realtime/ws carries projection deltas, that is expected. It is not a snapshot stream. It is the shared realtime channel.
 
 Better naming would be:
 
 GET /v1/workspace/snapshot
-GET /v1/realtime/stream
+GET /v1/realtime/ws
 Do We Need Events?
 Yes, but mostly as internal backend facts.
 

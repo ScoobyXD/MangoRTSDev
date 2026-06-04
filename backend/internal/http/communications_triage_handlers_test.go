@@ -39,8 +39,8 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 			From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
 		}},
 	})
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	body, _ := json.Marshal(map[string]any{
 		"company_id":    companyID,

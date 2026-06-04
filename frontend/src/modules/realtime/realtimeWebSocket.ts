@@ -10,6 +10,7 @@ export type RealtimeMessageType =
   | "workspace.event"
   | "notification.created"
   | "notification.deleted"
+  | "communications.event"
   | "snapshot.refetch"
   | "permission.revoked"
   | "ping"
@@ -89,6 +90,21 @@ export type RealtimeNotificationDeletedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
+export type RealtimeCommunicationsEventEnvelope = {
+  user_id?: string;
+  type?: string;
+  trigger?: string;
+  message_id?: string;
+  ts?: string;
+};
+
+export type RealtimeCommunicationsEventMessage = RealtimeBaseMessage & {
+  type: "communications.event";
+  company_id: string;
+  scope: string;
+  event: RealtimeCommunicationsEventEnvelope;
+};
+
 export type RealtimeSnapshotRefetchMessage = RealtimeBaseMessage & {
   type: "snapshot.refetch";
   scope: string;
@@ -118,6 +134,7 @@ export type RealtimeInboundMessage =
   | RealtimeWorkspaceEventMessage
   | RealtimeNotificationCreatedMessage
   | RealtimeNotificationDeletedMessage
+  | RealtimeCommunicationsEventMessage
   | RealtimeSnapshotRefetchMessage
   | RealtimePermissionRevokedMessage
   | RealtimeErrorMessage
@@ -133,6 +150,7 @@ export type RealtimeSubscriptionHandlers = {
   onWorkspaceEvent?: (message: RealtimeWorkspaceEventMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
   onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
+  onCommunicationsEvent?: (message: RealtimeCommunicationsEventMessage) => void;
   onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
   onPermissionRevoked?: (message: RealtimePermissionRevokedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
@@ -144,13 +162,13 @@ type RealtimeSubscription = RealtimeSubscriptionHandlers & {
 
 type RealtimeClientOptions = {
   getAccessToken?: () => Promise<string>;
-  getTicket?: () => Promise<string>;
+  getTicket?: () => Promise<void>;
   WebSocketCtor?: typeof WebSocket;
   reconnectDelayMs?: number;
 };
 
 type RealtimeTicketResponse = {
-  ticket?: string;
+  expires_at?: string;
 };
 
 const realtimeClients = new Map<string, MangoRealtimeClient>();
@@ -282,6 +300,27 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         ts: stringValue(payload.ts) || undefined,
       };
     }
+    case "communications.event": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      const companyID = stringValue(payload.company_id);
+      if (!companyID) throw new Error("realtime_company_id_required");
+      const event = recordValue(payload.event);
+      if (!event || !stringValue(event.type)) throw new Error("realtime_communications_event_required");
+      return {
+        ...base,
+        type,
+        company_id: companyID,
+        scope,
+        event: {
+          user_id: stringValue(event.user_id) || undefined,
+          type: stringValue(event.type) || undefined,
+          trigger: stringValue(event.trigger) || undefined,
+          message_id: stringValue(event.message_id) || undefined,
+          ts: stringValue(event.ts) || undefined,
+        },
+      };
+    }
     case "snapshot.refetch": {
       const scope = stringValue(payload.scope);
       if (!scope) throw new Error("realtime_scope_required");
@@ -320,30 +359,27 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
   }
 }
 
-export function realtimeWebSocketURL(apiBase: string, companyID: string, ticket = ""): string {
+export function realtimeWebSocketURL(apiBase: string, companyID: string): string {
   const url = new URL("/v1/realtime/ws", apiBase || window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("company_id", companyID);
-  if (ticket) url.searchParams.set("ticket", ticket);
   return url.toString();
 }
 
-export async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string, getAccessToken: () => Promise<string> = getApiAccessToken): Promise<string> {
-  const response = await requestJSON<RealtimeTicketResponse>(apiBase, "/v1/realtime/ticket", {
+export async function requestRealtimeWebSocketTicket(apiBase: string, companyID: string, getAccessToken: () => Promise<string> = getApiAccessToken): Promise<void> {
+  await requestJSON<RealtimeTicketResponse>(apiBase, "/v1/realtime/ticket", {
     method: "POST",
+    credentials: "include",
     json: { company_id: companyID },
     getAccessToken,
   });
-  const ticket = stringValue(response.ticket);
-  if (!ticket) throw new Error("realtime_ticket_required");
-  return ticket;
 }
 
 export class MangoRealtimeClient {
   private readonly apiBase: string;
   private readonly companyID: string;
   private readonly getAccessToken: () => Promise<string>;
-  private readonly getTicket: () => Promise<string>;
+  private readonly getTicket: () => Promise<void>;
   private readonly WebSocketCtor: typeof WebSocket;
   private readonly reconnectDelayMs: number;
   private readonly subscriptions = new Map<string, Set<RealtimeSubscription>>();
@@ -398,9 +434,9 @@ export class MangoRealtimeClient {
     this.manualClose = false;
     this.opening = true;
     void this.getTicket()
-      .then((ticket) => {
+      .then(() => {
         if (this.manualClose) return;
-        const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID, ticket));
+        const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID));
         this.socket = socket;
         socket.onopen = () => {
           this.opening = false;
@@ -512,6 +548,9 @@ export class MangoRealtimeClient {
           break;
         case "notification.deleted":
           sub.onNotificationDeleted?.(message);
+          break;
+        case "communications.event":
+          sub.onCommunicationsEvent?.(message);
           break;
         case "snapshot.refetch":
           sub.onRefetch?.(message);

@@ -928,8 +928,8 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 		t.Fatalf("created logic-gate card = %+v", createdCard)
 	}
 
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	issueBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,

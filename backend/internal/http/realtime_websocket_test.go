@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
@@ -61,8 +62,8 @@ func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
 
-	ticket := mintRealtimeTicketForTest(t, server.Routes(), companyID, token)
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID+"&ticket="+url.QueryEscape(ticket), "")
+	ticketCookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
+	client := openRealtimeWebSocketWithCookieForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, ticketCookie)
 	defer client.close()
 
 	ready := client.readJSON(t)
@@ -707,6 +708,155 @@ func TestRealtimeWebSocketWorkspaceEventRoutesOnlyToVisibleUserScopes(t *testing
 	blockedClient.assertNoMessage(t)
 }
 
+func TestRealtimeWebSocketWorkspaceSubscriptionReplaysVisibleEventsAfterSequence(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888018"
+	token := "workspace-replay-visible-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-visible", domain.RoleCompanyUser)
+	visibleNode, err := repo.CreateNode(companyID, "Replay visible node")
+	if err != nil {
+		t.Fatalf("CreateNode visible: %v", err)
+	}
+	hiddenNode, err := repo.CreateNode(companyID, "Replay hidden node")
+	if err != nil {
+		t.Fatalf("CreateNode hidden: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         visibleNode.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions visible: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         hiddenNode.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden: %v", err)
+	}
+	visibleEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "node_updated",
+		Payload:    map[string]any{"node_id": visibleNode.NodeID},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent visible: %v", err)
+	}
+	hiddenEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "node_updated",
+		Payload:    map[string]any{"node_id": hiddenNode.NodeID},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent hidden: %v", err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeWorkspaceScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": 0})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope || accepted["current_sequence"].(float64) != float64(hiddenEvent.Sequence) {
+		t.Fatalf("workspace replay accepted = %+v, want current sequence %d", accepted, hiddenEvent.Sequence)
+	}
+	replayed := client.readJSON(t)
+	if replayed["type"] != realtimeMessageWorkspaceEvent || replayed["scope"] != scope || replayed["sequence"].(float64) != float64(visibleEvent.Sequence) {
+		t.Fatalf("workspace replay message = %+v, want visible sequence %d", replayed, visibleEvent.Sequence)
+	}
+	envelope := replayed["event"].(map[string]any)
+	if envelope["type"] != "node_updated" {
+		t.Fatalf("workspace replay envelope = %+v, want node_updated", envelope)
+	}
+	client.assertNoMessage(t)
+}
+
+func TestRealtimeWebSocketWorkspaceSubscriptionDoesNotReplayCurrentSequence(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888019"
+	token := "workspace-replay-current-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-current", domain.RoleCompanyUser)
+	event, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "company_explorer_folder_created",
+		Payload:    map[string]any{"folder_id": "folder-current", "folder_kind": "node"},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent: %v", err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeCompanyExplorerScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": event.Sequence})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
+		t.Fatalf("workspace current subscription accepted = %+v, want %s", accepted, scope)
+	}
+	client.assertNoMessage(t)
+}
+
+func TestRealtimeWebSocketWorkspaceSubscriptionFallsBackWhenReplayWindowExceeded(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888020"
+	token := "workspace-replay-fallback-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-fallback", domain.RoleCompanyUser)
+	var last domain.DomainEvent
+	for index := 0; index <= realtimeWorkspaceReplayLimit; index++ {
+		event, err := repo.AppendDomainEvent(store.DomainEventInput{
+			CompanyID:  companyID,
+			StreamType: workspaceDomainStreamType,
+			StreamID:   companyID,
+			Type:       "company_explorer_folder_created",
+			Payload: map[string]any{
+				"folder_id":   fmt.Sprintf("folder-%d", index),
+				"folder_kind": "node",
+			},
+		})
+		if err != nil {
+			t.Fatalf("AppendDomainEvent %d: %v", index, err)
+		}
+		last = event
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeWorkspaceScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": 0})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope || accepted["current_sequence"].(float64) != float64(last.Sequence) {
+		t.Fatalf("workspace fallback accepted = %+v, want current sequence %d", accepted, last.Sequence)
+	}
+	refetch := client.readJSON(t)
+	if refetch["type"] != realtimeMessageSnapshotRefetch || refetch["scope"] != scope || refetch["reason"] != "sequence_unavailable" {
+		t.Fatalf("workspace fallback message = %+v, want snapshot refetch", refetch)
+	}
+}
+
 func TestRealtimeWebSocketEditorCollaborationEventRoutesToEditorScope(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888017"
@@ -974,7 +1124,22 @@ func openRealtimeWebSocketForTest(t *testing.T, handler http.Handler, target, to
 	return &realtimeWSClientForTest{conn: conn, reader: reader}
 }
 
+func openRealtimeWebSocketWithCookieForTest(t *testing.T, handler http.Handler, target string, cookie *http.Cookie) *realtimeWSClientForTest {
+	t.Helper()
+	conn, reader, resp := openRealtimeHandshakeForTestWithCookie(t, handler, target, "", cookie)
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		body, _ := io.ReadAll(resp.Body)
+		_ = conn.Close()
+		t.Fatalf("websocket handshake status = %d body=%s", resp.StatusCode, string(body))
+	}
+	return &realtimeWSClientForTest{conn: conn, reader: reader}
+}
+
 func openRealtimeHandshakeForTest(t *testing.T, handler http.Handler, target, token string) (net.Conn, *bufio.Reader, *http.Response) {
+	return openRealtimeHandshakeForTestWithCookie(t, handler, target, token, nil)
+}
+
+func openRealtimeHandshakeForTestWithCookie(t *testing.T, handler http.Handler, target, token string, cookie *http.Cookie) (net.Conn, *bufio.Reader, *http.Response) {
 	t.Helper()
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
@@ -997,6 +1162,9 @@ func openRealtimeHandshakeForTest(t *testing.T, handler http.Handler, target, to
 	if token != "" {
 		request.WriteString("Authorization: Bearer " + token + "\r\n")
 	}
+	if cookie != nil {
+		request.WriteString("Cookie: " + cookie.String() + "\r\n")
+	}
 	request.WriteString("\r\n")
 	if _, err := conn.Write([]byte(request.String())); err != nil {
 		_ = conn.Close()
@@ -1016,7 +1184,7 @@ func openRealtimeHandshakeForTest(t *testing.T, handler http.Handler, target, to
 	return conn, reader, resp
 }
 
-func mintRealtimeTicketForTest(t *testing.T, handler http.Handler, companyID, token string) string {
+func mintRealtimeTicketCookieForTest(t *testing.T, handler http.Handler, companyID, token string) *http.Cookie {
 	t.Helper()
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1037,15 +1205,25 @@ func mintRealtimeTicketForTest(t *testing.T, handler http.Handler, companyID, to
 		t.Fatalf("ticket status = %d body=%s", resp.StatusCode, string(payload))
 	}
 	var payload struct {
-		Ticket string `json:"ticket"`
+		Ticket    string `json:"ticket"`
+		ExpiresAt string `json:"expires_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode realtime ticket: %v", err)
 	}
-	if payload.Ticket == "" {
-		t.Fatalf("empty realtime ticket")
+	if payload.Ticket != "" {
+		t.Fatalf("ticket response leaked query credential: %+v", payload)
 	}
-	return payload.Ticket
+	if payload.ExpiresAt == "" {
+		t.Fatalf("ticket response missing expires_at")
+	}
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == realtimeTicketCookieName && cookie.Value != "" {
+			return cookie
+		}
+	}
+	t.Fatalf("ticket response missing %s cookie", realtimeTicketCookieName)
+	return nil
 }
 
 func randomWebSocketKeyForTest(t *testing.T) string {

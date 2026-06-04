@@ -62,7 +62,7 @@ func TestWorkspaceDerivedReplayCheckpointsMissingTargets(t *testing.T) {
 		t.Fatalf("AppendDomainEvent: %v", err)
 	}
 
-	server := &Server{repo: repo, hub: newWorkspaceEventHub()}
+	server := &Server{repo: repo, workspaceEvents: newLocalWorkspaceEventBus()}
 	if err := server.replayWorkspaceDerivedDomainEvents(context.Background(), repo, companyID, 10); err != nil {
 		t.Fatalf("replayWorkspaceDerivedDomainEvents: %v", err)
 	}

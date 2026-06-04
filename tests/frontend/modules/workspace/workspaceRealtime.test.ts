@@ -45,7 +45,10 @@ test("workspace realtime accepted boundary and events update cursor without gap 
 
     await harness.waitForSocket();
     assert.equal(harness.openedURLs.length, 1);
-    assert.equal(new URL(harness.openedURLs[0]).searchParams.get("ticket"), "workspace-ticket");
+    const url = new URL(harness.openedURLs[0]);
+    assert.equal(url.searchParams.has("ticket"), false);
+    assert.equal(url.searchParams.has("access_token"), false);
+    assert.equal(url.searchParams.has("token"), false);
     assert.deepEqual(harness.subscriptionScopes(), ["workspace:user:user-1"]);
 
     harness.emit({
@@ -226,7 +229,7 @@ function installRealtimeHarness(): {
   globalThis.fetch = (async (input) => {
     const url = new URL(String(input));
     assert.equal(url.pathname, "/v1/realtime/ticket");
-    return new Response(JSON.stringify({ ticket: "workspace-ticket" }), {
+    return new Response(JSON.stringify({ expires_at: "2026-06-04T00:00:30.000Z" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
