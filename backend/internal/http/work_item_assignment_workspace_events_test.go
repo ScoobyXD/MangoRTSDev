@@ -38,8 +38,8 @@ func TestWorkItemAssignmentPublishesCommittedWorkspaceEventAfterAtomicCommit(t *
 	}
 	actor := domain.User{UserID: "66666666-6666-4666-8666-666666666666", Email: "actor@example.com", DisplayName: "Actor"}
 
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	body, _ := json.Marshal(map[string]any{"company_id": companyID, "logic_gate_id": logicGate.LogicGateID, "node_id": node.NodeID, "priority": 3, "status": "done"})
 	rec := httptest.NewRecorder()
@@ -94,8 +94,8 @@ func TestWorkItemAssignmentDoesNotPublishHubEventWhenAtomicMutationFails(t *test
 	companyID := "77777777-7777-4777-8777-777777777777"
 	repo := &failingWorkItemAssignmentRepo{MemoryRepo: store.NewMemoryRepo(), err: errors.New("commit failed")}
 	server := NewServer(repo)
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	body, _ := json.Marshal(map[string]any{"company_id": companyID, "logic_gate_id": "gate", "node_id": "node", "status": "done"})
 	rec := httptest.NewRecorder()

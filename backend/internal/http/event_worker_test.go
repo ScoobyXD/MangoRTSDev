@@ -384,6 +384,62 @@ func TestEventWorkerPermissionChangeRevokesEditorRealtimeSubscription(t *testing
 	}
 }
 
+func TestEventWorkerPermissionChangeSignalsWorkspaceRealtimeScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777609"
+	token := "event-worker-workspace-revoke-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "event-worker-workspace-revoke-user", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Worker workspace revoke node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions grant: %v", err)
+	}
+	drainEventRowsForTest(t, repo, companyID)
+	server := newEventWorkerAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	scope := realtimeNodeGraphScope(user.UserID)
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
+	}
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessagePermissionRevoked || message["scope"] != scope || message["resource_type"] != store.EntityTypeNode || message["resource_id"] != node.NodeID {
+		t.Fatalf("workspace permission message = %+v, want permission.revoked for %s", message, scope)
+	}
+	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
+		t.Fatalf("workspace scope should remain subscribed after scoped permission signal")
+	}
+}
+
 func TestEventWorkerPermissionChangeRevokesRealtimeSubscription(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777603"

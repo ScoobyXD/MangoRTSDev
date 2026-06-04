@@ -41,8 +41,8 @@ func TestHomeDropAssignmentCommandKeepsSourceProjectionNodeAndEventsConsistent(t
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}
 
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	rec := postHomeDropWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments", map[string]any{
 		"company_id":      companyID,
@@ -148,8 +148,8 @@ func TestHomeDropAssignmentCommandFailureDoesNotPartiallyUpdateOrPublish(t *test
 		t.Fatalf("seed node fallback state: %v", err)
 	}
 
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	rec := postHomeDropWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments", map[string]any{
 		"company_id":    companyID,

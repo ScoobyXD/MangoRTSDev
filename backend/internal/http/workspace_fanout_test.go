@@ -57,8 +57,8 @@ func TestWorkspaceFanoutCommittedEventPublishesLocalHubAndExternalNotification(t
 	server := NewServerWithOptions(repo, ServerOptions{WorkspaceEventFanout: fanout})
 	defer server.Close()
 	companyID := "fanout-local-company"
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	event, err := repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:  companyID,
@@ -143,6 +143,68 @@ func TestWorkspaceFanoutNotificationPublishesRealtimeWorkspaceEvent(t *testing.T
 	if envelope["type"] != "node_updated" || envelope["company_id"] != companyID {
 		t.Fatalf("fanout realtime envelope = %+v, want node_updated company event", envelope)
 	}
+}
+
+func TestWorkspaceFanoutDuplicateNotificationAfterLocalPublishIsSuppressed(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	fanout := newManualWorkspaceEventFanout()
+	companyID := "88888888-8888-4888-8888-888888888103"
+	token := "workspace-fanout-dedupe-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-fanout-dedupe", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		WorkspaceEventFanout: fanout,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
+		}},
+	})
+	defer server.Close()
+
+	node, err := repo.CreateNode(companyID, "Fanout dedupe node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeWorkspaceScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	event, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "node_updated",
+		Payload:    map[string]any{"node_id": node.NodeID},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent: %v", err)
+	}
+	notification, ok := store.WorkspaceEventNotificationFromDomainEvent(event)
+	if !ok {
+		t.Fatalf("event did not produce workspace notification: %+v", event)
+	}
+	server.publishCommittedWorkspaceEventWithTiming(event, nil)
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessageWorkspaceEvent || message["scope"] != scope || message["sequence"].(float64) != float64(event.Sequence) {
+		t.Fatalf("local realtime message = %+v, want workspace event for sequence %d", message, event.Sequence)
+	}
+
+	fanout.emit(notification)
+	client.assertNoMessage(t)
 }
 
 func TestWorkspaceFanoutIgnoresUserScopedNotificationsAfterGlobalDelivery(t *testing.T) {

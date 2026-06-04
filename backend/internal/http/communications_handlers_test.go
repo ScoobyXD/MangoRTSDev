@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -1064,10 +1065,9 @@ func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *test
 
 func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	user, err := repo.UpsertAuthUser("subject", "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
+	companyID := "70707070-7070-4070-8070-707070707001"
+	token := "communications-webhook-ws-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "communications-webhook-ws", domain.RoleCompanyUser)
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID:       user.UserID,
 		Provider:     "google",
@@ -1079,11 +1079,24 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config})
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
+		}},
+	})
+	defer server.Close()
 	handler := server.Routes()
 
-	ch := server.emailHub.subscribe(user.UserID)
-	defer server.emailHub.unsubscribe(user.UserID, ch)
+	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeCommunicationsScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
+		t.Fatalf("communications subscription accepted = %+v, want %s", accepted, scope)
+	}
 
 	challengeReq := httptest.NewRequest(http.MethodGet, "/nylas/webhook?challenge=abc123", nil)
 	challengeRec := httptest.NewRecorder()
@@ -1100,17 +1113,13 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	select {
-	case raw := <-ch:
-		var event communicationsEventEnvelope
-		if err := json.Unmarshal(raw, &event); err != nil {
-			t.Fatal(err)
-		}
-		if event.UserID != user.UserID || event.Type != "mailbox_changed" || event.Trigger != "message.created" || event.MessageID != "message-1" {
-			t.Fatalf("event = %+v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mailbox event")
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessageCommunicationsEvent || message["company_id"] != companyID || message["scope"] != scope {
+		t.Fatalf("communications websocket message = %+v, want communications event for %s", message, scope)
+	}
+	event := message["event"].(map[string]any)
+	if event["user_id"] != user.UserID || event["type"] != "mailbox_changed" || event["trigger"] != "message.created" || event["message_id"] != "message-1" {
+		t.Fatalf("communications event = %+v", event)
 	}
 
 	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
@@ -1120,11 +1129,7 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("duplicate webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
 	}
-	select {
-	case raw := <-ch:
-		t.Fatalf("duplicate webhook published mailbox event: %s", string(raw))
-	default:
-	}
+	client.assertNoMessage(t)
 
 	badReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	badReq.Header.Set("X-Nylas-Signature", "bad")

@@ -33,9 +33,7 @@ type BootstrapDevAdminConfig struct {
 
 type Server struct {
 	repo                            store.Repository
-	hub                             *workspaceEventHub
-	emailHub                        *workspaceEventHub
-	notificationHub                 *workspaceEventHub
+	workspaceEvents                 *localWorkspaceEventBus
 	projectionHub                   *projectionDeltaHub
 	realtimeRegistry                *realtimeSubscriptionRegistry
 	realtimeTickets                 *realtimeTicketStore
@@ -43,6 +41,7 @@ type Server struct {
 	kanban                          *kanban.Service
 	workspaceFanout                 store.WorkspaceEventFanout
 	workspaceFanoutCancel           context.CancelFunc
+	workspacePublishDedupe          *workspaceEventPublishDedupe
 	workspaceDerivedCatchupCancel   context.CancelFunc
 	workspaceDerivedCatchupInterval time.Duration
 	workspaceDerivedCatchupLimit    int
@@ -166,15 +165,14 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server := &Server{
 		repo:                            repo,
-		hub:                             newWorkspaceEventHub(),
-		emailHub:                        newWorkspaceEventHub(),
-		notificationHub:                 newWorkspaceEventHub(),
+		workspaceEvents:                 newLocalWorkspaceEventBus(),
 		projectionHub:                   newProjectionDeltaHub(),
 		realtimeRegistry:                newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                 newRealtimeTicketStore(),
 		notifications:                   notifications.NewService(repo),
 		kanban:                          kanban.NewService(repo),
 		workspaceFanout:                 options.WorkspaceEventFanout,
+		workspacePublishDedupe:          newWorkspaceEventPublishDedupe(),
 		workspaceDerivedCatchupInterval: workspaceDerivedCatchupInterval,
 		workspaceDerivedCatchupLimit:    workspaceDerivedCatchupLimit,
 		notificationCatchupInterval:     notificationCatchupInterval,
@@ -257,12 +255,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/triage/", s.handleCommunicationsTriageByID)
 	mux.HandleFunc("/v1/communications/my-logic-gates", s.handleCommunicationsMyLogicGates)
 	mux.HandleFunc("/v1/communications/my-logic-gates/", s.handleCommunicationsMyLogicGateByID)
-	mux.HandleFunc("/v1/communications/stream", s.handleCommunicationsStream)
 	mux.HandleFunc("/v1/notifications", s.handleNotifications)
 	mux.HandleFunc("/v1/notifications/summary", s.handleNotificationSummary)
 	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)
 	mux.HandleFunc("/v1/notifications/read-all", s.handleNotificationReadAll)
-	mux.HandleFunc("/v1/notifications/stream", s.handleNotificationStream)
 	mux.HandleFunc("/v1/notifications/", s.handleNotificationByID)
 	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
 	mux.HandleFunc("/nylas/webhook", s.handleNylasWebhook)

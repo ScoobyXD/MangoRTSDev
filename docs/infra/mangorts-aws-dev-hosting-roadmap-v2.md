@@ -29,7 +29,7 @@ Known gaps:
 - V2 docs are not visually obvious enough.
 - Terraform state/backend setup is not fully documented for CI.
 - First AWS bootstrap needs a two-phase path because ECR and deploy role are Terraform-owned.
-- Frontend `EventSource` cannot send Cognito Bearer headers.
+- Browser-visible realtime now uses `/v1/realtime/ws` with a short-lived HttpOnly ticket cookie.
 - CloudFront/ALB origin needs stronger origin verification.
 - Old docs/scripts still point agents toward legacy infra.
 
@@ -68,12 +68,10 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 - Keep frontend route rewrites at CloudFront so static Vite routes land on `index.html`.
 
 ### Phase 5: Fix Authenticated Streaming
-- Replace raw `EventSource` calls with an authenticated fetch-based SSE helper.
-- Use the same Cognito token source as normal `fetch`.
-- Apply this to:
-  - `frontend/src/modules/node-map/NodeRelationshipGraph.ts`
-  - `frontend/src/modules/logic-gate-map/LogicGateRelationshipGraph.ts`
-- Add frontend tests for SSE parsing/reconnect behavior where practical.
+- Keep browser live updates on `/v1/realtime/ws`.
+- Mint the short-lived WebSocket ticket through authenticated `fetch`, then connect without token-bearing URL query params.
+- Keep node graph, logic gate graph, notification, communication, RACI, and Kanban live updates on the shared WebSocket client.
+- Add frontend tests for reconnect and scope-specific message routing where practical.
 
 ### Phase 6: Tenant/Auth Safety
 - Keep explicit `company_id` in the API for now.

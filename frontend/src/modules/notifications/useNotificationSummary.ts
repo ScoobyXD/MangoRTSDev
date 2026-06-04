@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { connectAuthenticatedSse, type SseConnection, type SseEvent } from "../../auth/authenticatedSse.js";
-import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, notificationStreamURL, type NotificationSummary } from "./notificationsApi.js";
+import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../../auth/cognitoAuth.js";
+import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
+import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_CLOSE_GRACE_MS = 1500;
 
@@ -14,12 +15,11 @@ type NotificationSummaryEntry = {
   closeTimer?: TimerID;
   loading: boolean;
   reloadQueued: boolean;
+  realtimePending: boolean;
+  unsubscribeRealtime?: () => void;
 };
 
 const notificationSummaryEntries = new Map<string, NotificationSummaryEntry>();
-let notificationStream: SseConnection | undefined;
-let notificationStreamCloseTimer: TimerID | undefined;
-let notificationStreamReadySeen = false;
 let notificationUpdateListener: ((event: Event) => void) | undefined;
 
 export function useNotificationSummary(companyID: string): NotificationSummary {
@@ -41,14 +41,11 @@ function subscribeNotificationSummary(companyID: string, listener: NotificationS
     clearTimeout(entry.closeTimer);
     entry.closeTimer = undefined;
   }
-  if (notificationStreamCloseTimer !== undefined) {
-    clearTimeout(notificationStreamCloseTimer);
-    notificationStreamCloseTimer = undefined;
-  }
 
   entry.listeners.add(listener);
   listener(entry.summary);
-  ensureNotificationStream();
+  ensureNotificationUpdateListener();
+  ensureNotificationRealtime(entry);
   requestNotificationSummaryLoad(entry, { queueWhileLoading: false });
 
   return () => {
@@ -56,10 +53,11 @@ function subscribeNotificationSummary(companyID: string, listener: NotificationS
     if (entry.listeners.size === 0 && entry.closeTimer === undefined) {
       entry.closeTimer = setTimeout(() => {
         if (entry.listeners.size > 0 || notificationSummaryEntries.get(companyID) !== entry) return;
+        entry.unsubscribeRealtime?.();
         notificationSummaryEntries.delete(companyID);
       }, NOTIFICATION_SUMMARY_CLOSE_GRACE_MS);
     }
-    scheduleNotificationStreamClose();
+    scheduleNotificationUpdateListenerClose();
   };
 }
 
@@ -72,26 +70,46 @@ function getNotificationSummaryEntry(companyID: string): NotificationSummaryEntr
     listeners: new Set(),
     loading: false,
     reloadQueued: false,
+    realtimePending: false,
   };
   notificationSummaryEntries.set(companyID, created);
   return created;
 }
 
-function ensureNotificationStream(): void {
-  if (notificationStream) return;
-  notificationStream = connectAuthenticatedSse(notificationStreamURL(), {
-    onEvent(event: SseEvent) {
-      if (event.event === "ready") {
-        if (notificationStreamReadySeen) requestActiveNotificationSummaryLoads();
-        notificationStreamReadySeen = true;
-      } else if (event.event === "notification") {
-        requestNotificationSummaryLoadsForCompany(notificationEventCompanyID(event));
-      }
-    },
-    onError(error: unknown) {
-      console.error("Notification stream failed", error);
-    },
-  });
+function ensureNotificationRealtime(entry: NotificationSummaryEntry): void {
+  if (entry.unsubscribeRealtime || entry.realtimePending || !entry.companyID.trim()) return;
+  entry.realtimePending = true;
+  const apiBase = readAuthConfig().apiBase;
+  void fetchCurrentUser()
+    .then((current) => {
+      const userID = current.user.user_id.trim();
+      if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
+      entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
+        onNotificationCreated(message) {
+          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+        },
+        onNotificationDeleted(message) {
+          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+        },
+        onError(error) {
+          console.error("Notification realtime failed", error);
+        },
+      });
+    })
+    .catch((error: unknown) => {
+      console.error("Notification realtime failed", error);
+    })
+    .finally(() => {
+      entry.realtimePending = false;
+    });
+}
+
+function currentUserCanUseCompany(current: CurrentUserResponse, companyID: string): boolean {
+  const cleanCompanyID = companyID.trim();
+  return !!cleanCompanyID && (current.is_dev_admin || current.memberships.some((membership) => membership.company_id === cleanCompanyID));
+}
+
+function ensureNotificationUpdateListener(): void {
   if (!notificationUpdateListener) {
     notificationUpdateListener = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -101,14 +119,9 @@ function ensureNotificationStream(): void {
   }
 }
 
-function scheduleNotificationStreamClose(): void {
-  if (activeNotificationSummaryListenerCount() > 0 || notificationStreamCloseTimer !== undefined) return;
-  notificationStreamCloseTimer = setTimeout(() => {
-    notificationStreamCloseTimer = undefined;
+function scheduleNotificationUpdateListenerClose(): void {
+  setTimeout(() => {
     if (activeNotificationSummaryListenerCount() > 0) return;
-    notificationStream?.close();
-    notificationStream = undefined;
-    notificationStreamReadySeen = false;
     if (notificationUpdateListener) {
       window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, notificationUpdateListener);
       notificationUpdateListener = undefined;
@@ -167,16 +180,3 @@ function notifyNotificationSummaryListeners(entry: NotificationSummaryEntry): vo
   for (const listener of Array.from(entry.listeners)) listener(entry.summary);
 }
 
-function notificationEventCompanyID(event: SseEvent): string {
-  if (!event.data) return "";
-  try {
-    const payload = JSON.parse(event.data) as { company_id?: unknown; notification?: { company_id?: unknown } };
-    return cleanString(payload.notification?.company_id) || cleanString(payload.company_id);
-  } catch {
-    return "";
-  }
-}
-
-function cleanString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}

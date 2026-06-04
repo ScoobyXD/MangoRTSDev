@@ -183,17 +183,74 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 	switch entityType {
 	case store.EntityTypeNode:
 		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
+		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	case store.EntityTypeLogicGate:
 		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.revalidateKanbanBoardSubscriptionsForLogicGate(row.CompanyID, entityID)
+		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	default:
 		return nil
+	}
+}
+
+func (s *Server) revalidateWorkspaceSubscriptionsForResource(companyID, resourceType, resourceID string) {
+	companyID = strings.TrimSpace(companyID)
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if companyID == "" || resourceType == "" || resourceID == "" || s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	for _, item := range s.realtimeRegistry.workspaceScopeConnections(companyID) {
+		conn := item.Connection
+		scope := strings.TrimSpace(item.Scope)
+		if conn == nil || scope == "" {
+			continue
+		}
+		userID := realtimeWorkspaceUserIDFromScope(scope)
+		if userID == "" {
+			continue
+		}
+		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, store.EntityPermissionView)
+		if err != nil {
+			log.Printf("failed to revalidate workspace realtime subscription company_id=%s user_id=%s scope=%s resource_type=%s resource_id=%s: %v", companyID, userID, scope, resourceType, resourceID, err)
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:         realtimeMessageSnapshotRefetch,
+				CompanyID:    companyID,
+				Scope:        scope,
+				ResourceType: resourceType,
+				ResourceID:   resourceID,
+				Reason:       "permission_check_failed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		if allowed {
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:         realtimeMessageSnapshotRefetch,
+				CompanyID:    companyID,
+				Scope:        scope,
+				ResourceType: resourceType,
+				ResourceID:   resourceID,
+				Reason:       "permission_changed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		_ = conn.sendJSON(realtimeServerMessage{
+			Type:         realtimeMessagePermissionRevoked,
+			CompanyID:    companyID,
+			Scope:        scope,
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
+			Reason:       "permission_revoked",
+		})
+		s.recordOperationalMetric("realtime.permission_revoked_count", realtimeScopeType(scope), 1, 0)
 	}
 }
 

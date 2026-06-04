@@ -18,8 +18,8 @@ func TestInboxPriorityMoveCommandKeepsSourceProjectionReadsAndEventsConsistent(t
 	repo.EnsureCompany(companyID, "Inbox Command Company")
 	logicGate, node, responsibleUserID := setupInboxCommandAssignedNode(t, repo, companyID, "inbox-command-priority", 4)
 
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	rec := postHomeDropWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments/move", map[string]any{
 		"company_id":    companyID,
@@ -106,8 +106,8 @@ func TestInboxMoveCommandFailureDoesNotPartiallyUpdateOrPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter before failure: %v", err)
 	}
-	stream := server.hub.subscribe(companyID)
-	defer server.hub.unsubscribe(companyID, stream)
+	stream := server.workspaceEvents.subscribe(companyID)
+	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	rec := postHomeDropWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments/move", map[string]any{
 		"company_id":    companyID,

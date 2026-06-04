@@ -150,7 +150,7 @@ Completed in Phase 1:
 - Added `company_projection_sequences` for company-scoped projection cursors.
 - Added RACI projection delta structs and best-effort delta publishing for `racio_matrix_projection_table` changes.
 - Removed synchronous `racio_projection_rows` response rereads from RACI matrix and assignment mutation response paths; command responses now return fast and omit fresh projection rows.
-- Added a scoped projection SSE path on `/v1/workspace/stream?projection=racio_matrix`, keyed to active `user:<user_id>` matrix subscribers.
+- Added a scoped projection WebSocket path on `/v1/realtime/ws`, keyed to active `racio:user:<user_id>` matrix subscribers.
 - Fanout considers only active company/projection/user-scope subscribers and checks effective access before sending row payloads.
 - Added permission-change projection fanout for active RACI matrix subscribers by rereading only affected projection rows.
 - Added targeted fallback GET `/v1/work-items/racio-matrix-projection` for the current/target matrix viewer.
@@ -174,7 +174,7 @@ Review notes after the local main merge:
 - Backend tests, frontend production build, and the aggregate `node scripts\run_all_tests.mjs` verification passed after the merge.
 - The Phase 1 schema addition is `company_projection_sequences`, added by `backend/db/migrations/20260602_racio_projection_sequences.sql`.
 - RACI projection deltas are currently sequenced in the async publisher after the source/projection transaction has returned. This is acceptable for the first vertical slice, but it can misorder delayed older publishes behind newer writes. Before expanding the pattern broadly, prefer assigning projection ordering at projection-sync/commit time or adding row-level projection versions that the client can compare.
-- RACI initial GET and projection SSE do not yet share a projection watermark. The existing stream cursor is still the workspace-domain-event `after_sequence`; the RACI projection sequence only appears inside projection event payloads. A missed final projection event can leave stale UI until targeted refetch or explicit refresh.
+- RACI initial GET and projection WebSocket updates do not yet share a projection watermark. The existing stream cursor is still the workspace-domain-event `after_sequence`; the RACI projection sequence only appears inside projection event payloads. A missed final projection event can leave stale UI until targeted refetch or explicit refresh.
 - Permission-change fanout exists, but Phase 2 should add or preserve an end-to-end test proving an actively subscribed user who loses access receives a delete/removal delta and no row payload leak.
 - The current RACI GET and live delta auth use effective `edit` access for this work surface. If a future projection is merely visible/read-only, do not blindly reuse `edit`; choose the required access level for that surface.
 
@@ -225,7 +225,7 @@ Completed in Phase 2:
 - Updated current Kanban card GETs to read projection cards directly and return a `projection_sequence` watermark for the Kanban GET plus stream handoff.
 - Updated Kanban column/card handlers so normal card writes return mutation results without rereading large Logic Gate work/UI aggregates just to refresh the response.
 - Emitted Kanban deltas for card create/update/move/delete, assignment state moves, issue toggles, and node-field changes that affect card title/status/priority/assignee/due-date display.
-- Added a scoped `/v1/workspace/stream?projection=kanban_board&kanban_board_id=<board_id>` subscription keyed to active `board:<board_id>|user:<user_id>` subscribers.
+- Added a scoped `/v1/realtime/ws` subscription keyed to active `board:<board_id>` subscribers.
 - Scoped Kanban fanout to active subscribers for the affected board, not every company user.
 - Permission-filtered Kanban row payloads with effective `view` access checks on both the logic gate and node. Unauthorized active subscribers receive delete deltas without row payloads.
 - Added permission-change Kanban fanout so active users who lose access to a node or logic gate receive removal/delete deltas.

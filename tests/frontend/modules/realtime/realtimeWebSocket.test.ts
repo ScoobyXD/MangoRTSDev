@@ -7,6 +7,7 @@ import {
   realtimeWebSocketURL,
   MangoRealtimeClient,
   type RealtimeErrorMessage,
+  type RealtimeCommunicationsEventMessage,
   type RealtimeNotificationCreatedMessage,
   type RealtimeNotificationDeletedMessage,
   type RealtimePermissionRevokedMessage,
@@ -101,6 +102,25 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(deleted.notification_id, "notification-1");
   assert.equal(deleted.ts, "2026-06-03T10:00:02.000Z");
 
+  const communications = parseRealtimeMessage(JSON.stringify({
+    type: "communications.event",
+    company_id: "company-1",
+    scope: "communications:user:user-1",
+    event: {
+      user_id: "user-1",
+      type: "mailbox_changed",
+      trigger: "message.created",
+      message_id: "message-1",
+      ts: "2026-06-03T10:00:03.000Z",
+    },
+  })) as RealtimeCommunicationsEventMessage;
+  assert.equal(communications.type, "communications.event");
+  assert.equal(communications.company_id, "company-1");
+  assert.equal(communications.scope, "communications:user:user-1");
+  assert.equal(communications.event.type, "mailbox_changed");
+  assert.equal(communications.event.trigger, "message.created");
+  assert.equal(communications.event.message_id, "message-1");
+
   const refetch = parseRealtimeMessage(JSON.stringify({ type: "snapshot.refetch", scope: "board:A", sequence: 9, reason: "sequence_unavailable" })) as RealtimeSnapshotRefetchMessage;
   assert.equal(refetch.type, "snapshot.refetch");
   assert.equal(refetch.scope, "board:A");
@@ -119,18 +139,19 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(error.error, "invalid_json");
 });
 
-test("websocket URL uses one-time ticket instead of normal access token query param", () => {
-  const url = new URL(realtimeWebSocketURL("https://api.example.test", "company-1", "ws-ticket-1"));
+test("websocket URL does not include credential query params", () => {
+  const url = new URL(realtimeWebSocketURL("https://api.example.test", "company-1"));
   assert.equal(url.protocol, "wss:");
   assert.equal(url.searchParams.get("company_id"), "company-1");
-  assert.equal(url.searchParams.get("ticket"), "ws-ticket-1");
+  assert.equal(url.searchParams.has("ticket"), false);
   assert.equal(url.searchParams.has("access_token"), false);
   assert.equal(url.searchParams.has("token"), false);
 });
 
-test("realtime client opens authenticated websocket with minted ticket", async () => {
+test("realtime client mints cookie before opening websocket without query credentials", async () => {
   const openedURLs: string[] = [];
   const sentMessages: string[] = [];
+  let minted = false;
   const originalWebSocket = globalThis.WebSocket;
 
   class FakeWebSocket {
@@ -166,17 +187,21 @@ test("realtime client opens authenticated websocket with minted ticket", async (
   try {
     const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
       WebSocketCtor: FakeWebSocket as unknown as typeof WebSocket,
-      getTicket: async () => "minted-ws-ticket",
+      getTicket: async () => {
+        minted = true;
+      },
       reconnectDelayMs: 60_000,
     });
     let ready = false;
     const unsubscribe = client.subscribe("board:A", { onReady: () => { ready = true; } });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(ready, true);
+    assert.equal(minted, true);
     assert.equal(openedURLs.length, 1);
     const url = new URL(openedURLs[0]);
-    assert.equal(url.searchParams.get("ticket"), "minted-ws-ticket");
+    assert.equal(url.searchParams.has("ticket"), false);
     assert.equal(url.searchParams.has("access_token"), false);
+    assert.equal(url.searchParams.has("token"), false);
     assert.equal(sentMessages.some((message) => JSON.parse(message).type === "subscribe"), true);
     unsubscribe();
     client.close();
@@ -220,7 +245,7 @@ test("realtime client reuses one websocket for RACIO and notification scopes", a
 
   const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
     WebSocketCtor: FakeSharedWebSocket as unknown as typeof WebSocket,
-    getTicket: async () => "minted-ws-ticket",
+    getTicket: async () => undefined,
     reconnectDelayMs: 60_000,
   });
   const unsubscribeNotifications = client.subscribe("notifications:user:user-a");
@@ -274,7 +299,7 @@ test("realtime client dispatches notification messages only to the exact subscri
   try {
     const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
       WebSocketCtor: FakeNotificationWebSocket as unknown as typeof WebSocket,
-      getTicket: async () => "minted-ws-ticket",
+      getTicket: async () => undefined,
       reconnectDelayMs: 60_000,
     });
     const created: RealtimeNotificationCreatedMessage[] = [];
