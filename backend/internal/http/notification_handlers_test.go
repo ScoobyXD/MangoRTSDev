@@ -870,16 +870,42 @@ func TestDeleteOneNotificationRemovesItFromGetResults(t *testing.T) {
 	}
 }
 
+func TestClearAllNotificationsRequiresCompanyID(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a"
+	user, err := repo.UpsertAuthUser("clear-all-missing-company-subject", "clear-all-missing-company@example.com", "Clear Missing Company")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-all-missing-company-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications", nil)
+	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusBadRequest {
+		t.Fatalf("DELETE notifications without company_id status = %d body=%s, want %d", deleteRec.Code, deleteRec.Body.String(), http.StatusBadRequest)
+	}
+}
+
 func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
 	handler := server.Routes()
 	companyID := "59595959-5959-4959-8959-595959595959"
+	otherCompanyID := "69696969-6969-4969-8969-696969696969"
 	user, err := repo.UpsertAuthUser("clear-all-subject", "clear-all@example.com", "Clear All")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership("clear-all-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-all-subject", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	other, err := repo.UpsertAuthUser("clear-all-other-subject", "clear-all-other@example.com", "Clear All Other")
@@ -894,6 +920,11 @@ func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T)
 		t.Fatal(err)
 	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID, other.UserID)
+	otherCompanyNode, err := repo.CreateNode(otherCompanyID, "Other company clear all notification node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, otherCompanyID, store.EntityTypeNode, otherCompanyNode.NodeID, user.UserID)
 	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
 		{
 			CompanyID:       companyID,
@@ -925,6 +956,16 @@ func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T)
 			Title:           "Other user notification",
 			NodeID:          node.NodeID,
 		},
+		{
+			CompanyID:       otherCompanyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "59595959-5959-4959-8959-000000000004",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        otherCompanyNode.NodeID,
+			Title:           "Other company notification",
+			NodeID:          otherCompanyNode.NodeID,
+		},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -950,6 +991,11 @@ func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T)
 	userListReq = requestWithActorForNotifications(userListReq, user, companyID)
 	if got := listNotificationsForRequestForTest(t, handler, userListReq); len(got) != 0 {
 		t.Fatalf("current user notifications after clear all = %+v, want none", got)
+	}
+	otherCompanyListReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+otherCompanyID, nil)
+	otherCompanyListReq = requestWithActorForNotifications(otherCompanyListReq, user, otherCompanyID)
+	if got := listNotificationsForRequestForTest(t, handler, otherCompanyListReq); len(got) != 1 || got[0].CompanyID != otherCompanyID {
+		t.Fatalf("same user other company notifications after clear all = %+v, want untouched other company notification", got)
 	}
 	otherListReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
 	otherListReq = requestWithActorForNotifications(otherListReq, other, companyID)

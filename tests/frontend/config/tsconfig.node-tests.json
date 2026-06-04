@@ -27,6 +27,8 @@
     "../modules/api/requestJSON.test.ts",
     "../../../frontend/src/modules/communications/communicationsApi.ts",
     "../modules/communications/communicationsApi.test.ts",
+    "../../../frontend/src/modules/notifications/notificationsApi.ts",
+    "../modules/notifications/notificationsApi.test.ts",
     "../../../frontend/src/pages/home/homeUtils.ts",
     "../pages/home/homeUtils.test.ts",
     "../../../frontend/src/pages/home/homeCommands.ts",

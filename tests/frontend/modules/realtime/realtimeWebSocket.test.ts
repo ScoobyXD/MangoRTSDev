@@ -7,6 +7,8 @@ import {
   realtimeWebSocketURL,
   MangoRealtimeClient,
   type RealtimeErrorMessage,
+  type RealtimeNotificationCreatedMessage,
+  type RealtimeNotificationDeletedMessage,
   type RealtimePermissionRevokedMessage,
   type RealtimeProjectionDeltaMessage,
   type RealtimeSnapshotRefetchMessage,
@@ -38,6 +40,42 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(delta.sequence, 8);
   assert.equal(delta.projection_sequence, 8);
   assert.equal(delta.deltas.length, 1);
+
+  const created = parseRealtimeMessage(JSON.stringify({
+    type: "notification.created",
+    company_id: "company-1",
+    scope: "notifications:user:user-1",
+    notification: {
+      notification_id: "notification-1",
+      company_id: "company-1",
+      recipient_user_id: "user-1",
+      type: "mention.created",
+      source_event_id: "event-1",
+      entity_type: "node",
+      entity_id: "node-1",
+      title: "Mention",
+      created_timestamp: "2026-06-03T10:00:00.000Z",
+    },
+    ts: "2026-06-03T10:00:01.000Z",
+  })) as RealtimeNotificationCreatedMessage;
+  assert.equal(created.type, "notification.created");
+  assert.equal(created.company_id, "company-1");
+  assert.equal(created.scope, "notifications:user:user-1");
+  assert.equal(created.notification.notification_id, "notification-1");
+  assert.equal(created.ts, "2026-06-03T10:00:01.000Z");
+
+  const deleted = parseRealtimeMessage(JSON.stringify({
+    type: "notification.deleted",
+    company_id: "company-1",
+    scope: "notifications:user:user-1",
+    notification_id: "notification-1",
+    ts: "2026-06-03T10:00:02.000Z",
+  })) as RealtimeNotificationDeletedMessage;
+  assert.equal(deleted.type, "notification.deleted");
+  assert.equal(deleted.company_id, "company-1");
+  assert.equal(deleted.scope, "notifications:user:user-1");
+  assert.equal(deleted.notification_id, "notification-1");
+  assert.equal(deleted.ts, "2026-06-03T10:00:02.000Z");
 
   const refetch = parseRealtimeMessage(JSON.stringify({ type: "snapshot.refetch", scope: "board:A", sequence: 9, reason: "sequence_unavailable" })) as RealtimeSnapshotRefetchMessage;
   assert.equal(refetch.type, "snapshot.refetch");
@@ -117,6 +155,91 @@ test("realtime client opens authenticated websocket with minted ticket", async (
     assert.equal(url.searchParams.has("access_token"), false);
     assert.equal(sentMessages.some((message) => JSON.parse(message).type === "subscribe"), true);
     unsubscribe();
+    client.close();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("realtime client dispatches notification messages only to the exact subscribed scope", async () => {
+  const sockets: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
+  const originalWebSocket = globalThis.WebSocket;
+
+  class FakeNotificationWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeNotificationWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.readyState = FakeNotificationWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+      });
+    }
+
+    send(_message: string): void {}
+
+    close(): void {
+      this.readyState = FakeNotificationWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  (globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = FakeNotificationWebSocket as unknown as typeof WebSocket;
+  try {
+    const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
+      WebSocketCtor: FakeNotificationWebSocket as unknown as typeof WebSocket,
+      getTicket: async () => "minted-ws-ticket",
+      reconnectDelayMs: 60_000,
+    });
+    const created: RealtimeNotificationCreatedMessage[] = [];
+    const deleted: RealtimeNotificationDeletedMessage[] = [];
+    const unrelated: RealtimeNotificationCreatedMessage[] = [];
+    const unsubscribeA = client.subscribe("notifications:user:user-a", {
+      onNotificationCreated: (message) => created.push(message),
+      onNotificationDeleted: (message) => deleted.push(message),
+    });
+    const unsubscribeB = client.subscribe("notifications:user:user-b", {
+      onNotificationCreated: (message) => unrelated.push(message),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].onmessage?.({ data: JSON.stringify({
+      type: "notification.created",
+      company_id: "company-1",
+      scope: "notifications:user:user-a",
+      notification: {
+        notification_id: "notification-a",
+        company_id: "company-1",
+        recipient_user_id: "user-a",
+        type: "mention.created",
+        source_event_id: "event-a",
+        entity_type: "node",
+        entity_id: "node-a",
+        title: "Mention A",
+        created_timestamp: "2026-06-03T10:00:00.000Z",
+      },
+    }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({
+      type: "notification.deleted",
+      company_id: "company-1",
+      scope: "notifications:user:user-a",
+      notification_id: "notification-a",
+    }) });
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].notification.notification_id, "notification-a");
+    assert.equal(deleted.length, 1);
+    assert.equal(deleted[0].notification_id, "notification-a");
+    assert.equal(unrelated.length, 0);
+    unsubscribeA();
+    unsubscribeB();
     client.close();
   } finally {
     globalThis.WebSocket = originalWebSocket;

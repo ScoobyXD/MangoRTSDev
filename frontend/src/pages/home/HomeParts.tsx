@@ -12,7 +12,7 @@ import { resolveExplorerClickSelection } from "../../modules/company-explorer/tr
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
+import { deleteNotification, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
@@ -2888,7 +2888,8 @@ export function RaciRoleInboxMatrix({
         seen.add(notificationID);
         return { ...current, seenNotificationIDs: Array.from(seen) };
       });
-      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void deleteNotification(notificationID, notification.company_id || getActiveCompanyID()).catch((error) => console.error("Failed to delete notification", error));
     }
     const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
@@ -2904,7 +2905,7 @@ export function RaciRoleInboxMatrix({
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, getActiveCompanyID()))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
     });
@@ -3266,7 +3267,8 @@ export function AciInboxMatrix({
         seen.add(notificationID);
         return { ...current, seenNotificationIDs: Array.from(seen) };
       });
-      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void deleteNotification(notificationID, notification.company_id || getActiveCompanyID()).catch((error) => console.error("Failed to delete notification", error));
     }
     const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
@@ -3282,7 +3284,7 @@ export function AciInboxMatrix({
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, getActiveCompanyID()))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
     });
@@ -3579,7 +3581,8 @@ export function ResponsibleInboxMatrix({
         seen.add(notificationID);
         return { ...current, seenNotificationIDs: Array.from(seen) };
       });
-      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void deleteNotification(notificationID, notification.company_id || getActiveCompanyID()).catch((error) => console.error("Failed to delete notification", error));
     }
     const informationID = notification.information_id?.trim() ?? "";
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
@@ -3595,7 +3598,7 @@ export function ResponsibleInboxMatrix({
     const notificationIDs = menu.items.map((item) => item.notification_id.trim()).filter(Boolean);
     if (menu.loading || notificationIDs.length === 0) return;
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void Promise.all(notificationIDs.map((notificationID) => markNotificationRead(notificationID, true))).catch((error) => {
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, getActiveCompanyID()))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
     });

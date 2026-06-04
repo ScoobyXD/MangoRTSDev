@@ -1,11 +1,14 @@
 import { getApiAccessToken } from "../../auth/cognitoAuth.js";
 import { requestJSON } from "../api/requestJSON.js";
+import type { NotificationItem } from "../notifications/notificationsApi.js";
 
 export type RealtimeMessageType =
   | "ready"
   | "subscription.accepted"
   | "subscription.rejected"
   | "projection.delta"
+  | "notification.created"
+  | "notification.deleted"
   | "snapshot.refetch"
   | "permission.revoked"
   | "ping"
@@ -48,6 +51,22 @@ export type RealtimeProjectionDeltaMessage = RealtimeBaseMessage & {
   deltas: unknown[];
 };
 
+export type RealtimeNotificationCreatedMessage = RealtimeBaseMessage & {
+  type: "notification.created";
+  company_id: string;
+  scope: string;
+  notification: NotificationItem;
+  ts?: string;
+};
+
+export type RealtimeNotificationDeletedMessage = RealtimeBaseMessage & {
+  type: "notification.deleted";
+  company_id: string;
+  scope: string;
+  notification_id: string;
+  ts?: string;
+};
+
 export type RealtimeSnapshotRefetchMessage = RealtimeBaseMessage & {
   type: "snapshot.refetch";
   scope: string;
@@ -74,6 +93,8 @@ export type RealtimeInboundMessage =
   | RealtimeSubscriptionAcceptedMessage
   | RealtimeSubscriptionRejectedMessage
   | RealtimeProjectionDeltaMessage
+  | RealtimeNotificationCreatedMessage
+  | RealtimeNotificationDeletedMessage
   | RealtimeSnapshotRefetchMessage
   | RealtimePermissionRevokedMessage
   | RealtimeErrorMessage
@@ -86,6 +107,8 @@ export type RealtimeSubscriptionHandlers = {
   onAccepted?: (message: RealtimeSubscriptionAcceptedMessage) => void;
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
   onDelta?: (message: RealtimeProjectionDeltaMessage) => void;
+  onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
+  onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
   onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
   onPermissionRevoked?: (message: RealtimePermissionRevokedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
@@ -122,6 +145,10 @@ function objectValue(raw: string): Record<string, unknown> {
     throw new Error("realtime_message_must_be_object");
   }
   return parsed as Record<string, unknown>;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
@@ -168,6 +195,38 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         projection_sequence: optionalNumber(payload.projection_sequence) ?? sequence,
         projected_timestamp: stringValue(payload.projected_timestamp) || undefined,
         deltas: Array.isArray(payload.deltas) ? payload.deltas : [],
+      };
+    }
+    case "notification.created": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      const companyID = stringValue(payload.company_id);
+      if (!companyID) throw new Error("realtime_company_id_required");
+      const notification = recordValue(payload.notification);
+      if (!notification || !stringValue(notification.notification_id)) throw new Error("realtime_notification_required");
+      return {
+        ...base,
+        type,
+        company_id: companyID,
+        scope,
+        notification: notification as unknown as NotificationItem,
+        ts: stringValue(payload.ts) || undefined,
+      };
+    }
+    case "notification.deleted": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      const companyID = stringValue(payload.company_id);
+      if (!companyID) throw new Error("realtime_company_id_required");
+      const notificationID = stringValue(payload.notification_id);
+      if (!notificationID) throw new Error("realtime_notification_id_required");
+      return {
+        ...base,
+        type,
+        company_id: companyID,
+        scope,
+        notification_id: notificationID,
+        ts: stringValue(payload.ts) || undefined,
       };
     }
     case "snapshot.refetch": {
@@ -391,6 +450,12 @@ export class MangoRealtimeClient {
           break;
         case "projection.delta":
           sub.onDelta?.(message);
+          break;
+        case "notification.created":
+          sub.onNotificationCreated?.(message);
+          break;
+        case "notification.deleted":
+          sub.onNotificationDeleted?.(message);
           break;
         case "snapshot.refetch":
           sub.onRefetch?.(message);

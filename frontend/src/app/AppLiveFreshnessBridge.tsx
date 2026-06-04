@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { readAuthConfig } from "../auth/cognitoAuth";
+import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import {
   applyEmailMessageToCachedPages,
@@ -16,7 +16,8 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } fro
 import { invalidateKanbanBoardContentsCache } from "../modules/kanban/KanbanBoardContentStore";
 import { invalidateLogicGateRelationshipGraphSnapshot } from "../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/NodeRelationshipGraph";
-import { ensureMangoRealtimeConnection } from "../modules/realtime/realtimeWebSocket";
+import { emitNotificationsUpdated } from "../modules/notifications/notificationsApi";
+import { ensureMangoRealtimeConnection, subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
 import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceStream, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceStream";
 
@@ -58,6 +59,32 @@ export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppL
   useEffect(() => {
     if (!companyID) return undefined;
     return ensureMangoRealtimeConnection(apiBase, companyID);
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    if (!companyID) return undefined;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    void fetchCurrentUser()
+      .then((current) => {
+        const userID = current.user.user_id.trim();
+        if (cancelled || !userID || !currentUserCanUseCompany(current, companyID)) return;
+        unsubscribe = subscribeRealtimeScope(apiBase, companyID, `notifications:user:${userID}`, {
+          onNotificationCreated(message) {
+            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID);
+          },
+          onNotificationDeleted(message) {
+            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID);
+          },
+        });
+      })
+      .catch(() => {
+        // Auth gate owns visible auth failures; this bridge only wires live refresh.
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [apiBase, companyID]);
 
   useEffect(() => {
@@ -112,6 +139,18 @@ function markCommunicationsCachesStaleForEvent(event: StreamEvent, companyID: st
   }
   invalidateCommunicationsCache({ messagePages: true });
   if (trigger.startsWith("message.created") && messageID) primeCreatedMessageFromStream(messageID, companyID);
+}
+
+function currentUserCanUseCompany(current: CurrentUserResponse, companyID: string): boolean {
+  const cleanCompanyID = companyID.trim();
+  return !!cleanCompanyID && (current.is_dev_admin || current.memberships.some((membership) => membership.company_id === cleanCompanyID));
+}
+
+function markNotificationCachesStaleForRealtimeMessage(messageCompanyID: string | undefined, activeCompanyID: string): void {
+  const cleanMessageCompanyID = messageCompanyID?.trim() ?? "";
+  const cleanActiveCompanyID = activeCompanyID.trim();
+  if (cleanMessageCompanyID && cleanMessageCompanyID !== cleanActiveCompanyID) return;
+  emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID);
 }
 
 function markWorkspaceCachesStaleForEvent(event: StreamEvent, apiBase: string, companyID: string, scopes: WorkspaceReconciliationScope[] = []): void {
