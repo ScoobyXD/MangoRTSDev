@@ -1,4 +1,5 @@
-import { connectAuthenticatedSse, type SseConnection, type SseEvent } from "../../auth/authenticatedSse.js";
+import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
+import { subscribeRealtimeScope, type RealtimeSnapshotRefetchMessage, type RealtimeWorkspaceEventMessage } from "../realtime/realtimeWebSocket.js";
 
 export type WorkspaceStreamEnvelope = {
   company_id?: string;
@@ -43,6 +44,12 @@ export type WorkspaceStreamReplayBoundary = {
   reconnect: boolean;
 };
 
+export type WorkspaceRealtimeEvent = {
+  event: "workspace";
+  id?: string;
+  data: string;
+};
+
 export type WorkspaceStreamGapSignal = {
   apiBase: string;
   companyID: string;
@@ -50,7 +57,7 @@ export type WorkspaceStreamGapSignal = {
   receivedSequence: number;
   missingFrom: number;
   missingTo: number;
-  event: SseEvent;
+  event: WorkspaceRealtimeEvent;
   envelope?: WorkspaceStreamEnvelope;
   scopes: WorkspaceReconciliationScope[];
 };
@@ -64,30 +71,17 @@ export type WorkspaceStreamEventContext = {
   gap?: WorkspaceStreamGapSignal;
 };
 
-type WorkspaceStreamSubscriber = {
-  onEvent: (event: SseEvent, context: WorkspaceStreamEventContext) => void;
+type WorkspaceRealtimeSubscriber = {
+  onEvent: (event: WorkspaceRealtimeEvent, context: WorkspaceStreamEventContext) => void;
   onGap?: (gap: WorkspaceStreamGapSignal) => void;
   onReplayBoundary?: (boundary: WorkspaceStreamReplayBoundary) => void;
   onError?: (error: unknown) => void;
 };
 
-export type WorkspaceProjectionName = "kanban_board";
+type WorkspaceUserScopeFactory = (userID: string) => string;
 
-export type WorkspaceStreamOptions = {
-  projections?: WorkspaceProjectionName[];
-  kanbanBoardID?: string;
-};
-
-type WorkspaceStreamEntry = {
-  subscribers: Set<WorkspaceStreamSubscriber>;
-  source?: SseConnection;
-  closeTimer?: ReturnType<typeof setTimeout>;
-  readyCount: number;
-};
-
-const workspaceStreams = new Map<string, WorkspaceStreamEntry>();
 const workspaceCursors = new Map<string, number>();
-const STREAM_CLOSE_GRACE_MS = 1500;
+const workspaceReadyCounts = new Map<string, number>();
 const WORK_ITEM_ASSIGNMENT_EVENT_TYPES = new Set([
   "work_item.logic_gate_assignment_saved",
   "work_item.logic_gate_assignment_moved",
@@ -101,64 +95,40 @@ const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
   "logic_gate_map_position_upsert_requested",
 ]);
 
-function normalizeWorkspaceProjections(projections?: WorkspaceProjectionName[]): WorkspaceProjectionName[] {
-  return Array.from(new Set((projections ?? []).map((projection) => projection.trim()).filter((projection): projection is WorkspaceProjectionName => (
-    projection === "kanban_board"
-  )))).sort();
+export function workspaceRealtimeScope(userID: string): string {
+  return userScopedWorkspaceScope("workspace", userID);
 }
 
-function streamKey(apiBase: string, companyID: string, projections: WorkspaceProjectionName[], kanbanBoardID = ""): string {
-  return `${apiBase}:${companyID}:${projections.join(",")}:kanban_board=${encodeURIComponent(kanbanBoardID.trim())}`;
+export function companyExplorerRealtimeScope(userID: string): string {
+  return userScopedWorkspaceScope("company_explorer", userID);
 }
 
-function getEntry(key: string): WorkspaceStreamEntry {
-  const existing = workspaceStreams.get(key);
-  if (existing) return existing;
-  const created: WorkspaceStreamEntry = { subscribers: new Set(), readyCount: 0 };
-  workspaceStreams.set(key, created);
-  return created;
+export function nodeGraphRealtimeScope(userID: string): string {
+  return userScopedWorkspaceScope("node_graph", userID);
 }
 
-function buildWorkspaceStreamURL(apiBase: string, companyID: string, cursor: number | undefined, projections: WorkspaceProjectionName[], kanbanBoardID = ""): string {
-  const params = new URLSearchParams({ company_id: companyID });
-  if (cursor !== undefined) params.set("after_sequence", String(cursor));
-  for (const projection of projections) params.append("projection", projection);
-  if (projections.includes("kanban_board") && kanbanBoardID.trim()) params.set("kanban_board_id", kanbanBoardID.trim());
-  return `${apiBase}/v1/workspace/stream?${params.toString()}`;
+export function logicGateGraphRealtimeScope(userID: string): string {
+  return userScopedWorkspaceScope("logic_gate_graph", userID);
 }
 
-function workspaceEventSequence(event: SseEvent): number | undefined {
+function userScopedWorkspaceScope(prefix: string, userID: string): string {
+  const cleanPrefix = prefix.trim();
+  const cleanUserID = userID.trim();
+  return cleanPrefix && cleanUserID ? `${cleanPrefix}:user:${cleanUserID}` : "";
+}
+
+function streamKey(apiBase: string, companyID: string, scope: string): string {
+  return `${apiBase}:${companyID}:${scope}`;
+}
+
+function workspaceEventSequence(event: WorkspaceRealtimeEvent): number | undefined {
   if (event.event !== "workspace" || event.id === undefined) return undefined;
   if (!/^(0|[1-9]\d*)$/.test(event.id)) return undefined;
   const sequence = Number(event.id);
   return Number.isSafeInteger(sequence) ? sequence : undefined;
 }
 
-function parseNonNegativeInteger(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
-
-function parseReadyAfterSequence(event: SseEvent): number | undefined {
-  if (event.event !== "ready" || event.data.length === 0) return undefined;
-  try {
-    const payload = JSON.parse(event.data) as { after_sequence?: unknown };
-    return parseNonNegativeInteger(payload.after_sequence);
-  } catch {
-    return undefined;
-  }
-}
-
-function shouldStoreWorkspaceEventID(key: string, event: SseEvent): boolean {
-  const sequence = workspaceEventSequence(event);
-  if (sequence === undefined) return false;
-  const cursor = workspaceCursors.get(key);
-  return cursor === undefined || sequence > cursor;
-}
-
-function parseWorkspaceEnvelope(event: SseEvent): WorkspaceStreamEnvelope | undefined {
+function parseWorkspaceEnvelope(event: WorkspaceRealtimeEvent): WorkspaceStreamEnvelope | undefined {
   if (event.event !== "workspace" || event.data.length === 0) return undefined;
   try {
     const parsed = JSON.parse(event.data) as WorkspaceStreamEnvelope;
@@ -169,7 +139,7 @@ function parseWorkspaceEnvelope(event: SseEvent): WorkspaceStreamEnvelope | unde
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object");
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanString(value: unknown): string {
@@ -313,23 +283,16 @@ function gapRecoveryScopes(scopes: WorkspaceReconciliationScope[]): WorkspaceRec
   return scopes.length > 0 ? scopes : fallbackWorkspaceScope("workspace_gap_unscoped");
 }
 
-function markReadyBoundary(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, event: SseEvent): WorkspaceStreamReplayBoundary | undefined {
-  const afterSequence = parseReadyAfterSequence(event);
-  if (afterSequence === undefined) return undefined;
-  const previousSequence = workspaceCursors.get(key);
-  if (previousSequence === undefined || afterSequence > previousSequence) workspaceCursors.set(key, afterSequence);
-  const boundary: WorkspaceStreamReplayBoundary = {
-    apiBase,
-    companyID,
-    afterSequence,
-    previousSequence,
-    reconnect: entry.readyCount > 0 || previousSequence !== undefined,
+function messageToWorkspaceEvent(message: RealtimeWorkspaceEventMessage): WorkspaceRealtimeEvent {
+  const sequence = message.sequence ?? message.event.sequence;
+  return {
+    event: "workspace",
+    id: sequence === undefined ? undefined : String(sequence),
+    data: JSON.stringify(message.event),
   };
-  entry.readyCount += 1;
-  return boundary;
 }
 
-function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, event: SseEvent): { deliver: boolean; context: WorkspaceStreamEventContext } {
+function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, event: WorkspaceRealtimeEvent): { deliver: boolean; context: WorkspaceStreamEventContext } {
   const sequence = workspaceEventSequence(event);
   if (sequence === undefined) return { deliver: true, context: { scopes: [] } };
   const cursor = workspaceCursors.get(key);
@@ -362,58 +325,89 @@ function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, 
   };
 }
 
-function ensureWorkspaceStream(apiBase: string, companyID: string, key: string, entry: WorkspaceStreamEntry, projections: WorkspaceProjectionName[], kanbanBoardID = ""): void {
-  if (entry.source) return;
-  const cursor = workspaceCursors.get(key);
-  entry.source = connectAuthenticatedSse(() => buildWorkspaceStreamURL(apiBase, companyID, workspaceCursors.get(key), projections, kanbanBoardID), {
-    lastEventId: cursor === undefined ? undefined : String(cursor),
-    shouldStoreLastEventId: (event: SseEvent) => shouldStoreWorkspaceEventID(key, event),
-    onEvent(event: SseEvent) {
-      if (event.event === "ready") {
-        const replayBoundary = markReadyBoundary(apiBase, companyID, key, entry, event);
-        const context: WorkspaceStreamEventContext = { replayBoundary, sequence: replayBoundary?.afterSequence, previousSequence: replayBoundary?.previousSequence, scopes: [] };
-        for (const subscriber of Array.from(entry.subscribers)) {
-          if (replayBoundary) subscriber.onReplayBoundary?.(replayBoundary);
-          subscriber.onEvent(event, context);
-        }
-        return;
+function markAcceptedBoundary(apiBase: string, companyID: string, key: string, currentSequence: number | undefined): WorkspaceStreamReplayBoundary | undefined {
+  if (currentSequence === undefined) return undefined;
+  const previousSequence = workspaceCursors.get(key);
+  if (previousSequence !== undefined) return undefined;
+  workspaceCursors.set(key, currentSequence);
+  const readyCount = workspaceReadyCounts.get(key) ?? 0;
+  workspaceReadyCounts.set(key, readyCount + 1);
+  return {
+    apiBase,
+    companyID,
+    afterSequence: currentSequence,
+    previousSequence,
+    reconnect: readyCount > 0,
+  };
+}
+
+function refetchGap(apiBase: string, companyID: string, key: string, message: RealtimeSnapshotRefetchMessage): WorkspaceStreamGapSignal | undefined {
+  const receivedSequence = message.sequence;
+  const previousSequence = workspaceCursors.get(key);
+  if (receivedSequence === undefined || previousSequence === undefined || receivedSequence <= previousSequence) return undefined;
+  const event: WorkspaceRealtimeEvent = {
+    event: "workspace",
+    id: String(receivedSequence),
+    data: JSON.stringify({ company_id: companyID, sequence: receivedSequence, type: "workspace_snapshot_refetch", data: { reason: message.reason } }),
+  };
+  workspaceCursors.set(key, receivedSequence);
+  return {
+    apiBase,
+    companyID,
+    previousSequence,
+    receivedSequence,
+    missingFrom: previousSequence + 1,
+    missingTo: receivedSequence,
+    event,
+    envelope: parseWorkspaceEnvelope(event),
+    scopes: fallbackWorkspaceScope("workspace_snapshot_refetch"),
+  };
+}
+
+export function subscribeWorkspaceRealtime(apiBase: string, companyID: string, scope: string, subscriber: WorkspaceRealtimeSubscriber): () => void {
+  const cleanCompanyID = companyID.trim();
+  const cleanScope = scope.trim();
+  if (!cleanCompanyID || !cleanScope) return () => undefined;
+  const key = streamKey(apiBase, cleanCompanyID, cleanScope);
+  return subscribeRealtimeScope(apiBase, cleanCompanyID, cleanScope, {
+    getAfterSequence: () => workspaceCursors.get(key),
+    onAccepted(message) {
+      const boundary = markAcceptedBoundary(apiBase, cleanCompanyID, key, message.current_sequence);
+      if (boundary) {
+        subscriber.onReplayBoundary?.(boundary);
+        subscriber.onEvent({ event: "workspace", id: String(boundary.afterSequence), data: "{}" }, { replayBoundary: boundary, sequence: boundary.afterSequence, previousSequence: boundary.previousSequence, scopes: [] });
       }
-      const result = updateWorkspaceCursor(apiBase, companyID, key, event);
+    },
+    onWorkspaceEvent(message) {
+      const event = messageToWorkspaceEvent(message);
+      const result = updateWorkspaceCursor(apiBase, cleanCompanyID, key, event);
       if (!result.deliver) return;
-      if (result.context.gap) {
-        for (const subscriber of Array.from(entry.subscribers)) subscriber.onGap?.(result.context.gap);
-      }
-      for (const subscriber of Array.from(entry.subscribers)) subscriber.onEvent(event, result.context);
+      if (result.context.gap) subscriber.onGap?.(result.context.gap);
+      subscriber.onEvent(event, result.context);
     },
-    onError(error: unknown) {
-      for (const subscriber of Array.from(entry.subscribers)) subscriber.onError?.(error);
+    onRefetch(message) {
+      const gap = refetchGap(apiBase, cleanCompanyID, key, message);
+      if (gap) subscriber.onGap?.(gap);
     },
+    onError: subscriber.onError,
   });
 }
 
-export function subscribeWorkspaceStream(apiBase: string, companyID: string, subscriber: WorkspaceStreamSubscriber, options: WorkspaceStreamOptions = {}): () => void {
-  const projections = normalizeWorkspaceProjections(options.projections);
-  const kanbanBoardID = options.kanbanBoardID?.trim() ?? "";
-  const key = streamKey(apiBase, companyID, projections, projections.includes("kanban_board") ? kanbanBoardID : "");
-  const entry = getEntry(key);
-  if (entry.closeTimer !== undefined) {
-    clearTimeout(entry.closeTimer);
-    entry.closeTimer = undefined;
-  }
-  entry.subscribers.add(subscriber);
-  ensureWorkspaceStream(apiBase, companyID, key, entry, projections, kanbanBoardID);
-
+export function subscribeWorkspaceUserRealtime(apiBase: string, companyID: string, scopeForUser: WorkspaceUserScopeFactory, subscriber: WorkspaceRealtimeSubscriber): () => void {
+  let cancelled = false;
+  let unsubscribe: (() => void) | undefined;
+  void fetchCurrentUser()
+    .then((current) => {
+      const userID = current.user.user_id?.trim() ?? "";
+      if (cancelled || !userID) return;
+      const scope = scopeForUser(userID);
+      unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, scope, subscriber);
+    })
+    .catch((error: unknown) => {
+      if (!cancelled) subscriber.onError?.(error);
+    });
   return () => {
-    const current = workspaceStreams.get(key);
-    if (!current) return;
-    current.subscribers.delete(subscriber);
-    if (current.subscribers.size === 0) {
-      current.closeTimer = setTimeout(() => {
-        const closingEntry = workspaceStreams.get(key);
-        if (closingEntry !== current || current.subscribers.size > 0) return;
-        current.source?.close();
-        workspaceStreams.delete(key);
-      }, STREAM_CLOSE_GRACE_MS);
-    }
+    cancelled = true;
+    unsubscribe?.();
   };
 }

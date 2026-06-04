@@ -14,6 +14,7 @@ import {
   type RealtimeSnapshotRefetchMessage,
   type RealtimeSubscriptionAcceptedMessage,
   type RealtimeSubscriptionRejectedMessage,
+  type RealtimeWorkspaceEventMessage,
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 test("parses realtime accepted, rejected, delta, refetch, and error messages", () => {
@@ -44,6 +45,25 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(delta.resource_type, "logic_gate");
   assert.equal(delta.resource_id, "gate-1");
   assert.equal(delta.deltas.length, 1);
+
+  const workspace = parseRealtimeMessage(JSON.stringify({
+    type: "workspace.event",
+    company_id: "company-1",
+    scope: "workspace:user:user-1",
+    sequence: 3,
+    event: {
+      company_id: "company-1",
+      sequence: 3,
+      type: "node_updated",
+      data: { node_id: "node-1" },
+    },
+  })) as RealtimeWorkspaceEventMessage;
+  assert.equal(workspace.type, "workspace.event");
+  assert.equal(workspace.company_id, "company-1");
+  assert.equal(workspace.scope, "workspace:user:user-1");
+  assert.equal(workspace.sequence, 3);
+  assert.equal(workspace.event.type, "node_updated");
+  assert.deepEqual(workspace.event.data, { node_id: "node-1" });
 
   const created = parseRealtimeMessage(JSON.stringify({
     type: "notification.created",

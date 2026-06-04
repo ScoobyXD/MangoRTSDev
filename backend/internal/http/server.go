@@ -41,10 +41,8 @@ type Server struct {
 	realtimeTickets                 *realtimeTicketStore
 	notifications                   *notifications.Service
 	kanban                          *kanban.Service
-	workspaceWakeHub                *workspaceEventNotificationHub
 	workspaceFanout                 store.WorkspaceEventFanout
 	workspaceFanoutCancel           context.CancelFunc
-	workspaceCatchupInterval        time.Duration
 	workspaceDerivedCatchupCancel   context.CancelFunc
 	workspaceDerivedCatchupInterval time.Duration
 	workspaceDerivedCatchupLimit    int
@@ -90,7 +88,6 @@ type ServerOptions struct {
 	MaxRequestBodyBytes             int64
 	LegacyMapRoutesEnabled          bool
 	WorkspaceEventFanout            store.WorkspaceEventFanout
-	WorkspaceCatchupInterval        time.Duration
 	WorkspaceDerivedCatchupInterval time.Duration
 	WorkspaceDerivedCatchupLimit    int
 	NotificationCatchupInterval     time.Duration
@@ -132,10 +129,6 @@ func normalizeBootstrapDevAdminConfig(config BootstrapDevAdminConfig) BootstrapD
 }
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
-	catchupInterval := options.WorkspaceCatchupInterval
-	if catchupInterval <= 0 {
-		catchupInterval = workspaceCatchupInterval
-	}
 	notificationCatchupInterval := options.NotificationCatchupInterval
 	if notificationCatchupInterval <= 0 {
 		notificationCatchupInterval = notificationDomainEventCatchupInterval
@@ -181,9 +174,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeTickets:                 newRealtimeTicketStore(),
 		notifications:                   notifications.NewService(repo),
 		kanban:                          kanban.NewService(repo),
-		workspaceWakeHub:                newWorkspaceEventNotificationHub(),
 		workspaceFanout:                 options.WorkspaceEventFanout,
-		workspaceCatchupInterval:        catchupInterval,
 		workspaceDerivedCatchupInterval: workspaceDerivedCatchupInterval,
 		workspaceDerivedCatchupLimit:    workspaceDerivedCatchupLimit,
 		notificationCatchupInterval:     notificationCatchupInterval,
@@ -280,7 +271,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
-	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
 	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)

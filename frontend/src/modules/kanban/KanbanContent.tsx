@@ -7,7 +7,7 @@ import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subs
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
-import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
+import { subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import {
   assignNodeToLogicGateStatus,
   createKanbanBoard,
@@ -158,7 +158,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
   forcedHighlightedNodeID = "",
-  suppressWorkspaceStream = false,
+  suppressLegacyWorkspaceStream = false,
   onCollapseArenaToTab,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -957,44 +957,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [activeBoardID, activeLogicGateID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, requestKanbanProjectionFallback]);
 
   useEffect(() => {
-    if (arenaMode && suppressWorkspaceStream) return undefined;
+    if (arenaMode && suppressLegacyWorkspaceStream) return undefined;
     const streamBoardID = activeBoardID.trim();
     if (!streamBoardID) return undefined;
     if (arenaMode) {
       const logicGateID = activeLogicGateID.trim();
       if (!logicGateID || streamBoardID !== logicGateKanbanBoardID(logicGateID)) return undefined;
     }
-    return subscribeWorkspaceStream(apiBase, companyID, {
+    return subscribeWorkspaceUserRealtime(apiBase, companyID, workspaceRealtimeScope, {
       onGap: reconcileKanbanGap,
       onEvent(event) {
-        if (event.event === "projection" && event.data.length > 0) {
-          let envelope: KanbanProjectionEnvelope;
-          try {
-            envelope = JSON.parse(event.data) as KanbanProjectionEnvelope;
-          } catch {
-            requestKanbanProjectionFallback("invalid_envelope");
-            return;
-          }
-          if (envelope.company_id !== companyID || envelope.projection !== "kanban_board") return;
-          const result = applyKanbanProjectionEnvelope({
-            envelope,
-            companyID,
-            boardID: activeBoardIDRef.current,
-            cards: cardsRef.current,
-            versions: kanbanProjectionVersionsRef.current,
-            lastSequence: kanbanProjectionSequenceRef.current,
-          });
-          if (result.fallback) {
-            requestKanbanProjectionFallback(result.fallbackReason ?? "invalid_delta");
-            return;
-          }
-          kanbanProjectionSequenceRef.current = result.lastSequence;
-          if (!result.changed) return;
-          applyCards(result.cards);
-          removeCardsFromLocalSelection(result.removedCardIDs);
-          syncNodeStatusesFromCards(result.upsertedCards);
-          return;
-        }
         if (event.event !== "workspace" || event.data.length === 0) return;
         try {
           const envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
@@ -1129,7 +1101,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     });
-  }, [activeBoardID, activeLogicGateID, apiBase, applyCards, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, removeCardsFromLocalSelection, requestKanbanProjectionFallback, suppressWorkspaceStream, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [activeBoardID, activeLogicGateID, apiBase, arenaMode, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, suppressLegacyWorkspaceStream, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

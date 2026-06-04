@@ -7,6 +7,7 @@ export type RealtimeMessageType =
   | "subscription.accepted"
   | "subscription.rejected"
   | "projection.delta"
+  | "workspace.event"
   | "notification.created"
   | "notification.deleted"
   | "snapshot.refetch"
@@ -53,6 +54,25 @@ export type RealtimeProjectionDeltaMessage = RealtimeBaseMessage & {
   deltas: unknown[];
 };
 
+export type RealtimeWorkspaceEventEnvelope = {
+  company_id?: string;
+  event_id?: string;
+  sequence?: number;
+  stream_type?: string;
+  stream_id?: string;
+  type?: string;
+  ts?: string;
+  data?: Record<string, unknown>;
+};
+
+export type RealtimeWorkspaceEventMessage = RealtimeBaseMessage & {
+  type: "workspace.event";
+  company_id: string;
+  scope: string;
+  sequence?: number;
+  event: RealtimeWorkspaceEventEnvelope;
+};
+
 export type RealtimeNotificationCreatedMessage = RealtimeBaseMessage & {
   type: "notification.created";
   company_id: string;
@@ -95,6 +115,7 @@ export type RealtimeInboundMessage =
   | RealtimeSubscriptionAcceptedMessage
   | RealtimeSubscriptionRejectedMessage
   | RealtimeProjectionDeltaMessage
+  | RealtimeWorkspaceEventMessage
   | RealtimeNotificationCreatedMessage
   | RealtimeNotificationDeletedMessage
   | RealtimeSnapshotRefetchMessage
@@ -109,6 +130,7 @@ export type RealtimeSubscriptionHandlers = {
   onAccepted?: (message: RealtimeSubscriptionAcceptedMessage) => void;
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
   onDelta?: (message: RealtimeProjectionDeltaMessage) => void;
+  onWorkspaceEvent?: (message: RealtimeWorkspaceEventMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
   onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
   onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
@@ -199,6 +221,33 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         resource_id: stringValue(payload.resource_id) || undefined,
         projected_timestamp: stringValue(payload.projected_timestamp) || undefined,
         deltas: Array.isArray(payload.deltas) ? payload.deltas : [],
+      };
+    }
+    case "workspace.event": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      const companyID = stringValue(payload.company_id);
+      if (!companyID) throw new Error("realtime_company_id_required");
+      const event = recordValue(payload.event);
+      if (!event || !stringValue(event.type)) throw new Error("realtime_workspace_event_required");
+      const envelope: RealtimeWorkspaceEventEnvelope = {
+        company_id: stringValue(event.company_id) || undefined,
+        event_id: stringValue(event.event_id) || undefined,
+        sequence: optionalNumber(event.sequence),
+        stream_type: stringValue(event.stream_type) || undefined,
+        stream_id: stringValue(event.stream_id) || undefined,
+        type: stringValue(event.type) || undefined,
+        ts: stringValue(event.ts) || undefined,
+        data: recordValue(event.data) ?? undefined,
+      };
+      const sequence = optionalNumber(payload.sequence) ?? envelope.sequence;
+      return {
+        ...base,
+        type,
+        company_id: companyID,
+        scope,
+        sequence,
+        event: envelope,
       };
     }
     case "notification.created": {
@@ -454,6 +503,9 @@ export class MangoRealtimeClient {
           break;
         case "projection.delta":
           sub.onDelta?.(message);
+          break;
+        case "workspace.event":
+          sub.onWorkspaceEvent?.(message);
           break;
         case "notification.created":
           sub.onNotificationCreated?.(message);

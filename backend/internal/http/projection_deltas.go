@@ -2,10 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"miraeopus/backend/internal/store"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -153,26 +151,6 @@ func (h *projectionDeltaHub) publish(companyID, projection, scope string, payloa
 		default:
 		}
 	}
-}
-
-func workspaceStreamProjectionRequested(r *http.Request, projection string) bool {
-	projection = strings.TrimSpace(projection)
-	if projection == "" {
-		return false
-	}
-	values := r.URL.Query()["projection"]
-	for _, value := range values {
-		for _, part := range strings.Split(value, ",") {
-			if strings.TrimSpace(part) == projection {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func writeProjectionSSE(w http.ResponseWriter, payload []byte) {
-	fmt.Fprintf(w, "event: projection\ndata: %s\n\n", payload)
 }
 
 func (s *Server) publishProjectionDeltas(deltas []store.ProjectionDelta) {

@@ -59,7 +59,7 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type
 import { applyRacioProjectionEnvelope, parseRacioProjectionSequence, racioRealtimeScope, type RacioProjectionDeltaEnvelope } from "../../modules/racio/racioProjectionDeltas";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
 import { listMyLogicGates, listRacioMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
-import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
+import { subscribeWorkspaceRealtime, workspaceRealtimeScope } from "../../modules/workspace/workspaceRealtime";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
@@ -1243,8 +1243,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     };
   }, [companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
   useEffect(() => {
-    if (!companyID) return undefined;
-    const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
+    if (!companyID || !currentUserID) return undefined;
+    const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {
       onGap(gap) {
         if (gap.companyID !== companyID) return;
         const touchesSharedInbox = gap.scopes.some((scope) => (
@@ -1377,7 +1377,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         }
       },
       onError() {
-        // Workspace SSE reconnects automatically; visible errors come from reloads.
+        // Workspace realtime reconnects automatically; visible errors come from reloads.
       },
     });
     return () => {
@@ -1387,7 +1387,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         workspacePanelReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleWorkspacePanelReload]);
+  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleWorkspacePanelReload]);
   useEffect(() => {
     if (!selectedMessageID) return;
     let cancelled = false;
@@ -2306,14 +2306,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!cleanLogicGateID) return;
     const cleanNodeID = nodeID?.trim() ?? "";
     const cleanInformationID = informationID?.trim() ?? "";
-    const suppressWorkspaceStream = isInboxMatrixView && !!cleanNodeID;
+    const suppressLegacyWorkspaceStream = isInboxMatrixView && !!cleanNodeID;
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
       label,
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
-      suppressWorkspaceStream,
+      suppressLegacyWorkspaceStream,
     });
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
       companyID,
@@ -2324,7 +2324,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
-      suppressWorkspaceStream,
+      suppressLegacyWorkspaceStream,
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();

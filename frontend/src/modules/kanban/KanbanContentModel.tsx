@@ -43,7 +43,7 @@ export type KanbanContentProps = {
   forcedLogicGateID?: string;
   forcedLogicGateLabel?: string;
   forcedHighlightedNodeID?: string;
-  suppressWorkspaceStream?: boolean;
+  suppressLegacyWorkspaceStream?: boolean;
   onCollapseArenaToTab?: () => void;
 };
 

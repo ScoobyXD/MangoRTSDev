@@ -15,17 +15,6 @@ import (
 )
 
 const workspaceDomainStreamType = "workspace"
-const workspaceReplayLimit = 500
-const workspaceCatchupInterval = 250 * time.Millisecond
-
-const (
-	workspaceReplaySourceInitial        = "initial_replay"
-	workspaceReplaySourcePoll           = "poll"
-	workspaceReplaySourceHub            = "hub"
-	workspaceReplaySourceExternalFanout = "external_fanout"
-	workspaceReplayOutcomeSuccess       = "success"
-	workspaceReplayOutcomeError         = "error"
-)
 
 func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -831,208 +820,6 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 	}, etag)
 }
 
-func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	if companyID == "" {
-		writeError(w, http.StatusBadRequest, "company_id_required")
-		return
-	}
-	streamUserID := ""
-	if actor, ok := authenticatedActor(r); ok {
-		if actorRoleForCompany(actor, companyID) == "" {
-			writeError(w, http.StatusForbidden, "company_access_denied")
-			return
-		}
-		streamUserID = strings.TrimSpace(actor.User.UserID)
-	}
-	afterSequence, explicitCursor, ok := workspaceReplayAfterSequence(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_after_sequence")
-		return
-	}
-	if !explicitCursor {
-		sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID})
-		if err != nil {
-			log.Printf("workspace stream baseline failed company_id=%s: %v", companyID, err)
-			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
-			return
-		}
-		afterSequence = sequence
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "stream_unsupported")
-		return
-	}
-
-	prepareSSEHeaders(w)
-
-	ch := s.hub.subscribeUser(companyID, streamUserID)
-	defer s.hub.unsubscribeUser(companyID, streamUserID, ch)
-	externalCh := s.workspaceWakeHub.subscribeUser(companyID, streamUserID)
-	defer s.workspaceWakeHub.unsubscribeUser(companyID, streamUserID, externalCh)
-	var kanbanProjectionCh chan []byte
-	kanbanBoardID := strings.TrimSpace(firstNonEmptyQueryValue(r, "kanban_board_id", "board_id"))
-	if streamUserID != "" && kanbanBoardID != "" && workspaceStreamProjectionRequested(r, store.ProjectionNameKanbanBoard) {
-		kanbanProjectionScope := projectionKanbanBoardUserScope(kanbanBoardID, streamUserID)
-		if kanbanProjectionScope != "" {
-			kanbanProjectionCh = s.projectionHub.subscribe(companyID, store.ProjectionNameKanbanBoard, kanbanProjectionScope)
-			defer s.projectionHub.unsubscribe(companyID, store.ProjectionNameKanbanBoard, kanbanProjectionScope, kanbanProjectionCh)
-		}
-	}
-
-	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q,\"user_id\":%q,\"after_sequence\":%d}\n\n", companyID, streamUserID, afterSequence)
-	flusher.Flush()
-
-	lastSentSequence := afterSequence
-	if explicitCursor {
-		if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceInitial, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
-			log.Printf("workspace stream replay failed company_id=%s after_sequence=%d: %v", companyID, afterSequence, err)
-		}
-	}
-
-	heartbeat := time.NewTicker(sseHeartbeatInterval)
-	defer heartbeat.Stop()
-	catchup := time.NewTicker(s.workspaceCatchupInterval)
-	defer catchup.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-heartbeat.C:
-			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
-			flusher.Flush()
-		case <-catchup.C:
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourcePoll, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
-				log.Printf("workspace stream catch-up failed company_id=%s after_sequence=%d: %v", companyID, lastSentSequence, err)
-			}
-		case payload := <-ch:
-			sequence := workspacePayloadSequence(payload)
-			if sequence > 0 && sequence <= lastSentSequence {
-				continue
-			}
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceHub, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
-				log.Printf("workspace stream hub catch-up failed company_id=%s after_sequence=%d payload_sequence=%d: %v", companyID, lastSentSequence, sequence, err)
-			}
-		case notification := <-externalCh:
-			if notification.Sequence > 0 && notification.Sequence <= lastSentSequence {
-				continue
-			}
-			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceExternalFanout, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
-				log.Printf("workspace stream external fanout catch-up failed company_id=%s after_sequence=%d notification_sequence=%d: %v", companyID, lastSentSequence, notification.Sequence, err)
-			}
-		case payload := <-kanbanProjectionCh:
-			writeProjectionSSE(w, payload)
-			flusher.Flush()
-		}
-	}
-}
-
-func workspaceReplayAfterSequence(r *http.Request) (int64, bool, bool) {
-	if values, hasAfterSequence := r.URL.Query()["after_sequence"]; hasAfterSequence {
-		raw := ""
-		if len(values) > 0 {
-			raw = strings.TrimSpace(values[0])
-		}
-		value, ok := parseWorkspaceStreamSequence(raw)
-		return value, true, ok
-	}
-	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
-	if raw == "" {
-		return 0, false, true
-	}
-	value, ok := parseWorkspaceStreamSequence(raw)
-	return value, true, ok
-}
-
-func parseWorkspaceStreamSequence(raw string) (int64, bool) {
-	value, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || value < 0 {
-		return 0, false
-	}
-	return value, true
-}
-
-type workspaceDurableCatchupResult struct {
-	Batches            int
-	Events             int
-	StartAfterSequence int64
-	LastSequence       int64
-}
-
-func (s *Server) writeAndRecordWorkspaceDurableCatchup(source string, w http.ResponseWriter, flusher http.Flusher, companyID, userID string, lastSentSequence *int64) error {
-	start := time.Now()
-	result, err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, userID, lastSentSequence)
-	s.recordWorkspaceReplayMetric(source, result, time.Since(start), err)
-	return err
-}
-
-func (s *Server) recordWorkspaceReplayMetric(source string, result workspaceDurableCatchupResult, duration time.Duration, err error) {
-	if s.metrics == nil {
-		return
-	}
-	outcome := workspaceReplayOutcomeSuccess
-	if err != nil {
-		outcome = workspaceReplayOutcomeError
-	}
-	s.metrics.RecordWorkspaceReplay(WorkspaceReplayMetric{
-		Source:             source,
-		Outcome:            outcome,
-		Duration:           duration,
-		Batches:            result.Batches,
-		Events:             result.Events,
-		StartAfterSequence: result.StartAfterSequence,
-		LastSequence:       result.LastSequence,
-	})
-}
-
-func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID, userID string, lastSentSequence *int64) (workspaceDurableCatchupResult, error) {
-	result := workspaceDurableCatchupResult{StartAfterSequence: *lastSentSequence, LastSequence: *lastSentSequence}
-	for {
-		result.Batches++
-		replay, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: *lastSentSequence, Limit: workspaceReplayLimit})
-		if err != nil {
-			result.LastSequence = *lastSentSequence
-			return result, err
-		}
-		if len(replay) == 0 {
-			result.LastSequence = *lastSentSequence
-			return result, nil
-		}
-		for _, event := range replay {
-			if event.Sequence <= *lastSentSequence {
-				continue
-			}
-			if strings.TrimSpace(userID) != "" && !s.workspaceEventVisibleToUser(event, userID) {
-				*lastSentSequence = event.Sequence
-				continue
-			}
-			if writeWorkspaceSSE(w, event) {
-				*lastSentSequence = event.Sequence
-				result.Events++
-			}
-		}
-		result.LastSequence = *lastSentSequence
-		flusher.Flush()
-		if len(replay) < workspaceReplayLimit {
-			return result, nil
-		}
-	}
-}
-
-func workspacePayloadSequence(payload []byte) int64 {
-	var envelope workspaceEventEnvelope
-	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return 0
-	}
-	return envelope.Sequence
-}
-
 type workspaceEventEnvelope struct {
 	EventID    string         `json:"event_id,omitempty"`
 	Sequence   int64          `json:"sequence,omitempty"`
@@ -1167,8 +954,17 @@ func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
 }
 
 func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEvent, timings *requestTimingRecorder) {
+	s.publishCommittedWorkspaceEventLocal(event, timings, true)
+}
+
+func (s *Server) publishCommittedWorkspaceEventFromFanout(event domain.DomainEvent) {
+	s.publishCommittedWorkspaceEventLocal(event, nil, false)
+}
+
+func (s *Server) publishCommittedWorkspaceEventLocal(event domain.DomainEvent, timings *requestTimingRecorder, notifyFanout bool) {
 	stop := timings.observe("events.publish.serialize")
-	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
+	envelope := workspaceEventEnvelopeFromDomainEvent(event)
+	payload, err := json.Marshal(envelope)
 	stop()
 	if err != nil {
 		log.Printf("failed to marshal committed workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
@@ -1189,9 +985,83 @@ func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEve
 			stop()
 		}
 	}
+	s.publishWorkspaceRealtimeEvent(event, envelope, userIDs)
 	stop = timings.observe("events.publish.listener_work")
-	s.notifyWorkspaceEventFanout(event)
+	if notifyFanout {
+		s.notifyWorkspaceEventFanout(event)
+	}
 	stop()
+}
+
+func (s *Server) publishWorkspaceRealtimeEvent(event domain.DomainEvent, envelope workspaceEventEnvelope, userIDs []string) {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	companyID := strings.TrimSpace(event.CompanyID)
+	if companyID == "" {
+		return
+	}
+	publishScope := func(scope string) {
+		scope = strings.TrimSpace(scope)
+		if scope == "" || !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+			return
+		}
+		payload, err := json.Marshal(realtimeWorkspaceEventMessage{
+			Type:      realtimeMessageWorkspaceEvent,
+			CompanyID: companyID,
+			Scope:     scope,
+			Sequence:  event.Sequence,
+			Event:     envelope,
+		})
+		if err != nil {
+			log.Printf("failed to marshal realtime workspace event company_id=%s scope=%s sequence=%d event_id=%s: %v", companyID, scope, event.Sequence, event.EventID, err)
+			return
+		}
+		s.realtimeRegistry.publish(companyID, scope, payload)
+	}
+	for _, userID := range userIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			continue
+		}
+		publishScope(realtimeWorkspaceScope(userID))
+		publishScope(realtimeCompanyExplorerScope(userID))
+		publishScope(realtimeNodeGraphScope(userID))
+		publishScope(realtimeLogicGateGraphScope(userID))
+	}
+	if scope := realtimeEditorCollaborationScope(envelope); scope != "" {
+		publishScope(scope)
+	}
+}
+
+func realtimeEditorCollaborationScope(envelope workspaceEventEnvelope) string {
+	if strings.TrimSpace(envelope.Type) != "editor_collaboration_event" {
+		return ""
+	}
+	entityKind := workspaceEnvelopeDataString(envelope.Data, "entity_kind")
+	entityID := workspaceEnvelopeDataString(envelope.Data, "entity_id")
+	return realtimeEditorScope(entityKind, entityID)
+}
+
+func workspaceEnvelopeDataString(data map[string]any, key string) string {
+	if data == nil {
+		return ""
+	}
+	value, ok := data[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case *string:
+		if typed == nil {
+			return ""
+		}
+		return strings.TrimSpace(*typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
 }
 
 func cloneDomainEventsForAsync(events []domain.DomainEvent) []domain.DomainEvent {
@@ -1247,24 +1117,6 @@ func domainEventTypesForLog(events []domain.DomainEvent) string {
 	return strings.Join(parts, ",")
 }
 
-func (s *Server) workspaceEventVisibleToUser(event domain.DomainEvent, userID string) bool {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return true
-	}
-	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
-	if err != nil {
-		log.Printf("failed to resolve workspace event visibility company_id=%s sequence=%d event_id=%s user_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, userID, err)
-		return false
-	}
-	for _, allowedUserID := range userIDs {
-		if strings.TrimSpace(allowedUserID) == userID {
-			return true
-		}
-	}
-	return false
-}
-
 func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEventEnvelope {
 	return workspaceEventEnvelope{
 		EventID:    event.EventID,
@@ -1276,14 +1128,4 @@ func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEv
 		TS:         event.CreatedTimestamp,
 		Data:       event.Payload,
 	}
-}
-
-func writeWorkspaceSSE(w http.ResponseWriter, event domain.DomainEvent) bool {
-	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
-	if err != nil {
-		log.Printf("failed to marshal workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
-		return false
-	}
-	fmt.Fprintf(w, "id: %d\nevent: workspace\ndata: %s\n\n", event.Sequence, payload)
-	return true
 }

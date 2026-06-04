@@ -19,7 +19,7 @@ import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/Nod
 import { emitNotificationsUpdated } from "../modules/notifications/notificationsApi";
 import { ensureMangoRealtimeConnection, subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
-import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceStream, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceStream";
+import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceRealtime";
 
 type StreamEvent = {
   event: string;
@@ -36,11 +36,7 @@ type WorkspaceStreamEnvelope = {
   type?: string;
 };
 
-type AppLiveFreshnessBridgeProps = {
-  suppressWorkspaceStream?: boolean;
-};
-
-export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppLiveFreshnessBridgeProps) {
+export function AppLiveFreshnessBridge() {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
 
@@ -88,8 +84,8 @@ export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppL
   }, [apiBase, companyID]);
 
   useEffect(() => {
-    if (!companyID || suppressWorkspaceStream) return undefined;
-    const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
+    if (!companyID) return undefined;
+    const unsubscribe = subscribeWorkspaceUserRealtime(apiBase, companyID, workspaceRealtimeScope, {
       onEvent(event, context: WorkspaceStreamEventContext) {
         markWorkspaceCachesStaleForEvent(event, apiBase, companyID, context.scopes);
       },
@@ -101,7 +97,7 @@ export function AppLiveFreshnessBridge({ suppressWorkspaceStream = false }: AppL
       },
     });
     return unsubscribe;
-  }, [apiBase, companyID, suppressWorkspaceStream]);
+  }, [apiBase, companyID]);
 
   return null;
 }

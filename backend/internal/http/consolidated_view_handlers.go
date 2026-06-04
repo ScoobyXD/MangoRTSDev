@@ -29,6 +29,7 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 	if !ok {
 		return
 	}
+	editorSequence := s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeNode, nodeID))
 	view, err := s.repo.GetNodeView(store.NodeViewInput{
 		CompanyID: companyID,
 		NodeID:    nodeID,
@@ -48,7 +49,7 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	view.EffectiveAccessFlags = flags
-	view.EditorSequence = s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeNode, nodeID))
+	view.EditorSequence = editorSequence
 	writeJSONMaybeNotModified(w, r, http.StatusOK, view)
 }
 
