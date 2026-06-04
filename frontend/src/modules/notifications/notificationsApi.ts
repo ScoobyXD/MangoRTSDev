@@ -71,6 +71,27 @@ export function emptyNotificationSummary(companyID = ""): NotificationSummary {
   };
 }
 
+export async function deleteNotification(notificationID: string, companyID = ""): Promise<number> {
+  const cleanNotificationID = notificationID.trim();
+  if (!cleanNotificationID) throw new Error("notification_id_required");
+  const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}`, {
+    method: "DELETE",
+  });
+  emitNotificationsUpdated(companyID);
+  return normalizeCount(result.deleted_count);
+}
+
+export async function deleteNotifications(input: { companyID: string }): Promise<number> {
+  const cleanCompanyID = input.companyID.trim();
+  if (!cleanCompanyID) throw new Error("company_id_required");
+  const query = `?company_id=${encodeURIComponent(cleanCompanyID)}`;
+  const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications${query}`, {
+    method: "DELETE",
+  });
+  emitNotificationsUpdated(cleanCompanyID);
+  return normalizeCount(result.deleted_count);
+}
+
 export async function fetchNotificationSummary(companyID: string): Promise<NotificationSummary> {
   const cleanCompanyID = companyID.trim();
   const query = cleanCompanyID ? `?company_id=${encodeURIComponent(cleanCompanyID)}` : "";
@@ -102,7 +123,7 @@ export async function markNotificationRead(notificationID: string, read = true):
   const item = await apiFetchJSON<NotificationItem>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}/${action}`, {
     method: "POST",
   });
-  dispatchNotificationsUpdated(item.company_id);
+  emitNotificationsUpdated(item.company_id);
   return normalizeNotification(item);
 }
 
@@ -119,7 +140,7 @@ export async function markNotificationsRead(input: NotificationClearInput = {}):
     method: "POST",
     body: JSON.stringify(payload),
   });
-  dispatchNotificationsUpdated(payload.company_id);
+  emitNotificationsUpdated(payload.company_id);
   return normalizeCount(result.updated_count);
 }
 
@@ -215,7 +236,7 @@ function normalizeNotification(item: NotificationItem): NotificationItem {
   };
 }
 
-function dispatchNotificationsUpdated(companyID?: string): void {
+export function emitNotificationsUpdated(companyID?: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "" } }));
 }

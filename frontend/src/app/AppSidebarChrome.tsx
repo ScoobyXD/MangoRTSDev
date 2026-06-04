@@ -23,7 +23,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import { fetchNotifications, markNotificationRead, markNotificationsRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { deleteNotification, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import {
@@ -328,24 +328,7 @@ export function AppSidebar({
     setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
     setSharedSelectionAnchorTreeID("");
   }, [activeHomeView]);
-  const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const requestID = notificationMenuRequestRef.current + 1;
-    notificationMenuRequestRef.current = requestID;
-    const sectionRect = keyViewsSectionRef.current?.getBoundingClientRect();
-    const anchorRect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
-    const anchorTop = sectionRect && anchorRect ? Math.max(0, anchorRect.bottom - sectionRect.top + 5) : 0;
-    const nextMenu: SidebarNotificationMenuState = {
-      ...filter,
-      requestID,
-      anchorTop,
-      loading: true,
-      error: "",
-      items: [],
-      seenNotificationIDs: [],
-    };
-    setNotificationMenu(nextMenu);
+  const loadNotificationMenuItems = useCallback((requestID: number, filter: SidebarNotificationMenuFilter) => {
     fetchNotifications({ companyID, type: filter.type, unreadOnly: true, limit: 100 })
       .then((items) => {
         const filtered = items.filter((item) => sidebarNotificationMatchesFilter(item, filter));
@@ -364,16 +347,64 @@ export function AppSidebar({
       });
   }, [companyID]);
 
+  const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const requestID = notificationMenuRequestRef.current + 1;
+    notificationMenuRequestRef.current = requestID;
+    const sectionRect = keyViewsSectionRef.current?.getBoundingClientRect();
+    const anchorRect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
+    const anchorTop = sectionRect && anchorRect ? Math.max(0, anchorRect.bottom - sectionRect.top + 5) : 0;
+    const nextMenu: SidebarNotificationMenuState = {
+      ...filter,
+      requestID,
+      anchorTop,
+      loading: true,
+      error: "",
+      items: [],
+      seenNotificationIDs: [],
+    };
+    setNotificationMenu(nextMenu);
+    loadNotificationMenuItems(requestID, filter);
+  }, [loadNotificationMenuItems]);
+
+  useEffect(() => {
+    if (!notificationMenu) return undefined;
+    const activeRequestID = notificationMenu.requestID;
+    const filter: SidebarNotificationMenuFilter = {
+      title: notificationMenu.title,
+      type: notificationMenu.type,
+      surface: notificationMenu.surface,
+      role: notificationMenu.role,
+    };
+    const onNotificationsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      const eventCompanyID = detail?.companyID?.trim() ?? "";
+      if (eventCompanyID && eventCompanyID !== companyID) return;
+      const requestID = notificationMenuRequestRef.current + 1;
+      notificationMenuRequestRef.current = requestID;
+      setNotificationMenu((current) => (
+        current?.requestID === activeRequestID
+          ? { ...current, requestID, loading: true, error: "" }
+          : current
+      ));
+      loadNotificationMenuItems(requestID, filter);
+    };
+    window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
+    return () => window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
+  }, [companyID, loadNotificationMenuItems, notificationMenu]);
+
   const clearNotificationMenu = useCallback(() => {
     const menu = notificationMenu;
     if (!menu || menu.loading || menu.items.length === 0) return;
+    const notificationsToDelete = menu.items
+      .map((item) => ({
+        notificationID: item.notification_id.trim(),
+        companyID: item.company_id?.trim() || companyID,
+      }))
+      .filter((item) => item.notificationID);
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void markNotificationsRead({
-      companyID,
-      type: menu.type,
-      surface: menu.surface,
-      role: menu.role,
-    }).catch((error) => {
+    void Promise.all(notificationsToDelete.map((item) => deleteNotification(item.notificationID, item.companyID))).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
     });
@@ -386,9 +417,13 @@ export function AppSidebar({
         if (!current) return current;
         const seen = new Set(current.seenNotificationIDs);
         seen.add(notificationID);
-        return { ...current, seenNotificationIDs: Array.from(seen) };
+        return {
+          ...current,
+          items: current.items.filter((item) => item.notification_id !== notificationID),
+          seenNotificationIDs: Array.from(seen),
+        };
       });
-      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+      void deleteNotification(notificationID, notification.company_id || companyID).catch((error) => console.error("Failed to delete notification", error));
     }
 
     const informationID = notification.information_id?.trim() ?? "";

@@ -112,10 +112,14 @@ func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Requ
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	companyID := firstNonEmptyString(req.CompanyID, r.URL.Query().Get("company_id"))
+	companyID := strings.TrimSpace(firstNonEmptyString(req.CompanyID, r.URL.Query().Get("company_id")))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
 	deleted, err := s.repo.DeleteNotifications(store.NotificationDeleteInput{
 		UserID:    actor.User.UserID,
-		CompanyID: strings.TrimSpace(companyID),
+		CompanyID: companyID,
 	})
 	if errorsIsInvalid(err) {
 		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
