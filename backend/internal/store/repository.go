@@ -298,6 +298,7 @@ type EventRepository interface {
 	AppendEventRow(input EventRowInput) (EventRow, error)
 	AppendEventRows(inputs []EventRowInput) ([]EventRow, error)
 	ListEventRows(companyID string, limit int) ([]EventRow, error)
+	CurrentEventRowSequence(companyID, sequenceScope string) (int64, error)
 	ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error)
 	MarkEventRowProcessed(companyID, eventID string) error
 	MarkEventRowFailed(companyID, eventID, lastError string, availableAt time.Time) error

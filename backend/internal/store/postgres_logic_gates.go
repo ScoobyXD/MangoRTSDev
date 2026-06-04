@@ -1303,23 +1303,33 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 	if projectionID == "" {
 		projectionID = item.InformationID
 	}
+	var projection domain.LogicGateProjection
 	if isEditorTextBoxType(item.Type) {
 		// Logic gates keep the legacy one-document editor contract. The new
 		// multi-block timeline/chat/email workspace is node-only.
-		if _, err := tx.ExecContext(ctx,
+		if err := tx.QueryRowContext(ctx,
 			`insert into logic_gate_projection_table
 			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
 			 values ($1, $2, $3, $4::information_type, $5, now(), now())
 			 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
 			 do update set
 			   information=excluded.information,
-			   updated_timestamp=now()`,
+			   updated_timestamp=now()
+			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
+		).Scan(
+			&projection.CompanyID,
+			&projection.LogicGateID,
+			&projection.InformationID,
+			&projection.Type,
+			&projection.Information,
+			&projection.CreatedTimestamp,
+			&projection.UpdatedTimestamp,
 		); err != nil {
 			return domain.LogicGateInformation{}, err
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx,
+		if err := tx.QueryRowContext(ctx,
 			`insert into logic_gate_projection_table
 			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
 			 values ($1, $2, $3, $4::information_type, $5, now(), now())
@@ -1327,9 +1337,23 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 			 do update set
 			   type=excluded.type,
 			   information=excluded.information,
-			   updated_timestamp=now()`,
+			   updated_timestamp=now()
+			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
+		).Scan(
+			&projection.CompanyID,
+			&projection.LogicGateID,
+			&projection.InformationID,
+			&projection.Type,
+			&projection.Information,
+			&projection.CreatedTimestamp,
+			&projection.UpdatedTimestamp,
 		); err != nil {
+			return domain.LogicGateInformation{}, err
+		}
+	}
+	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, "", "", EditorProjectionRowFromLogicGate(projection)); ok {
+		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
 			return domain.LogicGateInformation{}, err
 		}
 	}
@@ -1398,8 +1422,14 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 
 func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informationID string) error {
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	var exists bool
-	if err := r.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
 		companyID, logicGateID,
 	).Scan(&exists); err != nil {
@@ -1408,12 +1438,24 @@ func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informa
 	if !exists {
 		return ErrNotFound
 	}
-	_, err := r.db.ExecContext(ctx,
+	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gate_projection_table
 		 where company_id=$1 and logic_gate_id=$2 and information_id=$3`,
 		companyID, logicGateID, informationID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if affected, err := deleted.RowsAffected(); err != nil {
+		return err
+	} else if affected > 0 {
+		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, "", "", EntityTypeLogicGate, logicGateID, informationID); ok {
+			if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {

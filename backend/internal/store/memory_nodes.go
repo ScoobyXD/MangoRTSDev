@@ -717,6 +717,17 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		return domain.NodeInformation{}, ErrNotFound
 	}
 	now := time.Now().UTC()
+	k := key(companyID, nodeID)
+	beforeInfo := append([]domain.NodeInformation{}, r.nodeInfo[k]...)
+	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
+	beforeChanges := cloneMemoryNodeContentChanges(r.nodeContentChanges)
+	beforeChangeSeen := cloneMemoryTimeMap(r.nodeContentChangeSeen)
+	rollback := func() {
+		r.nodeInfo[k] = beforeInfo
+		r.nodeText[k] = beforeText
+		r.nodeContentChanges = beforeChanges
+		r.nodeContentChangeSeen = beforeChangeSeen
+	}
 	item := domain.NodeInformation{
 		CompanyID:        companyID,
 		InformationID:    newUUIDv7String(),
@@ -726,7 +737,6 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	k := key(companyID, nodeID)
 	r.nodeInfo[k] = append(r.nodeInfo[k], item)
 	sort.Slice(r.nodeInfo[k], func(i, j int) bool {
 		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
@@ -746,7 +756,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		existingCopy := existing
 		previous = &existingCopy
 	}
-	r.nodeText[k][keyValue] = domain.NodeProjection{
+	projection := domain.NodeProjection{
 		CompanyID:        companyID,
 		NodeID:           nodeID,
 		Type:             infoType,
@@ -755,6 +765,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		CreatedTimestamp: created,
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
+	r.nodeText[k][keyValue] = projection
 	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
 		r.recordNodeContentChangesLocked(buildNodeContentChanges(
 			companyID,
@@ -766,6 +777,12 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 			normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName),
 			now,
 		))
+	}
+	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
+		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
+			rollback()
+			return domain.NodeInformation{}, err
+		}
 	}
 	return item, nil
 }
@@ -811,6 +828,14 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		return ErrNotFound
 	}
 	k := key(companyID, nodeID)
+	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
+	beforeChanges := cloneMemoryNodeContentChanges(r.nodeContentChanges)
+	beforeChangeSeen := cloneMemoryTimeMap(r.nodeContentChangeSeen)
+	rollback := func() {
+		r.nodeText[k] = beforeText
+		r.nodeContentChanges = beforeChanges
+		r.nodeContentChangeSeen = beforeChangeSeen
+	}
 	if existing, ok := r.nodeText[k][informationID]; ok && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
 		existingCopy := existing
 		r.recordNodeContentChangesLocked(buildNodeContentChanges(
@@ -824,7 +849,15 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 			time.Now().UTC(),
 		))
 	}
-	delete(r.nodeText[k], informationID)
+	if _, ok := r.nodeText[k][informationID]; ok {
+		delete(r.nodeText[k], informationID)
+		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeNode, nodeID, informationID); ok {
+			if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
+				rollback()
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -839,6 +872,33 @@ func (r *MemoryRepo) recordNodeContentChangesLocked(changes []domain.NodeContent
 			r.nodeContentChangeSeen[nodeContentChangeSeenKey(change.CompanyID, change.ChangeID, change.ActorUserID)] = now
 		}
 	}
+}
+
+func cloneMemoryNodeProjectionMap(items map[string]domain.NodeProjection) map[string]domain.NodeProjection {
+	if items == nil {
+		return nil
+	}
+	out := make(map[string]domain.NodeProjection, len(items))
+	for key, value := range items {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneMemoryNodeContentChanges(items map[string]domain.NodeContentChange) map[string]domain.NodeContentChange {
+	out := make(map[string]domain.NodeContentChange, len(items))
+	for key, value := range items {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneMemoryTimeMap(items map[string]time.Time) map[string]time.Time {
+	out := make(map[string]time.Time, len(items))
+	for key, value := range items {
+		out[key] = value
+	}
+	return out
 }
 
 func (r *MemoryRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error) {

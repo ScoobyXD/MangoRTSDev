@@ -238,6 +238,23 @@ limit $2`, companyID, limit)
 	return scanEventRows(rows)
 }
 
+func (r *PostgresRepo) CurrentEventRowSequence(companyID, sequenceScope string) (int64, error) {
+	companyID = strings.TrimSpace(companyID)
+	sequenceScope = strings.TrimSpace(sequenceScope)
+	if companyID == "" || sequenceScope == "" {
+		return 0, ErrInvalid
+	}
+	var sequence int64
+	if err := r.db.QueryRowContext(context.Background(), `
+select coalesce(max(sequence), 0)
+from event_rows
+where company_id=$1::uuid
+  and sequence_scope=$2`, companyID, sequenceScope).Scan(&sequence); err != nil {
+		return 0, err
+	}
+	return sequence, nil
+}
+
 func (r *PostgresRepo) ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error) {
 	limit = NormalizeEventRowListLimit(limit)
 	processingLeaseTimeout = NormalizeEventRowProcessingLeaseTimeout(processingLeaseTimeout)

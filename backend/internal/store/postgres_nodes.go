@@ -1332,7 +1332,8 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	if err != nil {
 		return domain.NodeInformation{}, err
 	}
-	if _, err := tx.ExecContext(ctx,
+	var projection domain.NodeProjection
+	if err := tx.QueryRowContext(ctx,
 		`insert into node_projection_table
 		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4::information_type, $5, now(), now())
@@ -1340,8 +1341,17 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		 do update set
 		   type=excluded.type,
 		   information=excluded.information,
-		   updated_timestamp=now()`,
+		   updated_timestamp=now()
+		 returning company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.NodeID, keyValue, item.Type, input.Information,
+	).Scan(
+		&projection.CompanyID,
+		&projection.NodeID,
+		&projection.InformationID,
+		&projection.Type,
+		&projection.Information,
+		&projection.CreatedTimestamp,
+		&projection.UpdatedTimestamp,
 	); err != nil {
 		return domain.NodeInformation{}, err
 	}
@@ -1361,6 +1371,11 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 			actor,
 			time.Now().UTC(),
 		)); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	}
+	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
+		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
 			return domain.NodeInformation{}, err
 		}
 	}
@@ -1515,32 +1530,41 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	if !exists {
 		return ErrNotFound
 	}
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		if previous, found, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID); err != nil {
+	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
+	if err != nil {
+		return err
+	}
+	if previousFound && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
+		previousCopy := previous
+		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+			companyID,
+			nodeID,
+			informationID,
+			previous.Type,
+			&previousCopy,
+			"",
+			normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName),
+			time.Now().UTC(),
+		)); err != nil {
 			return err
-		} else if found {
-			previousCopy := previous
-			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-				companyID,
-				nodeID,
-				informationID,
-				previous.Type,
-				&previousCopy,
-				"",
-				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName),
-				time.Now().UTC(),
-			)); err != nil {
-				return err
-			}
 		}
 	}
-	_, err = tx.ExecContext(ctx,
+	deleted, err := tx.ExecContext(ctx,
 		`delete from node_projection_table
 		 where company_id=$1 and node_id=$2 and information_id=$3`,
 		companyID, nodeID, informationID,
 	)
 	if err != nil {
 		return err
+	}
+	if affected, err := deleted.RowsAffected(); err != nil {
+		return err
+	} else if affected > 0 {
+		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeNode, nodeID, informationID); ok {
+			if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit()
 }

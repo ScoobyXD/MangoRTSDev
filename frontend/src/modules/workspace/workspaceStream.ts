@@ -71,7 +71,7 @@ type WorkspaceStreamSubscriber = {
   onError?: (error: unknown) => void;
 };
 
-export type WorkspaceProjectionName = "racio_matrix" | "kanban_board";
+export type WorkspaceProjectionName = "kanban_board";
 
 export type WorkspaceStreamOptions = {
   projections?: WorkspaceProjectionName[];
@@ -103,7 +103,7 @@ const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
 
 function normalizeWorkspaceProjections(projections?: WorkspaceProjectionName[]): WorkspaceProjectionName[] {
   return Array.from(new Set((projections ?? []).map((projection) => projection.trim()).filter((projection): projection is WorkspaceProjectionName => (
-    projection === "racio_matrix" || projection === "kanban_board"
+    projection === "kanban_board"
   )))).sort();
 }
 

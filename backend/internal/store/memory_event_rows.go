@@ -117,6 +117,24 @@ func (r *MemoryRepo) ListEventRows(companyID string, limit int) ([]EventRow, err
 	return rows, nil
 }
 
+func (r *MemoryRepo) CurrentEventRowSequence(companyID, sequenceScope string) (int64, error) {
+	companyID = strings.TrimSpace(companyID)
+	sequenceScope = strings.TrimSpace(sequenceScope)
+	if companyID == "" || sequenceScope == "" {
+		return 0, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var sequence int64
+	for _, row := range r.eventRows {
+		if row.CompanyID == companyID && row.SequenceScope == sequenceScope && row.Sequence > sequence {
+			sequence = row.Sequence
+		}
+	}
+	return sequence, nil
+}
+
 func (r *MemoryRepo) ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error) {
 	limit = NormalizeEventRowListLimit(limit)
 	processingLeaseTimeout = NormalizeEventRowProcessingLeaseTimeout(processingLeaseTimeout)

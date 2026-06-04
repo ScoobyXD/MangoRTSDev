@@ -48,6 +48,7 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	view.EffectiveAccessFlags = flags
+	view.EditorSequence = s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeNode, nodeID))
 	writeJSONMaybeNotModified(w, r, http.StatusOK, view)
 }
 
@@ -61,6 +62,7 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 	if !ok {
 		return
 	}
+	editorSequence := s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeLogicGate, logicGateID))
 	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_view_version")
@@ -86,7 +88,9 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 			return
 		}
 		view.EffectiveAccessFlags = flags
-		writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateViewResponseWithWork(view), etag)
+		response := logicGateViewResponseWithWork(view)
+		response.EditorSequence = editorSequence
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 		return
 	}
 	details, err := s.repo.GetLogicGateDetails(companyID, logicGateID)
@@ -109,7 +113,9 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_view")
 		return
 	}
-	writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateCoreViewResponse(companyID, logicGateID, details, projections, flags), etag)
+	response := logicGateCoreViewResponse(companyID, logicGateID, details, projections, flags)
+	response.EditorSequence = editorSequence
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 }
 
 func (s *Server) consolidatedViewETag(r *http.Request, companyID, resource string) (string, error) {
@@ -134,6 +140,7 @@ type logicGateViewHTTPResponse struct {
 	RelationshipsCount  int                              `json:"relationships_count"`
 	AssignmentCount     int                              `json:"assignment_count,omitempty"`
 	NodeCount           int                              `json:"node_count,omitempty"`
+	EditorSequence      int64                            `json:"editor_sequence,omitempty"`
 	domain.EffectiveAccessFlags
 }
 

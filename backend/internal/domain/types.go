@@ -318,6 +318,7 @@ type NodeView struct {
 	RelationshipsCount   int                       `json:"relationships_count"`
 	AssignmentCount      int                       `json:"assignment_count"`
 	ContentChangeCount   int                       `json:"content_change_count"`
+	EditorSequence       int64                     `json:"editor_sequence,omitempty"`
 	EffectiveAccessFlags
 }
 

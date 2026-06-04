@@ -875,13 +875,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 	defer s.hub.unsubscribeUser(companyID, streamUserID, ch)
 	externalCh := s.workspaceWakeHub.subscribeUser(companyID, streamUserID)
 	defer s.workspaceWakeHub.unsubscribeUser(companyID, streamUserID, externalCh)
-	var racioProjectionCh chan []byte
 	var kanbanProjectionCh chan []byte
-	projectionScope := projectionUserScope(streamUserID)
-	if projectionScope != "" && workspaceStreamProjectionRequested(r, store.ProjectionNameRacioMatrix) {
-		racioProjectionCh = s.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, projectionScope)
-		defer s.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, projectionScope, racioProjectionCh)
-	}
 	kanbanBoardID := strings.TrimSpace(firstNonEmptyQueryValue(r, "kanban_board_id", "board_id"))
 	if streamUserID != "" && kanbanBoardID != "" && workspaceStreamProjectionRequested(r, store.ProjectionNameKanbanBoard) {
 		kanbanProjectionScope := projectionKanbanBoardUserScope(kanbanBoardID, streamUserID)
@@ -932,9 +926,6 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceExternalFanout, w, flusher, companyID, streamUserID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream external fanout catch-up failed company_id=%s after_sequence=%d notification_sequence=%d: %v", companyID, lastSentSequence, notification.Sequence, err)
 			}
-		case payload := <-racioProjectionCh:
-			writeProjectionSSE(w, payload)
-			flusher.Flush()
 		case payload := <-kanbanProjectionCh:
 			writeProjectionSSE(w, payload)
 			flusher.Flush()

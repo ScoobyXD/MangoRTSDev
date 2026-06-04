@@ -17,6 +17,7 @@ type NodeViewResponse = NodeDetails & {
   node_id?: string;
   projections?: NodeProjectionItem[];
   content_changes?: NodeContentChange[];
+  editor_sequence?: number | string;
 };
 
 const viewCache = new Map<string, NodeViewResponse>();
@@ -124,4 +125,16 @@ export async function getNodeContentChangesSingleFlight(apiBase: string, company
   if (cached) return cached;
   const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
   return payload.content_changes ?? [];
+}
+
+export async function getNodeEditorSequenceSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<number> {
+  const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
+  return parseEditorSequence(payload.editor_sequence);
+}
+
+function parseEditorSequence(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
 }

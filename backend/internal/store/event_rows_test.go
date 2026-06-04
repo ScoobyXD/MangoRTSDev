@@ -219,6 +219,139 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	}
 }
 
+func TestEditorNodeInformationInsertsEventRowWithProjectionDelta(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999111"
+	repo.EnsureCompany(companyID, "Editor Node Event Rows Co")
+	node, err := repo.CreateNode(companyID, "Editor event row node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	informationID := "11111111-1111-4111-8111-111111111111"
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:     companyID,
+		NodeID:        node.NodeID,
+		InformationID: informationID,
+		Type:          "Text box",
+		Information:   "node editor content",
+		ActorUserID:   "11111111-1111-4111-8111-111111111112",
+	}); err != nil {
+		t.Fatalf("AddNodeInformationWithActor: %v", err)
+	}
+
+	rows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows: %v", err)
+	}
+	var row EventRow
+	for _, candidate := range rows {
+		if candidate.EventType == EventTypeEditorProjectionDelta {
+			row = candidate
+			break
+		}
+	}
+	wantScope := EditorRealtimeScope(EntityTypeNode, node.NodeID)
+	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantScope || row.Sequence != 1 {
+		t.Fatalf("editor node event row = %+v, want scope=%s sequence=1", row, wantScope)
+	}
+	payload, err := DecodeEditorProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeEditorProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Scope != wantScope || payload.ResourceType != EntityTypeNode || payload.ResourceID != node.NodeID || len(payload.Deltas) != 1 {
+		t.Fatalf("payload = %+v, want one node editor delta for %s", payload, wantScope)
+	}
+	delta := payload.Deltas[0]
+	if delta.Operation != ProjectionDeltaOperationUpsert || delta.Row == nil || delta.Row.NodeID != node.NodeID || delta.Row.InformationID != informationID || delta.Row.Information != "node editor content" {
+		t.Fatalf("delta = %+v, want node upsert row", delta)
+	}
+	if current, err := repo.CurrentEventRowSequence(companyID, wantScope); err != nil || current != 1 {
+		t.Fatalf("CurrentEventRowSequence = %d err=%v, want 1", current, err)
+	}
+}
+
+func TestEditorLogicGateInformationInsertsEventRowWithProjectionDelta(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999112"
+	repo.EnsureCompany(companyID, "Editor Logic Gate Event Rows Co")
+	logicGate, err := repo.CreateLogicGate(companyID, "Editor event row gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	informationID := "11111111-1111-4111-8111-111111111113"
+	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "logic gate editor content", informationID); err != nil {
+		t.Fatalf("AddLogicGateInformation: %v", err)
+	}
+
+	rows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows: %v", err)
+	}
+	var row EventRow
+	for _, candidate := range rows {
+		if candidate.EventType == EventTypeEditorProjectionDelta {
+			row = candidate
+			break
+		}
+	}
+	wantScope := EditorRealtimeScope(EntityTypeLogicGate, logicGate.LogicGateID)
+	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantScope || row.Sequence != 1 {
+		t.Fatalf("editor logic gate event row = %+v, want scope=%s sequence=1", row, wantScope)
+	}
+	payload, err := DecodeEditorProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeEditorProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Scope != wantScope || payload.ResourceType != EntityTypeLogicGate || payload.ResourceID != logicGate.LogicGateID || len(payload.Deltas) != 1 {
+		t.Fatalf("payload = %+v, want one logic gate editor delta for %s", payload, wantScope)
+	}
+	delta := payload.Deltas[0]
+	if delta.Operation != ProjectionDeltaOperationUpsert || delta.Row == nil || delta.Row.LogicGateID != logicGate.LogicGateID || delta.Row.InformationID != informationID || delta.Row.Information != "logic gate editor content" {
+		t.Fatalf("delta = %+v, want logic gate upsert row", delta)
+	}
+}
+
+func TestEditorNodeInformationEventRowRollbackLeavesNoProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999113"
+	repo.EnsureCompany(companyID, "Editor Rollback Co")
+	node, err := repo.CreateNode(companyID, "Editor rollback node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	beforeRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+
+	repo.eventRowAppendErr = errors.New("forced editor event row failure")
+	_, err = repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID:     companyID,
+		NodeID:        node.NodeID,
+		InformationID: "11111111-1111-4111-8111-111111111114",
+		Type:          "Text box",
+		Information:   "rollback content",
+	})
+	if !errors.Is(err, repo.eventRowAppendErr) {
+		t.Fatalf("AddNodeInformationWithActor error = %v, want forced event row failure", err)
+	}
+	repo.eventRowAppendErr = nil
+	afterRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("event rows after rollback = %d, want %d", len(afterRows), len(beforeRows))
+	}
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections after rollback: %v", err)
+	}
+	if len(projections) != 0 {
+		t.Fatalf("node projections after rollback = %+v, want none", projections)
+	}
+}
+
 func TestEventWorkerClaimAndProcessBookkeeping(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999103"

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/store"
@@ -94,6 +95,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 		return s.processKanbanProjectionDeltaEvent(row)
 	case store.EventTypeRacioProjectionDelta:
 		return s.processRacioProjectionDeltaEvent(row)
+	case store.EventTypeEditorProjectionDelta:
+		return s.processEditorProjectionDeltaEvent(row)
 	case store.EventTypePermissionChanged:
 		return s.processPermissionChangedEvent(row)
 	default:
@@ -131,6 +134,39 @@ func (s *Server) processRacioProjectionDeltaEvent(row store.EventRow) error {
 	return nil
 }
 
+func (s *Server) processEditorProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeEditorProjectionDeltaEventPayload(row)
+	if err != nil {
+		return err
+	}
+	scope := payload.Scope
+	if scope == "" {
+		scope = realtimeEditorScope(payload.ResourceType, payload.ResourceID)
+	}
+	if scope == "" || scope != realtimeEditorScope(payload.ResourceType, payload.ResourceID) {
+		return fmt.Errorf("unsupported_editor_scope:%s", scope)
+	}
+	if len(payload.Deltas) == 0 {
+		return nil
+	}
+	message, err := json.Marshal(realtimeEditorProjectionDeltaMessage{
+		Type:               realtimeMessageProjectionDelta,
+		CompanyID:          row.CompanyID,
+		Scope:              scope,
+		Sequence:           row.Sequence,
+		Projection:         "editor",
+		ResourceType:       payload.ResourceType,
+		ResourceID:         payload.ResourceID,
+		Deltas:             payload.Deltas,
+		ProjectedTimestamp: time.Now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	s.realtimeRegistry.publish(row.CompanyID, scope, message)
+	return nil
+}
+
 func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 	payload, err := store.DecodePermissionChangedEventPayload(row)
 	if err != nil {
@@ -146,16 +182,65 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 	}
 	switch entityType {
 	case store.EntityTypeNode:
+		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	case store.EntityTypeLogicGate:
+		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.revalidateKanbanBoardSubscriptionsForLogicGate(row.CompanyID, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	default:
 		return nil
+	}
+}
+
+func (s *Server) revalidateEditorSubscriptionsForResource(companyID, resourceType, resourceID string) {
+	companyID = strings.TrimSpace(companyID)
+	resourceID = strings.TrimSpace(resourceID)
+	scope := realtimeEditorScope(resourceType, resourceID)
+	if companyID == "" || resourceID == "" || scope == "" {
+		return
+	}
+	for _, conn := range s.realtimeRegistry.connectionsForScope(companyID, scope) {
+		if conn == nil {
+			continue
+		}
+		authorized, _, err := s.authorizeRealtimeSubscription(conn.actor, companyID, scope)
+		if err != nil {
+			log.Printf("failed to revalidate editor realtime subscription company_id=%s user_id=%s scope=%s: %v", companyID, conn.userID, scope, err)
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:      realtimeMessageSnapshotRefetch,
+				CompanyID: companyID,
+				Scope:     scope,
+				Reason:    "permission_check_failed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		if authorized {
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:      realtimeMessageSnapshotRefetch,
+				CompanyID: companyID,
+				Scope:     scope,
+				Reason:    "permission_changed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		_ = conn.sendJSON(realtimeServerMessage{
+			Type:         realtimeMessagePermissionRevoked,
+			CompanyID:    companyID,
+			Scope:        scope,
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
+			Reason:       "permission_revoked",
+		})
+		s.recordOperationalMetric("realtime.permission_revoked_count", realtimeScopeType(scope), 1, 0)
+		s.realtimeRegistry.unsubscribe(conn.id, companyID, scope)
+		s.recordRealtimeActiveSubscriptions()
 	}
 }
 
