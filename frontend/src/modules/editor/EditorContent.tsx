@@ -78,7 +78,7 @@ import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetEditorDocumentUndoHistory, snapshotEditorDocumentHTML } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { subscribeWorkspaceRealtime } from "../workspace/workspaceRealtime";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
@@ -177,7 +177,7 @@ type EditorContentProps = {
   forcedEmptyMessage?: string;
   focusInformationID?: string;
   focusRequestID?: number;
-  suppressWorkspaceStream?: boolean;
+  suppressLegacyWorkspaceStream?: boolean;
 };
 
 type CompanyUser = {
@@ -234,7 +234,7 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
 }
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressWorkspaceStream = false }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressLegacyWorkspaceStream = false }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1250,12 +1250,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [activeTab, hasLinkedDocument, linkedEntityKind]);
 
   useEffect(() => {
-    if (suppressWorkspaceStream || !companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
+    if (suppressLegacyWorkspaceStream || !companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
       setCollaborators([]);
       return;
     }
     const currentTarget = { entityKind: linkedEntityKind, entityID: linkedNodeID };
-    return subscribeWorkspaceStream(apiBase, companyID, {
+    const realtimeScope = editorRealtimeScope(linkedEntityKind, linkedNodeID);
+    return subscribeWorkspaceRealtime(apiBase, companyID, realtimeScope, {
       onEvent(event) {
         if (event.event !== "workspace") return;
         const payload = parseEditorCollaborationWorkspaceEvent(event.data);
@@ -1286,7 +1287,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         }
       },
     });
-  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID, suppressWorkspaceStream]);
+  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID, suppressLegacyWorkspaceStream]);
 
   const rememberEditorProjectionSequence = useCallback((scope: string, value: unknown) => {
     const cleanScope = scope.trim();
@@ -1432,7 +1433,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
     const realtimeScope = resourceType ? editorRealtimeScope(resourceType, resourceID) : "";
-    if (suppressWorkspaceStream || !companyID || !resourceType || !resourceID || !realtimeScope || editorSnapshotLoadedScope !== realtimeScope) return;
+    if (!companyID || !resourceType || !resourceID || !realtimeScope || editorSnapshotLoadedScope !== realtimeScope) return;
     return subscribeRealtimeScope(apiBase, companyID, realtimeScope, {
       getAfterSequence: () => editorProjectionSequenceByScopeRef.current.get(realtimeScope),
       onAccepted(message) {
@@ -1470,7 +1471,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setError(message.message || message.error || "Editor realtime error");
       },
     });
-  }, [apiBase, applyLoadedDocument, applyRealtimeEditorProjectionDelta, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot, rememberEditorProjectionSequence, suppressWorkspaceStream]);
+  }, [apiBase, applyLoadedDocument, applyRealtimeEditorProjectionDelta, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot, rememberEditorProjectionSequence]);
 
   useEffect(() => {
     const intervalID = window.setInterval(() => {
@@ -1870,7 +1871,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, suppressWorkspaceStream]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
   const markNodeContentChangeSeen = useCallback((changeID: string) => {
     if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
     const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);

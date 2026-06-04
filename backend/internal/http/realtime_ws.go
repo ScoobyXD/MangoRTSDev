@@ -36,6 +36,7 @@ const (
 	realtimeMessageSubscriptionAccepted = "subscription.accepted"
 	realtimeMessageSubscriptionRejected = "subscription.rejected"
 	realtimeMessageProjectionDelta      = "projection.delta"
+	realtimeMessageWorkspaceEvent       = "workspace.event"
 	realtimeMessageNotificationCreated  = "notification.created"
 	realtimeMessageNotificationDeleted  = "notification.deleted"
 	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
@@ -98,6 +99,14 @@ type realtimeEditorProjectionDeltaMessage struct {
 	ResourceID         string                        `json:"resource_id"`
 	Deltas             []store.EditorProjectionDelta `json:"deltas"`
 	ProjectedTimestamp time.Time                     `json:"projected_timestamp"`
+}
+
+type realtimeWorkspaceEventMessage struct {
+	Type      string                 `json:"type"`
+	CompanyID string                 `json:"company_id"`
+	Scope     string                 `json:"scope"`
+	Sequence  int64                  `json:"sequence"`
+	Event     workspaceEventEnvelope `json:"event"`
 }
 
 func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -359,6 +368,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if userID := realtimeWorkspaceUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
 			return false, "access_denied", nil
@@ -432,6 +447,61 @@ func realtimeRacioUserIDFromScope(scope string) string {
 	return strings.TrimSpace(strings.TrimPrefix(scope, "racio:user:"))
 }
 
+func realtimeWorkspaceScope(userID string) string {
+	return realtimeUserScopedWorkspaceScope("workspace", userID)
+}
+
+func realtimeCompanyExplorerScope(userID string) string {
+	return realtimeUserScopedWorkspaceScope("company_explorer", userID)
+}
+
+func realtimeNodeGraphScope(userID string) string {
+	return realtimeUserScopedWorkspaceScope("node_graph", userID)
+}
+
+func realtimeLogicGateGraphScope(userID string) string {
+	return realtimeUserScopedWorkspaceScope("logic_gate_graph", userID)
+}
+
+func realtimeUserScopedWorkspaceScope(prefix, userID string) string {
+	prefix = strings.TrimSpace(prefix)
+	userID = strings.TrimSpace(userID)
+	if prefix == "" || userID == "" {
+		return ""
+	}
+	return prefix + ":user:" + userID
+}
+
+func realtimeWorkspaceUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	for _, prefix := range []string{
+		"workspace:user:",
+		"company_explorer:user:",
+		"node_graph:user:",
+		"logic_gate_graph:user:",
+	} {
+		if strings.HasPrefix(scope, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(scope, prefix))
+		}
+	}
+	return ""
+}
+
+func realtimeWorkspaceDomainEventScopeType(scope string) string {
+	scope = strings.TrimSpace(scope)
+	for _, prefix := range []string{
+		"workspace",
+		"company_explorer",
+		"node_graph",
+		"logic_gate_graph",
+	} {
+		if strings.HasPrefix(scope, prefix+":user:") {
+			return prefix
+		}
+	}
+	return ""
+}
+
 func realtimeScopeType(scope string) string {
 	scope = strings.TrimSpace(scope)
 	switch {
@@ -441,6 +511,8 @@ func realtimeScopeType(scope string) string {
 		return "editor"
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
+	case realtimeWorkspaceDomainEventScopeType(scope) != "":
+		return realtimeWorkspaceDomainEventScopeType(scope)
 	case realtimeRacioUserIDFromScope(scope) != "":
 		return "racio"
 	default:
@@ -492,6 +564,13 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 		sequence, err := s.repo.CurrentEventRowSequence(companyID, scope)
 		if err != nil {
 			log.Printf("failed to read realtime editor scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
+			return 0
+		}
+		return sequence
+	} else if realtimeWorkspaceDomainEventScopeType(scope) != "" {
+		sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID})
+		if err != nil {
+			log.Printf("failed to read realtime workspace scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
 			return 0
 		}
 		return sequence

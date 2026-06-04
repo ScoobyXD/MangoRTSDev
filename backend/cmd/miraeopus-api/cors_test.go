@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestCORSAllowsWorkspaceStreamAndSnapshotHeaders(t *testing.T) {
+func TestCORSAllowsWorkspaceSnapshotHeaders(t *testing.T) {
 	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "http://localhost:5173")
 
 	called := false
@@ -16,7 +16,7 @@ func TestCORSAllowsWorkspaceStreamAndSnapshotHeaders(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodOptions, "/v1/workspace/stream?company_id=company-1", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/v1/workspace/snapshot?company_id=company-1", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	req.Header.Set("Access-Control-Request-Headers", "authorization,cache-control,if-none-match")

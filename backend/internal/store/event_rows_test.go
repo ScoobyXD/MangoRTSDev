@@ -219,6 +219,111 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	}
 }
 
+func TestRacioMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999114"
+	repo.EnsureCompany(companyID, "RACIO Matrix Existing Gate Event Rows Co")
+	user, err := repo.UpsertAuthUser("racio-matrix-existing-user", "racio-matrix-existing-user@example.com", "RACIO Matrix Existing User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "RACIO matrix existing gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments setup: %v", err)
+	}
+
+	beforeRows, err := repo.ListEventRows(companyID, 20)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+	priority := 3
+	nodeID := "11111111-1111-4111-8111-111111111115"
+	if _, err := repo.CreateRacioMatrixNode(RacioMatrixNodeCreateInput{
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		NodeID:         nodeID,
+		Title:          "RACIO matrix existing gate node",
+		Status:         LogicGateWorkStatusPending,
+		Priority:       &priority,
+		PrioritySet:    true,
+		ActorUserID:    user.UserID,
+		IdempotencyKey: "racio-matrix-existing-event-row",
+	}); err != nil {
+		t.Fatalf("CreateRacioMatrixNode existing gate: %v", err)
+	}
+
+	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
+	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(newRows, EventTypeRacioProjectionDelta)
+	if len(kanbanRows) != 1 || len(racioRows) != 1 {
+		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
+	}
+	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], logicGate.LogicGateID, 1)
+	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 2, []string{EntityTypeNode})
+}
+
+func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999116"
+	repo.EnsureCompany(companyID, "RACIO Matrix New Gate Event Rows Co")
+	user, err := repo.UpsertAuthUser("racio-matrix-new-user", "racio-matrix-new-user@example.com", "RACIO Matrix New User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	priority := 4
+	nodeID := "11111111-1111-4111-8111-111111111116"
+	result, err := repo.CreateRacioMatrixNode(RacioMatrixNodeCreateInput{
+		CompanyID:                companyID,
+		NodeID:                   nodeID,
+		Title:                    "RACIO matrix new gate node",
+		CreateLogicGateHeader:    "RACIO matrix new gate",
+		CreatorLogicGateRaciRole: domain.LogicGateRaciRoleResponsible,
+		Status:                   LogicGateWorkStatusPending,
+		Priority:                 &priority,
+		PrioritySet:              true,
+		ActorUserID:              user.UserID,
+		IdempotencyKey:           "racio-matrix-new-event-row",
+	})
+	if err != nil {
+		t.Fatalf("CreateRacioMatrixNode new gate: %v", err)
+	}
+	if result.LogicGate == nil {
+		t.Fatalf("CreateRacioMatrixNode returned no created logic gate")
+	}
+
+	rows, err := repo.ListEventRows(companyID, 20)
+	if err != nil {
+		t.Fatalf("ListEventRows: %v", err)
+	}
+	kanbanRows := eventRowsOfTypeForTest(rows, EventTypeKanbanProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(rows, EventTypeRacioProjectionDelta)
+	if len(kanbanRows) != 1 || len(racioRows) != 1 {
+		t.Fatalf("event rows = %+v, want one Kanban row and one RACIO row for the created logic-gate projection", rows)
+	}
+	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
+	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
+	if current, err := repo.CurrentEventRowSequence(companyID, RacioProjectionUserScope(user.UserID)); err != nil || current != 1 {
+		t.Fatalf("CurrentEventRowSequence RACIO = %d err=%v, want 1", current, err)
+	}
+}
+
 func TestEditorNodeInformationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999111"
@@ -547,4 +652,81 @@ func TestEventWorkerFailedRowsRespectAvailableAtBeforeRetry(t *testing.T) {
 	if len(retry) != 1 || retry[0].EventID != row.EventID || retry[0].AttemptCount != 2 {
 		t.Fatalf("retry claim = %+v, want failed row after available_at with second attempt", retry)
 	}
+}
+
+func eventRowsAfterPrefixForTest(t *testing.T, repo *MemoryRepo, companyID string, prefixLen int) []EventRow {
+	t.Helper()
+	rows, err := repo.ListEventRows(companyID, 50)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if prefixLen > len(rows) {
+		t.Fatalf("prefixLen %d exceeds event rows %d", prefixLen, len(rows))
+	}
+	return rows[prefixLen:]
+}
+
+func eventRowsOfTypeForTest(rows []EventRow, eventType string) []EventRow {
+	out := []EventRow{}
+	for _, row := range rows {
+		if row.EventType == eventType {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func assertKanbanProjectionEventRowForLogicGate(t *testing.T, row EventRow, logicGateID string, wantSequence int64) {
+	t.Helper()
+	wantScope := "board:" + LogicGateKanbanBoardID(logicGateID)
+	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantScope || row.Sequence != wantSequence {
+		t.Fatalf("Kanban event row = %+v, want scope=%s sequence=%d", row, wantScope, wantSequence)
+	}
+	payload, err := DecodeKanbanProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeKanbanProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Projection != ProjectionNameKanbanBoard || payload.Scope != wantScope || len(payload.Deltas) == 0 {
+		t.Fatalf("Kanban payload = %+v, want deltas for %s", payload, wantScope)
+	}
+}
+
+func assertRacioProjectionEventRowForUser(t *testing.T, row EventRow, userID string, wantSequence int64, wantResourceTypes []string) {
+	t.Helper()
+	wantScope := RacioRealtimeUserScope(userID)
+	wantSequenceScope := RacioProjectionUserScope(userID)
+	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != wantSequence {
+		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s sequence=%d", row, wantScope, wantSequenceScope, wantSequence)
+	}
+	payload, err := DecodeRacioProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Projection != ProjectionNameRacioMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
+		t.Fatalf("RACIO payload = %+v, want deltas for %s", payload, wantScope)
+	}
+	gotResourceTypes := make([]string, 0, len(payload.Deltas))
+	for _, delta := range payload.Deltas {
+		gotResourceTypes = append(gotResourceTypes, delta.RowKey.ResourceType)
+	}
+	if !sameStringSet(gotResourceTypes, wantResourceTypes) {
+		t.Fatalf("RACIO payload resource types = %+v, want %+v", gotResourceTypes, wantResourceTypes)
+	}
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, value := range left {
+		counts[value]++
+	}
+	for _, value := range right {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	return true
 }

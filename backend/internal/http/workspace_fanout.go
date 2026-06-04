@@ -5,67 +5,12 @@ import (
 	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
-	"sync"
+	"strings"
 	"time"
 )
 
 const workspaceFanoutNotifyTimeout = time.Second
 const workspaceFanoutReconnectDelay = time.Second
-
-type workspaceEventNotificationHub struct {
-	mu          sync.RWMutex
-	subscribers map[string]map[chan store.WorkspaceEventNotification]struct{}
-}
-
-func newWorkspaceEventNotificationHub() *workspaceEventNotificationHub {
-	return &workspaceEventNotificationHub{subscribers: map[string]map[chan store.WorkspaceEventNotification]struct{}{}}
-}
-
-func (h *workspaceEventNotificationHub) subscribe(companyID string) chan store.WorkspaceEventNotification {
-	return h.subscribeUser(companyID, "")
-}
-
-func (h *workspaceEventNotificationHub) subscribeUser(companyID, userID string) chan store.WorkspaceEventNotification {
-	ch := make(chan store.WorkspaceEventNotification, 24)
-	key := workspaceSubscriptionKey(companyID, userID)
-	h.mu.Lock()
-	bucket := h.subscribers[key]
-	if bucket == nil {
-		bucket = map[chan store.WorkspaceEventNotification]struct{}{}
-		h.subscribers[key] = bucket
-	}
-	bucket[ch] = struct{}{}
-	h.mu.Unlock()
-	return ch
-}
-
-func (h *workspaceEventNotificationHub) unsubscribe(companyID string, ch chan store.WorkspaceEventNotification) {
-	h.unsubscribeUser(companyID, "", ch)
-}
-
-func (h *workspaceEventNotificationHub) unsubscribeUser(companyID, userID string, ch chan store.WorkspaceEventNotification) {
-	key := workspaceSubscriptionKey(companyID, userID)
-	h.mu.Lock()
-	if bucket := h.subscribers[key]; bucket != nil {
-		delete(bucket, ch)
-		if len(bucket) == 0 {
-			delete(h.subscribers, key)
-		}
-	}
-	h.mu.Unlock()
-	close(ch)
-}
-
-func (h *workspaceEventNotificationHub) publish(notification store.WorkspaceEventNotification) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for ch := range h.subscribers[workspaceSubscriptionKey(notification.CompanyID, notification.UserID)] {
-		select {
-		case ch <- notification:
-		default:
-		}
-	}
-}
 
 func (s *Server) startWorkspaceEventFanout() {
 	if s.workspaceFanout == nil {
@@ -79,7 +24,7 @@ func (s *Server) startWorkspaceEventFanout() {
 func (s *Server) runWorkspaceEventFanout(ctx context.Context) {
 	for ctx.Err() == nil {
 		err := s.workspaceFanout.ListenWorkspaceEvents(ctx, func(notification store.WorkspaceEventNotification) {
-			s.workspaceWakeHub.publish(notification)
+			s.publishWorkspaceFanoutNotification(notification)
 		})
 		if ctx.Err() != nil {
 			return
@@ -95,6 +40,32 @@ func (s *Server) runWorkspaceEventFanout(ctx context.Context) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (s *Server) publishWorkspaceFanoutNotification(notification store.WorkspaceEventNotification) {
+	if strings.TrimSpace(notification.UserID) != "" {
+		return
+	}
+	companyID := strings.TrimSpace(notification.CompanyID)
+	if companyID == "" || notification.Sequence <= 0 {
+		return
+	}
+	events, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{
+		CompanyID:     companyID,
+		StreamType:    workspaceDomainStreamType,
+		StreamID:      companyID,
+		AfterSequence: notification.Sequence - 1,
+		Limit:         1,
+	})
+	if err != nil {
+		log.Printf("workspace event fanout replay failed company_id=%s sequence=%d: %v", companyID, notification.Sequence, err)
+		return
+	}
+	if len(events) == 0 || events[0].Sequence != notification.Sequence {
+		log.Printf("workspace event fanout replay missed company_id=%s sequence=%d", companyID, notification.Sequence)
+		return
+	}
+	s.publishCommittedWorkspaceEventFromFanout(events[0])
 }
 
 func (s *Server) notifyWorkspaceEventFanout(event domain.DomainEvent) {

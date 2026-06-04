@@ -1018,7 +1018,7 @@ func TestNotificationSSEStreamStillReceivesCreatedNotifications(t *testing.T) {
 	streamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server.handleNotificationStream(w, requestWithActorForNotifications(r, user, companyID))
 	})
-	reader, cancel := openWorkspaceStreamForTest(t, streamHandler, "/v1/notifications/stream", nil)
+	reader, cancel := openSSEStreamForTest(t, streamHandler, "/v1/notifications/stream", nil)
 	defer cancel()
 	ready := readSSEEventForTest(t, reader)
 	if ready.Event != "ready" {

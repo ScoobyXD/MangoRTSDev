@@ -9,7 +9,7 @@ import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type Compan
 import { invalidateKanbanBoardListCache, listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
-import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
+import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
@@ -249,7 +249,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [apiBase, companyID, refreshKanbanBoards]);
 
   useEffect(() => {
-    return subscribeWorkspaceStream(apiBase, companyID, {
+    return subscribeWorkspaceUserRealtime(apiBase, companyID, companyExplorerRealtimeScope, {
       onGap: reconcileCompanyExplorerGap,
       onEvent(event) {
         if (event.event !== "workspace" || event.data.length === 0) return;

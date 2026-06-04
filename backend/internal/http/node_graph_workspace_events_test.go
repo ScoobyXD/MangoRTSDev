@@ -21,7 +21,7 @@ func (r *failingNodeCreateWorkspaceEventRepo) CreateNodeWithAssigneeAndWorkspace
 	return domain.Node{}, domain.DomainEvent{}, r.err
 }
 
-func TestNodeCreateAtomicWorkspaceEventReplaysFromCursor(t *testing.T) {
+func TestNodeCreateAtomicWorkspaceEventWritesDurableEvent(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	handler := server.Routes()
@@ -46,17 +46,6 @@ func TestNodeCreateAtomicWorkspaceEventReplaysFromCursor(t *testing.T) {
 	}
 	if len(durable) != 1 || durable[0].Type != "node_created" || durable[0].Payload["node_id"] != node.NodeID {
 		t.Fatalf("durable events = %+v, want node_created for %q", durable, node.NodeID)
-	}
-
-	reader, cancel := openWorkspaceStreamForTest(t, handler, "/v1/workspace/stream?company_id="+companyID+"&after_sequence=0", nil)
-	defer cancel()
-	ready := readWorkspaceReadyForTest(t, reader)
-	if ready.AfterSequence != 0 {
-		t.Fatalf("ready after_sequence = %d, want explicit 0", ready.AfterSequence)
-	}
-	event := readWorkspaceSSEForTest(t, reader)
-	if event.Sequence != durable[0].Sequence || event.Type != "node_created" || event.Data["node_id"] != node.NodeID {
-		t.Fatalf("replayed event = %+v, want durable node_created for %q", event, node.NodeID)
 	}
 }
 

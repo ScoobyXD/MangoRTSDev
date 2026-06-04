@@ -200,6 +200,45 @@ func TestRealtimeWebSocketRacioSubscriptionAuthorizesOwnUserAndRejectsOtherUser(
 	}
 }
 
+func TestRealtimeWebSocketWorkspaceSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888015"
+	tokenA := "workspace-subscription-a-token"
+	tokenB := "workspace-subscription-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "workspace-subscription-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "workspace-subscription-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+		tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+	}}})
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	otherScope := realtimeWorkspaceScope(userB.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
+	rejected := client.readJSON(t)
+	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
+		t.Fatalf("workspace subscription rejected = %+v, want rejection for %s", rejected, otherScope)
+	}
+	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
+		t.Fatalf("unauthorized workspace subscription was stored")
+	}
+
+	ownScope := realtimeWorkspaceScope(userA.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": ownScope})
+	accepted := client.readJSON(t)
+	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != ownScope {
+		t.Fatalf("workspace subscription accepted = %+v, want accepted for %s", accepted, ownScope)
+	}
+	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, ownScope) {
+		t.Fatalf("authorized workspace subscription was not stored")
+	}
+	_ = tokenB
+}
+
 func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &recordingRealtimeAccessRepo{Repository: base}
@@ -598,6 +637,131 @@ func TestRealtimeWebSocketKanbanBoardDeltaHidesInaccessibleCardAsDeleteWithoutRo
 	}
 	if got := message.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.NodeID != node.NodeID {
 		t.Fatalf("hidden card delta = %+v, want delete row key only", got)
+	}
+}
+
+func TestRealtimeWebSocketWorkspaceEventRoutesOnlyToVisibleUserScopes(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888016"
+	tokenVisible := "workspace-event-visible-token"
+	tokenBlocked := "workspace-event-blocked-token"
+	visible := mustRealtimeAuthUser(t, repo, companyID, "workspace-event-visible", domain.RoleCompanyUser)
+	blocked := mustRealtimeAuthUser(t, repo, companyID, "workspace-event-blocked", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Visible workspace realtime node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   visible.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+		tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
+		tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
+	}}})
+	defer server.Close()
+
+	visibleClient := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenVisible)
+	defer visibleClient.close()
+	blockedClient := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
+	defer blockedClient.close()
+	visibleClient.readJSON(t)
+	blockedClient.readJSON(t)
+	visibleScope := realtimeNodeGraphScope(visible.UserID)
+	blockedScope := realtimeNodeGraphScope(blocked.UserID)
+	visibleClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": visibleScope})
+	blockedClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": blockedScope})
+	visibleClient.readJSON(t)
+	blockedClient.readJSON(t)
+
+	event, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "node_updated",
+		Payload:    map[string]any{"node_id": node.NodeID},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent: %v", err)
+	}
+	server.publishCommittedWorkspaceEventWithTiming(event, nil)
+
+	message := visibleClient.readJSON(t)
+	if message["type"] != realtimeMessageWorkspaceEvent || message["scope"] != visibleScope || message["sequence"].(float64) != float64(event.Sequence) {
+		t.Fatalf("workspace websocket message = %+v, want node graph scope %s sequence %d", message, visibleScope, event.Sequence)
+	}
+	envelope := message["event"].(map[string]any)
+	if envelope["type"] != "node_updated" || envelope["company_id"] != companyID {
+		t.Fatalf("workspace event envelope = %+v, want node_updated for company", envelope)
+	}
+	blockedClient.assertNoMessage(t)
+}
+
+func TestRealtimeWebSocketEditorCollaborationEventRoutesToEditorScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888017"
+	token := "editor-collaboration-ws-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "editor-collaboration-ws", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Editor collaboration websocket node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeNode,
+		EntityID:   node.NodeID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions node: %v", err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	scope := realtimeEditorScope(store.EntityTypeNode, node.NodeID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	event, err := repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+		Type:       "editor_collaboration_event",
+		Payload: map[string]any{
+			"event_type":  "presence",
+			"entity_kind": store.EntityTypeNode,
+			"entity_id":   node.NodeID,
+			"client_id":   "client-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendDomainEvent: %v", err)
+	}
+	server.publishCommittedWorkspaceEventWithTiming(event, nil)
+
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessageWorkspaceEvent || message["scope"] != scope {
+		t.Fatalf("editor collaboration websocket message = %+v, want scope %s", message, scope)
+	}
+	envelope := message["event"].(map[string]any)
+	if envelope["type"] != "editor_collaboration_event" {
+		t.Fatalf("editor collaboration envelope = %+v, want editor_collaboration_event", envelope)
 	}
 }
 

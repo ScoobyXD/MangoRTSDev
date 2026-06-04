@@ -3,7 +3,7 @@ import type {
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
+import { logicGateGraphRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -474,9 +474,9 @@ function ensureStream(apiBase: string, companyID: string): void {
     logicGateRelationshipGraphStreams.set(key, stream);
   }
   if (stream.unsubscribeStream) return;
-  stream.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
-    onEvent(event) {
-      if (event.event === "ready") {
+  stream.unsubscribeStream = subscribeWorkspaceUserRealtime(apiBase, companyID, logicGateGraphRealtimeScope, {
+    onEvent(event, context) {
+      if (context.replayBoundary) {
         if (stream?.refreshAfterStreamReconnect) {
           stream.refreshAfterStreamReconnect = false;
           refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);

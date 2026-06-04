@@ -1,7 +1,7 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
+import { nodeGraphRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
 export type NodeRelationshipGraphSnapshot = {
@@ -104,7 +104,7 @@ function gapTouchesNodeRelationshipGraph(gap: WorkspaceStreamGapSignal): boolean
 }
 
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
-// forcing a full snapshot refetch. SSE + periodic snapshot refresh remain the source of truth.
+// forcing a full snapshot refetch. Realtime + snapshot refresh remain the source of truth.
 export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: string, node: NodeRecord): void {
   const generatedAt = new Date().toISOString();
   for (const entry of getMutationEntries(apiBase, companyID)) {
@@ -507,7 +507,6 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
   }
 }
 
-// SSE stream bootstrap: keeps modules synchronized in near real-time without polling loops.
 function refreshSubscribedNodeRelationshipGraphSnapshots(apiBase: string, companyID: string): void {
   for (const entry of getCompanyEntries(apiBase, companyID)) {
     if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
@@ -526,7 +525,7 @@ function closeNodeRelationshipGraphStreamIfIdle(apiBase: string, companyID: stri
   nodeRelationshipGraphStreams.delete(key);
 }
 
-// SSE stream bootstrap: keeps modules synchronized in near real-time without polling loops.
+// Realtime bootstrap: keeps modules synchronized without polling loops.
 function ensureStream(apiBase: string, companyID: string): void {
   const key = graphStreamKey(apiBase, companyID);
   let stream = nodeRelationshipGraphStreams.get(key);
@@ -535,9 +534,9 @@ function ensureStream(apiBase: string, companyID: string): void {
     nodeRelationshipGraphStreams.set(key, stream);
   }
   if (stream.unsubscribeStream) return;
-  stream.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
-    onEvent(event) {
-      if (event.event === "ready") {
+  stream.unsubscribeStream = subscribeWorkspaceUserRealtime(apiBase, companyID, nodeGraphRealtimeScope, {
+    onEvent(event, context) {
+      if (context.replayBoundary) {
         if (stream?.refreshAfterStreamReconnect) {
           stream.refreshAfterStreamReconnect = false;
           refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);

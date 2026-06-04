@@ -11,7 +11,6 @@ import (
 
 type MetricsRecorder interface {
 	RecordHTTPRequest(HTTPRequestMetric)
-	RecordWorkspaceReplay(WorkspaceReplayMetric)
 	RecordOperationalMetric(OperationalMetric)
 }
 
@@ -22,16 +21,6 @@ type HTTPRequestMetric struct {
 	Duration    time.Duration
 	Conditional bool
 	NotModified bool
-}
-
-type WorkspaceReplayMetric struct {
-	Source             string
-	Outcome            string
-	Duration           time.Duration
-	Batches            int
-	Events             int
-	StartAfterSequence int64
-	LastSequence       int64
 }
 
 type OperationalMetric struct {
@@ -55,23 +44,6 @@ type HTTPRequestMetricStats struct {
 	LastDuration  time.Duration
 }
 
-type WorkspaceReplayMetricKey struct {
-	Source  string
-	Outcome string
-}
-
-type WorkspaceReplayMetricStats struct {
-	Count                  int64
-	TotalDuration          time.Duration
-	LastDuration           time.Duration
-	TotalBatches           int64
-	LastBatches            int
-	TotalEvents            int64
-	LastEvents             int
-	LastStartAfterSequence int64
-	LastSequence           int64
-}
-
 type OperationalMetricKey struct {
 	Name      string
 	ScopeType string
@@ -86,23 +58,20 @@ type OperationalMetricStats struct {
 }
 
 type MetricsSnapshot struct {
-	HTTPRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
-	WorkspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
-	Operational      map[OperationalMetricKey]OperationalMetricStats
+	HTTPRequests map[HTTPRequestMetricKey]HTTPRequestMetricStats
+	Operational  map[OperationalMetricKey]OperationalMetricStats
 }
 
 type InMemoryMetricsRecorder struct {
-	mu               sync.Mutex
-	httpRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
-	workspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
-	operational      map[OperationalMetricKey]OperationalMetricStats
+	mu           sync.Mutex
+	httpRequests map[HTTPRequestMetricKey]HTTPRequestMetricStats
+	operational  map[OperationalMetricKey]OperationalMetricStats
 }
 
 func NewInMemoryMetricsRecorder() *InMemoryMetricsRecorder {
 	return &InMemoryMetricsRecorder{
-		httpRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
-		workspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
-		operational:      map[OperationalMetricKey]OperationalMetricStats{},
+		httpRequests: map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		operational:  map[OperationalMetricKey]OperationalMetricStats{},
 	}
 }
 
@@ -126,26 +95,6 @@ func (m *InMemoryMetricsRecorder) RecordHTTPRequest(metric HTTPRequestMetric) {
 	m.mu.Unlock()
 }
 
-func (m *InMemoryMetricsRecorder) RecordWorkspaceReplay(metric WorkspaceReplayMetric) {
-	if m == nil {
-		return
-	}
-	key := WorkspaceReplayMetricKey{Source: metric.Source, Outcome: metric.Outcome}
-	m.mu.Lock()
-	stats := m.workspaceReplays[key]
-	stats.Count++
-	stats.TotalDuration += metric.Duration
-	stats.LastDuration = metric.Duration
-	stats.TotalBatches += int64(metric.Batches)
-	stats.LastBatches = metric.Batches
-	stats.TotalEvents += int64(metric.Events)
-	stats.LastEvents = metric.Events
-	stats.LastStartAfterSequence = metric.StartAfterSequence
-	stats.LastSequence = metric.LastSequence
-	m.workspaceReplays[key] = stats
-	m.mu.Unlock()
-}
-
 func (m *InMemoryMetricsRecorder) RecordOperationalMetric(metric OperationalMetric) {
 	if m == nil || strings.TrimSpace(metric.Name) == "" {
 		return
@@ -164,9 +113,8 @@ func (m *InMemoryMetricsRecorder) RecordOperationalMetric(metric OperationalMetr
 
 func (m *InMemoryMetricsRecorder) Snapshot() MetricsSnapshot {
 	snapshot := MetricsSnapshot{
-		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
-		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
-		Operational:      map[OperationalMetricKey]OperationalMetricStats{},
+		HTTPRequests: map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		Operational:  map[OperationalMetricKey]OperationalMetricStats{},
 	}
 	if m == nil {
 		return snapshot
@@ -174,9 +122,6 @@ func (m *InMemoryMetricsRecorder) Snapshot() MetricsSnapshot {
 	m.mu.Lock()
 	for key, stats := range m.httpRequests {
 		snapshot.HTTPRequests[key] = stats
-	}
-	for key, stats := range m.workspaceReplays {
-		snapshot.WorkspaceReplays[key] = stats
 	}
 	for key, stats := range m.operational {
 		snapshot.Operational[key] = stats
@@ -190,9 +135,8 @@ func (s *Server) MetricsSnapshot() MetricsSnapshot {
 		return snapshotter.Snapshot()
 	}
 	return MetricsSnapshot{
-		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
-		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
-		Operational:      map[OperationalMetricKey]OperationalMetricStats{},
+		HTTPRequests: map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		Operational:  map[OperationalMetricKey]OperationalMetricStats{},
 	}
 }
 

@@ -4,15 +4,15 @@ import { connectAuthenticatedSse, createSseParser, SseEvent } from "../../../fro
 
 const encoder = new TextEncoder();
 
-test("parses split SSE workspace events", () => {
+test("parses split SSE notification events", () => {
   const parser = createSseParser();
-  assert.deepEqual(parser.push("event: workspace\ndata: {\"type\""), []);
-  const events = parser.push(":\"node_created\"}\nid: event-1\n\n");
+  assert.deepEqual(parser.push("event: notification\ndata: {\"type\""), []);
+  const events = parser.push(":\"notification.created\"}\nid: event-1\n\n");
 
   assert.deepEqual(events, [
     {
-      event: "workspace",
-      data: "{\"type\":\"node_created\"}",
+      event: "notification",
+      data: "{\"type\":\"notification.created\"}",
       id: "event-1",
       retry: undefined,
     },
@@ -21,10 +21,10 @@ test("parses split SSE workspace events", () => {
 
 test("joins multi-line SSE data fields", () => {
   const parser = createSseParser();
-  const events = parser.push("event: workspace\ndata: first\ndata: second\n\n");
+  const events = parser.push("event: notification\ndata: first\ndata: second\n\n");
 
   assert.equal(events.length, 1);
-  assert.equal(events[0].event, "workspace");
+  assert.equal(events[0].event, "notification");
   assert.equal(events[0].data, "first\nsecond");
 });
 
@@ -37,7 +37,7 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
   let connection: ReturnType<typeof connectAuthenticatedSse> | null = null;
 
   const done = new Promise<void>((resolve, reject) => {
-    connection = connectAuthenticatedSse("https://api.example.test/v1/workspace/stream?company_id=company-1", {
+    connection = connectAuthenticatedSse("https://api.example.test/v1/notifications/stream?company_id=company-1", {
       getAccessToken: async () => `token-${fetchCalls + 1}`,
       fetchImpl: async (_input, init) => {
         fetchCalls += 1;
@@ -47,7 +47,7 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
         lastEventIDHeaders.push(headers.get("Last-Event-ID"));
         const data = fetchCalls === 1 ? "one" : "two";
         const idLine = fetchCalls === 1 ? "id: 41\n" : "";
-        return new Response(streamFrom([`event: workspace\n${idLine}data: ${data}\n\n`]), {
+        return new Response(streamFrom([`event: notification\n${idLine}data: ${data}\n\n`]), {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
         });
