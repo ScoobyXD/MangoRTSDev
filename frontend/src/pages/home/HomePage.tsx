@@ -56,6 +56,8 @@ import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeR
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
+import { applyRacioProjectionEnvelope, parseRacioProjectionSequence, racioRealtimeScope, type RacioProjectionDeltaEnvelope } from "../../modules/racio/racioProjectionDeltas";
+import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
 import { listMyLogicGates, listRacioMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
@@ -83,37 +85,6 @@ function promptEmailProviderForConnection(): EmailProvider | "" {
 
 function isSharedInboxEmailConnectionError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("shared_inbox_email_account_not_connected");
-}
-
-type RacioProjectionDeltaOperation = "upsert" | "delete" | "patch";
-
-type RacioProjectionDelta = {
-  company_id: string;
-  projection: "racio_matrix";
-  projection_sequence?: number | string;
-  operation: RacioProjectionDeltaOperation;
-  row_key: {
-    user_id: string;
-    resource_type: "node" | "logic_gate";
-    resource_id: string;
-  };
-  row?: RacioMatrixProjectionRow;
-  patch?: Partial<RacioMatrixProjectionRow>;
-  projected_timestamp?: string;
-};
-
-type RacioProjectionDeltaEnvelope = {
-  company_id: string;
-  projection: "racio_matrix";
-  projection_sequence?: number | string;
-  deltas?: RacioProjectionDelta[];
-} & Partial<RacioProjectionDelta>;
-
-function parseRacioProjectionSequence(value: unknown): number {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : 0;
 }
 
 async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
@@ -284,7 +255,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const racioProjectionSequenceRef = useRef(0);
   const racioProjectionRefetchInFlightRef = useRef(false);
   const racioProjectionInitializedRef = useRef(false);
-  const racioProjectionDeltaHandlerRef = useRef<((eventData: string) => void) | null>(null);
+  const racioProjectionRowsRef = useRef<RacioMatrixProjectionRow[]>([]);
+  const racioProjectionScopeKeyRef = useRef("");
   const racioProjectedNodeIDsRef = useRef<Set<string>>(new Set());
   const racioProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef<EmailMessage[]>([]);
@@ -305,6 +277,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
   const isNarrow = isInboxMatrixView ? viewportWidth < 980 : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
+  useEffect(() => {
+    const scopeKey = companyID && currentUserID ? `${companyID}\u0000${currentUserID}` : "";
+    if (racioProjectionScopeKeyRef.current === scopeKey) return;
+    racioProjectionScopeKeyRef.current = scopeKey;
+    racioProjectionSequenceRef.current = 0;
+    racioProjectionRowsRef.current = [];
+    racioProjectionInitializedRef.current = false;
+    racioProjectedNodeIDsRef.current = new Set();
+    racioProjectedLogicGateIDsRef.current = new Set();
+  }, [companyID, currentUserID]);
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const connection = status?.connection;
@@ -1283,10 +1265,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
       },
       onEvent(event, context) {
-        if (event.event === "projection") {
-          if (isInboxMatrixViewID(activeViewIDRef.current)) racioProjectionDeltaHandlerRef.current?.(event.data);
-          return;
-        }
         if (event.event !== "workspace") return;
         let envelope: WorkspaceStreamEnvelope;
         try {
@@ -1401,7 +1379,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       onError() {
         // Workspace SSE reconnects automatically; visible errors come from reloads.
       },
-    }, isInboxMatrixView ? { projections: ["racio_matrix"] } : {});
+    });
     return () => {
       unsubscribe();
       if (workspacePanelReloadTimerRef.current !== null) {
@@ -2387,6 +2365,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       row.resource_id?.trim()
     ));
     if (cleanRows.length === 0 && mode !== "replace") return;
+    if (mode === "replace") {
+      racioProjectionRowsRef.current = cleanRows;
+    } else {
+      const byKey = new Map(racioProjectionRowsRef.current.map((row) => [`${row.resource_type}\u0000${row.resource_id}`, row]));
+      for (const row of cleanRows) byKey.set(`${row.resource_type}\u0000${row.resource_id}`, row);
+      racioProjectionRowsRef.current = Array.from(byKey.values());
+    }
     const projectedLogicGateByID = new Map((options.logicGates ?? []).map((logicGate) => [logicGate.logic_gate_id, logicGate]));
     const nodeRows = cleanRows.filter((row) => row.resource_type === "node");
     const logicGateRows = cleanRows.filter((row) => row.resource_type === "logic_gate");
@@ -2504,93 +2489,59 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const removeRacioProjectionNode = useCallback((nodeID: string) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
+    racioProjectionRowsRef.current = racioProjectionRowsRef.current.filter((row) => row.resource_type !== "node" || row.resource_id.trim() !== cleanNodeID);
     racioProjectedNodeIDsRef.current.delete(cleanNodeID);
     setNodes((previous) => previous.filter((node) => node.node_id !== cleanNodeID));
     removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
   }, [apiBase, companyID]);
-  const handleRacioProjectionDeltaEvent = useCallback((eventData: string) => {
-    let envelope: RacioProjectionDeltaEnvelope;
-    try {
-      envelope = JSON.parse(eventData) as RacioProjectionDeltaEnvelope;
-    } catch {
-      void refreshRacioMatrixProjection();
+  const requestRacioProjectionRefresh = useCallback((minimumSequence = 0) => {
+    void refreshRacioMatrixProjection(minimumSequence);
+  }, [refreshRacioMatrixProjection]);
+  const applyRealtimeRacioProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
+    if (!companyID || !currentUserID) return;
+    const envelope = message as unknown as RacioProjectionDeltaEnvelope;
+    const result = applyRacioProjectionEnvelope({
+      envelope,
+      companyID,
+      userID: currentUserID,
+      rows: racioProjectionRowsRef.current,
+      lastSequence: racioProjectionSequenceRef.current,
+    });
+    if (result.fallback) {
+      requestRacioProjectionRefresh(parseRacioProjectionSequence(envelope.projection_sequence ?? envelope.sequence));
       return;
     }
-    if (envelope.company_id?.trim() !== companyID || envelope.projection !== "racio_matrix") return;
-    const sequence = parseRacioProjectionSequence(envelope.projection_sequence);
-    if (sequence <= 0) {
-      void refreshRacioMatrixProjection();
-      return;
+    racioProjectionRowsRef.current = result.rows;
+    racioProjectionSequenceRef.current = result.lastSequence ?? racioProjectionSequenceRef.current;
+    if (!result.changed) return;
+
+    for (const key of result.removedRowKeys) {
+      if (key.resource_type === "node" && key.resource_id) removeRacioProjectionNode(key.resource_id);
     }
-    const previousSequence = racioProjectionSequenceRef.current;
-    if (sequence > previousSequence + 1) {
-      void refreshRacioMatrixProjection(sequence);
-      return;
+    const upsertedNodeRows = result.upsertedRows.filter((row) => row.resource_type === "node");
+    const upsertedLogicGateRows = result.upsertedRows.filter((row) => row.resource_type === "logic_gate");
+    if (upsertedNodeRows.length > 0) applyRacioProjectionRows(upsertedNodeRows);
+    if (upsertedLogicGateRows.length > 0) applyRacioProjectionRows(upsertedLogicGateRows);
+    if (upsertedLogicGateRows.length > 0 || result.removedRowKeys.some((key) => key.resource_type === "logic_gate")) {
+      requestRacioProjectionRefresh(result.lastSequence ?? 0);
     }
-    if (sequence <= previousSequence) return;
-    const deltas = Array.isArray(envelope.deltas)
-      ? envelope.deltas
-      : envelope.operation && envelope.row_key
-        ? [envelope as RacioProjectionDelta]
-        : [];
-    if (deltas.length === 0) {
-      void refreshRacioMatrixProjection(sequence);
-      return;
-    }
-    for (const delta of deltas) {
-      if (delta.company_id?.trim() !== companyID || delta.projection !== "racio_matrix") {
-        void refreshRacioMatrixProjection(sequence);
-        return;
-      }
-      const rowKey = delta.row_key;
-      if (!rowKey || rowKey.user_id?.trim() !== currentUserID || !rowKey.resource_id?.trim()) {
-        void refreshRacioMatrixProjection(sequence);
-        return;
-      }
-      if (delta.operation === "delete") {
-        if (rowKey.resource_type === "node") {
-          removeRacioProjectionNode(rowKey.resource_id);
-          continue;
-        }
-        if (rowKey.resource_type === "logic_gate") {
-          void refreshRacioMatrixProjection(sequence);
-          return;
-        }
-      }
-      if (delta.operation === "upsert") {
-        if (!delta.row || delta.row.user_id?.trim() !== currentUserID) {
-          void refreshRacioMatrixProjection(sequence);
-          return;
-        }
-        if (delta.row.resource_type === "node") {
-          applyRacioProjectionRows([delta.row]);
-          continue;
-        }
-        if (delta.row.resource_type === "logic_gate") {
-          applyRacioProjectionRows([delta.row]);
-          void refreshRacioMatrixProjection(sequence);
-          return;
-        }
-      }
-      if (delta.operation === "patch") {
-        if (delta.row && delta.row.resource_type === "node") {
-          applyRacioProjectionRows([delta.row]);
-          continue;
-        }
-        void refreshRacioMatrixProjection(sequence);
-        return;
-      }
-      void refreshRacioMatrixProjection(sequence);
-      return;
-    }
-    racioProjectionSequenceRef.current = sequence;
-  }, [applyRacioProjectionRows, companyID, currentUserID, refreshRacioMatrixProjection, removeRacioProjectionNode]);
-  racioProjectionDeltaHandlerRef.current = handleRacioProjectionDeltaEvent;
+  }, [applyRacioProjectionRows, companyID, currentUserID, removeRacioProjectionNode, requestRacioProjectionRefresh]);
   useEffect(() => {
     if (!companyID || !currentUserID || !isInboxMatrixView) return undefined;
     void refreshRacioMatrixProjection();
     return undefined;
   }, [companyID, currentUserID, isInboxMatrixView, refreshRacioMatrixProjection]);
+  useEffect(() => {
+    if (!companyID || !currentUserID || !isInboxMatrixView) return undefined;
+    return subscribeRealtimeScope(apiBase, companyID, racioRealtimeScope(currentUserID), {
+      getAfterSequence: () => racioProjectionSequenceRef.current,
+      onRejected: () => requestRacioProjectionRefresh(),
+      onRefetch: (message) => requestRacioProjectionRefresh(parseRacioProjectionSequence(message.sequence)),
+      onPermissionRevoked: () => requestRacioProjectionRefresh(),
+      onError: () => requestRacioProjectionRefresh(),
+      onDelta: applyRealtimeRacioProjectionDelta,
+    });
+  }, [apiBase, applyRealtimeRacioProjectionDelta, companyID, currentUserID, isInboxMatrixView, requestRacioProjectionRefresh]);
   const attachMessagesToNode = useCallback(async (logicGateID: string, nodeID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     const cleanLogicGateID = logicGateID.trim();

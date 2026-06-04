@@ -7,6 +7,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 	}
 
 	result := RacioMatrixNodeCreateResult{}
+	ownedProjectionDeltas := []ProjectionDelta{}
 	logicGateID := input.LogicGateID
 	if input.CreateLogicGateHeader != "" {
 		batch, err := r.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
@@ -30,7 +31,9 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
 		r.mu.RLock()
-		result.ProjectionDeltas = append(result.ProjectionDeltas, diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, nil, []string{logicGateID}))...)
+		deltas := diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, nil, []string{logicGateID}))
+		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
 		r.mu.RUnlock()
 		eventInputs := []DomainEventInput{
 			logicGateCreatedWorkspaceEventInput(logicGate, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)),
@@ -43,6 +46,9 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 			return RacioMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
+		if _, err := r.AppendEventRows(RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
+			return RacioMatrixNodeCreateResult{}, err
+		}
 	}
 
 	if logicGateID != "" {
@@ -101,5 +107,9 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		return RacioMatrixNodeCreateResult{}, err
 	}
 	result.Events = append(result.Events, event)
+	if _, err := r.appendEventRowsLocked(RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return RacioMatrixNodeCreateResult{}, err
+	}
 	return result, nil
 }

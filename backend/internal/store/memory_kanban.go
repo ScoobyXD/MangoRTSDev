@@ -832,7 +832,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -1106,7 +1106,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -1161,7 +1161,7 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
@@ -1234,7 +1234,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}

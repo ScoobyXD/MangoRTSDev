@@ -153,6 +153,115 @@ func TestEventWorkerKanbanDeltaRoutesByBoardAndFiltersPerUser(t *testing.T) {
 	}
 }
 
+func TestEventWorkerPublishesRacioDeltaToUserScopeOnly(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777605"
+	tokenA := "event-worker-racio-a-token"
+	tokenB := "event-worker-racio-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "event-worker-racio-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "event-worker-racio-b", domain.RoleCompanyUser)
+	logicGate, err := repo.CreateLogicGate(companyID, "Worker RACIO gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+		}},
+		DisableEventWorker: true,
+	})
+	defer server.Close()
+
+	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer clientA.close()
+	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
+	defer clientB.close()
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+	scopeA := realtimeRacioScope(userA.UserID)
+	scopeB := realtimeRacioScope(userB.UserID)
+	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
+	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+
+	if _, err := repo.AddLogicGateRaciAssignments(store.LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		ActorUserID: userA.UserID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: userA.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
+	}
+	delta := clientA.readProjectionDelta(t)
+	if delta.Scope != scopeA || delta.Projection != store.ProjectionNameRacioMatrix || len(delta.Deltas) != 1 {
+		t.Fatalf("RACIO worker delta = %+v, want user A scoped delta", delta)
+	}
+	if got := delta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.UserID != userA.UserID {
+		t.Fatalf("RACIO worker delta payload = %+v, want upsert for user A", delta.Deltas)
+	}
+	clientB.assertNoMessage(t)
+}
+
+func TestEventWorkerRacioPermissionLossSendsDeleteWithoutRowPayload(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777606"
+	token := "event-worker-racio-delete-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "event-worker-racio-delete", domain.RoleCompanyUser)
+	logicGate, err := repo.CreateLogicGate(companyID, "Worker RACIO delete gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.AddLogicGateRaciAssignments(store.LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+	drainEventRowsForTest(t, repo, companyID)
+	server := newEventWorkerAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	scope := realtimeRacioScope(user.UserID)
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	client.readJSON(t)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
+	}
+	delta := client.readProjectionDelta(t)
+	if delta.Scope != scope || delta.Projection != store.ProjectionNameRacioMatrix || len(delta.Deltas) != 1 {
+		t.Fatalf("RACIO permission delta = %+v, want one scoped delta", delta)
+	}
+	got := delta.Deltas[0]
+	if got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.ResourceType != store.EntityTypeLogicGate || got.RowKey.ResourceID != logicGate.LogicGateID {
+		t.Fatalf("RACIO permission delta payload = %+v, want delete without row payload", got)
+	}
+}
+
 func TestEventWorkerPermissionChangeRevokesRealtimeSubscription(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777603"

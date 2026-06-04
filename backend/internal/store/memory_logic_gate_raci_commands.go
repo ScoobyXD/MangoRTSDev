@@ -12,6 +12,7 @@ type memoryLogicGateRaciCommandSnapshot struct {
 	effectiveAccess       map[string]domain.EffectiveResourceAccess
 	racioProjectionRows   map[string]memoryRacioProjectionRow
 	domainEvents          map[string]domain.DomainEvent
+	eventRows             map[string]EventRow
 	workspaceReadVersions map[string]int64
 }
 
@@ -22,6 +23,7 @@ func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRa
 		effectiveAccess:       cloneMemoryMap(r.effectiveAccess),
 		racioProjectionRows:   cloneMemoryMap(r.racioProjectionRows),
 		domainEvents:          cloneMemoryMap(r.domainEvents),
+		eventRows:             cloneMemoryMap(r.eventRows),
 		workspaceReadVersions: cloneMemoryMap(r.workspaceReadVersions),
 	}
 }
@@ -32,6 +34,7 @@ func (r *MemoryRepo) restoreLogicGateRaciCommandStateLocked(snapshot memoryLogic
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.racioProjectionRows = snapshot.racioProjectionRows
 	r.domainEvents = snapshot.domainEvents
+	r.eventRows = snapshot.eventRows
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }
 
@@ -147,5 +150,9 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		return LogicGateRaciAssignmentCommandResult{}, err
 	}
 	result.Events = []domain.DomainEvent{event}
+	if _, err := r.appendEventRowsLocked(RacioProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+		r.restoreLogicGateRaciCommandStateLocked(snapshot)
+		return LogicGateRaciAssignmentCommandResult{}, err
+	}
 	return result, nil
 }

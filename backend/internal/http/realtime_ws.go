@@ -330,6 +330,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	return false, "unsupported_scope", nil
 }
 
@@ -365,6 +371,18 @@ func realtimeNotificationUserIDFromScope(scope string) string {
 	return strings.TrimSpace(strings.TrimPrefix(scope, "notifications:user:"))
 }
 
+func realtimeRacioScope(userID string) string {
+	return store.RacioRealtimeUserScope(userID)
+}
+
+func realtimeRacioUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "racio:user:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "racio:user:"))
+}
+
 func realtimeScopeType(scope string) string {
 	scope = strings.TrimSpace(scope)
 	switch {
@@ -372,6 +390,8 @@ func realtimeScopeType(scope string) string {
 		return "board"
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
+	case realtimeRacioUserIDFromScope(scope) != "":
+		return "racio"
 	default:
 		if index := strings.Index(scope, ":"); index > 0 {
 			return strings.TrimSpace(scope[:index])
@@ -392,11 +412,11 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"board", "notifications"} {
+	for _, scopeType := range []string{"board", "notifications", "racio"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 	for scopeType, count := range counts {
-		if scopeType == "board" || scopeType == "notifications" {
+		if scopeType == "board" || scopeType == "notifications" || scopeType == "racio" {
 			continue
 		}
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(count), 0)
@@ -404,10 +424,18 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 }
 
 func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
-	if realtimeBoardIDFromScope(scope) == "" {
+	projectionName := ""
+	projectionScope := ""
+	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
+		projectionName = store.ProjectionNameKanbanBoard
+		projectionScope = scope
+	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
+		projectionName = store.ProjectionNameRacioMatrix
+		projectionScope = store.RacioProjectionUserScope(userID)
+	} else {
 		return 0
 	}
-	sequence, err := s.repo.CurrentProjectionSequence(companyID, store.ProjectionNameKanbanBoard, scope)
+	sequence, err := s.repo.CurrentProjectionSequence(companyID, projectionName, projectionScope)
 	if err != nil {
 		log.Printf("failed to read realtime scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
 		return 0

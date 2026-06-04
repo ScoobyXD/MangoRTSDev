@@ -172,13 +172,16 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	racioProjectionBefore := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
-	kanbanProjectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	racioProjectionAfter := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
 		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
@@ -188,7 +191,7 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	if _, err := r.appendEventRowsLocked(KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", kanbanProjectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}

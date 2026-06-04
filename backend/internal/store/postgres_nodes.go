@@ -371,6 +371,10 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	racioProjectionBefore, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -379,12 +383,17 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	racioProjectionAfter, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	kanbanProjectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", kanbanProjectionDeltas)); err != nil {
+	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
+	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	if err := tx.Commit(); err != nil {

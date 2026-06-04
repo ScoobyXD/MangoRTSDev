@@ -161,6 +161,60 @@ test("realtime client opens authenticated websocket with minted ticket", async (
   }
 });
 
+test("realtime client reuses one websocket for RACIO and notification scopes", async () => {
+  const openedURLs: string[] = [];
+  const sentMessages: string[] = [];
+
+  class FakeSharedWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeSharedWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(url: string) {
+      openedURLs.push(url);
+      queueMicrotask(() => {
+        this.readyState = FakeSharedWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+      });
+    }
+
+    send(message: string): void {
+      sentMessages.push(message);
+    }
+
+    close(): void {
+      this.readyState = FakeSharedWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
+    WebSocketCtor: FakeSharedWebSocket as unknown as typeof WebSocket,
+    getTicket: async () => "minted-ws-ticket",
+    reconnectDelayMs: 60_000,
+  });
+  const unsubscribeNotifications = client.subscribe("notifications:user:user-a");
+  const unsubscribeRacio = client.subscribe("racio:user:user-a", { getAfterSequence: () => 12 });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(openedURLs.length, 1);
+  const subscriptions = sentMessages
+    .map((message) => JSON.parse(message) as { type: string; scope?: string; after_sequence?: number })
+    .filter((message) => message.type === "subscribe");
+  assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["notifications:user:user-a", "racio:user:user-a"]);
+  assert.equal(subscriptions.find((message) => message.scope === "racio:user:user-a")?.after_sequence, 12);
+
+  unsubscribeNotifications();
+  unsubscribeRacio();
+  client.close();
+});
+
 test("realtime client dispatches notification messages only to the exact subscribed scope", async () => {
   const sockets: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
   const originalWebSocket = globalThis.WebSocket;
