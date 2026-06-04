@@ -204,9 +204,6 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		if query.Refresh {
-			s.commCache.invalidateMessagePages(connection.UserID)
-		}
 		page, err := s.communicationsMessagePage(r.Context(), connection, query)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
@@ -286,6 +283,11 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		w.Header().Set("Retry-After", result.retryAfter)
 	}
 	if len(result.ArchivedIDs) > 0 {
+		now := time.Now().UTC()
+		s.commCache.removeMessagesFromPages(connection.UserID, result.ArchivedIDs, "primary", now)
+		for _, message := range result.Messages {
+			s.commCache.patchMessagePages(connection.UserID, message, now)
+		}
 		s.invalidateCommunicationsMessageMutations(connection.UserID, result.ArchivedIDs, true)
 		for _, messageID := range result.ArchivedIDs {
 			s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", messageID)
@@ -403,7 +405,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		s.commCache.invalidateUser(connection.UserID)
+		now := time.Now().UTC()
+		s.commCache.patchMessagePages(connection.UserID, message, now)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, req.Folders != nil)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
@@ -413,7 +417,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		s.commCache.invalidateUser(connection.UserID)
+		now := time.Now().UTC()
+		s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "", now)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.deleted", messageID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
@@ -441,6 +447,9 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	now := time.Now().UTC()
+	s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "primary", now)
+	s.commCache.patchMessagePages(connection.UserID, archived, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", archived.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
@@ -466,6 +475,9 @@ func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.R
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	now := time.Now().UTC()
+	s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "archive", now)
+	s.commCache.patchMessagePages(connection.UserID, restored, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", restored.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
@@ -479,6 +491,7 @@ type communicationsArchiveBatchFailure struct {
 type communicationsArchiveBatchResult struct {
 	ArchivedIDs []string                            `json:"archived_ids"`
 	Failed      []communicationsArchiveBatchFailure `json:"failed"`
+	Messages    []NylasMessage
 	retryAfter  string
 }
 
@@ -518,6 +531,7 @@ func (s *Server) archiveCommunicationsMessagesBatch(ctx context.Context, connect
 					}
 				} else {
 					result.ArchivedIDs = append(result.ArchivedIDs, firstNonBlank(archived.ID, messageID))
+					result.Messages = append(result.Messages, archived)
 				}
 				mu.Unlock()
 			}
@@ -634,7 +648,6 @@ func (s *Server) invalidateCommunicationsMessageMutations(userID string, message
 	if foldersChanged {
 		s.commCache.invalidateFolders(userID)
 	}
-	s.commCache.invalidateMessagePages(userID)
 	for _, messageID := range messageIDs {
 		s.commCache.invalidateMessage(userID, messageID)
 	}
@@ -699,7 +712,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
-	s.commCache.invalidateUser(connection.UserID)
+	now := time.Now().UTC()
+	s.commCache.patchMessagePages(connection.UserID, message, now)
+	s.commCache.invalidateMessage(connection.UserID, message.ID)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
@@ -958,14 +973,21 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 
 func (s *Server) communicationsMessagePage(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
 	now := time.Now().UTC()
-	if page, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, now); ok {
-		return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
+	cacheQuery := query
+	cacheQuery.Refresh = false
+	if !query.Refresh {
+		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL, now); ok {
+			return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
+		}
 	}
+
 	var page NylasMessagePage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-		if cached, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
-			page = cached
-			return nil
+		if !query.Refresh {
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
+				page = cached
+				return nil
+			}
 		}
 		var err error
 		page, err = s.nylasClient.ListMessages(ctx, connection.GrantID, query)
@@ -973,16 +995,15 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return cached, nil
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
+				return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, cached), nil
 			}
 		}
 		return NylasMessagePage{}, err
 	}
-	s.commCache.setMessagePage(connection.UserID, query, page, now)
+	s.commCache.setMessagePage(connection.UserID, cacheQuery, page, now)
 	return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
 }
-
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
 	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok {

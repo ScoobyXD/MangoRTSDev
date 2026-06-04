@@ -4233,6 +4233,10 @@ export function MessageDetail({ message, loading, archiveAvailable, archiveLabel
   onToggleStar: () => void;
 }) {
   const messageDate = formatMessageDate(message.date);
+  const localReplies = message.local_replies ?? [];
+  const hasLocalReplies = localReplies.length > 0;
+  const bodyFrameStyle = hasLocalReplies ? { ...iframeStyle, minHeight: 320, height: 320 } : iframeStyle;
+  const replyFrameStyle = { ...iframeStyle, minHeight: 220, height: 220, boxShadow: "none" };
   return (
     <div style={detailStyle}>
       <div style={panelHeaderStyle}>
@@ -4250,7 +4254,29 @@ export function MessageDetail({ message, loading, archiveAvailable, archiveLabel
         <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
         <button style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
-      <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={iframeStyle} />
+      <div style={hasLocalReplies ? {
+        minHeight: 0,
+        overflow: "auto",
+        display: "grid",
+        gap: 10,
+        alignContent: "start",
+      } : { minHeight: 0 }}>
+        <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
+        {localReplies.map((reply) => (
+          <div key={reply.id} style={{
+            display: "grid",
+            gap: 6,
+            paddingTop: 10,
+            borderTop: "1px solid rgba(148, 163, 184, 0.28)",
+          }}>
+            <div style={mutedSmallStyle}>
+              From {formatAddressList(reply.from) || "me"} to {formatAddressList(reply.to) || "recipient"}
+              {formatMessageDate(reply.date) ? ` - ${formatMessageDate(reply.date)}` : ""}
+            </div>
+            <iframe title="Sent reply body" sandbox="" srcDoc={messageDocument(reply.body || reply.snippet || "")} style={replyFrameStyle} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -212,11 +212,9 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasW
 	switch {
 	case strings.HasPrefix(trigger, "folder."):
 		s.commCache.invalidateFolders(userID)
-		s.commCache.invalidateMessagePages(userID)
 	case strings.HasPrefix(trigger, "message.created"):
-		s.commCache.invalidateMessagePages(userID)
+		return
 	case strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
-		s.commCache.invalidateMessagePages(userID)
 		s.commCache.invalidateMessage(userID, change.MessageID)
 	default:
 		s.commCache.invalidateUser(userID)
