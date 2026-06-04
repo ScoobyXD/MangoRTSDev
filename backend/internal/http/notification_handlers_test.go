@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -807,6 +808,195 @@ func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
 	}
 	if len(listPayload.Notifications) != 1 || listPayload.Notifications[0].Type != domain.NotificationEventNodeFieldsChanged {
 		t.Fatalf("remaining unread notifications = %+v, want only node fields notification", listPayload.Notifications)
+	}
+}
+
+func TestDeleteOneNotificationRemovesItFromGetResults(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "58585858-5858-4858-8858-585858585858"
+	user, err := repo.UpsertAuthUser("delete-one-subject", "delete-one@example.com", "Delete One")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("delete-one-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Delete notification node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "58585858-5858-4858-8858-000000000001",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "First notification",
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "58585858-5858-4858-8858-000000000002",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Second notification",
+			NodeID:          node.NodeID,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications/"+created[0].NotificationID, nil)
+	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE notification status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	listReq = requestWithActorForNotifications(listReq, user, companyID)
+	notifications := listNotificationsForRequestForTest(t, handler, listReq)
+	if len(notifications) != 1 || notifications[0].NotificationID != created[1].NotificationID {
+		t.Fatalf("notifications after delete one = %+v, want only second notification", notifications)
+	}
+}
+
+func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "59595959-5959-4959-8959-595959595959"
+	user, err := repo.UpsertAuthUser("clear-all-subject", "clear-all@example.com", "Clear All")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-all-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.UpsertAuthUser("clear-all-other-subject", "clear-all-other@example.com", "Clear All Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-all-other-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Clear all notification node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID, other.UserID)
+	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "59595959-5959-4959-8959-000000000001",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Current user first",
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "59595959-5959-4959-8959-000000000002",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Current user second",
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: other.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "59595959-5959-4959-8959-000000000003",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Other user notification",
+			NodeID:          node.NodeID,
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID, nil)
+	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE notifications status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var deletedPayload struct {
+		DeletedCount int `json:"deleted_count"`
+	}
+	if err := json.NewDecoder(deleteRec.Body).Decode(&deletedPayload); err != nil {
+		t.Fatalf("decode delete all: %v", err)
+	}
+	if deletedPayload.DeletedCount != 2 {
+		t.Fatalf("deleted_count = %d, want 2", deletedPayload.DeletedCount)
+	}
+
+	userListReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	userListReq = requestWithActorForNotifications(userListReq, user, companyID)
+	if got := listNotificationsForRequestForTest(t, handler, userListReq); len(got) != 0 {
+		t.Fatalf("current user notifications after clear all = %+v, want none", got)
+	}
+	otherListReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	otherListReq = requestWithActorForNotifications(otherListReq, other, companyID)
+	if got := listNotificationsForRequestForTest(t, handler, otherListReq); len(got) != 1 || got[0].RecipientUserID != other.UserID {
+		t.Fatalf("other user notifications after clear all = %+v, want untouched other notification", got)
+	}
+}
+
+func TestNotificationSSEStreamStillReceivesCreatedNotifications(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	companyID := "60606060-6060-4060-8060-606060606060"
+	user, err := repo.UpsertAuthUser("notification-sse-subject", "notification-sse@example.com", "Notification SSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("notification-sse-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	streamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.handleNotificationStream(w, requestWithActorForNotifications(r, user, companyID))
+	})
+	reader, cancel := openWorkspaceStreamForTest(t, streamHandler, "/v1/notifications/stream", nil)
+	defer cancel()
+	ready := readSSEEventForTest(t, reader)
+	if ready.Event != "ready" {
+		t.Fatalf("notification SSE first event = %q data=%s, want ready", ready.Event, ready.Data)
+	}
+	created := domain.Notification{
+		NotificationID:   "60606060-6060-4060-8060-000000000001",
+		CompanyID:        companyID,
+		RecipientUserID:  user.UserID,
+		Type:             domain.NotificationEventMentionCreated,
+		Title:            "SSE notification",
+		CreatedTimestamp: time.Now().UTC(),
+	}
+	server.publishNotifications([]domain.Notification{created})
+	event := readSSEEventForTest(t, reader)
+	if event.Event != "notification" {
+		t.Fatalf("notification SSE event = %q data=%s, want notification", event.Event, event.Data)
+	}
+	var envelope notificationStreamEnvelope
+	if err := json.Unmarshal([]byte(event.Data), &envelope); err != nil {
+		t.Fatalf("decode notification SSE payload: %v", err)
+	}
+	if envelope.Type != "notification.created" || envelope.Notification.NotificationID != created.NotificationID {
+		t.Fatalf("notification SSE payload = %+v, want created notification", envelope)
 	}
 }
 

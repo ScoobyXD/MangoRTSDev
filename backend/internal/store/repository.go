@@ -278,6 +278,8 @@ type NotificationRepository interface {
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
 	MarkNotificationsRead(input NotificationMarkReadInput) (int, error)
 	MarkAllNotificationsRead(userID, companyID string) (int, error)
+	DeleteNotifications(input NotificationDeleteInput) ([]domain.Notification, error)
+	DeleteExpiredNotifications(olderThan time.Time, limit int) ([]domain.Notification, error)
 }
 
 type DomainEventRepository interface {
@@ -296,7 +298,7 @@ type EventRepository interface {
 	AppendEventRow(input EventRowInput) (EventRow, error)
 	AppendEventRows(inputs []EventRowInput) ([]EventRow, error)
 	ListEventRows(companyID string, limit int) ([]EventRow, error)
-	ClaimAvailableEventRows(limit int) ([]EventRow, error)
+	ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error)
 	MarkEventRowProcessed(companyID, eventID string) error
 	MarkEventRowFailed(companyID, eventID, lastError string, availableAt time.Time) error
 }
@@ -902,6 +904,9 @@ type KanbanCardWorkspaceEventResult struct {
 }
 
 const NotificationListMaxLimit = 100
+const NotificationCleanupMaxLimit = 1000
+
+const DefaultNotificationRetentionDuration = 30 * 24 * time.Hour
 
 type NotificationCreateInput struct {
 	CompanyID       string
@@ -943,6 +948,12 @@ type NotificationMarkReadInput struct {
 	NodeID           string
 }
 
+type NotificationDeleteInput struct {
+	UserID         string
+	CompanyID      string
+	NotificationID string
+}
+
 type NotificationSummaryInput struct {
 	UserID    string
 	CompanyID string
@@ -966,6 +977,20 @@ func NormalizeNotificationListLimit(limit int) int {
 		return 50
 	}
 	return limit
+}
+
+func NormalizeNotificationCleanupLimit(limit int) int {
+	if limit <= 0 || limit > NotificationCleanupMaxLimit {
+		return 500
+	}
+	return limit
+}
+
+func NormalizeNotificationRetentionDuration(retention time.Duration) time.Duration {
+	if retention <= 0 {
+		return DefaultNotificationRetentionDuration
+	}
+	return retention
 }
 
 type UpdateNodeInput struct {

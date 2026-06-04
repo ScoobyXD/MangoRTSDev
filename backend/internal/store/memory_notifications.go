@@ -455,3 +455,78 @@ func (r *MemoryRepo) MarkNotificationsRead(input NotificationMarkReadInput) (int
 func (r *MemoryRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
 	return r.MarkNotificationsRead(NotificationMarkReadInput{UserID: userID, CompanyID: companyID})
 }
+
+func (r *MemoryRepo) DeleteNotifications(input NotificationDeleteInput) ([]domain.Notification, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationID = strings.TrimSpace(input.NotificationID)
+	if input.UserID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	deleted := make([]domain.Notification, 0)
+	for id, item := range r.notifications {
+		if item.RecipientUserID != input.UserID {
+			continue
+		}
+		if input.CompanyID != "" && item.CompanyID != input.CompanyID {
+			continue
+		}
+		if input.NotificationID != "" && item.NotificationID != input.NotificationID {
+			continue
+		}
+		delete(r.notifications, id)
+		deleted = append(deleted, cloneNotification(item))
+	}
+	if input.NotificationID != "" && len(deleted) == 0 {
+		return nil, ErrNotFound
+	}
+	slices.SortFunc(deleted, func(a, b domain.Notification) int {
+		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
+			return -1
+		}
+		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
+			return 1
+		}
+		return strings.Compare(a.NotificationID, b.NotificationID)
+	})
+	return deleted, nil
+}
+
+func (r *MemoryRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) ([]domain.Notification, error) {
+	if olderThan.IsZero() {
+		return nil, ErrInvalid
+	}
+	limit = NormalizeNotificationCleanupLimit(limit)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	candidates := make([]domain.Notification, 0)
+	for _, item := range r.notifications {
+		if item.CreatedTimestamp.Before(olderThan) {
+			candidates = append(candidates, item)
+		}
+	}
+	slices.SortFunc(candidates, func(a, b domain.Notification) int {
+		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
+			return -1
+		}
+		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
+			return 1
+		}
+		return strings.Compare(a.NotificationID, b.NotificationID)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	deleted := make([]domain.Notification, 0, len(candidates))
+	for _, item := range candidates {
+		delete(r.notifications, item.NotificationID)
+		deleted = append(deleted, cloneNotification(item))
+	}
+	return deleted, nil
+}

@@ -133,6 +133,32 @@ func (r *realtimeSubscriptionRegistry) connectionSubscriptionCount(connectionID 
 	return len(r.connectionScopes[connectionID])
 }
 
+func (r *realtimeSubscriptionRegistry) connectionCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.connections)
+}
+
+func (r *realtimeSubscriptionRegistry) scopeTypeCounts() map[string]int {
+	counts := map[string]int{}
+	if r == nil {
+		return counts
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for key, bucket := range r.scopeConnections {
+		scopeType := realtimeScopeType(key.scope)
+		if scopeType == "" {
+			continue
+		}
+		counts[scopeType] += len(bucket)
+	}
+	return counts
+}
+
 func (r *realtimeSubscriptionRegistry) scopeSubscriptionCount(companyID, scope string) int {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)

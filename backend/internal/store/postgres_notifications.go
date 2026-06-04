@@ -406,3 +406,76 @@ where recipient_user_id=$1::uuid
 func (r *PostgresRepo) MarkAllNotificationsRead(userID, companyID string) (int, error) {
 	return r.MarkNotificationsRead(NotificationMarkReadInput{UserID: userID, CompanyID: companyID})
 }
+
+func (r *PostgresRepo) DeleteNotifications(input NotificationDeleteInput) ([]domain.Notification, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationID = strings.TrimSpace(input.NotificationID)
+	if input.UserID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.Query(`
+delete from notifications
+where recipient_user_id=$1::uuid
+  and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and ($3 = '' or notification_id = nullif($3, '')::uuid)
+returning `+notificationSelectColumns, input.UserID, input.CompanyID, input.NotificationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	deleted := make([]domain.Notification, 0)
+	for rows.Next() {
+		item, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		deleted = append(deleted, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if input.NotificationID != "" && len(deleted) == 0 {
+		return nil, ErrNotFound
+	}
+	return deleted, nil
+}
+
+func (r *PostgresRepo) DeleteExpiredNotifications(olderThan time.Time, limit int) ([]domain.Notification, error) {
+	if olderThan.IsZero() {
+		return nil, ErrInvalid
+	}
+	limit = NormalizeNotificationCleanupLimit(limit)
+	rows, err := r.db.Query(`
+with expired as (
+  select notification_id
+  from notifications
+  where created_timestamp < $1
+  order by created_timestamp asc, notification_id asc
+  limit $2
+),
+deleted as (
+  delete from notifications
+  using expired
+  where notifications.notification_id=expired.notification_id
+  returning notifications.*
+)
+select `+notificationSelectColumns+`
+from deleted
+order by created_timestamp asc, notification_id asc`, olderThan.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	deleted := make([]domain.Notification, 0)
+	for rows.Next() {
+		item, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		deleted = append(deleted, item)
+	}
+	return deleted, rows.Err()
+}

@@ -36,6 +36,8 @@ const (
 	realtimeMessageSubscriptionAccepted = "subscription.accepted"
 	realtimeMessageSubscriptionRejected = "subscription.rejected"
 	realtimeMessageProjectionDelta      = "projection.delta"
+	realtimeMessageNotificationCreated  = "notification.created"
+	realtimeMessageNotificationDeleted  = "notification.deleted"
 	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
 	realtimeMessagePermissionRevoked    = "permission.revoked"
 	realtimeMessagePing                 = "ping"
@@ -124,8 +126,11 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		reader:    reader,
 	}
 	s.realtimeRegistry.addConnection(realtimeConn)
+	s.recordRealtimeActiveConnections()
 	defer func() {
 		s.realtimeRegistry.removeConnection(realtimeConn.id)
+		s.recordRealtimeActiveConnections()
+		s.recordRealtimeActiveSubscriptions()
 		_ = conn.Close()
 	}()
 
@@ -248,6 +253,7 @@ func (s *Server) handleRealtimeMessage(conn *realtimeConnection, payload []byte)
 		scope := strings.TrimSpace(message.Scope)
 		if scope != "" {
 			s.realtimeRegistry.unsubscribe(conn.id, conn.companyID, scope)
+			s.recordRealtimeActiveSubscriptions()
 		}
 	case realtimeMessagePing:
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessagePong})
@@ -273,6 +279,7 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		return
 	}
 	s.realtimeRegistry.subscribe(conn, scope)
+	s.recordRealtimeActiveSubscriptions()
 	currentSequence := s.currentRealtimeScopeSequence(conn.companyID, scope)
 	_ = conn.sendJSON(realtimeServerMessage{
 		Type:            realtimeMessageSubscriptionAccepted,
@@ -288,6 +295,7 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 			Sequence:  currentSequence,
 			Reason:    "sequence_unavailable",
 		})
+		s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
 	}
 }
 
@@ -316,6 +324,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if userID := realtimeNotificationUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	return false, "unsupported_scope", nil
 }
 
@@ -333,6 +347,60 @@ func realtimeBoardIDFromScope(scope string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(scope, "board:"))
+}
+
+func realtimeNotificationScope(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	return "notifications:user:" + userID
+}
+
+func realtimeNotificationUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "notifications:user:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "notifications:user:"))
+}
+
+func realtimeScopeType(scope string) string {
+	scope = strings.TrimSpace(scope)
+	switch {
+	case realtimeBoardIDFromScope(scope) != "":
+		return "board"
+	case realtimeNotificationUserIDFromScope(scope) != "":
+		return "notifications"
+	default:
+		if index := strings.Index(scope, ":"); index > 0 {
+			return strings.TrimSpace(scope[:index])
+		}
+		return scope
+	}
+}
+
+func (s *Server) recordRealtimeActiveConnections() {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	s.recordOperationalMetric("realtime.active_connections", "", int64(s.realtimeRegistry.connectionCount()), 0)
+}
+
+func (s *Server) recordRealtimeActiveSubscriptions() {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	counts := s.realtimeRegistry.scopeTypeCounts()
+	for _, scopeType := range []string{"board", "notifications"} {
+		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
+	}
+	for scopeType, count := range counts {
+		if scopeType == "board" || scopeType == "notifications" {
+			continue
+		}
+		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(count), 0)
+	}
 }
 
 func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {

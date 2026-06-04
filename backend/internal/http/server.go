@@ -51,9 +51,15 @@ type Server struct {
 	notificationCatchupCancel       context.CancelFunc
 	notificationCatchupInterval     time.Duration
 	notificationCatchupLimit        int
+	notificationCleanupCancel       context.CancelFunc
+	notificationCleanupInterval     time.Duration
+	notificationRetentionDuration   time.Duration
+	notificationCleanupLimit        int
+	notificationCleanupDisabled     bool
 	eventWorkerCancel               context.CancelFunc
 	eventWorkerInterval             time.Duration
 	eventWorkerBatchLimit           int
+	eventWorkerLeaseTimeout         time.Duration
 	eventWorkerDisabled             bool
 	metrics                         MetricsRecorder
 	commCache                       *communicationsCache
@@ -89,8 +95,13 @@ type ServerOptions struct {
 	WorkspaceDerivedCatchupLimit    int
 	NotificationCatchupInterval     time.Duration
 	NotificationCatchupLimit        int
+	NotificationCleanupInterval     time.Duration
+	NotificationRetentionDuration   time.Duration
+	NotificationCleanupLimit        int
+	DisableNotificationCleanup      bool
 	EventWorkerInterval             time.Duration
 	EventWorkerBatchLimit           int
+	EventWorkerLeaseTimeout         time.Duration
 	DisableEventWorker              bool
 	Metrics                         MetricsRecorder
 }
@@ -133,6 +144,12 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if notificationCatchupLimit <= 0 {
 		notificationCatchupLimit = notificationDomainEventCatchupLimit
 	}
+	notificationCleanupInterval := options.NotificationCleanupInterval
+	if notificationCleanupInterval <= 0 {
+		notificationCleanupInterval = defaultNotificationCleanupInterval
+	}
+	notificationRetentionDuration := store.NormalizeNotificationRetentionDuration(options.NotificationRetentionDuration)
+	notificationCleanupLimit := store.NormalizeNotificationCleanupLimit(options.NotificationCleanupLimit)
 	eventWorkerInterval := options.EventWorkerInterval
 	if eventWorkerInterval <= 0 {
 		eventWorkerInterval = defaultEventWorkerInterval
@@ -141,6 +158,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if eventWorkerBatchLimit <= 0 {
 		eventWorkerBatchLimit = defaultEventWorkerBatchLimit
 	}
+	eventWorkerLeaseTimeout := store.NormalizeEventRowProcessingLeaseTimeout(options.EventWorkerLeaseTimeout)
 	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
 	if workspaceDerivedCatchupInterval <= 0 {
 		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
@@ -170,8 +188,13 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		workspaceDerivedCatchupLimit:    workspaceDerivedCatchupLimit,
 		notificationCatchupInterval:     notificationCatchupInterval,
 		notificationCatchupLimit:        notificationCatchupLimit,
+		notificationCleanupInterval:     notificationCleanupInterval,
+		notificationRetentionDuration:   notificationRetentionDuration,
+		notificationCleanupLimit:        notificationCleanupLimit,
+		notificationCleanupDisabled:     options.DisableNotificationCleanup,
 		eventWorkerInterval:             eventWorkerInterval,
 		eventWorkerBatchLimit:           eventWorkerBatchLimit,
+		eventWorkerLeaseTimeout:         eventWorkerLeaseTimeout,
 		eventWorkerDisabled:             options.DisableEventWorker,
 		metrics:                         metrics,
 		commCache:                       newCommunicationsCache(),
@@ -193,6 +216,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server.startWorkspaceEventFanout()
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationDomainEventCatchup()
+	server.startNotificationCleanup()
 	server.startEventWorker()
 	return server
 }
@@ -206,6 +230,9 @@ func (s *Server) Close() {
 	}
 	if s.notificationCatchupCancel != nil {
 		s.notificationCatchupCancel()
+	}
+	if s.notificationCleanupCancel != nil {
+		s.notificationCleanupCancel()
 	}
 	if s.eventWorkerCancel != nil {
 		s.eventWorkerCancel()

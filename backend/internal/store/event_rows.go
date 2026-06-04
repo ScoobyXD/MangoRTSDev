@@ -8,6 +8,7 @@ import (
 )
 
 const EventRowListMaxLimit = 100
+const DefaultEventRowProcessingLeaseTimeout = 5 * time.Minute
 
 const (
 	EventTypeKanbanProjectionDelta = "kanban.projection_delta"
@@ -67,6 +68,13 @@ func NormalizeEventRowListLimit(limit int) int {
 		return 25
 	}
 	return limit
+}
+
+func NormalizeEventRowProcessingLeaseTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return DefaultEventRowProcessingLeaseTimeout
+	}
+	return timeout
 }
 
 func NormalizeEventRowInput(input EventRowInput) (EventRowInput, error) {

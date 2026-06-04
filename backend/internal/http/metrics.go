@@ -12,6 +12,7 @@ import (
 type MetricsRecorder interface {
 	RecordHTTPRequest(HTTPRequestMetric)
 	RecordWorkspaceReplay(WorkspaceReplayMetric)
+	RecordOperationalMetric(OperationalMetric)
 }
 
 type HTTPRequestMetric struct {
@@ -31,6 +32,13 @@ type WorkspaceReplayMetric struct {
 	Events             int
 	StartAfterSequence int64
 	LastSequence       int64
+}
+
+type OperationalMetric struct {
+	Name      string
+	ScopeType string
+	Value     int64
+	Duration  time.Duration
 }
 
 type HTTPRequestMetricKey struct {
@@ -64,21 +72,37 @@ type WorkspaceReplayMetricStats struct {
 	LastSequence           int64
 }
 
+type OperationalMetricKey struct {
+	Name      string
+	ScopeType string
+}
+
+type OperationalMetricStats struct {
+	Count         int64
+	TotalValue    int64
+	LastValue     int64
+	TotalDuration time.Duration
+	LastDuration  time.Duration
+}
+
 type MetricsSnapshot struct {
 	HTTPRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
 	WorkspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
+	Operational      map[OperationalMetricKey]OperationalMetricStats
 }
 
 type InMemoryMetricsRecorder struct {
 	mu               sync.Mutex
 	httpRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
 	workspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
+	operational      map[OperationalMetricKey]OperationalMetricStats
 }
 
 func NewInMemoryMetricsRecorder() *InMemoryMetricsRecorder {
 	return &InMemoryMetricsRecorder{
 		httpRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
 		workspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+		operational:      map[OperationalMetricKey]OperationalMetricStats{},
 	}
 }
 
@@ -122,10 +146,27 @@ func (m *InMemoryMetricsRecorder) RecordWorkspaceReplay(metric WorkspaceReplayMe
 	m.mu.Unlock()
 }
 
+func (m *InMemoryMetricsRecorder) RecordOperationalMetric(metric OperationalMetric) {
+	if m == nil || strings.TrimSpace(metric.Name) == "" {
+		return
+	}
+	key := OperationalMetricKey{Name: strings.TrimSpace(metric.Name), ScopeType: strings.TrimSpace(metric.ScopeType)}
+	m.mu.Lock()
+	stats := m.operational[key]
+	stats.Count++
+	stats.TotalValue += metric.Value
+	stats.LastValue = metric.Value
+	stats.TotalDuration += metric.Duration
+	stats.LastDuration = metric.Duration
+	m.operational[key] = stats
+	m.mu.Unlock()
+}
+
 func (m *InMemoryMetricsRecorder) Snapshot() MetricsSnapshot {
 	snapshot := MetricsSnapshot{
 		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
 		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+		Operational:      map[OperationalMetricKey]OperationalMetricStats{},
 	}
 	if m == nil {
 		return snapshot
@@ -136,6 +177,9 @@ func (m *InMemoryMetricsRecorder) Snapshot() MetricsSnapshot {
 	}
 	for key, stats := range m.workspaceReplays {
 		snapshot.WorkspaceReplays[key] = stats
+	}
+	for key, stats := range m.operational {
+		snapshot.Operational[key] = stats
 	}
 	m.mu.Unlock()
 	return snapshot
@@ -148,7 +192,20 @@ func (s *Server) MetricsSnapshot() MetricsSnapshot {
 	return MetricsSnapshot{
 		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
 		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+		Operational:      map[OperationalMetricKey]OperationalMetricStats{},
 	}
+}
+
+func (s *Server) recordOperationalMetric(name, scopeType string, value int64, duration time.Duration) {
+	if s == nil || s.metrics == nil {
+		return
+	}
+	s.metrics.RecordOperationalMetric(OperationalMetric{
+		Name:      name,
+		ScopeType: scopeType,
+		Value:     value,
+		Duration:  duration,
+	})
 }
 
 func (s *Server) withHTTPMetrics(next http.Handler) http.Handler {

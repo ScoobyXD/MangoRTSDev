@@ -24,6 +24,30 @@ type notificationStreamEnvelope struct {
 	TS           time.Time           `json:"ts"`
 }
 
+type notificationDeletedStreamEnvelope struct {
+	Type            string    `json:"type"`
+	CompanyID       string    `json:"company_id,omitempty"`
+	RecipientUserID string    `json:"recipient_user_id,omitempty"`
+	NotificationID  string    `json:"notification_id"`
+	TS              time.Time `json:"ts"`
+}
+
+type realtimeNotificationCreatedMessage struct {
+	Type         string              `json:"type"`
+	CompanyID    string              `json:"company_id,omitempty"`
+	Scope        string              `json:"scope"`
+	Notification domain.Notification `json:"notification"`
+	TS           time.Time           `json:"ts"`
+}
+
+type realtimeNotificationDeletedMessage struct {
+	Type           string    `json:"type"`
+	CompanyID      string    `json:"company_id,omitempty"`
+	Scope          string    `json:"scope"`
+	NotificationID string    `json:"notification_id"`
+	TS             time.Time `json:"ts"`
+}
+
 const editorRichTextPrefix = "<!-- mango-editor-html-v1 -->"
 const editorNodeTextBlockPrefix = "<!-- mango-node-text-block-v1 -->"
 
@@ -33,10 +57,17 @@ var (
 )
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleNotificationList(w, r)
+	case http.MethodDelete:
+		s.handleNotificationDeleteAll(w, r)
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
 	}
+}
+
+func (s *Server) handleNotificationList(w http.ResponseWriter, r *http.Request) {
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -67,6 +98,35 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"notifications": items})
+}
+
+func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Request) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	companyID := firstNonEmptyString(req.CompanyID, r.URL.Query().Get("company_id"))
+	deleted, err := s.repo.DeleteNotifications(store.NotificationDeleteInput{
+		UserID:    actor.User.UserID,
+		CompanyID: strings.TrimSpace(companyID),
+	})
+	if errorsIsInvalid(err) {
+		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_notifications")
+		return
+	}
+	s.publishNotificationDeletions(deleted)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted_count": len(deleted)})
 }
 
 func (s *Server) handleNotificationSummary(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +224,10 @@ func (s *Server) handleNotificationReadAll(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleNotificationByID(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/notifications/"), "/")
 	parts := strings.Split(trimmed, "/")
+	if len(parts) == 1 && strings.TrimSpace(parts[0]) != "" && r.Method == http.MethodDelete {
+		s.handleNotificationDeleteByID(w, r, strings.TrimSpace(parts[0]))
+		return
+	}
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -201,6 +265,32 @@ func (s *Server) handleNotificationByID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleNotificationDeleteByID(w http.ResponseWriter, r *http.Request, notificationID string) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	deleted, err := s.repo.DeleteNotifications(store.NotificationDeleteInput{
+		UserID:         actor.User.UserID,
+		NotificationID: notificationID,
+	})
+	if errorsIsInvalid(err) {
+		writeError(w, http.StatusBadRequest, "invalid_notification_id")
+		return
+	}
+	if err == store.ErrNotFound {
+		writeError(w, http.StatusNotFound, "notification_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_notification")
+		return
+	}
+	s.publishNotificationDeletions(deleted)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted_count": len(deleted), "notification_id": notificationID})
 }
 
 func (s *Server) handleNotificationStream(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +371,9 @@ func (s *Server) publishNotifications(items []domain.Notification) {
 }
 
 func (s *Server) publishNotificationsWithTiming(items []domain.Notification, timings *requestTimingRecorder) {
+	if len(items) > 0 {
+		s.recordOperationalMetric("notifications.created_count", "", int64(len(items)), 0)
+	}
 	for _, item := range items {
 		stop := timings.observe("notifications.publish.serialize")
 		payload, err := json.Marshal(notificationStreamEnvelope{
@@ -294,8 +387,71 @@ func (s *Server) publishNotificationsWithTiming(items []domain.Notification, tim
 		}
 		stop = timings.observe("notifications.publish")
 		s.notificationHub.publish(item.RecipientUserID, payload)
+		s.publishNotificationCreatedRealtime(item)
 		stop()
 	}
+}
+
+func (s *Server) publishNotificationDeletions(items []domain.Notification) {
+	if len(items) > 0 {
+		s.recordOperationalMetric("notifications.deleted_count", "", int64(len(items)), 0)
+	}
+	for _, item := range items {
+		payload, err := json.Marshal(notificationDeletedStreamEnvelope{
+			Type:            "notification.deleted",
+			CompanyID:       item.CompanyID,
+			RecipientUserID: item.RecipientUserID,
+			NotificationID:  item.NotificationID,
+			TS:              time.Now().UTC(),
+		})
+		if err != nil {
+			continue
+		}
+		s.notificationHub.publish(item.RecipientUserID, payload)
+		s.publishNotificationDeletedRealtime(item)
+	}
+}
+
+func (s *Server) publishNotificationCreatedRealtime(item domain.Notification) {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	scope := realtimeNotificationScope(item.RecipientUserID)
+	if scope == "" || strings.TrimSpace(item.CompanyID) == "" {
+		return
+	}
+	payload, err := json.Marshal(realtimeNotificationCreatedMessage{
+		Type:         realtimeMessageNotificationCreated,
+		CompanyID:    item.CompanyID,
+		Scope:        scope,
+		Notification: item,
+		TS:           time.Now().UTC(),
+	})
+	if err != nil {
+		return
+	}
+	s.realtimeRegistry.publish(item.CompanyID, scope, payload)
+}
+
+func (s *Server) publishNotificationDeletedRealtime(item domain.Notification) {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	scope := realtimeNotificationScope(item.RecipientUserID)
+	if scope == "" || strings.TrimSpace(item.CompanyID) == "" || strings.TrimSpace(item.NotificationID) == "" {
+		return
+	}
+	payload, err := json.Marshal(realtimeNotificationDeletedMessage{
+		Type:           realtimeMessageNotificationDeleted,
+		CompanyID:      item.CompanyID,
+		Scope:          scope,
+		NotificationID: item.NotificationID,
+		TS:             time.Now().UTC(),
+	})
+	if err != nil {
+		return
+	}
+	s.realtimeRegistry.publish(item.CompanyID, scope, payload)
 }
 
 func notificationActorPayload(r *http.Request) (string, string) {
