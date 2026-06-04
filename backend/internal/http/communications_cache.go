@@ -8,16 +8,16 @@ import (
 )
 
 const (
-	communicationsFoldersCacheTTL  = 10 * time.Minute
-	communicationsMessagesCacheTTL = 5 * time.Minute
-	communicationsMessageCacheTTL  = 10 * time.Minute
-	communicationsMaxStaleTTL      = 6 * time.Hour
+	communicationsFoldersCacheTTL  = 10 * time.Hour
+	communicationsMessagesCacheTTL = 10 * time.Hour
+	communicationsMessageCacheTTL  = 10 * time.Hour
+	communicationsMaxStaleTTL      = 24 * time.Hour
 
 	communicationsMaxCachedFolderUsers     = 1024
-	communicationsMaxMessagePageEntries    = 2048
-	communicationsMaxMessageEntries        = 512
-	communicationsMaxMessagePagesPerUser   = 8
-	communicationsMaxMessageDetailsPerUser = 16
+	communicationsMaxMessagePageEntries    = 8192
+	communicationsMaxMessageEntries        = 2048
+	communicationsMaxMessagePagesPerUser   = 32
+	communicationsMaxMessageDetailsPerUser = 64
 )
 
 const communicationsCacheKeySeparator = "\x1f"
@@ -229,6 +229,94 @@ func (c *communicationsCache) invalidateMessage(userID, messageID string) {
 	delete(c.messages, key)
 }
 
+func (c *communicationsCache) patchMessagePages(userID string, message NylasMessage, now time.Time) {
+	if c == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	message.ID = strings.TrimSpace(message.ID)
+	if userID == "" || message.ID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, entry := range c.messagePages {
+		if communicationsCacheKeyUserID(key) != userID {
+			continue
+		}
+		query, ok := communicationsMessagePageQueryFromCacheKey(key)
+		if !ok {
+			continue
+		}
+		changed := false
+		messages := make([]NylasMessage, 0, len(entry.page.Messages))
+		for _, existing := range entry.page.Messages {
+			if strings.TrimSpace(existing.ID) != message.ID {
+				messages = append(messages, existing)
+				continue
+			}
+			changed = true
+			if nylasMessageMatchesCachedPageQuery(message, query) {
+				messages = append(messages, cloneNylasMessage(message))
+			}
+		}
+		if changed {
+			page := cloneNylasMessagePage(entry.page)
+			page.Messages = messages
+			c.messagePages[key] = cachedCommunicationsMessagePage{page: page, fetchedAt: now}
+		}
+	}
+}
+
+func (c *communicationsCache) removeMessagesFromPages(userID string, messageIDs []string, mailbox string, now time.Time) {
+	if c == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	ids := map[string]bool{}
+	for _, messageID := range messageIDs {
+		messageID = strings.TrimSpace(messageID)
+		if messageID != "" {
+			ids[messageID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	mailbox = strings.TrimSpace(strings.ToLower(mailbox))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, entry := range c.messagePages {
+		if communicationsCacheKeyUserID(key) != userID {
+			continue
+		}
+		query, ok := communicationsMessagePageQueryFromCacheKey(key)
+		if !ok {
+			continue
+		}
+		if mailbox != "" && strings.TrimSpace(strings.ToLower(query.Mailbox)) != mailbox {
+			continue
+		}
+		messages := make([]NylasMessage, 0, len(entry.page.Messages))
+		changed := false
+		for _, message := range entry.page.Messages {
+			if ids[strings.TrimSpace(message.ID)] {
+				changed = true
+				continue
+			}
+			messages = append(messages, message)
+		}
+		if changed {
+			page := cloneNylasMessagePage(entry.page)
+			page.Messages = messages
+			c.messagePages[key] = cachedCommunicationsMessagePage{page: page, fetchedAt: now}
+		}
+	}
+}
+
 func (c *communicationsCache) deleteMessagePagesForUserLocked(userID string) {
 	prefix := userID + communicationsCacheKeySeparator
 	for key := range c.messagePages {
@@ -273,6 +361,33 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 	}, communicationsCacheKeySeparator)
 }
 
+func communicationsMessagePageQueryFromCacheKey(key string) (NylasMessageQuery, bool) {
+	parts := strings.Split(key, communicationsCacheKeySeparator)
+	if len(parts) != 9 || strings.TrimSpace(parts[0]) == "" {
+		return NylasMessageQuery{}, false
+	}
+	limit, _ := strconv.Atoi(parts[1])
+	query := NylasMessageQuery{
+		Limit:             limit,
+		PageToken:         strings.TrimSpace(parts[2]),
+		FolderID:          strings.TrimSpace(parts[3]),
+		Query:             strings.TrimSpace(parts[4]),
+		SearchQueryNative: strings.TrimSpace(parts[5]),
+		Mailbox:           strings.TrimSpace(parts[6]),
+	}
+	if parts[7] != "" {
+		if value, err := strconv.ParseBool(parts[7]); err == nil {
+			query.Unread = &value
+		}
+	}
+	if parts[8] != "" {
+		if value, err := strconv.ParseBool(parts[8]); err == nil {
+			query.Starred = &value
+		}
+	}
+	return query, true
+}
+
 func communicationsMessageCacheKey(userID, messageID string) string {
 	userID = strings.TrimSpace(userID)
 	messageID = strings.TrimSpace(messageID)
@@ -288,6 +403,108 @@ func communicationsCacheKeyUserID(key string) string {
 		return ""
 	}
 	return key[:index]
+}
+
+func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessageQuery) bool {
+	if query.Unread != nil && message.Unread != *query.Unread {
+		return false
+	}
+	if query.Starred != nil && message.Starred != *query.Starred {
+		return false
+	}
+	if query.FolderID != "" && !nylasMessageHasFolder(message, query.FolderID) {
+		return false
+	}
+	if query.Query != "" && !nylasMessageMatchesSearch(message, query.Query) {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(query.Mailbox)) {
+	case "", "primary":
+		if nylasMessageHasAnyFolder(message, []string{"sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"}) {
+			return false
+		}
+		return len(nylasMessageFolderTokens(message)) == 0 || nylasMessageHasAnyFolder(message, []string{"inbox", "\\inbox"})
+	case "all":
+		return true
+	case "sent":
+		return nylasMessageHasAnyFolder(message, []string{"sent", "\\sent"})
+	case "starred":
+		return message.Starred
+	case "archive":
+		if nylasMessageHasAnyFolder(message, []string{"trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"}) {
+			return false
+		}
+		return !nylasMessageHasAnyFolder(message, []string{"inbox", "\\inbox"})
+	default:
+		return true
+	}
+}
+
+func nylasMessageMatchesSearch(message NylasMessage, query string) bool {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		message.Subject,
+		message.Snippet,
+		message.Body,
+		formatNylasAddressesForSearch(message.From),
+		formatNylasAddressesForSearch(message.To),
+		formatNylasAddressesForSearch(message.Cc),
+		formatNylasAddressesForSearch(message.Bcc),
+	}, " "))
+	return strings.Contains(haystack, query)
+}
+
+func formatNylasAddressesForSearch(addresses []NylasEmailAddress) string {
+	parts := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		parts = append(parts, strings.TrimSpace(address.Name)+" "+strings.TrimSpace(address.Email))
+	}
+	return strings.Join(parts, " ")
+}
+
+func nylasMessageHasAnyFolder(message NylasMessage, candidates []string) bool {
+	for _, candidate := range candidates {
+		if nylasMessageHasFolder(message, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func nylasMessageHasFolder(message NylasMessage, folder string) bool {
+	normalized := normalizeNylasCachedFolderToken(folder)
+	if normalized == "" {
+		return false
+	}
+	for _, token := range nylasMessageFolderTokens(message) {
+		if token == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func nylasMessageFolderTokens(message NylasMessage) []string {
+	values := append([]string{}, message.Folders...)
+	values = append(values, message.FolderIDs...)
+	tokens := make([]string, 0, len(values))
+	for _, value := range values {
+		if token := normalizeNylasCachedFolderToken(value); token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func normalizeNylasCachedFolderToken(value string) string {
+	token := strings.Trim(strings.ToLower(strings.TrimSpace(value)), "\\")
+	if strings.HasPrefix(token, "category_") {
+		return "category:" + strings.TrimPrefix(token, "category_")
+	}
+	return token
 }
 
 func (c *communicationsCache) evictExpiredFoldersLocked(now time.Time, maxAge time.Duration) {

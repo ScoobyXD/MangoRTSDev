@@ -56,6 +56,7 @@ export type EmailMessage = {
   folder_ids?: string[];
   logic_gate_ids?: string[];
   logic_gate_count?: number;
+  local_replies?: EmailMessage[];
 };
 
 export type ListMessagesParams = {
@@ -199,13 +200,15 @@ type CacheEntry<T> = {
 };
 
 const STATUS_CACHE_TTL_MS = 60_000;
-const FOLDERS_CACHE_TTL_MS = 10 * 60_000;
-const MESSAGE_PAGE_CACHE_TTL_MS = 5 * 60_000;
-const MESSAGE_DETAIL_CACHE_TTL_MS = 10 * 60_000;
+const WORKDAY_EMAIL_CACHE_TTL_MS = 10 * 60 * 60_000;
+const FOLDERS_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const MESSAGE_PAGE_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const MESSAGE_DETAIL_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS = 24 * 60 * 60_000;
 const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
-const RECENT_ARCHIVED_MESSAGE_TTL_MS = 10 * 60_000;
-const RECENT_PRIMARY_MESSAGE_TTL_MS = 10 * 60_000;
+const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const RECENT_PRIMARY_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communications-shared-inboxes-updated";
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
@@ -255,7 +258,8 @@ export async function disconnectCommunications(): Promise<void> {
 export async function listEmailFolders(params: ListEmailFoldersParams = {}): Promise<EmailFolder[]> {
   ensureCommunicationsCacheAuthScope();
   const cachePath = `/v1/communications/folders${createFolderQuery(params)}`;
-  const cached = readCache(foldersCache.get(cachePath) ?? null, FOLDERS_CACHE_TTL_MS, cloneFolders);
+  const cacheEntry = foldersCache.get(cachePath) ?? null;
+  const cached = readCache(cacheEntry, FOLDERS_CACHE_TTL_MS, cloneFolders);
   if (cached) return cached;
   const existingInflight = foldersInflight.get(cachePath);
   if (existingInflight) return cloneFolders(await existingInflight);
@@ -269,7 +273,13 @@ export async function listEmailFolders(params: ListEmailFoldersParams = {}): Pro
       foldersInflight.delete(cachePath);
     });
   foldersInflight.set(cachePath, request);
-  return cloneFolders(await request);
+  try {
+    return cloneFolders(await request);
+  } catch (error) {
+    const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneFolders) : null;
+    if (stale) return stale;
+    throw error;
+  }
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
@@ -277,8 +287,9 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   const cacheParams = { ...params, refresh: false };
   const cachePath = `/v1/communications/messages${createMessageQuery(cacheParams)}`;
   const requestPath = params.refresh ? `/v1/communications/messages${createMessageQuery(params)}` : cachePath;
+  const cacheEntry = messagePageCache.get(cachePath) ?? null;
   if (!params.refresh) {
-    const cached = readCache(messagePageCache.get(cachePath) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
+    const cached = readCache(cacheEntry, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
     if (cached) return applyLocalMessageOverlaysToPage(cached, cacheParams);
     const existingInflight = messagePageInflight.get(cachePath);
     if (existingInflight) return applyLocalMessageOverlaysToPage(cloneMessagePage(await existingInflight), cacheParams);
@@ -287,12 +298,19 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
     messagePageInflight.delete(cachePath);
   });
   messagePageInflight.set(cachePath, pagePromise);
-  const page = await pagePromise;
+  let page: MessagePage;
+  try {
+    page = await pagePromise;
+  } catch (error) {
+    const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneMessagePage) : null;
+    if (stale) return applyLocalMessageOverlaysToPage(stale, cacheParams);
+    throw error;
+  }
   const normalized = applyLocalMessageOverlaysToPage(cloneMessagePage(page), cacheParams);
   messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
-      messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID, params.sharedInboxID), { value: cloneMessage(message), fetchedAt: Date.now() });
+      primeMessageCaches(message);
     }
   }
   return cloneMessagePage(normalized);
@@ -311,7 +329,8 @@ export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): Ema
 export async function getEmailMessage(messageID: string, companyID?: string, sharedInboxID?: string): Promise<EmailMessage> {
   ensureCommunicationsCacheAuthScope();
   const cacheKey = messageDetailCacheKey(messageID, companyID, sharedInboxID);
-  const cached = readCache(messageDetailCache.get(cacheKey) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
+  const cacheEntry = messageDetailCache.get(cacheKey) ?? null;
+  const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
   if (cached && isEmailMessageDetailed(cached)) return cached;
   const existingInflight = messageDetailInflight.get(cacheKey);
   if (existingInflight) return cloneMessage(await existingInflight);
@@ -322,14 +341,23 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
   const request = apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query ? `?${query}` : ""}`)
     .then((payload) => {
       const message = cloneMessage(payload.message);
-      messageDetailCache.set(cacheKey, { value: message, fetchedAt: Date.now() });
-      return message;
+      const previous = messageDetailCache.get(cacheKey)?.value;
+      const replies = mergeLocalReplies(previous?.local_replies ?? [], message.local_replies ?? []);
+      const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
+      messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now() });
+      return value;
     })
     .finally(() => {
       messageDetailInflight.delete(cacheKey);
     });
   messageDetailInflight.set(cacheKey, request);
-  return cloneMessage(await request);
+  try {
+    return cloneMessage(await request);
+  } catch (error) {
+    const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneMessage) : null;
+    if (stale && isEmailMessageDetailed(stale)) return stale;
+    throw error;
+  }
 }
 
 export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
@@ -338,9 +366,7 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     method: "PUT",
     body: JSON.stringify(update),
   });
-  primeMessageCaches(payload.message);
-  clearMessagePageCache();
-  if (update.folders) clearEmailFolderCache();
+  applyEmailMessageToCachedPages(payload.message);
   return payload.message;
 }
 
@@ -352,9 +378,7 @@ export async function archiveEmailMessage(messageID: string, sharedInboxID?: str
   const message = archivedEmailMessageForLocalLists(payload.message);
   recentPrimaryMessages.delete(message.id.trim());
   rememberRecentlyArchivedMessage(message);
-  primeMessageCaches(message);
-  clearMessagePageCache();
-  clearEmailFolderCache();
+  applyEmailMessageToCachedPages(message);
   return message;
 }
 
@@ -368,12 +392,8 @@ export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInbo
   });
   const archivedIDs = cleanIDs(payload.archived_ids ?? []);
   for (const messageID of archivedIDs) {
-    recentPrimaryMessages.delete(messageID);
-    recentArchivedMessages.delete(messageID);
-    invalidateEmailMessageCache(messageID);
+    markCachedMessageArchived(messageID);
   }
-  clearMessagePageCache();
-  clearEmailFolderCache();
   return {
     archived_ids: archivedIDs,
     failed: (payload.failed ?? [])
@@ -389,9 +409,7 @@ export async function unarchiveEmailMessage(messageID: string, sharedInboxID?: s
   });
   recentArchivedMessages.delete(messageID.trim());
   rememberRecentlyPrimaryMessage(payload.message);
-  primeMessageCaches(payload.message);
-  clearMessagePageCache();
-  clearEmailFolderCache();
+  applyEmailMessageToCachedPages(payload.message);
   return payload.message;
 }
 
@@ -401,8 +419,7 @@ export async function deleteEmailMessage(messageID: string, sharedInboxID?: stri
   recentArchivedMessages.delete(messageID.trim());
   recentPrimaryMessages.delete(messageID.trim());
   invalidateEmailMessageCache(messageID);
-  clearMessagePageCache();
-  clearEmailFolderCache();
+  removeEmailMessageFromCachedPages(messageID);
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
@@ -412,10 +429,11 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
     method: "POST",
     body: JSON.stringify(messageInput),
   });
-  primeMessageCaches(payload.message);
-  clearMessagePageCache();
-  clearEmailFolderCache();
-  return payload.message;
+  const message = sentEmailMessageForLocalLists(payload.message);
+  primeMessageCaches(message);
+  applyEmailMessageToCachedPages(message, { prependIfMissing: true });
+  if (input.reply_to_message_id?.trim()) addLocalEmailReply(input.reply_to_message_id, message);
+  return message;
 }
 
 export async function listCommunicationsSharedInboxes(companyID: string): Promise<CommunicationsSharedInbox[]> {
@@ -840,12 +858,58 @@ export function removeEmailMessageFromCache(messageID: string): void {
   recentArchivedMessages.delete(cleanMessageID);
   recentPrimaryMessages.delete(cleanMessageID);
   invalidateEmailMessageCache(cleanMessageID);
-  for (const [key, entry] of messagePageCache.entries()) {
-    const messages = entry.value.messages.filter((message) => message.id !== cleanMessageID);
-    if (messages.length !== entry.value.messages.length) {
-      messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
-    }
+  removeEmailMessageFromCachedPages(cleanMessageID);
+}
+
+export function addLocalEmailReply(replyToMessageID: string, reply: EmailMessage): void {
+  const cleanReplyToMessageID = replyToMessageID.trim();
+  if (!cleanReplyToMessageID || !reply.id.trim()) return;
+  for (const [key, entry] of messageDetailCache.entries()) {
+    if (!messageCacheKeyMatchesID(key, cleanReplyToMessageID)) continue;
+    const message = addLocalReplyToEmailMessage(entry.value, reply);
+    messageDetailCache.set(key, { value: message, fetchedAt: Date.now() });
   }
+  patchCachedPageMessages((message) => (
+    message.id === cleanReplyToMessageID ? addLocalReplyToEmailMessage(message, reply) : message
+  ));
+}
+
+export function reconcileLocalEmailReply(reply: EmailMessage): void {
+  const cleanReplyID = reply.id.trim();
+  const cleanThreadID = reply.thread_id?.trim() ?? "";
+  if (!cleanReplyID && !cleanThreadID) return;
+  for (const [key, entry] of messageDetailCache.entries()) {
+    const message = reconcileEmailMessageLocalReply(entry.value, reply);
+    if (message !== entry.value) messageDetailCache.set(key, { value: message, fetchedAt: Date.now() });
+  }
+  patchCachedPageMessages((message) => reconcileEmailMessageLocalReply(message, reply));
+}
+
+export function addLocalReplyToEmailMessage(message: EmailMessage, reply: EmailMessage): EmailMessage {
+  const cleanMessageID = message.id.trim();
+  const cleanReplyID = reply.id.trim();
+  if (!cleanMessageID || !cleanReplyID || cleanMessageID === cleanReplyID) return cloneMessage(message);
+  const next = cloneMessage(message);
+  next.local_replies = mergeLocalReplies(next.local_replies ?? [], [replyForLocalThread(reply)]);
+  return next;
+}
+
+export function reconcileEmailMessageLocalReply(message: EmailMessage, reply: EmailMessage): EmailMessage {
+  const replies = message.local_replies ?? [];
+  if (replies.length === 0) return message;
+  const cleanReplyID = reply.id.trim();
+  const cleanThreadID = reply.thread_id?.trim() ?? "";
+  if (!cleanReplyID && !cleanThreadID) return message;
+  let changed = false;
+  const reconciled = replies.map((existing) => {
+    if (!emailRepliesRepresentSameMessage(existing, reply)) return existing;
+    changed = true;
+    return mergeLocalReplyMessage(existing, reply);
+  });
+  if (!changed) return message;
+  const next = cloneMessage(message);
+  next.local_replies = mergeLocalReplies(reconciled, []);
+  return next;
 }
 
 export function applyEmailMessageToCachedPages(message: EmailMessage, options: MergeEmailMessageOptions = {}): void {
@@ -860,6 +924,58 @@ export function applyEmailMessageToCachedPages(message: EmailMessage, options: M
     });
     messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
   }
+}
+
+function removeEmailMessageFromCachedPages(messageID: string): void {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return;
+  for (const [key, entry] of messagePageCache.entries()) {
+    const messages = entry.value.messages.filter((message) => message.id !== cleanMessageID);
+    if (messages.length !== entry.value.messages.length) {
+      messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
+    }
+  }
+}
+
+function patchCachedPageMessages(patch: (message: EmailMessage) => EmailMessage): void {
+  for (const [key, entry] of messagePageCache.entries()) {
+    let changed = false;
+    const messages = entry.value.messages.map((message) => {
+      const next = patch(message);
+      if (next !== message) changed = true;
+      return next;
+    });
+    if (changed) messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
+  }
+}
+
+function markCachedMessageArchived(messageID: string): void {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return;
+  const cached = findCachedEmailMessage(cleanMessageID);
+  if (!cached) {
+    removeEmailMessageFromCachedPages(cleanMessageID);
+    invalidateEmailMessageCache(cleanMessageID);
+    recentPrimaryMessages.delete(cleanMessageID);
+    recentArchivedMessages.delete(cleanMessageID);
+    return;
+  }
+  const archived = archivedEmailMessageForLocalLists(cached);
+  rememberRecentlyArchivedMessage(archived);
+  applyEmailMessageToCachedPages(archived);
+}
+
+function findCachedEmailMessage(messageID: string): EmailMessage | null {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return null;
+  for (const entry of messageDetailCache.values()) {
+    if (entry.value.id === cleanMessageID) return cloneMessage(entry.value);
+  }
+  for (const entry of messagePageCache.values()) {
+    const match = entry.value.messages.find((message) => message.id === cleanMessageID);
+    if (match) return cloneMessage(match);
+  }
+  return null;
 }
 
 export function mergeEmailMessageIntoMessageList(
@@ -891,6 +1007,9 @@ function mergeExistingMessageForList(previous: EmailMessage, next: EmailMessage,
     merged.folders = previous.folders ? [...previous.folders] : undefined;
     merged.folder_ids = previous.folder_ids ? [...previous.folder_ids] : undefined;
   }
+  const replies = mergeLocalReplies(previous.local_replies ?? [], next.local_replies ?? []);
+  if (replies.length > 0) merged.local_replies = replies;
+  else delete merged.local_replies;
   return cloneMessage(merged);
 }
 
@@ -962,6 +1081,68 @@ function archivedEmailMessageForLocalLists(message: EmailMessage): EmailMessage 
   archived.folders = stripInboxFolders(archived.folders);
   archived.folder_ids = stripInboxFolders(archived.folder_ids);
   return archived;
+}
+
+function sentEmailMessageForLocalLists(message: EmailMessage): EmailMessage {
+  const sent = cloneMessage(message);
+  sent.unread = false;
+  if (messageFolderTokens(sent).length === 0) sent.folders = ["sent"];
+  return sent;
+}
+
+function replyForLocalThread(reply: EmailMessage): EmailMessage {
+  const local = cloneMessage(reply);
+  delete local.local_replies;
+  return local;
+}
+
+function mergeLocalReplies(existing: EmailMessage[], incoming: EmailMessage[]): EmailMessage[] {
+  const replies: EmailMessage[] = [];
+  for (const reply of [...existing, ...incoming]) {
+    const candidate = replyForLocalThread(reply);
+    const cleanID = candidate.id.trim();
+    if (!cleanID) continue;
+    const duplicateIndex = replies.findIndex((item) => emailRepliesRepresentSameMessage(item, candidate));
+    if (duplicateIndex >= 0) replies[duplicateIndex] = mergeLocalReplyMessage(replies[duplicateIndex], candidate);
+    else replies.push(candidate);
+  }
+  return replies.sort((left, right) => emailMessageSortTimestamp(left) - emailMessageSortTimestamp(right));
+}
+
+function mergeLocalReplyMessage(previous: EmailMessage, next: EmailMessage): EmailMessage {
+  const merged = replyForLocalThread({ ...previous, ...next });
+  if (!next.body && previous.body) merged.body = previous.body;
+  if (!next.snippet && previous.snippet) merged.snippet = previous.snippet;
+  if (!next.from?.length && previous.from?.length) merged.from = cloneEmailAddresses(previous.from);
+  if (!next.to?.length && previous.to?.length) merged.to = cloneEmailAddresses(previous.to);
+  if (!next.cc?.length && previous.cc?.length) merged.cc = cloneEmailAddresses(previous.cc);
+  if (!next.bcc?.length && previous.bcc?.length) merged.bcc = cloneEmailAddresses(previous.bcc);
+  return merged;
+}
+
+function emailRepliesRepresentSameMessage(left: EmailMessage, right: EmailMessage): boolean {
+  const leftID = left.id.trim();
+  const rightID = right.id.trim();
+  if (leftID && rightID && leftID === rightID) return true;
+  const leftSignature = localReplySignature(left);
+  return !!leftSignature && leftSignature === localReplySignature(right);
+}
+
+function localReplySignature(message: EmailMessage): string {
+  const threadID = message.thread_id?.trim() ?? "";
+  const body = (message.body || message.snippet || "").trim();
+  if (!threadID || !body) return "";
+  return [
+    threadID,
+    normalizeReplySubject(message.subject),
+    body,
+    formatAddressesForSearch(message.from).trim().toLowerCase(),
+    formatAddressesForSearch(message.to).trim().toLowerCase(),
+  ].join("\x1f");
+}
+
+function normalizeReplySubject(subject: string): string {
+  return subject.trim().toLowerCase().replace(/^(re:\s*)+/, "");
 }
 
 function stripInboxFolders(folders: string[] | undefined): string[] | undefined {
@@ -1135,8 +1316,25 @@ function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (val
   return clone(entry.value);
 }
 
+function isNylasRateLimitedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.trim().toLowerCase();
+  return message.includes("nylas_rate_limited") || message.includes("429");
+}
+
 function primeMessageCaches(message: EmailMessage): void {
-  messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+  const cleanMessageID = message.id.trim();
+  if (!cleanMessageID) return;
+  const now = Date.now();
+  for (const [key, entry] of messageDetailCache.entries()) {
+    if (!messageCacheKeyMatchesID(key, cleanMessageID)) continue;
+    const replies = mergeLocalReplies(entry.value.local_replies ?? [], message.local_replies ?? []);
+    const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
+    messageDetailCache.set(key, { value, fetchedAt: now });
+  }
+  const existing = messageDetailCache.get(cleanMessageID)?.value;
+  const replies = mergeLocalReplies(existing?.local_replies ?? [], message.local_replies ?? []);
+  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
 }
 
 function messageDetailCacheKey(messageID: string, companyID?: string, sharedInboxID?: string): string {
@@ -1144,6 +1342,10 @@ function messageDetailCacheKey(messageID: string, companyID?: string, sharedInbo
   const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
   const cleanMessageID = messageID.trim();
   return cleanCompanyID || cleanSharedInboxID ? `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanMessageID}` : cleanMessageID;
+}
+
+function messageCacheKeyMatchesID(key: string, messageID: string): boolean {
+  return key === messageID || key.endsWith(`\x1f${messageID}`);
 }
 
 function createSharedInboxMessageMutationQuery(sharedInboxID?: string, companyID?: string): string {
@@ -1193,6 +1395,7 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     folder_ids: message.folder_ids ? [...message.folder_ids] : undefined,
     logic_gate_ids: message.logic_gate_ids ? [...message.logic_gate_ids] : undefined,
     logic_gate_count: message.logic_gate_count,
+    local_replies: message.local_replies ? message.local_replies.map((reply) => cloneMessage(reply)) : undefined,
   };
 }
 

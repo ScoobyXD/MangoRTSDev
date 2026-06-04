@@ -9,6 +9,7 @@ import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules"
 import {
   applyEmailMessageToCachedPages,
   addLogicGateRaciAssignments,
+  addLocalReplyToEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
@@ -26,6 +27,8 @@ import {
   listCommunicationsSharedInboxes,
   mergeEmailMessageIntoMessageList,
   primeEmailMessageCache,
+  reconcileEmailMessageLocalReply,
+  reconcileLocalEmailReply,
   removeLogicGateRaciAssignments,
   removeEmailMessageFromCache,
   sortEmailMessagesByDateDescending,
@@ -984,7 +987,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
       if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current)) return;
-      invalidateCommunicationsCache({ messagePages: true });
       void loadMessagesRef.current?.({ refresh: true });
     }, delayMs);
   }, [status?.connected]);
@@ -1153,7 +1155,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         prependIfMissing,
         maxMessages: Math.max(MESSAGE_BATCH_SIZE, previous.length + (prependIfMissing ? 1 : 0)),
       }));
-      if (selectedMessageIDRef.current === message.id) setSelectedMessage(message);
+      if (selectedMessageIDRef.current === message.id) {
+        setSelectedMessage((current) => current?.id === message.id ? {
+          ...message,
+          local_replies: current.local_replies ?? message.local_replies,
+        } : message);
+      }
     };
     const unsubscribe = subscribeCommunicationsStream(apiBase, companyID, {
       onEvent(event) {
@@ -1210,6 +1217,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
           .then((message) => {
             primeEmailMessageCache(message);
+            reconcileLocalEmailReply(message);
+            setSelectedMessage((current) => current ? reconcileEmailMessageLocalReply(current, message) : current);
             const matchesCurrentView = emailMessageMatchesListFilters(message, params);
             applyMessageToCurrentView(message, trigger.startsWith("message.created"));
             if (
@@ -1396,7 +1405,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     getEmailMessage(selectedMessageID, companyID, sharedInboxIDForHomeView(activeViewID))
       .then((message) => {
         if (!cancelled) {
-          setSelectedMessage(locallyReadMessageIDsRef.current.has(message.id) ? { ...message, unread: false } : message);
+          setSelectedMessage((current) => {
+            const next = locallyReadMessageIDsRef.current.has(message.id) ? { ...message, unread: false } : message;
+            return current?.id === message.id && current.local_replies?.length ? {
+              ...next,
+              local_replies: current.local_replies,
+            } : next;
+          });
         }
       })
       .catch((detailError) => {
@@ -1473,7 +1488,11 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setMessages((previous) => mergeEmailMessageIntoMessageList(previous, message, params));
     if (selectedMessageIDRef.current === message.id) {
       if (stillVisible) {
-        setSelectedMessage((current) => (current?.id === message.id ? { ...current, ...message } : message));
+        setSelectedMessage((current) => (current?.id === message.id ? {
+          ...current,
+          ...message,
+          local_replies: current.local_replies ?? message.local_replies,
+        } : message));
       } else {
         setSelectedMessageID("");
         setSelectedMessage(null);
@@ -1529,7 +1548,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (!routedToStarred) {
         applyUpdatedMessageToCurrentView(normalized);
       }
-      if (update.folders) await loadMessages();
       if (starredDelta !== 0) void loadFolders();
     } catch (updateError) {
       if (starredDelta !== 0) adjustStarredMailboxCount(countKey, -starredDelta);
@@ -1633,7 +1651,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     try {
       await unarchiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
       adjustPrimaryMailboxCount(countKey, ids.length);
-      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      removeMessagesFromVisibleMailList(ids);
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
         setSelectedMessage(null);
@@ -1642,14 +1660,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message moved to Inbox." : `${ids.length} messages moved to Inbox.`);
-      await loadMessages();
       await loadFolders();
     } catch (unarchiveError) {
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
     } finally {
       setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, loadMessages, selectedMessageID]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, removeMessagesFromVisibleMailList, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
     if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
@@ -1730,13 +1747,23 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
       const currentSharedInbox = sharedInboxID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxID) ?? null : null;
       const connectedAccountEmail = (currentSharedInbox?.account_email ?? connection?.account_email ?? "").trim();
+      const submittedCompose = compose;
       const result = await sendHomeMailComposeCommand({ companyID, sharedInboxID, compose, connectedAccountEmail });
       setCompose(emptyCompose);
       setNotice("Message sent.");
+      const replyToMessageID = submittedCompose.replyToMessageID.trim();
+      if (replyToMessageID) {
+        setSelectedMessage((current) => current?.id === replyToMessageID ? addLocalReplyToEmailMessage(current, result.sentMessage) : current);
+      }
+      const sentParams = currentMessageListParams();
+      if (emailMessageMatchesListFilters(result.sentMessage, sentParams)) {
+        setMessages((previous) => mergeEmailMessageIntoMessageList(previous, result.sentMessage, sentParams, {
+          prependIfMissing: true,
+          maxMessages: Math.max(MESSAGE_BATCH_SIZE, previous.length + 1),
+        }));
+      }
       if (result.sentToConnectedAccount && mailboxRef.current === "primary") {
         scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS);
-      } else {
-        await loadMessages();
       }
     } catch (sendError) {
       setError(formatError(sendError, "Failed to send message"));
@@ -2059,7 +2086,11 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         const readUpdated = { ...result.message, unread: false };
         setMessages((previous) => mergeEmailMessageIntoMessageList(previous, readUpdated, listParams()));
         if (selectedMessageIDRef.current === messageID) {
-          setSelectedMessage((current) => (current?.id === messageID ? { ...current, ...readUpdated } : readUpdated));
+          setSelectedMessage((current) => (current?.id === messageID ? {
+            ...current,
+            ...readUpdated,
+            local_replies: current.local_replies ?? readUpdated.local_replies,
+          } : readUpdated));
         }
       })
       .catch((markError) => {
@@ -2150,7 +2181,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
       await deleteHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
       adjustPrimaryMailboxCount(countKey, -deletedInboxCount);
-      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      removeMessagesFromVisibleMailList(ids);
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
         setSelectedMessage(null);
@@ -2159,13 +2190,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message deleted." : `${ids.length} messages deleted.`);
-      await loadMessages();
     } catch (deleteError) {
       setError(formatError(deleteError, ids.length === 1 ? "Failed to delete message" : "Failed to delete messages"));
     } finally {
       setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, removeMessagesFromVisibleMailList, selectedMessageID]);
   const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
     setBusy("my-logic-gates");
     setError("");
