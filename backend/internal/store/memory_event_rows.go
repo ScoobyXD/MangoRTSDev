@@ -117,15 +117,20 @@ func (r *MemoryRepo) ListEventRows(companyID string, limit int) ([]EventRow, err
 	return rows, nil
 }
 
-func (r *MemoryRepo) ClaimAvailableEventRows(limit int) ([]EventRow, error) {
+func (r *MemoryRepo) ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error) {
 	limit = NormalizeEventRowListLimit(limit)
+	processingLeaseTimeout = NormalizeEventRowProcessingLeaseTimeout(processingLeaseTimeout)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
+	staleBefore := now.Add(-processingLeaseTimeout)
 	candidates := make([]EventRow, 0)
 	for _, row := range r.eventRows {
-		if row.ProcessedAt != nil || row.ProcessingStartedAt != nil || row.AvailableAt.After(now) {
+		if row.ProcessedAt != nil || row.AvailableAt.After(now) {
+			continue
+		}
+		if row.ProcessingStartedAt != nil && !row.ProcessingStartedAt.Before(staleBefore) {
 			continue
 		}
 		candidates = append(candidates, row)

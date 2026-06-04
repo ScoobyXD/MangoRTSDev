@@ -238,14 +238,19 @@ limit $2`, companyID, limit)
 	return scanEventRows(rows)
 }
 
-func (r *PostgresRepo) ClaimAvailableEventRows(limit int) ([]EventRow, error) {
+func (r *PostgresRepo) ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error) {
 	limit = NormalizeEventRowListLimit(limit)
+	processingLeaseTimeout = NormalizeEventRowProcessingLeaseTimeout(processingLeaseTimeout)
+	staleBefore := time.Now().UTC().Add(-processingLeaseTimeout)
 	rows, err := r.db.QueryContext(context.Background(), `
 with claimed as (
   select company_id, event_id
   from event_rows
   where processed_at is null
-    and processing_started_at is null
+    and (
+      processing_started_at is null
+      or processing_started_at < $2
+    )
     and available_at <= now()
   order by available_at asc, created_timestamp asc, company_id asc, event_id asc
   limit $1
@@ -261,7 +266,7 @@ updated as (
   returning `+eventRowSelectColumnsForRowAlias+`
 )
 select * from updated
-order by available_at asc, created_timestamp asc, company_id asc, event_id asc`, limit)
+order by available_at asc, created_timestamp asc, company_id asc, event_id asc`, limit, staleBefore)
 	if err != nil {
 		return nil, err
 	}

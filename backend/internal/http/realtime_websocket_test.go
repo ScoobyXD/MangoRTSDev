@@ -493,6 +493,137 @@ func TestRealtimeWebSocketKanbanBoardDeltaHidesInaccessibleCardAsDeleteWithoutRo
 	}
 }
 
+func TestRealtimeWebSocketNotificationSubscriptionRequiresOwnUser(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888012"
+	tokenA := "notification-own-a-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-own-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-own-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+		}},
+		DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer client.close()
+	ready := client.readJSON(t)
+	connectionID := ready["connection_id"].(string)
+	otherScope := realtimeNotificationScope(userB.UserID)
+	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
+	rejected := client.readJSON(t)
+	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
+		t.Fatalf("notification subscription rejected = %+v, want rejection for %s", rejected, otherScope)
+	}
+	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
+		t.Fatalf("unauthorized notification subscription was stored")
+	}
+}
+
+func TestRealtimeWebSocketNotificationCreatedRoutesOnlyToRecipientScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888013"
+	tokenA := "notification-created-a-token"
+	tokenB := "notification-created-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-created-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-created-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+		}},
+		DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+
+	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer clientA.close()
+	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
+	defer clientB.close()
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+	scopeA := realtimeNotificationScope(userA.UserID)
+	scopeB := realtimeNotificationScope(userB.UserID)
+	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
+	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{
+		CompanyID:       companyID,
+		RecipientUserID: userA.UserID,
+		Type:            domain.NotificationEventMentionCreated,
+		SourceEventID:   "88888888-8888-4888-8888-000000000013",
+		EntityType:      store.EntityTypeNode,
+		EntityID:        "notification-created-node",
+		Title:           "Created notification",
+	}}})
+	if err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+	server.publishNotifications(created)
+	message := clientA.readJSON(t)
+	if message["type"] != realtimeMessageNotificationCreated || message["scope"] != scopeA {
+		t.Fatalf("created notification websocket message = %+v, want scope %s", message, scopeA)
+	}
+	notification := message["notification"].(map[string]any)
+	if notification["notification_id"] != created[0].NotificationID || notification["recipient_user_id"] != userA.UserID {
+		t.Fatalf("created notification payload = %+v, want recipient %s", notification, userA.UserID)
+	}
+	clientB.assertNoMessage(t)
+}
+
+func TestRealtimeWebSocketNotificationDeletedRoutesOnlyToRecipientScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888014"
+	tokenA := "notification-deleted-a-token"
+	tokenB := "notification-deleted-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+		}},
+		DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+
+	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer clientA.close()
+	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
+	defer clientB.close()
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+	scopeA := realtimeNotificationScope(userA.UserID)
+	scopeB := realtimeNotificationScope(userB.UserID)
+	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
+	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{
+		CompanyID:       companyID,
+		RecipientUserID: userA.UserID,
+		Type:            domain.NotificationEventMentionCreated,
+		SourceEventID:   "88888888-8888-4888-8888-000000000014",
+		EntityType:      store.EntityTypeNode,
+		EntityID:        "notification-deleted-node",
+		Title:           "Deleted notification",
+	}}})
+	if err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+	server.publishNotificationDeletions(created)
+	message := clientA.readJSON(t)
+	if message["type"] != realtimeMessageNotificationDeleted || message["scope"] != scopeA || message["notification_id"] != created[0].NotificationID {
+		t.Fatalf("deleted notification websocket message = %+v, want deletion for %s", message, created[0].NotificationID)
+	}
+	clientB.assertNoMessage(t)
+}
+
 func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, role string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", strings.ReplaceAll(subject, "-", " "))

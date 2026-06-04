@@ -46,16 +46,18 @@ func (s *Server) processAvailableEventRows(ctx context.Context, limit int) (int,
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	rows, err := s.repo.ClaimAvailableEventRows(limit)
+	rows, err := s.repo.ClaimAvailableEventRows(limit, s.eventWorkerLeaseTimeout)
 	if err != nil {
 		return 0, err
 	}
+	s.recordEventRowLag(rows)
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return len(rows), err
 		}
 		if err := s.processEventRow(row); err != nil {
 			availableAt := time.Now().UTC().Add(eventWorkerRetryDelay(row.AttemptCount))
+			s.recordOperationalMetric("event_worker.retry_count", "", 1, 0)
 			if markErr := s.repo.MarkEventRowFailed(row.CompanyID, row.EventID, err.Error(), availableAt); markErr != nil {
 				return len(rows), markErr
 			}
@@ -66,6 +68,24 @@ func (s *Server) processAvailableEventRows(ctx context.Context, limit int) (int,
 		}
 	}
 	return len(rows), nil
+}
+
+func (s *Server) recordEventRowLag(rows []store.EventRow) {
+	if len(rows) == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	var maxLag time.Duration
+	for _, row := range rows {
+		if row.AvailableAt.IsZero() || row.AvailableAt.After(now) {
+			continue
+		}
+		lag := now.Sub(row.AvailableAt)
+		if lag > maxLag {
+			maxLag = lag
+		}
+	}
+	s.recordOperationalMetric("event_rows.lag_ms", "", int64(maxLag/time.Millisecond), maxLag)
 }
 
 func (s *Server) processEventRow(row store.EventRow) error {
@@ -140,6 +160,7 @@ func (s *Server) revalidateKanbanBoardSubscriptionsForLogicGate(companyID, logic
 				Scope:     scope,
 				Reason:    "permission_check_failed",
 			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
 			continue
 		}
 		if authorized {
@@ -149,6 +170,7 @@ func (s *Server) revalidateKanbanBoardSubscriptionsForLogicGate(companyID, logic
 				Scope:     scope,
 				Reason:    "permission_changed",
 			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
 			continue
 		}
 		_ = conn.sendJSON(realtimeServerMessage{
@@ -159,7 +181,9 @@ func (s *Server) revalidateKanbanBoardSubscriptionsForLogicGate(companyID, logic
 			ResourceID:   logicGateID,
 			Reason:       "permission_revoked",
 		})
+		s.recordOperationalMetric("realtime.permission_revoked_count", realtimeScopeType(scope), 1, 0)
 		s.realtimeRegistry.unsubscribe(conn.id, companyID, scope)
+		s.recordRealtimeActiveSubscriptions()
 	}
 }
 

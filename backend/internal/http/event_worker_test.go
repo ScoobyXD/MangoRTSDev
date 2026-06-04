@@ -247,7 +247,7 @@ func newEventWorkerAuthServerForTest(repo *store.MemoryRepo, token string, user 
 func drainEventRowsForTest(t *testing.T, repo *store.MemoryRepo, companyID string) {
 	t.Helper()
 	for {
-		rows, err := repo.ClaimAvailableEventRows(100)
+		rows, err := repo.ClaimAvailableEventRows(100, store.DefaultEventRowProcessingLeaseTimeout)
 		if err != nil {
 			t.Fatalf("ClaimAvailableEventRows drain: %v", err)
 		}
