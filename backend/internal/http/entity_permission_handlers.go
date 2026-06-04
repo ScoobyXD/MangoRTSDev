@@ -616,6 +616,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 	if !requireCompanyManager(w, r, req.CompanyID) {
 		return
 	}
+	actor, _ := authenticatedActor(r)
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        req.CompanyID,
 		EntityType:       entityType,
@@ -624,6 +625,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		DefaultAccessSet: req.DefaultAccess != nil,
 		OverrideUserIDs:  req.OverrideUserIDs,
 		Permissions:      req.Permissions,
+		ActorUserID:      actor.User.UserID,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
@@ -653,7 +655,6 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 	}
 	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
 	s.publishRacioPermissionProjectionDeltas(req.CompanyID, entityType, entityID)
-	s.publishKanbanPermissionProjectionDeltas(req.CompanyID, entityType, entityID)
 	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")

@@ -38,6 +38,7 @@ type Server struct {
 	notificationHub                 *workspaceEventHub
 	projectionHub                   *projectionDeltaHub
 	realtimeRegistry                *realtimeSubscriptionRegistry
+	realtimeTickets                 *realtimeTicketStore
 	notifications                   *notifications.Service
 	kanban                          *kanban.Service
 	workspaceWakeHub                *workspaceEventNotificationHub
@@ -50,6 +51,10 @@ type Server struct {
 	notificationCatchupCancel       context.CancelFunc
 	notificationCatchupInterval     time.Duration
 	notificationCatchupLimit        int
+	eventWorkerCancel               context.CancelFunc
+	eventWorkerInterval             time.Duration
+	eventWorkerBatchLimit           int
+	eventWorkerDisabled             bool
 	metrics                         MetricsRecorder
 	commCache                       *communicationsCache
 	nylasGate                       *nylasRequestGate
@@ -84,6 +89,9 @@ type ServerOptions struct {
 	WorkspaceDerivedCatchupLimit    int
 	NotificationCatchupInterval     time.Duration
 	NotificationCatchupLimit        int
+	EventWorkerInterval             time.Duration
+	EventWorkerBatchLimit           int
+	DisableEventWorker              bool
 	Metrics                         MetricsRecorder
 }
 
@@ -125,6 +133,14 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if notificationCatchupLimit <= 0 {
 		notificationCatchupLimit = notificationDomainEventCatchupLimit
 	}
+	eventWorkerInterval := options.EventWorkerInterval
+	if eventWorkerInterval <= 0 {
+		eventWorkerInterval = defaultEventWorkerInterval
+	}
+	eventWorkerBatchLimit := options.EventWorkerBatchLimit
+	if eventWorkerBatchLimit <= 0 {
+		eventWorkerBatchLimit = defaultEventWorkerBatchLimit
+	}
 	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
 	if workspaceDerivedCatchupInterval <= 0 {
 		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
@@ -144,6 +160,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		notificationHub:                 newWorkspaceEventHub(),
 		projectionHub:                   newProjectionDeltaHub(),
 		realtimeRegistry:                newRealtimeSubscriptionRegistry(),
+		realtimeTickets:                 newRealtimeTicketStore(),
 		notifications:                   notifications.NewService(repo),
 		kanban:                          kanban.NewService(repo),
 		workspaceWakeHub:                newWorkspaceEventNotificationHub(),
@@ -153,6 +170,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		workspaceDerivedCatchupLimit:    workspaceDerivedCatchupLimit,
 		notificationCatchupInterval:     notificationCatchupInterval,
 		notificationCatchupLimit:        notificationCatchupLimit,
+		eventWorkerInterval:             eventWorkerInterval,
+		eventWorkerBatchLimit:           eventWorkerBatchLimit,
+		eventWorkerDisabled:             options.DisableEventWorker,
 		metrics:                         metrics,
 		commCache:                       newCommunicationsCache(),
 		nylasGate:                       newNylasRequestGate(communicationsNylasMinRequestInterval),
@@ -173,6 +193,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server.startWorkspaceEventFanout()
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationDomainEventCatchup()
+	server.startEventWorker()
 	return server
 }
 
@@ -185,6 +206,9 @@ func (s *Server) Close() {
 	}
 	if s.notificationCatchupCancel != nil {
 		s.notificationCatchupCancel()
+	}
+	if s.eventWorkerCancel != nil {
+		s.eventWorkerCancel()
 	}
 }
 
@@ -230,6 +254,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
+	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
 	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)
 	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)

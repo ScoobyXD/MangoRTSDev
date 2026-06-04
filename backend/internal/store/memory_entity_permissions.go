@@ -338,6 +338,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
+	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
 		return nil, ErrNotFound
 	}
@@ -438,6 +439,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			r.effectiveAccess = effectiveAccessSnapshot
 			r.nodes = nodesSnapshot
 			r.logicGates = logicGatesSnapshot
+			r.eventRows = eventRowsSnapshot
 			return nil, err
 		}
 		if entityType == EntityTypeNode || entityType == EntityTypeLogicGate {
@@ -446,6 +448,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 				r.effectiveAccess = effectiveAccessSnapshot
 				r.nodes = nodesSnapshot
 				r.logicGates = logicGatesSnapshot
+				r.eventRows = eventRowsSnapshot
 				return nil, err
 			}
 		}
@@ -456,6 +459,17 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			r.effectiveAccess = effectiveAccessSnapshot
 			r.nodes = nodesSnapshot
 			r.logicGates = logicGatesSnapshot
+			r.eventRows = eventRowsSnapshot
+			return nil, err
+		}
+	}
+	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
+		if _, err := r.appendEventRowLocked(eventInput); err != nil {
+			r.entityPermissions = permissionsSnapshot
+			r.effectiveAccess = effectiveAccessSnapshot
+			r.nodes = nodesSnapshot
+			r.logicGates = logicGatesSnapshot
+			r.eventRows = eventRowsSnapshot
 			return nil, err
 		}
 	}
@@ -468,11 +482,13 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
+	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	restore := func() {
 		r.entityPermissions = permissionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		r.nodes = nodesSnapshot
 		r.logicGates = logicGatesSnapshot
+		r.eventRows = eventRowsSnapshot
 	}
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
 		return nil, ErrNotFound
@@ -602,6 +618,12 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	}
 	if entityType == EntityTypeLogicGate {
 		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{entityID}, nil); err != nil {
+			restore()
+			return nil, err
+		}
+	}
+	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
+		if _, err := r.appendEventRowLocked(eventInput); err != nil {
 			restore()
 			return nil, err
 		}

@@ -46,6 +46,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if actor, ok := s.consumeRealtimeTicketActor(r); ok {
+			ctx := context.WithValue(r.Context(), actorContextKey{}, actor)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 
 		claims, err := s.authValidator.Validate(r.Context(), requestAuthToken(r))
 		if err != nil {
@@ -186,13 +191,16 @@ func requestAuthToken(r *http.Request) string {
 	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
 		return token
 	}
-	if r.URL != nil && r.URL.Path == "/v1/realtime/ws" && isWebSocketUpgradeRequest(r) {
-		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" {
-			return token
-		}
-		return strings.TrimSpace(r.URL.Query().Get("token"))
-	}
 	return ""
+}
+
+func (s *Server) consumeRealtimeTicketActor(r *http.Request) (ActorContext, bool) {
+	if s == nil || r == nil || r.URL == nil || r.URL.Path != "/v1/realtime/ws" || !isWebSocketUpgradeRequest(r) {
+		return ActorContext{}, false
+	}
+	ticket := strings.TrimSpace(r.URL.Query().Get("ticket"))
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	return s.realtimeTickets.consume(ticket, companyID)
 }
 
 func requestCompanyID(r *http.Request) (string, error) {

@@ -557,6 +557,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	return result, nil
 }
 
@@ -699,6 +702,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -773,6 +779,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStat
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
@@ -845,6 +854,9 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, KanbanProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

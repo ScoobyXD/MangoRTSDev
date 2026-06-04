@@ -37,6 +37,7 @@ const (
 	realtimeMessageSubscriptionRejected = "subscription.rejected"
 	realtimeMessageProjectionDelta      = "projection.delta"
 	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
+	realtimeMessagePermissionRevoked    = "permission.revoked"
 	realtimeMessagePing                 = "ping"
 	realtimeMessagePong                 = "pong"
 	realtimeMessageError                = "error"
@@ -66,6 +67,8 @@ type realtimeServerMessage struct {
 	Scope           string `json:"scope,omitempty"`
 	CurrentSequence int64  `json:"current_sequence,omitempty"`
 	Sequence        int64  `json:"sequence,omitempty"`
+	ResourceType    string `json:"resource_type,omitempty"`
+	ResourceID      string `json:"resource_id,omitempty"`
 	Error           string `json:"error,omitempty"`
 	Message         string `json:"message,omitempty"`
 	Reason          string `json:"reason,omitempty"`

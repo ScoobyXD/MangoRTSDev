@@ -4,7 +4,10 @@ import test from "node:test";
 import { applyKanbanProjectionEnvelope, type KanbanProjectionEnvelope } from "../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js";
 import {
   parseRealtimeMessage,
+  realtimeWebSocketURL,
+  MangoRealtimeClient,
   type RealtimeErrorMessage,
+  type RealtimePermissionRevokedMessage,
   type RealtimeProjectionDeltaMessage,
   type RealtimeSnapshotRefetchMessage,
   type RealtimeSubscriptionAcceptedMessage,
@@ -42,9 +45,82 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(refetch.sequence, 9);
   assert.equal(refetch.reason, "sequence_unavailable");
 
+  const revoked = parseRealtimeMessage(JSON.stringify({ type: "permission.revoked", scope: "board:A", resource_type: "logic_gate", resource_id: "gate-1", reason: "permission_revoked" })) as RealtimePermissionRevokedMessage;
+  assert.equal(revoked.type, "permission.revoked");
+  assert.equal(revoked.scope, "board:A");
+  assert.equal(revoked.resource_type, "logic_gate");
+  assert.equal(revoked.resource_id, "gate-1");
+  assert.equal(revoked.reason, "permission_revoked");
+
   const error = parseRealtimeMessage(JSON.stringify({ type: "error", error: "invalid_json" })) as RealtimeErrorMessage;
   assert.equal(error.type, "error");
   assert.equal(error.error, "invalid_json");
+});
+
+test("websocket URL uses one-time ticket instead of normal access token query param", () => {
+  const url = new URL(realtimeWebSocketURL("https://api.example.test", "company-1", "ws-ticket-1"));
+  assert.equal(url.protocol, "wss:");
+  assert.equal(url.searchParams.get("company_id"), "company-1");
+  assert.equal(url.searchParams.get("ticket"), "ws-ticket-1");
+  assert.equal(url.searchParams.has("access_token"), false);
+  assert.equal(url.searchParams.has("token"), false);
+});
+
+test("realtime client opens authenticated websocket with minted ticket", async () => {
+  const openedURLs: string[] = [];
+  const sentMessages: string[] = [];
+  const originalWebSocket = globalThis.WebSocket;
+
+  class FakeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(url: string) {
+      openedURLs.push(url);
+      queueMicrotask(() => {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+      });
+    }
+
+    send(message: string): void {
+      sentMessages.push(message);
+    }
+
+    close(): void {
+      this.readyState = FakeWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  (globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  try {
+    const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
+      WebSocketCtor: FakeWebSocket as unknown as typeof WebSocket,
+      getTicket: async () => "minted-ws-ticket",
+      reconnectDelayMs: 60_000,
+    });
+    let ready = false;
+    const unsubscribe = client.subscribe("board:A", { onReady: () => { ready = true; } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(ready, true);
+    assert.equal(openedURLs.length, 1);
+    const url = new URL(openedURLs[0]);
+    assert.equal(url.searchParams.get("ticket"), "minted-ws-ticket");
+    assert.equal(url.searchParams.has("access_token"), false);
+    assert.equal(sentMessages.some((message) => JSON.parse(message).type === "subscribe"), true);
+    unsubscribe();
+    client.close();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
 });
 
 test("applies Kanban upsert and delete from realtime projection delta without refetch", () => {

@@ -182,11 +182,26 @@ func (s *Server) publishProjectionDeltas(deltas []store.ProjectionDelta) {
 func (s *Server) publishProjectionDeltasWithTiming(deltas []store.ProjectionDelta, timings *requestTimingRecorder) {
 	stop := timings.observeAccounted("projection.publish.enqueue")
 	deltas = cloneProjectionDeltasForAsync(deltas)
+	deltas = requestPathProjectionDeltas(deltas)
 	stop()
 	if len(deltas) == 0 {
 		return
 	}
 	go s.publishProjectionDeltasAsync(deltas)
+}
+
+func requestPathProjectionDeltas(deltas []store.ProjectionDelta) []store.ProjectionDelta {
+	if len(deltas) == 0 {
+		return nil
+	}
+	out := deltas[:0]
+	for _, delta := range deltas {
+		if strings.TrimSpace(delta.Projection) == store.ProjectionNameKanbanBoard {
+			continue
+		}
+		out = append(out, delta)
+	}
+	return out
 }
 
 func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
@@ -501,7 +516,7 @@ func (s *Server) publishKanbanPermissionProjectionDeltasAsync(companyID, entityT
 		log.Printf("failed to read Kanban projection rows for permission delta company_id=%s entity_type=%s entity_id=%s: %v", companyID, entityType, entityID, err)
 		return
 	}
-	s.publishProjectionDeltas(store.KanbanProjectionUpsertDeltas(rows))
+	s.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
 }
 
 func (s *Server) publishKanbanProjectionUpsertsForNode(companyID, nodeID string) {

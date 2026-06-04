@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -49,6 +50,38 @@ func TestRealtimeWebSocketAuthenticatedHandshakeSendsReady(t *testing.T) {
 	}
 	if ready["connection_id"] == "" {
 		t.Fatalf("ready missing connection_id: %+v", ready)
+	}
+}
+
+func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888010"
+	token := "ticket-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "ticket-user", domain.RoleCompanyUser)
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	ticket := mintRealtimeTicketForTest(t, server.Routes(), companyID, token)
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID+"&ticket="+url.QueryEscape(ticket), "")
+	defer client.close()
+
+	ready := client.readJSON(t)
+	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
+		t.Fatalf("ticket ready = %+v, want ready for company/user", ready)
+	}
+}
+
+func TestRealtimeWebSocketNormalAccessTokenQueryRejected(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888011"
+	token := "query-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "query-token-user", domain.RoleCompanyUser)
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+
+	status := realtimeHandshakeStatusForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID+"&access_token="+url.QueryEscape(token), "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("access_token query websocket status = %d, want %d", status, http.StatusUnauthorized)
 	}
 }
 
@@ -578,6 +611,38 @@ func openRealtimeHandshakeForTest(t *testing.T, handler http.Handler, target, to
 		t.Fatalf("read websocket handshake response: %v", err)
 	}
 	return conn, reader, resp
+}
+
+func mintRealtimeTicketForTest(t *testing.T, handler http.Handler, companyID, token string) string {
+	t.Helper()
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+	body := bytes.NewBufferString(`{"company_id":"` + companyID + `"}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/realtime/ticket", body)
+	if err != nil {
+		t.Fatalf("new ticket request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request realtime ticket: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ticket status = %d body=%s", resp.StatusCode, string(payload))
+	}
+	var payload struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode realtime ticket: %v", err)
+	}
+	if payload.Ticket == "" {
+		t.Fatalf("empty realtime ticket")
+	}
+	return payload.Ticket
 }
 
 func randomWebSocketKeyForTest(t *testing.T) string {
