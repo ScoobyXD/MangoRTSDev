@@ -1626,3 +1626,38 @@ Best phased path:
 5. Add subscribe/unsubscribe scopes.
 6. Later add outbox/broker for scale.
 That lets us migrate without replacing everything at once.
+
+
+------------------------
+
+Current Realtime Uses
+
+Kanban boards: board:<boardID>
+Used for Kanban projection deltas: cards, columns, card title/status/assignment projection changes.
+
+RACIO matrix: racio:user:<userID>
+Used for RACIO projection deltas for the current user’s R/A/C/I/O matrix.
+
+Node editor / Logic Gate editor: editor:node:<nodeID> and editor:logic_gate:<logicGateID>
+Used for editor projection deltas, text-block updates, editor snapshot fallback, and editor collaboration/presence events.
+
+Workspace/global freshness: workspace:user:<userID>
+Used as the broad “something in workspace changed” stream. This drives cache invalidation and fallback refresh for things like Home, Kanban freshness, RACIO reconciliation, etc.
+
+Company Explorer: company_explorer:user:<userID>
+Used for explorer tree/folder/item changes.
+
+Node map: node_graph:user:<userID>
+Used for node relationship graph freshness.
+
+Logic Gate map: logic_gate_graph:user:<userID>
+Used for logic-gate relationship graph freshness.
+
+Communications / shared triage / email: communications:user:<userID>
+Used for mail/message/folder/triage updates.
+
+Notifications: notifications:user:<userID>
+Used for notification created/deleted events and summary refresh.
+
+System control messages:
+subscription.accepted, subscription.rejected, snapshot.refetch, permission.revoked, ping/pong, and websocket reconnect/catchup sequencing.
