@@ -11,6 +11,27 @@ Important terminology for V5:
 - Use `event table`, `event row`, and `event worker`, not a separate `outbox` concept.
 - Do not implement from this file without checking the V5 tracker first.
 
+Active WebSocket subscription scopes:
+
+- `board:{boardID}`: Kanban board projection deltas for a logic-gate board.
+- `editor:node:{nodeID}`: node editor projection deltas and editor collaboration events.
+- `editor:logic_gate:{logicGateID}`: logic-gate editor projection deltas and editor collaboration events.
+- `racio:user:{userID}`: RACIO matrix projection deltas for that user.
+- `workspace:user:{userID}`: broad workspace domain-event updates visible to that user.
+- `company_explorer:user:{userID}`: company explorer domain-event updates visible to that user.
+- `node_graph:user:{userID}`: node graph domain-event updates visible to that user.
+- `logic_gate_graph:user:{userID}`: logic-gate graph domain-event updates visible to that user.
+- `notifications:user:{userID}`: notification create/delete messages for that user.
+- `communications:user:{userID}`: communications messages/events for that user.
+
+Snapshot + subscription rule:
+
+- A scoped snapshot must return its current sequence/cursor.
+- The frontend must save that cursor before subscribing.
+- The WebSocket `subscribe` message must include `after_sequence` when the frontend already has a snapshot.
+- If the backend has newer rows than `after_sequence` and cannot replay that projection safely, it sends `snapshot.refetch`.
+- The frontend must refetch only the affected scope, not the whole workspace.
+
 Original notes start below.
 
 I'm hand writting this

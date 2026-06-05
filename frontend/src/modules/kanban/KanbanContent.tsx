@@ -210,6 +210,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
+  const [kanbanProjectionSnapshotBoardID, setKanbanProjectionSnapshotBoardID] = useState("");
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
   const renameNodeInputRef = useRef<HTMLInputElement | null>(null);
@@ -313,6 +314,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     activeBoardIDRef.current = activeBoardID;
     kanbanProjectionSequenceRef.current = undefined;
     kanbanProjectionVersionsRef.current = new Map();
+    setKanbanProjectionSnapshotBoardID("");
   }, [activeBoardID]);
 
   useEffect(() => {
@@ -599,9 +601,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setActiveLogicGateLabel(logicGateLabel);
         const nextColumns = sortColumns(view.columns ?? []);
         const nextCards = view.cards ?? [];
+        kanbanProjectionSequenceRef.current = nextKanbanProjectionCursor(kanbanProjectionSequenceRef.current, view.projection_sequence);
         applyColumns(nextColumns);
         applyCards(nextCards);
-        primeKanbanBoardContentsCache(apiBase, companyID, board.board_id, { columns: nextColumns, cards: nextCards });
+        setKanbanProjectionSnapshotBoardID(expectedBoardID);
+        primeKanbanBoardContentsCache(apiBase, companyID, board.board_id, { columns: nextColumns, cards: nextCards, projectionSequence: kanbanProjectionSequenceRef.current });
         setError("");
         setLoading(false);
       })
@@ -789,6 +793,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       kanbanProjectionSequenceRef.current = nextKanbanProjectionCursor(kanbanProjectionSequenceRef.current, projectionSequence);
       applyColumns(sortColumns(nextColumns));
       applyCards(nextCards);
+      setKanbanProjectionSnapshotBoardID(requestedBoardID);
     } catch {
       if (boardRefreshRequestRef.current !== requestID) return;
       if (columnsRef.current.length === 0 && cardsRef.current.length === 0 && !logicGateIDFromKanbanBoardID(requestedBoardID)) {
@@ -943,6 +948,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!companyID || !streamBoardID) return undefined;
     const streamLogicGateID = logicGateIDFromKanbanBoardID(streamBoardID);
     if (arenaMode && !streamLogicGateID) return undefined;
+    if (kanbanProjectionSnapshotBoardID !== streamBoardID) return undefined;
     const scope = `board:${streamBoardID}`;
     return subscribeRealtimeScope(apiBase, companyID, scope, {
       getAfterSequence: () => kanbanProjectionSequenceRef.current,
@@ -952,7 +958,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, streamLogicGateID),
       onDelta: applyRealtimeKanbanProjectionDelta,
     });
-  }, [activeBoardID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, requestKanbanProjectionFallback]);
+  }, [activeBoardID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, kanbanProjectionSnapshotBoardID, requestKanbanProjectionFallback]);
 
   useEffect(() => {
     if (arenaMode && suppressLegacyWorkspaceStream) return undefined;
