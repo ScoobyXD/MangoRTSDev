@@ -1290,9 +1290,19 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           scope.eventType === "communications_shared_inbox_raci_updated" || scope.eventType === "shared_triage_access_updated" ||
           (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications"))
         ));
+        const touchesWorkspacePanel = scopes.some((scope) => (
+          scope.kind === "company_explorer" ||
+          (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
+          (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
+          scope.kind === "kanban_board" ||
+          scope.kind === "kanban_board_list" ||
+          scope.kind === "work_item_assignment" ||
+          scope.kind === "workspace"
+        ));
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
+        if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
         if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
           const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
           if (node?.node_id) {
@@ -1378,7 +1388,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             setLogicGateFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
           }
         }
-        if (scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
+        if (!touchesWorkspacePanel && scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
           scheduleWorkspacePanelReload();
         }
         if (type === "node_permissions_updated") {

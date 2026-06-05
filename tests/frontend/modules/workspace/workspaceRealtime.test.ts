@@ -139,9 +139,11 @@ test("workspace realtime converts snapshot refetch messages into workspace gap s
 });
 
 test("derives scoped invalidation targets from workspace event types", () => {
-  const nodeScopes = deriveWorkspaceReconciliationScopes({ type: "node_updated", data: { node_id: "node-1" } });
+  const nodeScopes = deriveWorkspaceReconciliationScopes({ type: "node_updated", data: { node_id: "node-1", node: { node_id: "node-1", logic_gate_ids: ["gate-1", "gate-2"] } } });
   assert.equal(nodeScopes.some((scope) => scope.kind === "node_graph" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "company_explorer" && scope.itemType === "node" && scope.itemID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-1" && scope.logicGateID === "gate-1" && scope.nodeID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-2" && scope.logicGateID === "gate-2" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "workspace"), false);
 
   const kanbanScopes = deriveWorkspaceReconciliationScopes({ type: "kanban_card_moved", data: { board_id: "board-A", card_id: "card-A", node_id: "node-A" } });

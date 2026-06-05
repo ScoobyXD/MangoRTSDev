@@ -847,10 +847,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (!streamBoardID) return;
       invalidateArenaViewForBoard(streamBoardID, detail.logicGateID ?? "");
       invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+      if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
     };
     window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
-  }, [apiBase, companyID, invalidateArenaViewForBoard]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
 
   const reconcileKanbanGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (gap.companyID !== companyID) return;

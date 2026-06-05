@@ -155,6 +155,19 @@ function logicGateKanbanBoardID(logicGateID: string): string {
   return logicGateID ? `logic-gate:${logicGateID}` : "";
 }
 
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    const clean = cleanString(item);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
+}
+
 function scopeSignature(scope: WorkspaceReconciliationScope): string {
   return [
     scope.kind,
@@ -232,6 +245,15 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   if (type === "node_created" || type === "node_updated" || type === "node_deleted" || type === "node_permissions_updated") {
     addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID });
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "node", itemID: nodeID });
+    for (const nodeLogicGateID of cleanStringList(node.logic_gate_ids)) {
+      addScope(scopes, seen, {
+        kind: "kanban_board",
+        eventType: type,
+        boardID: logicGateKanbanBoardID(nodeLogicGateID),
+        logicGateID: nodeLogicGateID,
+        nodeID,
+      });
+    }
     return scopes;
   }
 

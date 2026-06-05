@@ -324,6 +324,86 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 	}
 }
 
+func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999117"
+	repo.EnsureCompany(companyID, "Node Title Projection Event Rows Co")
+	user, err := repo.UpsertAuthUser("node-title-projection-user", "node-title-projection@example.com", "Node Title Projection User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Node title projection gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		ActorUserID: user.UserID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Old projection title")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	beforeRows, err := repo.ListEventRows(companyID, 20)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+
+	const updatedTitle = "Live projection title"
+	if _, _, err := repo.UpdateNodeAndWorkspaceEvent(UpdateNodeInput{
+		CompanyID:   companyID,
+		NodeID:      node.NodeID,
+		Title:       updatedTitle,
+		TitleSet:    true,
+		ActorUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("UpdateNodeAndWorkspaceEvent: %v", err)
+	}
+
+	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
+	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(newRows, EventTypeRacioProjectionDelta)
+	if len(kanbanRows) != 1 || len(racioRows) != 1 {
+		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
+	}
+	kanbanPayload, err := DecodeKanbanProjectionDeltaEventPayload(kanbanRows[0])
+	if err != nil {
+		t.Fatalf("DecodeKanbanProjectionDeltaEventPayload: %v", err)
+	}
+	if len(kanbanPayload.Deltas) != 1 || kanbanPayload.Deltas[0].Row == nil || kanbanPayload.Deltas[0].Row.NodeTitle != updatedTitle {
+		t.Fatalf("Kanban title delta = %+v, want node_title %q", kanbanPayload.Deltas, updatedTitle)
+	}
+	racioPayload, err := DecodeRacioProjectionDeltaEventPayload(racioRows[0])
+	if err != nil {
+		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+	}
+	if len(racioPayload.Deltas) != 1 || racioPayload.Deltas[0].Row == nil || racioPayload.Deltas[0].Row.DisplayTitle != updatedTitle {
+		t.Fatalf("RACIO title delta = %+v, want display_title %q", racioPayload.Deltas, updatedTitle)
+	}
+}
+
 func TestEditorNodeInformationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999111"

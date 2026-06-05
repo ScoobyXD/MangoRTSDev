@@ -14,6 +14,7 @@ import {
 import { subscribeCommunicationsStream } from "../modules/communications/communicationsStream";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../modules/kanban/kanbanApi";
 import { invalidateKanbanBoardContentsCache } from "../modules/kanban/KanbanBoardContentStore";
+import { EVENT_KANBAN_BOARD_CONTENTS_UPDATED, type KanbanBoardContentsUpdatedDetail } from "../modules/kanban/shared";
 import { invalidateLogicGateRelationshipGraphSnapshot } from "../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/NodeRelationshipGraph";
 import { emitNotificationsUpdated } from "../modules/notifications/notificationsApi";
@@ -200,6 +201,7 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
         if (scope.boardID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: scope.boardID });
           invalidateKanbanBoardContentsCache(apiBase, companyID, scope.boardID);
+          dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
         }
         if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
         break;
@@ -211,6 +213,7 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
         if (scope.boardID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: scope.boardID });
           invalidateKanbanBoardContentsCache(apiBase, companyID, scope.boardID);
+          dispatchKanbanBoardContentsUpdated({ companyID, boardID: scope.boardID, logicGateID: scope.logicGateID });
         }
         if (scope.logicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, scope.logicGateID);
         if (scope.nodeID) {
@@ -225,6 +228,11 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
     }
   }
   if (Object.values(workspacePanelScope).some(Boolean)) markCommunicationsWorkspacePanelStale(companyID, workspacePanelScope);
+}
+
+function dispatchKanbanBoardContentsUpdated(detail: KanbanBoardContentsUpdatedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail }));
 }
 
 function markWorkspaceCachesStale(apiBase: string, companyID: string): void {
