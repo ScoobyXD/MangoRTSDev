@@ -941,20 +941,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     const streamBoardID = activeBoardID.trim();
     if (!companyID || !streamBoardID) return undefined;
-    if (arenaMode) {
-      const logicGateID = activeLogicGateID.trim();
-      if (!logicGateID || streamBoardID !== logicGateKanbanBoardID(logicGateID)) return undefined;
-    }
+    const streamLogicGateID = logicGateIDFromKanbanBoardID(streamBoardID);
+    if (arenaMode && !streamLogicGateID) return undefined;
     const scope = `board:${streamBoardID}`;
     return subscribeRealtimeScope(apiBase, companyID, scope, {
       getAfterSequence: () => kanbanProjectionSequenceRef.current,
-      onRejected: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
-      onRefetch: () => requestKanbanProjectionFallback("sequence_gap", streamBoardID, activeLogicGateID),
-      onPermissionRevoked: () => requestKanbanProjectionFallback("permission_revoked", streamBoardID, activeLogicGateID),
-      onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, activeLogicGateID),
+      onRejected: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, streamLogicGateID),
+      onRefetch: () => requestKanbanProjectionFallback("sequence_gap", streamBoardID, streamLogicGateID),
+      onPermissionRevoked: () => requestKanbanProjectionFallback("permission_revoked", streamBoardID, streamLogicGateID),
+      onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, streamLogicGateID),
       onDelta: applyRealtimeKanbanProjectionDelta,
     });
-  }, [activeBoardID, activeLogicGateID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, requestKanbanProjectionFallback]);
+  }, [activeBoardID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, requestKanbanProjectionFallback]);
 
   useEffect(() => {
     if (arenaMode && suppressLegacyWorkspaceStream) return undefined;
@@ -1055,12 +1053,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID || !cardID) return;
             invalidateArenaViewForBoard(streamBoardID);
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
-            return;
-          }
-          if (envelope.type === "node_updated") {
-            const node = data.node as NodeRecord | undefined;
-            const nodeID = typeof node?.node_id === "string" ? node.node_id : (typeof data.node_id === "string" ? data.node_id : "");
-            if (!nodeID) return;
             return;
           }
           if (envelope.type === "node_deleted") {

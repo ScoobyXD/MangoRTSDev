@@ -238,7 +238,11 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				continue
 			}
 			realtimeScope := realtimeBoardScope(boardID)
-			for _, conn := range s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope) {
+			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
+			projectionUserIDs := s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix)
+			authorizedRealtimeTargets := 0
+			authorizedProjectionTargets := 0
+			for _, conn := range realtimeConnections {
 				if conn == nil {
 					continue
 				}
@@ -246,10 +250,11 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				if !ok {
 					continue
 				}
+				authorizedRealtimeTargets++
 				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: scopePrefix, connectionID: conn.id, realtime: true}
 				grouped[key] = append(grouped[key], filtered)
 			}
-			for _, userID := range s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, scopePrefix) {
+			for _, userID := range projectionUserIDs {
 				scope := projectionKanbanBoardUserScope(boardID, userID)
 				if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
 					continue
@@ -258,12 +263,16 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				if !ok {
 					continue
 				}
+				authorizedProjectionTargets++
 				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope, sequenceScope: scopePrefix}
 				grouped[key] = append(grouped[key], filtered)
 			}
+			log.Printf("kanban_projection_delta_targets company_id=%s board_id=%s realtime_scope=%s realtime_subscribers=%d realtime_authorized=%d projection_subscribers=%d projection_authorized=%d operation=%s node_id=%s card_id=%s", delta.CompanyID, boardID, realtimeScope, len(realtimeConnections), authorizedRealtimeTargets, len(projectionUserIDs), authorizedProjectionTargets, delta.Operation, delta.RowKey.NodeID, delta.RowKey.CardID)
 		}
 	}
 	if len(grouped) == 0 {
+		duration := time.Since(start)
+		log.Printf("async_projection_deltas_publish input=%d published=0 duration=%s skipped_no_targets=true", len(deltas), formatTimingDuration(duration))
 		return
 	}
 

@@ -306,12 +306,18 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		return
 	}
 	if !authorized {
+		if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
+			log.Printf("realtime_board_subscription_rejected company_id=%s user_id=%s connection_id=%s board_id=%s scope=%s error=%s", conn.companyID, conn.userID, conn.id, boardID, scope, rejectCode)
+		}
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: rejectCode})
 		return
 	}
 	s.realtimeRegistry.subscribe(conn, scope)
 	s.recordRealtimeActiveSubscriptions()
 	currentSequence := s.currentRealtimeScopeSequence(conn.companyID, scope)
+	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
+		log.Printf("realtime_board_subscription_accepted company_id=%s user_id=%s connection_id=%s board_id=%s scope=%s current_sequence=%d", conn.companyID, conn.userID, conn.id, boardID, scope, currentSequence)
+	}
 	_ = conn.sendJSON(realtimeServerMessage{
 		Type:            realtimeMessageSubscriptionAccepted,
 		CompanyID:       conn.companyID,
