@@ -6,6 +6,15 @@ param(
 
   [string]$WorkerParent = (Join-Path "C:\tmp" "MangoRTSDev-workers"),
 
+  [ValidateSet("read-only", "workspace-write", "danger-full-access")]
+  [string]$CodexSandbox = "workspace-write",
+
+  [ValidateSet("untrusted", "on-failure", "on-request", "never")]
+  [string]$CodexApproval = "never",
+
+  [ValidateSet("elevated", "unelevated")]
+  [string]$WindowsSandbox = "unelevated",
+
   [switch]$NoStart
 )
 
@@ -124,13 +133,15 @@ $codexExe = ""
 if (-not $NoStart) {
   $codexExe = Get-NewestVsCodeCodexExe
   $escapedCodexExe = $codexExe.Replace("'", "''")
+  $escapedWindowsSandboxConfig = "windows.sandbox=`"$WindowsSandbox`""
   $codexCommand = @(
     "Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue"
     "Remove-Item Env:FORCE_COLOR -ErrorAction SilentlyContinue"
     "`$env:CLICOLOR = '1'"
     "`$env:TERM = 'xterm-256color'"
     "`$env:COLORTERM = 'truecolor'"
-    "& '$escapedCodexExe'"
+    "`$codexArgs = @('--sandbox', '$CodexSandbox', '--ask-for-approval', '$CodexApproval', '-c', '$escapedWindowsSandboxConfig')"
+    "& '$escapedCodexExe' @codexArgs"
   ) -join "; "
   $process = Start-Process -FilePath powershell.exe -WorkingDirectory $workerPath -ArgumentList @(
     "-NoExit",
@@ -152,6 +163,7 @@ Write-Host "  Parent: $workerParentRoot"
 Write-Host "  Base:   local main @ $baseSha"
 if ($codexExe) {
   Write-Host "  Codex:  $codexExe"
+  Write-Host "  Mode:   sandbox=$CodexSandbox approval=$CodexApproval windowsSandbox=$WindowsSandbox"
 }
 if ($pidValue) {
   Write-Host "  PID:    $pidValue"
