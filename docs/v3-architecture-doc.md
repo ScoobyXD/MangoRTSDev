@@ -1484,6 +1484,39 @@ Over that one connection, the frontend sends:
 
 { "type": "subscribe", "scope": "board:abc", "after_sequence": 123 }
 { "type": "unsubscribe", "scope": "board:abc" }
+
+Current subscription scopes:
+
+workspace:user:<userID>
+General workspace events.
+
+company_explorer:user:<userID>
+Company Explorer tree and folder changes.
+
+node_graph:user:<userID>
+Node map and node relationship graph changes.
+
+logic_gate_graph:user:<userID>
+Logic gate map and logic gate relationship graph changes.
+
+racio:user:<userID>
+RACIO matrix projection deltas.
+
+board:<boardID>
+Kanban board projection deltas. Logic gate Kanban boards use board:logic-gate:<logicGateID>.
+
+editor:node:<nodeID>
+editor:logic_gate:<logicGateID>
+Node and logic gate editor projection deltas.
+
+notifications:user:<userID>
+Notification create/delete events.
+
+communications:user:<userID>
+Email and communications events.
+
+work_item_assignment is not a standalone WebSocket scope right now. Work-item assignment changes are delivered through workspace events and the affected projection scopes, such as RACIO or Kanban.
+
 Backend sends:
 
 { "type": "projection.delta", "scope": "board:abc", "sequence": 124, "deltas": [] }

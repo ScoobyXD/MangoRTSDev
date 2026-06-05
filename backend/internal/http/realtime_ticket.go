@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -96,14 +97,17 @@ func (s *Server) handleRealtimeTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if actorRoleForCompany(actor, companyID) == "" {
+		log.Printf("realtime_ticket_rejected company_id=%s user_id=%s error=company_access_denied", companyID, strings.TrimSpace(actor.User.UserID))
 		writeError(w, http.StatusForbidden, "company_access_denied")
 		return
 	}
 	ticket, expiresAt := s.realtimeTickets.mint(actor, companyID)
 	if ticket == "" {
+		log.Printf("realtime_ticket_rejected company_id=%s user_id=%s error=failed_to_create_realtime_ticket", companyID, strings.TrimSpace(actor.User.UserID))
 		writeError(w, http.StatusInternalServerError, "failed_to_create_realtime_ticket")
 		return
 	}
+	log.Printf("realtime_ticket_issued company_id=%s user_id=%s expires_at=%s", companyID, strings.TrimSpace(actor.User.UserID), expiresAt.Format(time.RFC3339))
 	http.SetCookie(w, &http.Cookie{
 		Name:     realtimeTicketCookieName,
 		Value:    ticket,
