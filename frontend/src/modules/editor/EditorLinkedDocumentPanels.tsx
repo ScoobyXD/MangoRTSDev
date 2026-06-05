@@ -151,6 +151,17 @@ function focusEditableTitleAtEnd(element: HTMLElement | null) {
   selection.addRange(range);
 }
 
+function selectEditableTitleContents(element: HTMLElement | null) {
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  const selection = element.ownerDocument.getSelection();
+  if (!selection) return;
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 function dateInputValueFromDraft(draft: string): string {
   return normalizeNodeDueDateDraft(draft) ?? "";
 }
@@ -302,6 +313,19 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     }
     window.requestAnimationFrame(() => focusEditableTitleAtEnd(editingTitleRef.current));
   };
+  const beginTitleEditPreservingSelection = () => {
+    if (!canEdit || isEditingTitle) return;
+    editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+    onSetIsEditingTitle(true);
+  };
+  const beginTitleEditSelectingAll = () => {
+    if (!canEdit) return;
+    if (!isEditingTitle) {
+      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+      onSetIsEditingTitle(true);
+    }
+    window.requestAnimationFrame(() => selectEditableTitleContents(editingTitleRef.current));
+  };
 
   return (
     <>
@@ -310,6 +334,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
           <div
             onMouseDown={(event) => {
               if (!canEdit) return;
+              if (editingTitleRef.current?.contains(event.target as Node)) return;
               event.preventDefault();
               event.stopPropagation();
               beginTitleEditAtEnd();
@@ -337,11 +362,18 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
             <span style={{ flex: "0 0 auto" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>
             <span
               ref={editingTitleRef}
-              contentEditable={canEdit && isEditingTitle}
+              data-floating-selection-actions="disabled"
+              contentEditable={canEdit}
               suppressContentEditableWarning
-              onClick={(event) => {
+              onFocus={() => beginTitleEditPreservingSelection()}
+              onMouseDown={(event) => {
                 event.stopPropagation();
-                beginTitleEditAtEnd();
+                beginTitleEditPreservingSelection();
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                beginTitleEditSelectingAll();
               }}
               onInput={(event) => {
                 if (!canEdit) return;
@@ -363,11 +395,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                   void onUpdateTitle(latestTitle);
                   onSetIsEditingTitle(false);
+                  event.currentTarget.blur();
                 }
                 if (event.key === "Escape") {
                   event.preventDefault();
                   if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
                   onSetIsEditingTitle(false);
+                  event.currentTarget.blur();
                 }
               }}
               style={{ minWidth: 0, flex: "1 1 auto", outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}

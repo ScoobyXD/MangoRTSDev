@@ -18,6 +18,7 @@ type TextSelectionSnapshot = {
 const BUTTON_SIZE = 28;
 const VIEWPORT_MARGIN = 8;
 const NODE_SELECTION_SOURCE_SELECTOR = '[data-mango-linked-entity-kind="node"][data-mango-linked-entity-id]';
+const FLOATING_SELECTION_ACTIONS_DISABLED_SELECTOR = '[data-floating-selection-actions="disabled"]';
 const RELATIONSHIP_OPTIONS: Array<{ kind: SelectionNodeRelationshipKind; label: string }> = [
   { kind: "parent", label: "Create parent node" },
   { kind: "peer", label: "Create peer node" },
@@ -43,7 +44,7 @@ function elementForNode(node: Node): Element | null {
 function selectionIsInsideSuppressedElement(range: Range): boolean {
   const element = elementForNode(range.commonAncestorContainer);
   if (!element) return false;
-  return Boolean(element.closest('[data-text-selection-node-creator="true"], [data-node-map-viewport="true"], button, input, textarea, select, option, [role="button"]'));
+  return Boolean(element.closest(`[data-text-selection-node-creator="true"], ${FLOATING_SELECTION_ACTIONS_DISABLED_SELECTOR}, [data-node-map-viewport="true"], button, input, textarea, select, option, [role="button"]`));
 }
 
 function eventTargetIsNodeCreator(target: EventTarget | null): boolean {

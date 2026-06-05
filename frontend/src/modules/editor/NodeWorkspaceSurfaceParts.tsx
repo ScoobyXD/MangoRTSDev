@@ -761,6 +761,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const selection = editor.ownerDocument.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
     const range = selection.getRangeAt(0);
+    const commonElement = range.commonAncestorContainer instanceof Element
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (commonElement?.closest('[data-floating-selection-actions="disabled"]')) return null;
     if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
     const rawSelectedText = range.toString();
     const leadingTrim = rawSelectedText.length - rawSelectedText.trimStart().length;

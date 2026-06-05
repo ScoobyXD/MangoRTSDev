@@ -209,7 +209,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
-  const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
+  const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string; replaceOnFirstEdit?: boolean } | null>(null);
   const [kanbanProjectionSnapshotBoardID, setKanbanProjectionSnapshotBoardID] = useState("");
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
@@ -1514,7 +1514,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setCardContextMenu(null);
     setColumnContextMenu(null);
     cancelRenameNodeOnBlurRef.current = false;
-    setRenameNodeDraft({ cardID: card.card_id, nodeID: card.node_id, title: card.node_title });
+    setRenameNodeDraft({ cardID: card.card_id, nodeID: card.node_id, title: card.node_title, replaceOnFirstEdit: true });
   }, []);
 
   const commitNodeRename = useCallback(async (nodeID: string, title: string) => {
@@ -1559,7 +1559,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!renameNodeDraft || !renameNodeInputRef.current) return;
     const input = renameNodeInputRef.current;
     input.focus();
-    input.select();
+    const caretPosition = input.value.length;
+    input.setSelectionRange(caretPosition, caretPosition);
   }, [renameNodeDraft?.cardID]);
 
   const removeCards = useCallback(async (cardIDs: string[]) => {
@@ -1737,6 +1738,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setSelectedCardIDs(new Set([result.card.card_id]));
       setSelectionAnchorCardID(result.card.card_id);
       setHighlightedEntity({ nodeID: result.card.node_id });
+      cancelRenameNodeOnBlurRef.current = false;
+      setRenameNodeDraft({ cardID: result.card.card_id, nodeID: result.card.node_id, title: result.card.node_title, replaceOnFirstEdit: true });
     } catch {
       setError("Node create failed");
       removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
@@ -1869,12 +1872,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         dragBefore={dragBefore}
         dragAfter={dragAfter}
         line={line}
-        cardBackground={cardBackground}
         text={text}
         subtext={subtext}
         accent={accent}
         editingTitle={renameNodeDraft?.cardID === card.card_id}
         renameTitleDraft={renameNodeDraft?.cardID === card.card_id ? renameNodeDraft.title : card.node_title}
+        replaceTitleOnFirstEdit={renameNodeDraft?.cardID === card.card_id && renameNodeDraft.replaceOnFirstEdit === true}
         renameInputRef={renameNodeInputRef}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1898,7 +1901,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
-        onSetRenameTitleDraft={(title) => setRenameNodeDraft((current) => (current && current.cardID === card.card_id ? { ...current, title } : current))}
+        onSetRenameTitleDraft={(title, replaceOnFirstEdit = false) => setRenameNodeDraft((current) => (current && current.cardID === card.card_id ? { ...current, title, replaceOnFirstEdit } : current))}
         onCommitRenameTitle={(title) => {
           if (cancelRenameNodeOnBlurRef.current) {
             cancelRenameNodeOnBlurRef.current = false;

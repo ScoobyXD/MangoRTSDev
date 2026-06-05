@@ -21,18 +21,18 @@ type KanbanCardViewProps = {
   dragBefore: boolean;
   dragAfter: boolean;
   line: string;
-  cardBackground: string;
   text: string;
   subtext: string;
   accent: string;
   editingTitle: boolean;
   renameTitleDraft: string;
+  replaceTitleOnFirstEdit: boolean;
   renameInputRef: React.RefObject<HTMLInputElement>;
   onMouseDown: React.MouseEventHandler<HTMLElement>;
   onClick: React.MouseEventHandler<HTMLElement>;
   onDoubleClick: React.MouseEventHandler<HTMLElement>;
   onContextMenu: React.MouseEventHandler<HTMLElement>;
-  onSetRenameTitleDraft: (title: string) => void;
+  onSetRenameTitleDraft: (title: string, replaceOnFirstEdit?: boolean) => void;
   onCommitRenameTitle: (title: string) => void;
   onCancelRenameTitle: () => void;
   onDragStart: React.DragEventHandler<HTMLElement>;
@@ -50,12 +50,12 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   dragBefore,
   dragAfter,
   line: _line,
-  cardBackground,
   text,
   subtext,
   accent,
   editingTitle,
   renameTitleDraft,
+  replaceTitleOnFirstEdit,
   renameInputRef,
   onMouseDown,
   onClick,
@@ -120,39 +120,61 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           <input
             ref={renameInputRef}
             value={renameTitleDraft}
-            onChange={(event) => onSetRenameTitleDraft(event.currentTarget.value)}
+            onChange={(event) => onSetRenameTitleDraft(event.currentTarget.value, false)}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (replaceTitleOnFirstEdit) onSetRenameTitleDraft(event.currentTarget.value, false);
+            }}
+            onPaste={(event) => {
+              if (!replaceTitleOnFirstEdit) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onSetRenameTitleDraft(event.clipboardData.getData("text"), false);
+            }}
             onKeyDown={(event) => {
+              event.stopPropagation();
               if (event.key === "Enter") {
                 event.preventDefault();
-                event.stopPropagation();
                 onCommitRenameTitle(event.currentTarget.value);
+                return;
               }
               if (event.key === "Escape") {
                 event.preventDefault();
-                event.stopPropagation();
                 onCancelRenameTitle();
+                return;
+              }
+              if (replaceTitleOnFirstEdit && (event.key === "Delete" || event.key === "Backspace")) {
+                event.preventDefault();
+                onSetRenameTitleDraft("", false);
+                return;
+              }
+              if (replaceTitleOnFirstEdit && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
+                event.preventDefault();
+                onSetRenameTitleDraft(event.key, false);
               }
             }}
             onBlur={(event) => onCommitRenameTitle(event.currentTarget.value)}
             style={{
               minWidth: 0,
               width: "100%",
-              border: `1px solid ${accent}`,
-              background: cardBackground,
-              color: isIssue ? "#111111" : text,
+              border: "none",
+              background: "transparent",
+              color: isIssue ? "#334155" : subtext,
+              caretColor: isIssue ? "#111111" : text,
               font: "inherit",
               fontSize: 12,
               fontWeight: 700,
               lineHeight: 1.25,
-              padding: "1px 4px",
+              padding: 0,
               outline: "none",
+              boxShadow: "none",
+              appearance: "none",
             }}
           />
         ) : (
-          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+          <div style={{ fontSize: 12, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
         )}
       </div>
       {description && (

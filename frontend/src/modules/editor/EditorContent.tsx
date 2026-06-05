@@ -1210,19 +1210,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [linkedEntityCanEdit, linkedNodeID]);
 
   useEffect(() => {
-    if (!isEditingTitle || !editingTitleRef.current) return;
-    const element = editingTitleRef.current;
-    element.focus();
-    const selection = window.getSelection();
-    if (!selection) return;
-    const nextRange = document.createRange();
-    nextRange.selectNodeContents(element);
-    nextRange.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(nextRange);
-  }, [isEditingTitle]);
-
-  useEffect(() => {
     const element = editorHeaderRef.current;
     if (!hasLinkedDocument || !element) {
       setEditorHeaderHeightPx(0);
