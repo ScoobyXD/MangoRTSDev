@@ -654,17 +654,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     scheduleTextBlockSave(blockID, nextContent);
   }, [canEdit, scheduleTextBlockSave]);
 
-  const renameTextBlock = useCallback((blockID: string) => {
-    if (!canEdit) return;
-    const block = blocks.find((item) => item.id === blockID);
-    const nextTitle = window.prompt("Rename title", block?.title || DEFAULT_TEXT_BLOCK_TITLE);
-    if (nextTitle === null) return;
-    const title = nextTitle.trim();
-    if (!title) return;
-    updateTextBlockContent(blockID, { title });
-    flushTextBlockSave(blockID);
-  }, [blocks, canEdit, flushTextBlockSave, updateTextBlockContent]);
-
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
     if (!nodeID || !companyID) return;
@@ -735,14 +724,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const requestDeleteTextBlock = useCallback((blockID: string) => {
     if (!canEdit) return;
-    const block = blocks.find((item) => item.id === blockID);
     const chatCount = chatMessages.filter((message) => message.blockID === blockID).length;
     setDeleteTextBlockConfirmation({
       blockID,
-      title: block?.title.trim() || DEFAULT_TEXT_BLOCK_TITLE,
+      title: "text box",
       chatCount,
     });
-  }, [blocks, canEdit, chatMessages]);
+  }, [canEdit, chatMessages]);
 
   const openSelectionChat = useCallback((selection: TextBlockSelectionDraft) => {
     if (!canEdit) return;
@@ -1549,35 +1537,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
-                    <input
-                      value={block.title}
-                      disabled={!canEdit}
-                      readOnly={!canEdit}
-                      onFocus={() => {
-                        if (!canEdit) return;
-                        setFocusedTextBlockID(block.id);
-                        setActiveChatBlockID("");
-                      }}
-                      onChange={(event) => updateTextBlockContent(block.id, { title: event.currentTarget.value })}
-                      onBlur={() => flushTextBlockSave(block.id)}
-                      placeholder={DEFAULT_TEXT_BLOCK_TITLE}
-                      style={{
-                        minWidth: 0,
-                        width: "100%",
-                        border: 0,
-                        outline: "none",
-                        background: "transparent",
-                        color: surfaceText,
-                        opacity: block.title ? 0.9 : 0.68,
-                        fontSize: 11,
-                        fontWeight: 800,
-                        letterSpacing: 0,
-                        caretColor: canEdit ? surfaceText : "transparent",
-                        cursor: canEdit ? "text" : "default",
-                      }}
-                    />
-                    <div style={{ minWidth: 0, maxWidth: compact ? 210 : 380, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: "nowrap" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                    <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: compact ? "normal" : "nowrap", overflow: "hidden" }}>
                       <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                         Last updated {formatTimestamp(block.updatedTimestamp)}
                       </span>
@@ -1604,7 +1565,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         surfaceText={surfaceText}
                         panelBackground={panelBackground}
                         strokeColor={strokeColor}
-                        onRename={() => renameTextBlock(block.id)}
                         onDelete={() => requestDeleteTextBlock(block.id)}
                       />
                     ) : (

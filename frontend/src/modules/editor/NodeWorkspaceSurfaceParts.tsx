@@ -104,7 +104,6 @@ type TextBlockActionsMenuProps = {
   surfaceText: string;
   panelBackground: string;
   strokeColor: string;
-  onRename: () => void;
   onDelete: () => void;
 };
 
@@ -113,7 +112,6 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
   surfaceText,
   panelBackground,
   strokeColor,
-  onRename,
   onDelete,
 }) => {
   const [open, setOpen] = useState(false);
@@ -166,17 +164,6 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
             boxShadow: "0 12px 28px rgba(0,0,0,0.14)",
           }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onRename();
-            }}
-            style={menuItemStyle}
-          >
-            Rename title
-          </button>
           <button
             type="button"
             role="menuitem"

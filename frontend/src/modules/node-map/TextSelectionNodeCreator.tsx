@@ -17,6 +17,10 @@ type TextSelectionSnapshot = {
 
 const BUTTON_SIZE = 28;
 const VIEWPORT_MARGIN = 8;
+const ACTION_EDGE_OFFSET = 8;
+const ACTION_GAP = 6;
+const NODE_ACTION_FORWARD_OFFSET = ACTION_EDGE_OFFSET + BUTTON_SIZE + ACTION_GAP;
+const NODE_ACTION_BACKWARD_OFFSET = (BUTTON_SIZE * 2) + ACTION_EDGE_OFFSET + ACTION_GAP;
 const NODE_SELECTION_SOURCE_SELECTOR = '[data-mango-linked-entity-kind="node"][data-mango-linked-entity-id]';
 const FLOATING_SELECTION_ACTIONS_DISABLED_SELECTOR = '[data-floating-selection-actions="disabled"]';
 const RELATIONSHIP_OPTIONS: Array<{ kind: SelectionNodeRelationshipKind; label: string }> = [
@@ -59,6 +63,15 @@ function readSelectionSourceNodeID(range: Range): string {
     : "";
 }
 
+function selectionIsForward(selection: Selection): boolean {
+  if (!selection.anchorNode || !selection.focusNode) return true;
+  if (selection.anchorNode === selection.focusNode) return selection.anchorOffset <= selection.focusOffset;
+  const position = selection.anchorNode.compareDocumentPosition(selection.focusNode);
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) return true;
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) return false;
+  return true;
+}
+
 function readSelectionSnapshot(root: HTMLElement | null): TextSelectionSnapshot | null {
   const selection = document.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -73,10 +86,18 @@ function readSelectionSnapshot(root: HTMLElement | null): TextSelectionSnapshot 
   if (!title) return null;
 
   const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-  const rect = rects[rects.length - 1] ?? range.getBoundingClientRect();
+  const selectionRect = range.getBoundingClientRect();
+  const forwardSelection = selectionIsForward(selection);
+  const rect = forwardSelection
+    ? (rects[rects.length - 1] ?? selectionRect)
+    : (rects[0] ?? selectionRect);
   if (!Number.isFinite(rect.right) || !Number.isFinite(rect.top) || rect.width <= 0 || rect.height <= 0) return null;
 
-  const x = clampToViewport(rect.right + 42, BUTTON_SIZE, window.innerWidth);
+  const x = clampToViewport(
+    forwardSelection ? rect.right + NODE_ACTION_FORWARD_OFFSET : rect.left - NODE_ACTION_BACKWARD_OFFSET,
+    BUTTON_SIZE,
+    window.innerWidth,
+  );
   const y = clampToViewport(rect.top + (rect.height - BUTTON_SIZE) / 2, BUTTON_SIZE, window.innerHeight);
   return { title, x, y, sourceNodeID };
 }

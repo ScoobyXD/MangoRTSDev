@@ -3,7 +3,7 @@ import type { EmailMailbox, EmailMessage } from "../../modules/communications/co
 import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
-import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
+import type { ComposeState, HomeViewID, MessageSelectionModifiers, MyLogicGateGroup } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, logicGateTitle, mailboxLabel, nodeTitle } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
@@ -148,6 +148,20 @@ type MailNodeTarget =
   | { kind: "node"; logicGateID: string; nodeID: string; label: string };
 
 type MailLogicGateNodeGroup = {
+  key: string;
+  label: string;
+  logicGates: Array<{
+    logicGate: LogicGateRecord;
+    nodes: NodeRecord[];
+  }>;
+};
+
+export type HomeMailNoticeAction = {
+  label: string;
+  onClick: () => void;
+};
+
+type MailLogicGateNodeItem = {
   logicGate: LogicGateRecord;
   nodes: NodeRecord[];
 };
@@ -183,14 +197,47 @@ const mailNodePriorityMenuStyle: React.CSSProperties = {
 
 const mailNodeMenuGroupStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
+  gap: 2,
 };
 
-const mailNodeMenuGateButtonStyle = (selected: boolean): React.CSSProperties => ({
+const mailNodeFolderButtonStyle = (open: boolean, depth = 0): React.CSSProperties => ({
   width: "100%",
   minHeight: 32,
   display: "grid",
-  gridTemplateColumns: "18px minmax(0, 1fr)",
+  gridTemplateColumns: "12px 18px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  border: "1px solid transparent",
+  borderRadius: 6,
+  background: open ? "rgba(255, 151, 8, 0.08)" : "transparent",
+  color: "#0f172a",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 850,
+  padding: `6px 8px 6px ${8 + depth * 16}px`,
+  textAlign: "left",
+  cursor: "pointer",
+  letterSpacing: 0,
+});
+
+const mailNodeDisclosureStyle = (open: boolean): React.CSSProperties => ({
+  width: 12,
+  height: 12,
+  display: "grid",
+  placeItems: "center",
+  color: "#475569",
+  transform: open ? "rotate(90deg)" : "rotate(0deg)",
+  transition: "transform 120ms ease",
+  fontSize: 11,
+  fontWeight: 900,
+  lineHeight: 1,
+});
+
+const mailNodeMenuGateButtonStyle = (selected: boolean, depth = 0, hasChildren = false, open = false): React.CSSProperties => ({
+  width: "100%",
+  minHeight: 32,
+  display: "grid",
+  gridTemplateColumns: hasChildren ? "12px 18px minmax(0, 1fr)" : "18px minmax(0, 1fr)",
   alignItems: "center",
   gap: 8,
   border: `1px solid ${selected ? "rgba(8, 145, 178, 0.46)" : "transparent"}`,
@@ -200,17 +247,16 @@ const mailNodeMenuGateButtonStyle = (selected: boolean): React.CSSProperties => 
   font: "inherit",
   fontSize: 12,
   fontWeight: 800,
-  padding: "6px 8px",
+  padding: `6px 8px 6px ${8 + depth * 16}px`,
   textAlign: "left",
   cursor: "pointer",
   letterSpacing: 0,
+  boxShadow: open && !selected ? "inset 0 0 0 1px rgba(148, 163, 184, 0.18)" : undefined,
 });
 
-const mailNodeMenuNodeButtonStyle = (selected: boolean): React.CSSProperties => ({
-  ...mailNodeMenuGateButtonStyle(selected),
+const mailNodeMenuNodeButtonStyle = (selected: boolean, depth = 0): React.CSSProperties => ({
+  ...mailNodeMenuGateButtonStyle(selected, depth),
   minHeight: 28,
-  marginLeft: 22,
-  width: "calc(100% - 22px)",
   fontSize: 11,
   fontWeight: 700,
   color: "#334155",
@@ -255,7 +301,7 @@ function mailNodePriorityMenuPosition(mainLeft: number, mainTop: number): { left
   return mailNodeMenuPosition(left, mainTop, MAIL_NODE_PRIORITY_MENU_WIDTH);
 }
 
-function buildMailLogicGateNodeGroups(logicGates: LogicGateRecord[], nodes: NodeRecord[]): MailLogicGateNodeGroup[] {
+function buildMailLogicGateNodeGroups(myGroups: MyLogicGateGroup[], nodes: NodeRecord[]): MailLogicGateNodeGroup[] {
   const nodesByLogicGateID = new Map<string, NodeRecord[]>();
   for (const node of nodes) {
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
@@ -264,13 +310,17 @@ function buildMailLogicGateNodeGroups(logicGates: LogicGateRecord[], nodes: Node
       nodesByLogicGateID.set(logicGateID, bucket);
     }
   }
-  return [...logicGates]
-    .sort((a, b) => logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" }) || a.logic_gate_id.localeCompare(b.logic_gate_id))
-    .map((logicGate) => ({
-      logicGate,
-      nodes: [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])]
-        .sort((a, b) => nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" }) || a.node_id.localeCompare(b.node_id)),
-    }));
+  return myGroups
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      logicGates: group.logicGates.map((logicGate): MailLogicGateNodeItem => ({
+        logicGate,
+        nodes: [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])]
+          .sort((a, b) => nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" }) || a.node_id.localeCompare(b.node_id)),
+      })),
+    }))
+    .filter((group) => group.logicGates.length > 0);
 }
 
 function MailNodeAttachmentMenu({
@@ -290,6 +340,14 @@ function MailNodeAttachmentMenu({
 }) {
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const priorityRef = React.useRef<HTMLDivElement | null>(null);
+  const [rootOpen, setRootOpen] = React.useState(true);
+  const [openGroupKeys, setOpenGroupKeys] = React.useState<Set<string>>(new Set());
+  const [openLogicGateIDs, setOpenLogicGateIDs] = React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    setRootOpen(true);
+    setOpenGroupKeys(new Set(groups.map((group) => group.key)));
+    setOpenLogicGateIDs(new Set(groups.flatMap((group) => group.logicGates.map((item) => item.logicGate.logic_gate_id))));
+  }, [groups, menu.messageID]);
   React.useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as globalThis.Node | null;
@@ -309,40 +367,88 @@ function MailNodeAttachmentMenu({
 
   const mainPosition = mailNodeMenuPosition(menu.x, menu.y, MAIL_NODE_MENU_WIDTH);
   const priorityPosition = mailNodePriorityMenuPosition(mainPosition.left, mainPosition.top);
+  const toggleGroup = (groupKey: string) => {
+    setOpenGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+  const toggleLogicGate = (logicGateID: string) => {
+    setOpenLogicGateIDs((current) => {
+      const next = new Set(current);
+      if (next.has(logicGateID)) next.delete(logicGateID);
+      else next.add(logicGateID);
+      return next;
+    });
+  };
   return (
     <>
       <div ref={menuRef} style={{ ...mailNodeMenuStyle, left: mainPosition.left, top: mainPosition.top }}>
         {groups.length === 0 ? (
-          <div style={mailNodeEmptyStyle}>No Logic Gates</div>
-        ) : groups.map((group) => {
-          const gateTarget: MailNodeTarget = { kind: "logic_gate", logicGateID: group.logicGate.logic_gate_id, label: logicGateTitle(group.logicGate) };
-          return (
-            <div key={group.logicGate.logic_gate_id} style={mailNodeMenuGroupStyle}>
-              <button
-                type="button"
-                style={mailNodeMenuGateButtonStyle(isSameMailNodeTarget(selectedTarget, gateTarget))}
-                onClick={() => onSelectTarget(gateTarget)}
-              >
-                <ExplorerRowIcon kind="logic_gate" />
-                <span style={mailNodeMenuLabelStyle}>{gateTarget.label}</span>
-              </button>
-              {group.nodes.map((node) => {
-                const nodeTarget: MailNodeTarget = { kind: "node", logicGateID: group.logicGate.logic_gate_id, nodeID: node.node_id, label: nodeTitle(node) };
-                return (
-                  <button
-                    key={`${group.logicGate.logic_gate_id}:${node.node_id}`}
-                    type="button"
-                    style={mailNodeMenuNodeButtonStyle(isSameMailNodeTarget(selectedTarget, nodeTarget))}
-                    onClick={() => onSelectTarget(nodeTarget)}
-                  >
-                    <ExplorerRowIcon kind="node" />
-                    <span style={mailNodeMenuLabelStyle}>{nodeTarget.label}</span>
+          <div style={mailNodeEmptyStyle}>No My Logic Gates</div>
+        ) : (
+          <div style={mailNodeMenuGroupStyle}>
+            <button type="button" style={mailNodeFolderButtonStyle(rootOpen)} onClick={() => setRootOpen((open) => !open)}>
+              <span aria-hidden="true" style={mailNodeDisclosureStyle(rootOpen)}>&gt;</span>
+              <ExplorerRowIcon kind="folder" />
+              <span style={mailNodeMenuLabelStyle}>My Logic Gates</span>
+            </button>
+            {rootOpen && groups.map((group) => {
+              const groupOpen = openGroupKeys.has(group.key);
+              return (
+                <div key={group.key} style={mailNodeMenuGroupStyle}>
+                  <button type="button" style={mailNodeFolderButtonStyle(groupOpen, 1)} onClick={() => toggleGroup(group.key)}>
+                    <span aria-hidden="true" style={mailNodeDisclosureStyle(groupOpen)}>&gt;</span>
+                    <ExplorerRowIcon kind="folder" />
+                    <span style={mailNodeMenuLabelStyle}>{group.label}</span>
                   </button>
-                );
-              })}
-            </div>
-          );
-        })}
+                  {groupOpen && group.logicGates.map(({ logicGate, nodes: gateNodes }) => {
+                    const gateOpen = openLogicGateIDs.has(logicGate.logic_gate_id);
+                    const gateTarget: MailNodeTarget = { kind: "logic_gate", logicGateID: logicGate.logic_gate_id, label: logicGateTitle(logicGate) };
+                    return (
+                      <div key={logicGate.logic_gate_id} style={mailNodeMenuGroupStyle}>
+                        <button
+                          type="button"
+                          style={mailNodeMenuGateButtonStyle(isSameMailNodeTarget(selectedTarget, gateTarget), 2, true, gateOpen)}
+                          onClick={() => onSelectTarget(gateTarget)}
+                        >
+                          <span
+                            aria-hidden="true"
+                            style={mailNodeDisclosureStyle(gateOpen)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleLogicGate(logicGate.logic_gate_id);
+                            }}
+                          >
+                            &gt;
+                          </span>
+                          <ExplorerRowIcon kind="logic_gate" />
+                          <span style={mailNodeMenuLabelStyle}>{gateTarget.label}</span>
+                        </button>
+                        {gateOpen && gateNodes.map((node) => {
+                          const nodeTarget: MailNodeTarget = { kind: "node", logicGateID: logicGate.logic_gate_id, nodeID: node.node_id, label: nodeTitle(node) };
+                          return (
+                            <button
+                              key={`${logicGate.logic_gate_id}:${node.node_id}`}
+                              type="button"
+                              style={mailNodeMenuNodeButtonStyle(isSameMailNodeTarget(selectedTarget, nodeTarget), 3)}
+                              onClick={() => onSelectTarget(nodeTarget)}
+                            >
+                              <ExplorerRowIcon kind="node" />
+                              <span style={mailNodeMenuLabelStyle}>{nodeTarget.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {selectedTarget && (
         <div ref={priorityRef} style={{ ...mailNodePriorityMenuStyle, left: priorityPosition.left, top: priorityPosition.top }}>
@@ -377,14 +483,15 @@ export function HomeMailWorkspace({
   loadingDetail,
   loadingMessages,
   loadingMoreMessages,
-  logicGates,
   mailFilterStatus,
   mailbox,
   mailboxCounts,
   messageListRef,
   messages,
+  myLogicGateGroups,
   nodes,
   notice,
+  noticeAction,
   pendingAutoArchiveMessageIDs,
   pendingStarredMessageIDs,
   searchDraft,
@@ -438,14 +545,15 @@ export function HomeMailWorkspace({
   loadingDetail: boolean;
   loadingMessages: boolean;
   loadingMoreMessages: boolean;
-  logicGates: LogicGateRecord[];
   mailFilterStatus: string;
   mailbox: EmailMailbox;
   mailboxCounts: TriageMailboxCounts;
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
+  myLogicGateGroups: MyLogicGateGroup[];
   nodes: NodeRecord[];
   notice: string;
+  noticeAction?: HomeMailNoticeAction | null;
   pendingAutoArchiveMessageIDs: Set<string>;
   pendingStarredMessageIDs: Set<string>;
   searchDraft: string;
@@ -496,7 +604,7 @@ export function HomeMailWorkspace({
   const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
   const archiveVisualFrameRef = React.useRef<number | null>(null);
   const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
-  const mailNodeGroups = React.useMemo(() => buildMailLogicGateNodeGroups(logicGates, nodes), [logicGates, nodes]);
+  const mailNodeGroups = React.useMemo(() => buildMailLogicGateNodeGroups(myLogicGateGroups, nodes), [myLogicGateGroups, nodes]);
 
   const closeNodeMenu = React.useCallback(() => {
     setNodeMenu(null);
@@ -637,7 +745,21 @@ export function HomeMailWorkspace({
             </div>
           )}
           {error && <div style={inlineErrorStyle}>{error}</div>}
-          {notice && !error && <div style={inlineNoticeStyle}>{notice}</div>}
+          {notice && !error && (
+            <div style={{ ...inlineNoticeStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ minWidth: 0 }}>{notice}</span>
+              {noticeAction && (
+                <button
+                  type="button"
+                  className="mango-elevated-action"
+                  onClick={noticeAction.onClick}
+                  style={{ ...mailPanelSmallButtonStyle, minHeight: 24, padding: "3px 10px", whiteSpace: "nowrap", flexShrink: 0 }}
+                >
+                  {noticeAction.label}
+                </button>
+              )}
+            </div>
+          )}
           {isArchivableListView && (
             <div style={mailArchiveActionsStyle}>
               <button

@@ -67,7 +67,7 @@ import { useNotificationSummary } from "../../modules/notifications/useNotificat
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
-import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
+import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
@@ -77,6 +77,14 @@ import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, typ
 function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
 }
+
+function isTriageMailViewID(viewID: HomeViewID): boolean {
+  return viewID === "my-triage" || viewID === "shared-root" || viewID.startsWith("shared:");
+}
+
+type HomeNoticeResourceAction =
+  | { kind: "logic_gate"; logicGateID: string }
+  | { kind: "node"; nodeID: string };
 
 function promptEmailProviderForConnection(): EmailProvider | "" {
   const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
@@ -227,6 +235,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
   const [columnWidths, setColumnWidths] = useState<HomeColumnWidths>(() => readHomeColumnWidths());
@@ -274,6 +283,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const loadingMoreMessagesRef = useRef(false);
   const activeDeleteSelectionKindRef = useRef<"message" | HomeEntityDeleteKind | "">("");
   const messageListFilterKeyRef = useRef("");
+  const noticeResourceTextRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
   const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
   const columnResizeDragRef = useRef<HomeColumnResizeDrag | null>(null);
@@ -320,6 +330,17 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     : activeSharedInboxFolderID
       ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
       : true;
+  useEffect(() => {
+    if (!notice || notice !== noticeResourceTextRef.current) {
+      noticeResourceTextRef.current = "";
+      setNoticeResourceAction(null);
+    }
+  }, [notice]);
+  const showNoticeWithResourceAction = useCallback((message: string, action: HomeNoticeResourceAction) => {
+    noticeResourceTextRef.current = message;
+    setNoticeResourceAction(action);
+    setNotice(message);
+  }, []);
   useEffect(() => {
     if (!notice) return undefined;
     const timerID = window.setTimeout(() => {
@@ -832,13 +853,23 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         refresh: options.refresh,
       });
       if (messageRequestSeqRef.current !== requestSeq) return;
-      setMessages(page.messages ?? []);
+      const pageMessages = page.messages ?? [];
+      setMessages(pageMessages);
       setNextPageToken(page.next_page_token ?? "");
       setLoadedMessageListKey(requestKey);
       const currentSelectedMessageID = selectedMessageIDRef.current;
-      if (currentSelectedMessageID && !(page.messages ?? []).some((message) => message.id === currentSelectedMessageID)) {
+      const currentSelectionStillVisible = !!currentSelectedMessageID && pageMessages.some((message) => message.id === currentSelectedMessageID);
+      if (!currentSelectionStillVisible && isTriageMailViewID(activeViewID) && pageMessages.length > 0) {
+        const firstMessage = pageMessages[0];
+        setSelectedMessageID(firstMessage.id);
+        setSelectedMessageIDs(new Set([firstMessage.id]));
+        setSelectionAnchorMessageID(firstMessage.id);
+        setSelectedMessage(firstMessage);
+      } else if (!currentSelectionStillVisible && currentSelectedMessageID) {
         setSelectedMessageID("");
         setSelectedMessage(null);
+        setSelectedMessageIDs(new Set());
+        setSelectionAnchorMessageID("");
       }
     } catch (messageError) {
       if (messageRequestSeqRef.current === requestSeq) {
@@ -2284,13 +2315,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
       setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
-      setNotice(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`);
+      showNoticeWithResourceAction(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`, { kind: "logic_gate", logicGateID });
     } catch (convertError) {
       setError(formatError(convertError, "Failed to send messages to Logic Gate"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID]);
+  }, [apiBase, companyID, logicGateByID, showNoticeWithResourceAction]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({
@@ -2619,13 +2650,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, cleanLogicGateID) : message));
       setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, cleanLogicGateID) : current);
       const title = nodeTitle(nodeByID.get(cleanNodeID)) || "node";
-      setNotice(converted.length === 1 ? `Attached to ${title}.` : `${converted.length} messages attached to ${title}.`);
+      showNoticeWithResourceAction(converted.length === 1 ? `Attached to ${title}.` : `${converted.length} messages attached to ${title}.`, { kind: "node", nodeID: cleanNodeID });
     } catch (attachError) {
       setError(formatError(attachError, "Failed to attach email to node"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID, showNoticeWithResourceAction]);
   const mergeCreatedFolderItems = useCallback((items: CompanyExplorerFolderItem[]) => {
     if (items.length === 0) return;
     setNodeFolderItems((previous) => {
@@ -3115,6 +3146,23 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const activeViewLabel = getHomeViewLabel(activeViewID, sharedInboxes);
   const isArchivableListView = isArchivableHomeViewID(activeViewID);
   const isArchiveMailbox = isArchivableListView && mailbox === "archive";
+  const mailNoticeAction = useMemo<HomeMailNoticeAction | null>(() => {
+    if (!noticeResourceAction) return null;
+    if (noticeResourceAction.kind === "logic_gate") {
+      const logicGateID = noticeResourceAction.logicGateID;
+      return {
+        label: "Go to Logic Gate",
+        onClick: () => openLogicGateArena(logicGateID, logicGateTitle(logicGateByID.get(logicGateID))),
+      };
+    }
+    const nodeID = noticeResourceAction.nodeID;
+    const node = nodeByID.get(nodeID);
+    if (!node) return null;
+    return {
+      label: "Go to Node",
+      onClick: () => openNodeEditorOverlay(node),
+    };
+  }, [logicGateByID, nodeByID, noticeResourceAction, openLogicGateArena, openNodeEditorOverlay]);
   const listViewLabel = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:")
     ? activeViewLabel
     : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
@@ -3344,14 +3392,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             loadingDetail={loadingDetail}
             loadingMessages={loadingMessages}
             loadingMoreMessages={loadingMoreMessages}
-            logicGates={logicGates}
             mailFilterStatus={mailFilterStatus}
             mailbox={mailbox}
             mailboxCounts={mailboxCounts}
             messageListRef={messageListRef}
             messages={messages}
+            myLogicGateGroups={myLogicGateGroups}
             nodes={nodes}
             notice={notice}
+            noticeAction={mailNoticeAction}
             pendingAutoArchiveMessageIDs={pendingAutoArchiveMessageIDs}
             pendingStarredMessageIDs={pendingStarredMessageIDs}
             searchDraft={searchDraft}

@@ -964,9 +964,14 @@ function LogicGateRaciRoleEditor({
       <div ref={menuRef} style={{ position: "relative", minWidth: 0 }}>
         <input
           id={inputID}
+          name={`${inputID}-raci-person`}
           value={draft}
           disabled={!canEdit}
           readOnly={!canEdit}
+          autoComplete="new-password"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
           onFocus={() => { if (canEdit) setOpen(true); }}
           onChange={(event) => {
             if (!canEdit) return;
