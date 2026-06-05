@@ -175,9 +175,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
   const [arenaGroupMenuOpen, setArenaGroupMenuOpen] = useState<ArenaGroupMenuID | null>(null);
   const [arenaXGroupBy, setArenaXGroupBy] = useState<KanbanGroupField>("status");
-  const [arenaYGroupBy, setArenaYGroupBy] = useState<KanbanGroupField>("person");
+  const [arenaYGroupBy, setArenaYGroupBy] = useState<KanbanGroupField>("priority");
   const [arenaXSortDirection, setArenaXSortDirection] = useState<KanbanGroupSortDirection>("asc");
-  const [arenaYSortDirection, setArenaYSortDirection] = useState<KanbanGroupSortDirection>(() => getDefaultKanbanYAxisSortDirection("person"));
+  const [arenaYSortDirection, setArenaYSortDirection] = useState<KanbanGroupSortDirection>(() => getDefaultKanbanYAxisSortDirection("priority"));
   const [editingBoardTitle, setEditingBoardTitle] = useState(false);
   const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
@@ -209,7 +209,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
-  const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string; replaceOnFirstEdit?: boolean } | null>(null);
+  const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
   const [kanbanProjectionSnapshotBoardID, setKanbanProjectionSnapshotBoardID] = useState("");
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
@@ -1338,7 +1338,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
-  const moveCardsToArenaGroupCell = useCallback(async (cardIDs: string[], columnGroupKey: string, rowGroupKey: string) => {
+  const moveCardsToArenaGroupCell = useCallback(async (
+    cardIDs: string[],
+    columnGroupKey: string,
+    rowGroupKey: string,
+    targetCardID: string | null = null,
+    placement: KanbanCardDropPlacement = "before",
+  ) => {
     setDragOverCard(null);
     setError("");
     const uniqueCardIDs = Array.from(new Set(cardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
@@ -1442,10 +1448,33 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         if (updatedNode) updatedNodes.set(updatedNode.node_id, updatedNode);
       }
 
+      let cardsForOrdering = cardsRef.current;
       if (savedCards.length > 0) {
         const savedCardByID = new Map(savedCards.map((card) => [card.card_id, card]));
-        applyCards((previous) => previous.map((card) => savedCardByID.get(card.card_id) ?? card));
+        cardsForOrdering = cardsRef.current.map((card) => savedCardByID.get(card.card_id) ?? card);
+        applyCards(() => cardsForOrdering);
         syncNodeStatusesFromCards(savedCards);
+      }
+      const reorderTargetCardID = targetCardID?.trim() ?? "";
+      if (reorderTargetCardID && !uniqueCardIDs.includes(reorderTargetCardID)) {
+        const reorderTarget = cardsForOrdering.find((card) => card.card_id === reorderTargetCardID);
+        const reorderColumnID = assignment.columnID ?? reorderTarget?.column_id ?? targetCards[0]?.column_id ?? "";
+        if (reorderColumnID) {
+          const result = await reorderKanbanCardsCommand({
+            context: kanbanCommandContext,
+            cards: cardsForOrdering,
+            cardIDs: uniqueCardIDs,
+            columnID: reorderColumnID,
+            targetCardID: reorderTargetCardID,
+            placement,
+            onOptimisticCards: applyCards,
+          });
+          if (result.persistedCards.length > 0) {
+            const byID = new Map(result.persistedCards.map((card) => [card.card_id, card]));
+            applyCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
+            syncNodeStatusesFromCards(result.persistedCards);
+          }
+        }
       }
       if (updatedNodes.size > 0) {
         for (const node of updatedNodes.values()) {
@@ -1461,7 +1490,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       endMutation();
     }
     if (shouldRefresh) void refreshBoard(mutationBoardID);
-  }, [apiBase, applyCards, arenaXGroupBy, arenaYGroupBy, beginLocalBoardMutation, boardID, companyID, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
+  }, [apiBase, applyCards, arenaXGroupBy, arenaYGroupBy, beginLocalBoardMutation, boardID, companyID, kanbanCommandContext, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
 
   const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
     const clickedCard = cards.find((card) => card.card_id === cardID);
@@ -1514,7 +1543,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setCardContextMenu(null);
     setColumnContextMenu(null);
     cancelRenameNodeOnBlurRef.current = false;
-    setRenameNodeDraft({ cardID: card.card_id, nodeID: card.node_id, title: card.node_title, replaceOnFirstEdit: true });
+    setRenameNodeDraft({ cardID: card.card_id, nodeID: card.node_id, title: card.node_title });
   }, []);
 
   const commitNodeRename = useCallback(async (nodeID: string, title: string) => {
@@ -1739,7 +1768,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setSelectionAnchorCardID(result.card.card_id);
       setHighlightedEntity({ nodeID: result.card.node_id });
       cancelRenameNodeOnBlurRef.current = false;
-      setRenameNodeDraft({ cardID: result.card.card_id, nodeID: result.card.node_id, title: result.card.node_title, replaceOnFirstEdit: true });
+      setRenameNodeDraft({ cardID: result.card.card_id, nodeID: result.card.node_id, title: result.card.node_title });
     } catch {
       setError("Node create failed");
       removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
@@ -1750,6 +1779,26 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     if (shouldRefresh) void refreshBoard(boardID);
   }, [apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, refreshBoard, syncNodeStatusesFromCards]);
+
+  const createNodeInArenaGroupCell = useCallback((columnGroupKey: string, rowGroupKey: string) => {
+    setError("");
+    const assignment = resolveKanbanGroupDropAssignment({
+      columns: columnsRef.current,
+      xGroupBy: arenaXGroupBy,
+      xGroupKey: columnGroupKey,
+      yGroupBy: arenaYGroupBy,
+      yGroupKey: rowGroupKey,
+    });
+    if (!assignment.columnID) {
+      setError("Status is required");
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(assignment, "priority") || assignment.priority == null) {
+      setError("Priority is required");
+      return;
+    }
+    void createNodeInColumn(assignment.columnID, assignment.priority);
+  }, [arenaXGroupBy, arenaYGroupBy, createNodeInColumn]);
 
   const requestAddEntitiesToColumn = useCallback((columnID: string, items: ExplorerEntityDragItem[], anchor?: { x: number; y: number }) => {
     setError("");
@@ -1877,7 +1926,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         accent={accent}
         editingTitle={renameNodeDraft?.cardID === card.card_id}
         renameTitleDraft={renameNodeDraft?.cardID === card.card_id ? renameNodeDraft.title : card.node_title}
-        replaceTitleOnFirstEdit={renameNodeDraft?.cardID === card.card_id && renameNodeDraft.replaceOnFirstEdit === true}
         renameInputRef={renameNodeInputRef}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1901,7 +1949,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
-        onSetRenameTitleDraft={(title, replaceOnFirstEdit = false) => setRenameNodeDraft((current) => (current && current.cardID === card.card_id ? { ...current, title, replaceOnFirstEdit } : current))}
+        onSetRenameTitleDraft={(title) => setRenameNodeDraft((current) => (current && current.cardID === card.card_id ? { ...current, title } : current))}
         onCommitRenameTitle={(title) => {
           if (cancelRenameNodeOnBlurRef.current) {
             cancelRenameNodeOnBlurRef.current = false;
@@ -1944,7 +1992,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             event.preventDefault();
             event.stopPropagation();
             if (groupedCell) {
-              void moveCardsToArenaGroupCell(cardPayload.cardIDs, groupedCell.columnKey, groupedCell.rowKey);
+              void moveCardsToArenaGroupCell(cardPayload.cardIDs, groupedCell.columnKey, groupedCell.rowKey, card.card_id, cardDropPlacement(event));
             } else {
               void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
             }
@@ -2037,7 +2085,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
-        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} /> : (
+        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} /> : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];

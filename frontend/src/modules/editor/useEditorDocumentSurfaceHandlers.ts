@@ -1585,7 +1585,7 @@ export function useEditorDocumentSurfaceHandlers({
         }
         const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
         const currentText = readEditorDocumentText(root);
-        const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle);
+        const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle, { continueAutomaticOutline: !event.shiftKey });
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
         const anchor = getCollapsedAnchorAtSelectionEnd(root);
         const inserted = anchor

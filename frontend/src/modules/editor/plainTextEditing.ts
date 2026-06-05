@@ -290,9 +290,15 @@ function getIndentGuideContinuation(value: string, selectionStart: number): stri
   return `\n${readLineIndentation(line)}`;
 }
 
-export function insertEditorEnterText(value: string, selectionStart: number, selectionEnd: number, outlineStyle: EditorOutlineStyleID): PlainTextEdit {
+export function insertEditorEnterText(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  outlineStyle: EditorOutlineStyleID,
+  options: { continueAutomaticOutline?: boolean } = {},
+): PlainTextEdit {
   const continuation = outlineStyle === "automatic-outline-numbering"
-    ? getAutomaticOutlineContinuation(value, selectionStart)
+    ? (options.continueAutomaticOutline === false ? null : getAutomaticOutlineContinuation(value, selectionStart))
     : getIndentGuideContinuation(value, selectionStart);
   return replaceSelection(value, selectionStart, selectionEnd, continuation ?? "\n");
 }

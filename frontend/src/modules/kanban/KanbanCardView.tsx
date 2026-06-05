@@ -26,13 +26,12 @@ type KanbanCardViewProps = {
   accent: string;
   editingTitle: boolean;
   renameTitleDraft: string;
-  replaceTitleOnFirstEdit: boolean;
   renameInputRef: React.RefObject<HTMLInputElement>;
   onMouseDown: React.MouseEventHandler<HTMLElement>;
   onClick: React.MouseEventHandler<HTMLElement>;
   onDoubleClick: React.MouseEventHandler<HTMLElement>;
   onContextMenu: React.MouseEventHandler<HTMLElement>;
-  onSetRenameTitleDraft: (title: string, replaceOnFirstEdit?: boolean) => void;
+  onSetRenameTitleDraft: (title: string) => void;
   onCommitRenameTitle: (title: string) => void;
   onCancelRenameTitle: () => void;
   onDragStart: React.DragEventHandler<HTMLElement>;
@@ -55,7 +54,6 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   accent,
   editingTitle,
   renameTitleDraft,
-  replaceTitleOnFirstEdit,
   renameInputRef,
   onMouseDown,
   onClick,
@@ -120,19 +118,13 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           <input
             ref={renameInputRef}
             value={renameTitleDraft}
-            onChange={(event) => onSetRenameTitleDraft(event.currentTarget.value, false)}
+            onChange={(event) => onSetRenameTitleDraft(event.currentTarget.value)}
             onClick={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-            onMouseDown={(event) => {
+            onDoubleClick={(event) => {
               event.stopPropagation();
-              if (replaceTitleOnFirstEdit) onSetRenameTitleDraft(event.currentTarget.value, false);
+              event.currentTarget.select();
             }}
-            onPaste={(event) => {
-              if (!replaceTitleOnFirstEdit) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onSetRenameTitleDraft(event.clipboardData.getData("text"), false);
-            }}
+            onMouseDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               event.stopPropagation();
               if (event.key === "Enter") {
@@ -144,15 +136,6 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
                 event.preventDefault();
                 onCancelRenameTitle();
                 return;
-              }
-              if (replaceTitleOnFirstEdit && (event.key === "Delete" || event.key === "Backspace")) {
-                event.preventDefault();
-                onSetRenameTitleDraft("", false);
-                return;
-              }
-              if (replaceTitleOnFirstEdit && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
-                event.preventDefault();
-                onSetRenameTitleDraft(event.key, false);
               }
             }}
             onBlur={(event) => onCommitRenameTitle(event.currentTarget.value)}

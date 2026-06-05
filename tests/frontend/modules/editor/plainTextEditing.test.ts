@@ -34,6 +34,16 @@ test("automatic outline numbering continues simple numbered lines on Enter", () 
   });
 });
 
+test("automatic outline numbering inserts a plain newline when continuation is disabled", () => {
+  const edit = insertEditorEnterText("1. alpha", "1. alpha".length, "1. alpha".length, "automatic-outline-numbering", { continueAutomaticOutline: false });
+
+  assert.deepEqual(edit, {
+    value: "1. alpha\n",
+    selectionStart: 9,
+    selectionEnd: 9,
+  });
+});
+
 test("automatic outline numbering continues multilevel lines without rewriting earlier text", () => {
   const value = "intro\n  1.2. beta";
   const edit = insertEditorEnterText(value, value.length, value.length, "automatic-outline-numbering");

@@ -269,18 +269,35 @@ export type KanbanArenaGroupedCellContext = {
   rowKey: string;
 };
 
+const ARENA_GROUP_CELL_TINTS = [
+  ["rgba(14, 165, 233, 0.10)", "rgba(34, 197, 94, 0.08)"],
+  ["rgba(249, 115, 22, 0.10)", "rgba(168, 85, 247, 0.08)"],
+  ["rgba(20, 184, 166, 0.10)", "rgba(244, 63, 94, 0.07)"],
+  ["rgba(234, 179, 8, 0.10)", "rgba(59, 130, 246, 0.08)"],
+];
+
+function arenaGroupCellBackground(isDark: boolean, columnIndex: number, rowIndex: number): string {
+  const tintPair = ARENA_GROUP_CELL_TINTS[(columnIndex + rowIndex) % ARENA_GROUP_CELL_TINTS.length];
+  const tint = tintPair[rowIndex % tintPair.length];
+  return isDark
+    ? `linear-gradient(135deg, rgba(15, 23, 42, 0.72), ${tint}), ${ARENA_GROUP_FRAME_BACKGROUND}`
+    : `linear-gradient(135deg, rgba(255,255,255,0.86), ${tint}), ${ARENA_GROUP_FRAME_BACKGROUND}`;
+}
+
 export function KanbanArenaGroupedBoard({
   groupedBoard,
   isDark,
   text,
   renderCard,
   onDropCardIDsToCell,
+  onCreateNodeInCell,
 }: {
   groupedBoard: KanbanGroupedBoardLayout;
   isDark: boolean;
   text: string;
   renderCard: (card: KanbanCard, groupedCell?: KanbanArenaGroupedCellContext) => React.ReactNode;
   onDropCardIDsToCell?: (cardIDs: string[], columnKey: string, rowKey: string) => void;
+  onCreateNodeInCell?: (columnKey: string, rowKey: string) => void;
 }) {
   const [activeDropCellKey, setActiveDropCellKey] = React.useState("");
   const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
@@ -348,11 +365,38 @@ export function KanbanArenaGroupedBoard({
                 borderLeft: columnIndex === 0 ? "none" : undefined,
                 borderTop: rowIndex === 0 ? "none" : undefined,
                 borderBottomRightRadius: rowIndex === rowCount - 1 && columnIndex === groupedBoard.columns.length - 1 ? 8 : 0,
-                background: groupFrameBackground,
+                background: arenaGroupCellBackground(isDark, columnIndex, rowIndex),
                 boxShadow: activeDrop ? `${groupFrameShadow}, inset 0 0 0 2px rgba(71, 85, 105, 0.34)` : groupFrameShadow,
                 padding: 8,
               }}
             >
+              {onCreateNodeInCell && (
+                <button
+                  className="mango-elevated-action"
+                  type="button"
+                  title="Create node in this cell"
+                  onClick={() => onCreateNodeInCell(column.key, row.key)}
+                  style={{
+                    justifySelf: "end",
+                    width: 26,
+                    height: 24,
+                    border: `1px solid ${glassBorder}`,
+                    borderRadius: 7,
+                    background: isDark ? "rgba(15, 23, 42, 0.78)" : "rgba(255,255,255,0.88)",
+                    color: text,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    font: "inherit",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  +
+                </button>
+              )}
               {cell.cards.map((card) => renderCard(card, { columnKey: column.key, rowKey: row.key }))}
             </div>
           );
