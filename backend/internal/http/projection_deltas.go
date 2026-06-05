@@ -214,8 +214,10 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			if projectionScope == "" || realtimeScope == "" {
 				continue
 			}
-			hasRealtimeSubscribers := s.realtimeRegistry.hasSubscribers(delta.CompanyID, realtimeScope)
+			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
+			hasRealtimeSubscribers := len(realtimeConnections) > 0
 			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
+			log.Printf("racio_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
 			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
 				continue
 			}

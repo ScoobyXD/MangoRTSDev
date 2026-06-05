@@ -158,11 +158,13 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 	s.realtimeRegistry.addConnection(realtimeConn)
 	s.recordRealtimeActiveConnections()
+	log.Printf("realtime_connection_open company_id=%s user_id=%s connection_id=%s", companyID, realtimeConn.userID, realtimeConn.id)
 	defer func() {
 		s.realtimeRegistry.removeConnection(realtimeConn.id)
 		s.recordRealtimeActiveConnections()
 		s.recordRealtimeActiveSubscriptions()
 		_ = conn.Close()
+		log.Printf("realtime_connection_closed company_id=%s user_id=%s connection_id=%s", companyID, realtimeConn.userID, realtimeConn.id)
 	}()
 
 	if err := realtimeConn.sendJSON(realtimeServerMessage{
@@ -306,18 +308,14 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		return
 	}
 	if !authorized {
-		if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
-			log.Printf("realtime_board_subscription_rejected company_id=%s user_id=%s connection_id=%s board_id=%s scope=%s error=%s", conn.companyID, conn.userID, conn.id, boardID, scope, rejectCode)
-		}
+		log.Printf("realtime_subscription_rejected company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s error=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope, rejectCode)
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: rejectCode})
 		return
 	}
 	s.realtimeRegistry.subscribe(conn, scope)
 	s.recordRealtimeActiveSubscriptions()
 	currentSequence := s.currentRealtimeScopeSequence(conn.companyID, scope)
-	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
-		log.Printf("realtime_board_subscription_accepted company_id=%s user_id=%s connection_id=%s board_id=%s scope=%s current_sequence=%d", conn.companyID, conn.userID, conn.id, boardID, scope, currentSequence)
-	}
+	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s current_sequence=%d", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope, currentSequence)
 	_ = conn.sendJSON(realtimeServerMessage{
 		Type:            realtimeMessageSubscriptionAccepted,
 		CompanyID:       conn.companyID,

@@ -388,6 +388,7 @@ export class MangoRealtimeClient {
   private manualClose = false;
   private keepAliveRefs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private subscriptionsSentForSocket = false;
 
   constructor(apiBase: string, companyID: string, options: RealtimeClientOptions = {}) {
     this.apiBase = apiBase;
@@ -438,8 +439,10 @@ export class MangoRealtimeClient {
         if (this.manualClose) return;
         const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID));
         this.socket = socket;
+        this.subscriptionsSentForSocket = false;
         socket.onopen = () => {
           this.opening = false;
+          this.sendSubscriptionsForCurrentSocket();
         };
         socket.onmessage = (event) => this.handleMessage(typeof event.data === "string" ? event.data : "");
         socket.onerror = () => {
@@ -448,6 +451,7 @@ export class MangoRealtimeClient {
         socket.onclose = () => {
           this.socket = null;
           this.opening = false;
+          this.subscriptionsSentForSocket = false;
           if (!this.manualClose && (this.keepAliveRefs > 0 || this.subscriptions.size > 0)) this.scheduleReconnect();
         };
       })
@@ -465,6 +469,7 @@ export class MangoRealtimeClient {
     this.socket?.close();
     this.socket = null;
     this.opening = false;
+    this.subscriptionsSentForSocket = false;
   }
 
   private closeIfIdle(): void {
@@ -482,6 +487,12 @@ export class MangoRealtimeClient {
 
   private sendSubscriptions(): void {
     for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
+  }
+
+  private sendSubscriptionsForCurrentSocket(): void {
+    if (this.subscriptionsSentForSocket) return;
+    this.subscriptionsSentForSocket = true;
+    this.sendSubscriptions();
   }
 
   private sendSubscribe(scope: string): void {
@@ -519,7 +530,7 @@ export class MangoRealtimeClient {
     }
     if (message.type === "ready") {
       for (const sub of this.allSubscriptions()) sub.onReady?.(message);
-      this.sendSubscriptions();
+      this.sendSubscriptionsForCurrentSocket();
       return;
     }
     if (message.type === "error") {
