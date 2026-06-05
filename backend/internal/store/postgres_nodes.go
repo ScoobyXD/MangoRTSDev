@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -392,7 +393,10 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
+	kanbanDeltaCount := len(projectionDeltas)
+	racioProjectionDeltas := diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)
+	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
+	log.Printf("node_update_projection_deltas company_id=%s node_id=%s title_set=%t kanban_before=%d kanban_after=%d kanban_deltas=%d racio_before=%d racio_after=%d racio_deltas=%d total_deltas=%d", input.CompanyID, input.NodeID, input.TitleSet, len(kanbanProjectionBefore), len(kanbanProjectionAfter), kanbanDeltaCount, len(racioProjectionBefore), len(racioProjectionAfter), len(racioProjectionDeltas), len(projectionDeltas))
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
