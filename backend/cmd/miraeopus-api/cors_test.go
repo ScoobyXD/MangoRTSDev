@@ -65,6 +65,29 @@ func TestCORSMatchesCommaSeparatedOrigins(t *testing.T) {
 	if got := rec.Header().Values("Vary"); !strings.Contains(strings.Join(got, ","), "Origin") {
 		t.Fatalf("vary headers = %v, want Origin", got)
 	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("allow credentials = %q, want true", got)
+	}
+}
+
+func TestCORSAllowsCredentialedRealtimeTicketWithWildcardDevOrigin(t *testing.T) {
+	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "*")
+
+	handler := withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/ticket", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("allow origin = %q, want request origin", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("allow credentials = %q, want true", got)
+	}
 }
 
 func TestCORSOmitsUnlistedOrigin(t *testing.T) {

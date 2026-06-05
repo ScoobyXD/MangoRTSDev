@@ -339,6 +339,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := corsAllowedOrigin(r.Header.Get("Origin"), allowedOrigin); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Add("Vary", "Origin")
 		}
 		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
@@ -357,12 +358,12 @@ func withCORS(next http.Handler) http.Handler {
 
 func corsAllowedOrigin(origin, allowedOrigin string) string {
 	allowedOrigin = strings.TrimSpace(allowedOrigin)
-	if allowedOrigin == "*" {
-		return "*"
-	}
 	origin = strings.TrimSpace(origin)
 	if origin == "" {
 		return ""
+	}
+	if allowedOrigin == "*" {
+		return origin
 	}
 	for _, candidate := range strings.Split(allowedOrigin, ",") {
 		if strings.TrimSpace(candidate) == origin {
