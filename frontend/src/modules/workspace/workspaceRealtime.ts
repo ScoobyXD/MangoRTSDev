@@ -15,6 +15,7 @@ export type WorkspaceStreamEnvelope = {
 export type WorkspaceReconciliationScopeKind =
   | "kanban_board"
   | "kanban_board_list"
+  | "racio_matrix"
   | "node_graph"
   | "logic_gate_graph"
   | "company_explorer"
@@ -82,6 +83,7 @@ type WorkspaceUserScopeFactory = (userID: string) => string;
 
 const workspaceCursors = new Map<string, number>();
 const workspaceReadyCounts = new Map<string, number>();
+const workspaceStreams = new Map<string, WorkspaceStreamState>();
 const WORK_ITEM_ASSIGNMENT_EVENT_TYPES = new Set([
   "work_item.logic_gate_assignment_saved",
   "work_item.logic_gate_assignment_moved",
@@ -94,6 +96,15 @@ const INTERNAL_DERIVED_WORK_EVENT_TYPES = new Set([
   "node_map_position_upsert_requested",
   "logic_gate_map_position_upsert_requested",
 ]);
+
+type WorkspaceStreamState = {
+  apiBase: string;
+  companyID: string;
+  scope: string;
+  key: string;
+  subscribers: Set<WorkspaceRealtimeSubscriber>;
+  unsubscribe?: () => void;
+};
 
 export function workspaceRealtimeScope(userID: string): string {
   return userScopedWorkspaceScope("workspace", userID);
@@ -226,6 +237,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   if (WORK_ITEM_ASSIGNMENT_EVENT_TYPES.has(type)) {
     addScope(scopes, seen, { kind: "work_item_assignment", eventType: type, boardID, logicGateID, nodeID, assignmentID, cardID, columnID });
     if (boardID) addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID, logicGateID, nodeID, cardID, columnID });
+    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, logicGateID, nodeID, assignmentID });
     if (nodeID) addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID });
     return scopes;
   }
@@ -254,6 +266,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
         nodeID,
       });
     }
+    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, nodeID });
     return scopes;
   }
 
@@ -268,6 +281,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "logic_gate", itemID: logicGateID });
     if (logicGateBoardID) addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID: logicGateBoardID, logicGateID });
     addScope(scopes, seen, { kind: "kanban_board_list", eventType: type, boardID: logicGateBoardID, logicGateID });
+    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, logicGateID });
     return scopes;
   }
 
@@ -391,28 +405,49 @@ export function subscribeWorkspaceRealtime(apiBase: string, companyID: string, s
   const cleanScope = scope.trim();
   if (!cleanCompanyID || !cleanScope) return () => undefined;
   const key = streamKey(apiBase, cleanCompanyID, cleanScope);
-  return subscribeRealtimeScope(apiBase, cleanCompanyID, cleanScope, {
-    getAfterSequence: () => workspaceCursors.get(key),
-    onAccepted(message) {
-      const boundary = markAcceptedBoundary(apiBase, cleanCompanyID, key, message.current_sequence);
-      if (boundary) {
-        subscriber.onReplayBoundary?.(boundary);
-        subscriber.onEvent({ event: "workspace", id: String(boundary.afterSequence), data: "{}" }, { replayBoundary: boundary, sequence: boundary.afterSequence, previousSequence: boundary.previousSequence, scopes: [] });
-      }
-    },
-    onWorkspaceEvent(message) {
-      const event = messageToWorkspaceEvent(message);
-      const result = updateWorkspaceCursor(apiBase, cleanCompanyID, key, event);
-      if (!result.deliver) return;
-      if (result.context.gap) subscriber.onGap?.(result.context.gap);
-      subscriber.onEvent(event, result.context);
-    },
-    onRefetch(message) {
-      const gap = refetchGap(apiBase, cleanCompanyID, key, message);
-      if (gap) subscriber.onGap?.(gap);
-    },
-    onError: subscriber.onError,
-  });
+  let state = workspaceStreams.get(key);
+  if (!state) {
+    state = { apiBase, companyID: cleanCompanyID, scope: cleanScope, key, subscribers: new Set() };
+    workspaceStreams.set(key, state);
+    state.unsubscribe = subscribeRealtimeScope(apiBase, cleanCompanyID, cleanScope, {
+      getAfterSequence: () => workspaceCursors.get(key),
+      onAccepted(message) {
+        const boundary = markAcceptedBoundary(apiBase, cleanCompanyID, key, message.current_sequence);
+        if (!boundary) return;
+        const event = { event: "workspace" as const, id: String(boundary.afterSequence), data: "{}" };
+        const context = { replayBoundary: boundary, sequence: boundary.afterSequence, previousSequence: boundary.previousSequence, scopes: [] };
+        for (const current of state?.subscribers ?? []) {
+          current.onReplayBoundary?.(boundary);
+          current.onEvent(event, context);
+        }
+      },
+      onWorkspaceEvent(message) {
+        const event = messageToWorkspaceEvent(message);
+        const result = updateWorkspaceCursor(apiBase, cleanCompanyID, key, event);
+        if (!result.deliver) return;
+        for (const current of state?.subscribers ?? []) {
+          if (result.context.gap) current.onGap?.(result.context.gap);
+          current.onEvent(event, result.context);
+        }
+      },
+      onRefetch(message) {
+        const gap = refetchGap(apiBase, cleanCompanyID, key, message);
+        if (!gap) return;
+        for (const current of state?.subscribers ?? []) current.onGap?.(gap);
+      },
+      onError(message) {
+        for (const current of state?.subscribers ?? []) current.onError?.(message);
+      },
+    });
+  }
+  state.subscribers.add(subscriber);
+  return () => {
+    const current = workspaceStreams.get(key);
+    current?.subscribers.delete(subscriber);
+    if (!current || current.subscribers.size > 0) return;
+    current.unsubscribe?.();
+    workspaceStreams.delete(key);
+  };
 }
 
 export function subscribeWorkspaceUserRealtime(apiBase: string, companyID: string, scopeForUser: WorkspaceUserScopeFactory, subscriber: WorkspaceRealtimeSubscriber): () => void {

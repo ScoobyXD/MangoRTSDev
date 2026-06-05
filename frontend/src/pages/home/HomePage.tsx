@@ -262,6 +262,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const racioProjectionScopeKeyRef = useRef("");
   const racioProjectedNodeIDsRef = useRef<Set<string>>(new Set());
   const racioProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
+  const requestRacioProjectionRefreshRef = useRef<((minimumSequence?: number) => void) | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const foldersRef = useRef<EmailFolder[]>([]);
   const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
@@ -1267,11 +1268,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
           scope.kind === "kanban_board" ||
           scope.kind === "kanban_board_list" ||
+          scope.kind === "racio_matrix" ||
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
+        const touchesRacioMatrix = gap.scopes.some((scope) => scope.kind === "racio_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
+        if (touchesRacioMatrix) requestRacioProjectionRefreshRef.current?.();
       },
       onEvent(event, context) {
         if (event.event !== "workspace") return;
@@ -1296,13 +1300,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
           scope.kind === "kanban_board" ||
           scope.kind === "kanban_board_list" ||
+          scope.kind === "racio_matrix" ||
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
+        const touchesRacioMatrix = scopes.some((scope) => scope.kind === "racio_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
+        if (touchesRacioMatrix) requestRacioProjectionRefreshRef.current?.();
         if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
           const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
           if (node?.node_id) {
@@ -2537,6 +2544,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const requestRacioProjectionRefresh = useCallback((minimumSequence = 0) => {
     void refreshRacioMatrixProjection(minimumSequence);
   }, [refreshRacioMatrixProjection]);
+  requestRacioProjectionRefreshRef.current = requestRacioProjectionRefresh;
   const applyRealtimeRacioProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
     if (!companyID || !currentUserID) return;
     const envelope = message as unknown as RacioProjectionDeltaEnvelope;

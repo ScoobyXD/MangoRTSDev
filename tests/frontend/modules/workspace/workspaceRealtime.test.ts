@@ -138,13 +138,53 @@ test("workspace realtime converts snapshot refetch messages into workspace gap s
   }
 });
 
+test("workspace realtime fans one scoped event out to multiple local subscribers", async () => {
+  const harness = installRealtimeHarness();
+  const firstReceived: string[] = [];
+  const secondReceived: string[] = [];
+
+  try {
+    const firstUnsubscribe = subscribeWorkspaceRealtime("https://api.workspace-realtime-fanout.test", "company-fanout", "workspace:user:user-1", {
+      onEvent: (event, context) => {
+        if (!context.replayBoundary && event.id) firstReceived.push(event.id);
+      },
+    });
+    const secondUnsubscribe = subscribeWorkspaceRealtime("https://api.workspace-realtime-fanout.test", "company-fanout", "workspace:user:user-1", {
+      onEvent: (event, context) => {
+        if (!context.replayBoundary && event.id) secondReceived.push(event.id);
+      },
+    });
+
+    await harness.waitForSocket();
+    assert.equal(harness.openedURLs.length, 1);
+    assert.deepEqual(harness.subscriptionScopes(), ["workspace:user:user-1"]);
+
+    harness.emit({ type: "subscription.accepted", scope: "workspace:user:user-1", current_sequence: 30 });
+    harness.emit(workspaceEventMessage("company-fanout", "workspace:user:user-1", 31, "node_updated", { node_id: "node-31" }));
+
+    assert.deepEqual(firstReceived, ["31"]);
+    assert.deepEqual(secondReceived, ["31"]);
+    firstUnsubscribe();
+    secondUnsubscribe();
+  } finally {
+    harness.restore();
+  }
+});
+
 test("derives scoped invalidation targets from workspace event types", () => {
   const nodeScopes = deriveWorkspaceReconciliationScopes({ type: "node_updated", data: { node_id: "node-1", node: { node_id: "node-1", logic_gate_ids: ["gate-1", "gate-2"] } } });
   assert.equal(nodeScopes.some((scope) => scope.kind === "node_graph" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "company_explorer" && scope.itemType === "node" && scope.itemID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-1" && scope.logicGateID === "gate-1" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-2" && scope.logicGateID === "gate-2" && scope.nodeID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "racio_matrix" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "workspace"), false);
+
+  const assignmentScopes = deriveWorkspaceReconciliationScopes({ type: "work_item.logic_gate_assignment_saved", data: { logic_gate_id: "gate-A", node_id: "node-A", assignment_id: "assignment-A" } });
+  assert.equal(assignmentScopes.some((scope) => scope.kind === "racio_matrix" && scope.logicGateID === "gate-A" && scope.nodeID === "node-A"), true);
+
+  const logicGateScopes = deriveWorkspaceReconciliationScopes({ type: "logic_gate_raci_updated", data: { logic_gate_id: "gate-B" } });
+  assert.equal(logicGateScopes.some((scope) => scope.kind === "racio_matrix" && scope.logicGateID === "gate-B"), true);
 
   const kanbanScopes = deriveWorkspaceReconciliationScopes({ type: "kanban_card_moved", data: { board_id: "board-A", card_id: "card-A", node_id: "node-A" } });
   assert.equal(kanbanScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "board-A" && scope.cardID === "card-A"), true);
