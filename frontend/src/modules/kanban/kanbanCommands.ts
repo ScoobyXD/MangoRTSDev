@@ -82,25 +82,6 @@ export async function createKanbanColumnCommand(args: {
   );
 }
 
-export async function renameKanbanColumnCommand(args: {
-  context: KanbanCommandContext;
-  columns: KanbanColumn[];
-  columnID: string;
-  title: string;
-  client?: KanbanCommandClient;
-}): Promise<KanbanColumn | null> {
-  const { context, columns, columnID, client = defaultKanbanCommandClient } = args;
-  const cleanTitle = args.title.trim();
-  if (!cleanTitle || !columns.some((column) => column.column_id === columnID)) return null;
-  return client.updateColumn({
-    apiBase: context.apiBase,
-    companyID: context.companyID,
-    boardID: context.boardID,
-    columnID,
-    title: cleanTitle,
-  });
-}
-
 export async function deleteKanbanColumnCommand(args: {
   context: KanbanCommandContext;
   columnID: string;

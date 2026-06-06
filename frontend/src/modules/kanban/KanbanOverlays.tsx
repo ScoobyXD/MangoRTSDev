@@ -2,7 +2,7 @@ import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
-import { normalizeKanbanColumnItemColor, type KanbanCard, type KanbanColumn } from "./shared";
+import { type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
   contextMenuHoverHandlers,
@@ -39,8 +39,6 @@ export function KanbanContextMenus({
   onCloseColumnMenu,
   onCloseCardMenu,
   onCreateNodeInColumn,
-  onEditColumn,
-  onPersistColumnItemColor,
   onToggleCardIssue,
   onRenameNode,
   onRequestNodeDeleteFromCards,
@@ -55,8 +53,6 @@ export function KanbanContextMenus({
   onCloseColumnMenu: () => void;
   onCloseCardMenu: () => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
-  onEditColumn: (columnID: string) => void;
-  onPersistColumnItemColor: (columnID: string, color: string) => void;
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
   onRenameNode: (card: KanbanCard) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
@@ -69,18 +65,6 @@ export function KanbanContextMenus({
           <button type="button" style={contextMenuButtonStyle} onClick={() => onCreateNodeInColumn(contextColumn.column_id, { x: columnContextMenu.x, y: columnContextMenu.y })} {...contextMenuHoverHandlers}>
             Create new node
           </button>
-          <button type="button" style={contextMenuButtonStyle} onClick={() => onEditColumn(contextColumn.column_id)} {...contextMenuHoverHandlers}>
-            Rename column
-          </button>
-          <label style={{ ...contextMenuButtonStyle, cursor: "default", justifyContent: "space-between" }}>
-            <span>Column color</span>
-            <input
-              type="color"
-              value={normalizeKanbanColumnItemColor(contextColumn.item_color)}
-              onChange={(event) => onPersistColumnItemColor(contextColumn.column_id, event.target.value)}
-              style={{ width: 34, height: 24, border: "1px solid #d0d0d0", background: "#fff", cursor: "pointer", padding: 0 }}
-            />
-          </label>
         </FrameRightClickMenu>
       )}
       {contextCard && cardContextMenu && (
@@ -168,12 +152,14 @@ export function KanbanNodeEditorOverlay({
         type="button"
         title="Collapse node editor to app tab"
         aria-label="Collapse node editor to app tab"
+        data-frame-interactive="true"
+        onMouseDown={(event) => event.stopPropagation()}
         onClick={onCollapseToTab}
         style={{
           position: "absolute",
           top: 7,
           right: 38,
-          zIndex: 8,
+          zIndex: 80,
           width: 24,
           height: 24,
           display: "grid",
@@ -193,12 +179,15 @@ export function KanbanNodeEditorOverlay({
         className="mango-elevated-action"
         type="button"
         title="Close node editor"
+        aria-label="Close node editor"
+        data-frame-interactive="true"
+        onMouseDown={(event) => event.stopPropagation()}
         onClick={onClose}
         style={{
           position: "absolute",
           top: 7,
           right: 8,
-          zIndex: 8,
+          zIndex: 80,
           width: 24,
           height: 24,
           border: "1px solid transparent",

@@ -31,7 +31,6 @@ import {
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
   persistKanbanColumnLayoutCommand,
-  renameKanbanColumnCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
   toggleKanbanCardIssueCommand,
@@ -78,7 +77,6 @@ import {
   logicGateKanbanBoardID,
   logicGateIDFromKanbanBoardID,
   nextCardPosition,
-  normalizeKanbanColumnItemColor,
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
@@ -267,7 +265,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardID = activeBoardID;
   const kanbanCommandContext = useMemo<KanbanCommandContext>(() => ({ apiBase, companyID, boardID }), [apiBase, boardID, companyID]);
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, frameID));
-  const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
   const [dragOverColumnID, setDragOverColumnID] = useState("");
   const [dragOverCard, setDragOverCard] = useState<{ cardID: string; placement: KanbanCardDropPlacement } | null>(null);
@@ -1322,27 +1319,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     try {
       const column = await createKanbanColumnCommand({ context: kanbanCommandContext, columns });
       setColumns((previous) => [...previous, column].sort((a, b) => a.position - b.position));
-      setEditingColumnID(column.column_id);
       void refreshBoards();
     } catch {
       setError("Column create failed");
     }
   }, [columns, kanbanCommandContext, refreshBoards]);
-
-  const commitColumnTitle = useCallback(async (columnID: string, title: string) => {
-    setError("");
-    try {
-      const updated = await renameKanbanColumnCommand({ context: kanbanCommandContext, columns, columnID, title });
-      if (!updated) return;
-      const nextColumns = columns.map((column) => (column.column_id === columnID ? updated : column));
-      setColumns(nextColumns);
-      syncNodeStatusesFromCards(cards.filter((card) => card.column_id === columnID), nextColumns);
-      setEditingColumnID("");
-    } catch {
-      setError("Column rename failed");
-      refreshBoard();
-    }
-  }, [cards, columns, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
   const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before") => {
     setDraggingColumnID("");
@@ -1374,22 +1355,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column resize failed");
-      refreshBoard();
-    }
-  }, [kanbanCommandContext, refreshBoard, storeLocalColumnLayout]);
-
-  const persistColumnItemColor = useCallback(async (columnID: string, itemColor: string) => {
-    const cleanColor = normalizeKanbanColumnItemColor(itemColor);
-    setColumns((previous) => previous.map((column) => (column.column_id === columnID ? { ...column, item_color: cleanColor } : column)));
-    setError("");
-    try {
-      if (storeLocalColumnLayout(columnID, { item_color: cleanColor })) {
-        return;
-      }
-      const updated = await persistKanbanColumnLayoutCommand({ context: kanbanCommandContext, columnID, itemColor: cleanColor });
-      setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
-    } catch {
-      setError("Column color update failed");
       refreshBoard();
     }
   }, [kanbanCommandContext, refreshBoard, storeLocalColumnLayout]);
@@ -2155,17 +2120,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         laneShadow={laneShadow}
         draggingColumnID={draggingColumnID}
         dragOverColumnID={dragOverColumnID}
-        editingColumnID={editingColumnID}
         resizeRef={resizeRef}
         onBlankMouseDown={clearCardSelectionFromBlankClick}
         onSetCardContextMenu={setCardContextMenu}
         onSetColumnContextMenu={setColumnContextMenu}
         onSetDraggingColumnID={setDraggingColumnID}
         onSetDragOverColumnID={setDragOverColumnID}
-        onSetColumns={setColumns}
-        onSetEditingColumnID={setEditingColumnID}
-        onCommitColumnTitle={(columnID, title) => void commitColumnTitle(columnID, title)}
-        onRefreshBoard={() => void refreshBoard()}
         onCreateNodeInColumn={(columnID, anchor) => requestCreateNodeInColumn(columnID, anchor)}
         onDropColumn={onDropColumn}
         dataTransferIncludes={dataTransferIncludes}
@@ -2310,11 +2270,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setColumnContextMenu(null);
           requestCreateNodeInColumn(columnID, anchor);
         }}
-        onEditColumn={(columnID) => {
-          setEditingColumnID(columnID);
-          setColumnContextMenu(null);
-        }}
-        onPersistColumnItemColor={(columnID, color) => void persistColumnItemColor(columnID, color)}
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
         onRenameNode={requestNodeRename}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}

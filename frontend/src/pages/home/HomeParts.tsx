@@ -819,6 +819,8 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             type="button"
             title="Collapse node editor to app tab"
             aria-label="Collapse node editor to app tab"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
             style={nodeEditorPopupCollapseButtonStyle}
           >
@@ -829,6 +831,9 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
           className="mango-elevated-action"
           type="button"
           title="Close node editor"
+          aria-label="Close node editor"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
           onClick={onClose}
           style={nodeEditorPopupCloseButtonStyle}
         >

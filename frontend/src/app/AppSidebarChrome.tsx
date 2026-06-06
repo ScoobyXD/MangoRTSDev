@@ -1776,6 +1776,8 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             type="button"
             title="Collapse node editor to app tab"
             aria-label="Collapse node editor to app tab"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
             style={nodeEditorPopupCollapseButtonStyle}
           >
@@ -1785,6 +1787,9 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
         <button
           type="button"
           title="Close node editor"
+          aria-label="Close node editor"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
           onClick={onClose}
           style={nodeEditorPopupCloseButtonStyle}
         >
@@ -2600,7 +2605,7 @@ const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   position: "absolute",
   top: 7,
   right: 8,
-  zIndex: 8,
+  zIndex: 80,
   width: 24,
   height: 24,
   border: "1px solid #334155",
@@ -2617,7 +2622,7 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   position: "absolute",
   top: 7,
   right: 38,
-  zIndex: 8,
+  zIndex: 80,
   width: 24,
   height: 24,
   display: "grid",

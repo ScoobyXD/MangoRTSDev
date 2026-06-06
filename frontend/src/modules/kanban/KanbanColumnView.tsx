@@ -37,17 +37,12 @@ type KanbanColumnViewProps = {
   laneShadow: string;
   draggingColumnID: string;
   dragOverColumnID: string;
-  editingColumnID: string;
   resizeRef: React.MutableRefObject<KanbanColumnResizeState | null>;
   onBlankMouseDown: React.MouseEventHandler<HTMLElement>;
   onSetCardContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; cardID: string } | null>>;
   onSetColumnContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; columnID: string } | null>>;
   onSetDraggingColumnID: React.Dispatch<React.SetStateAction<string>>;
   onSetDragOverColumnID: React.Dispatch<React.SetStateAction<string>>;
-  onSetColumns: React.Dispatch<React.SetStateAction<KanbanColumn[]>>;
-  onSetEditingColumnID: React.Dispatch<React.SetStateAction<string>>;
-  onCommitColumnTitle: (columnID: string, title: string) => void;
-  onRefreshBoard: () => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
@@ -69,17 +64,12 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   laneShadow,
   draggingColumnID,
   dragOverColumnID,
-  editingColumnID,
   resizeRef,
   onBlankMouseDown,
   onSetCardContextMenu,
   onSetColumnContextMenu,
   onSetDraggingColumnID,
   onSetDragOverColumnID,
-  onSetColumns,
-  onSetEditingColumnID,
-  onCommitColumnTitle,
-  onRefreshBoard,
   onCreateNodeInColumn,
   onDropColumn,
   dataTransferIncludes,
@@ -135,9 +125,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       }}
     >
       <div
-        draggable={editingColumnID !== column.column_id}
+        draggable
         onDragStart={(event) => {
-          if (editingColumnID === column.column_id) return;
           onSetDraggingColumnID(column.column_id);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData(KANBAN_COLUMN_DRAG_MIME, JSON.stringify({ columnID: column.column_id }));
@@ -148,39 +137,13 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         }}
         style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px" : "20px minmax(0, 1fr)", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.38)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.36)}, rgba(255,255,255,0.80) 58%, ${hexToRgba(columnColor, 0.18)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
       >
-        <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
-        {editingColumnID === column.column_id ? (
-          <input
-            value={column.title}
-            autoFocus
-            draggable={false}
-            onFocus={(event) => event.currentTarget.select()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onChange={(event) => {
-              const value = event.target.value;
-              onSetColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
-            }}
-            onBlur={(event) => onCommitColumnTitle(column.column_id, event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                onSetEditingColumnID("");
-                onRefreshBoard();
-              }
-            }}
-            // Column titles are user-authored board data. Preserve casing so
-            // names keep the exact meaning users and agents assigned.
-            style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 750, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
-          />
-        ) : (
-          <div
-            title={column.title}
-            onClick={() => onSetEditingColumnID(column.column_id)}
-            style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 750, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
-          >
-            {column.title}
-          </div>
-        )}
+        <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: "grab" }}>::</span>
+        <div
+          title={column.title}
+          style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 750, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+        >
+          {column.title}
+        </div>
         {showCreateNodeButton && (
           <button
             className="mango-elevated-action"

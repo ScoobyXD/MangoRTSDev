@@ -3,6 +3,7 @@ import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import type { LogicGateRaciAssignment, LogicGateRaciRole } from "../logic-gate-map/shared";
 import {
+  KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
@@ -71,13 +72,14 @@ const NODE_PRIORITY_OPTIONS = [
   { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
 ] as const;
 
-type NodeStatusValue = "pending" | "in_progress" | "verify" | "done";
+type NodeStatusValue = "backlog" | "pending" | "in_progress" | "verify" | "done";
 
 const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string; storageStatus: string; color: string }> = [
-  { value: "pending", label: "pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
-  { value: "in_progress", label: "in progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
-  { value: "verify", label: "verify", storageStatus: "Verify", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
-  { value: "done", label: "done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
+  { value: "backlog", label: "Backlog", storageStatus: "Backlog", color: KANBAN_LOGIC_GATE_BACKLOG_COLOR },
+  { value: "pending", label: "Pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
+  { value: "in_progress", label: "In Progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
+  { value: "verify", label: "Verify", storageStatus: "Verify", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
+  { value: "done", label: "Done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
 ];
 
 const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
@@ -127,11 +129,23 @@ function validHexColor(value: string): string {
 
 function normalizeNodeStatusValue(value: string): NodeStatusValue | "" {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "backlog" || normalized === "backlogs" || normalized === "b") return "backlog";
   if (normalized === "pending" || normalized === "p") return "pending";
   if (normalized === "in_progress" || normalized === "ip") return "in_progress";
   if (normalized === "verify" || normalized === "verification" || normalized === "v") return "verify";
   if (normalized === "done" || normalized === "d") return "done";
   return "";
+}
+
+function displayNodeStatusFallback(value: string): string {
+  const clean = value.trim();
+  if (!clean) return "None";
+  return clean
+    .replace(/[_-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function hexWithAlpha(hex: string, alpha: string): string {
@@ -225,6 +239,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [hoveredStatusValue, setHoveredStatusValue] = useState<NodeStatusValue | "">("");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const [hoveredPriorityValue, setHoveredPriorityValue] = useState("");
   const statusMenuRef = useRef<HTMLSpanElement | null>(null);
   const assigneeListID = useId();
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
@@ -237,7 +252,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
   const selectedStatus = NODE_STATUS_OPTIONS.find((option) => option.value === normalizeNodeStatusValue(nodePresetFields?.status ?? ""));
   const displayStatusColor = selectedStatus?.color ?? statusColor;
-  const displayStatusLabel = selectedStatus?.label ?? (nodePresetFields?.status || "none");
+  const displayStatusLabel = selectedStatus?.label ?? displayNodeStatusFallback(nodePresetFields?.status ?? "");
   const assigneeMatches = useMemo(() => {
     const query = (nodePresetFields?.assigneeDraft ?? "").trim().toLowerCase();
     const matches = query
@@ -249,7 +264,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   useEffect(() => {
     if (canEdit) return;
     setStatusMenuOpen(false);
+    setHoveredStatusValue("");
     setPriorityMenuOpen(false);
+    setHoveredPriorityValue("");
     setAssigneeMenuOpen(false);
     onSetIsEditingTitle(false);
   }, [canEdit, onSetIsEditingTitle]);
@@ -259,9 +276,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     const onPointerDown = (event: PointerEvent) => {
       if (statusMenuRef.current?.contains(event.target as Node)) return;
       setStatusMenuOpen(false);
+      setHoveredStatusValue("");
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setStatusMenuOpen(false);
+      if (event.key === "Escape") {
+        setStatusMenuOpen(false);
+        setHoveredStatusValue("");
+      }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown, true);
@@ -276,9 +297,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     const onPointerDown = (event: PointerEvent) => {
       if (priorityMenuRef.current?.contains(event.target as Node)) return;
       setPriorityMenuOpen(false);
+      setHoveredPriorityValue("");
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPriorityMenuOpen(false);
+      if (event.key === "Escape") {
+        setPriorityMenuOpen(false);
+        setHoveredPriorityValue("");
+      }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown, true);
@@ -439,7 +464,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     disabled={!canEdit}
                     onClick={() => {
                       if (!canEdit) return;
-                      setStatusMenuOpen((open) => !open);
+                      setStatusMenuOpen((open) => {
+                        if (open) setHoveredStatusValue("");
+                        return !open;
+                      });
                     }}
                     style={{
                       width: "100%",
@@ -682,7 +710,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       disabled={!canEdit}
                       onClick={() => {
                         if (!canEdit) return;
-                        setPriorityMenuOpen((open) => !open);
+                        setPriorityMenuOpen((open) => {
+                          if (open) setHoveredPriorityValue("");
+                          return !open;
+                        });
                       }}
                       style={{
                         width: "100%",
@@ -714,6 +745,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       <div
                         role="listbox"
                         aria-label="Priority"
+                        onMouseLeave={() => setHoveredPriorityValue("")}
                         style={{
                           position: "absolute",
                           zIndex: 30,
@@ -730,16 +762,20 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       >
                         {NODE_PRIORITY_OPTIONS.map((option) => {
                           const selected = option.value === selectedPriority.value;
+                          const highlighted = hoveredPriorityValue === option.value || selected;
                           return (
                             <button
                               key={option.value}
                               type="button"
                               role="option"
                               aria-selected={selected}
+                              onMouseEnter={() => setHoveredPriorityValue(option.value)}
+                              onMouseDown={(event) => event.preventDefault()}
                               onClick={() => {
                                 onSetNodePriorityDraft(option.value);
                                 onCommitNodePriorityDraft(option.value);
                                 setPriorityMenuOpen(false);
+                                setHoveredPriorityValue("");
                               }}
                               style={{
                                 width: "100%",
@@ -747,16 +783,17 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                                 gridTemplateColumns: "minmax(0, 1fr) 18px",
                                 alignItems: "center",
                                 gap: 8,
-                                border: "none",
+                                border: highlighted ? "1px solid transparent" : "1px solid transparent",
                                 borderRadius: 6,
-                                background: selected ? hexWithAlpha(option.color, "18") : "transparent",
-                                color: selected ? option.color : "#1f2937",
+                                background: highlighted ? `linear-gradient(135deg, ${hexWithAlpha(option.color, "22")}, rgba(255,255,255,0.88)) padding-box, linear-gradient(135deg, ${hexWithAlpha(option.color, "99")}, rgba(255,255,255,0.88)) border-box` : "transparent",
+                                color: highlighted ? option.color : "#1f2937",
                                 font: "inherit",
                                 fontSize: 11.5,
-                                fontWeight: 500,
+                                fontWeight: highlighted ? 800 : 500,
                                 padding: "7px 8px",
                                 cursor: "pointer",
                                 textAlign: "left",
+                                boxShadow: highlighted ? `0 8px 18px ${hexWithAlpha(option.color, "1a")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : undefined,
                               }}
                             >
                               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
