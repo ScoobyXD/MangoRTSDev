@@ -175,7 +175,7 @@ func requestPathProjectionDeltas(deltas []store.ProjectionDelta) []store.Project
 	out := deltas[:0]
 	for _, delta := range deltas {
 		switch strings.TrimSpace(delta.Projection) {
-		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix:
+		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix, store.ProjectionNameProjectManagementTimeline:
 			continue
 		}
 		out = append(out, delta)
@@ -218,6 +218,32 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			hasRealtimeSubscribers := len(realtimeConnections) > 0
 			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
 			log.Printf("racio_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
+			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
+				continue
+			}
+			filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
+			if !ok {
+				continue
+			}
+			if hasRealtimeSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: projectionScope, realtime: true}
+				grouped[key] = append(grouped[key], filtered)
+			}
+			if hasProjectionSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: projectionScope, sequenceScope: projectionScope}
+				grouped[key] = append(grouped[key], filtered)
+			}
+		case store.ProjectionNameProjectManagementTimeline:
+			userID := projectionDeltaUserID(delta)
+			projectionScope := store.ProjectManagementProjectionUserScope(userID)
+			realtimeScope := realtimeProjectManagementScope(userID)
+			if projectionScope == "" || realtimeScope == "" {
+				continue
+			}
+			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
+			hasRealtimeSubscribers := len(realtimeConnections) > 0
+			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
+			log.Printf("project_management_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s item_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID, delta.RowKey.ItemID)
 			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
 				continue
 			}
@@ -346,6 +372,8 @@ func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, u
 		return s.authorizedRacioProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameKanbanBoard:
 		return s.authorizedKanbanProjectionDeltaForUser(delta, userID)
+	case store.ProjectionNameProjectManagementTimeline:
+		return s.authorizedProjectManagementProjectionDeltaForUser(delta, userID)
 	default:
 		return store.ProjectionDelta{}, false
 	}
@@ -428,6 +456,50 @@ func (s *Server) authorizedKanbanProjectionDeltaForUser(delta store.ProjectionDe
 	return delta, true
 }
 
+func (s *Server) authorizedProjectManagementProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
+	userID = strings.TrimSpace(userID)
+	delta = cloneProjectionDelta(delta)
+	delta.RowKey.UserID = userID
+	resourceType := strings.TrimSpace(delta.RowKey.ResourceType)
+	resourceID := strings.TrimSpace(delta.RowKey.ResourceID)
+	if resourceType == "" || resourceID == "" {
+		if delta.Row != nil {
+			resourceType = strings.TrimSpace(delta.Row.ResourceType)
+			resourceID = strings.TrimSpace(delta.Row.ResourceID)
+		}
+	}
+	if resourceType == "" || resourceID == "" {
+		return store.ProjectionDelta{}, false
+	}
+	switch delta.Operation {
+	case store.ProjectionDeltaOperationDelete:
+		delta.Row = nil
+		delta.Patch = nil
+		return delta, true
+	case store.ProjectionDeltaOperationUpsert, store.ProjectionDeltaOperationPatch:
+	default:
+		return store.ProjectionDelta{}, false
+	}
+	allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, resourceType, resourceID, store.EntityPermissionView)
+	if err != nil {
+		log.Printf("failed to check project management projection access company_id=%s user_id=%s resource_type=%s resource_id=%s: %v", delta.CompanyID, userID, resourceType, resourceID, err)
+		return store.ProjectionDelta{}, false
+	}
+	if !allowed {
+		return store.ProjectionDelta{
+			CompanyID:          delta.CompanyID,
+			Projection:         store.ProjectionNameProjectManagementTimeline,
+			Operation:          store.ProjectionDeltaOperationDelete,
+			RowKey:             delta.RowKey,
+			ProjectedTimestamp: time.Now().UTC(),
+		}, true
+	}
+	if delta.Row != nil {
+		delta.Row.UserID = userID
+	}
+	return delta, true
+}
+
 func (s *Server) publishRacioPermissionProjectionDeltas(companyID, entityType, entityID string) {
 	companyID = strings.TrimSpace(companyID)
 	entityType = strings.TrimSpace(entityType)
@@ -505,6 +577,34 @@ func (s *Server) publishKanbanPermissionProjectionDeltasAsync(companyID, entityT
 		return
 	}
 	s.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+}
+
+func (s *Server) publishProjectManagementPermissionProjectionDeltas(companyID, entityType, entityID string) {
+	companyID = strings.TrimSpace(companyID)
+	entityType = strings.TrimSpace(entityType)
+	entityID = strings.TrimSpace(entityID)
+	if companyID == "" || entityID == "" {
+		return
+	}
+	go s.publishProjectManagementPermissionProjectionDeltasAsync(companyID, entityType, entityID)
+}
+
+func (s *Server) publishProjectManagementPermissionProjectionDeltasAsync(companyID, entityType, entityID string) {
+	var rows []store.ProjectManagementTimelineProjectionRow
+	var err error
+	switch entityType {
+	case store.EntityTypeNode:
+		rows, err = s.repo.ListProjectManagementTimelineProjectionRowsForNode(companyID, entityID)
+	case store.EntityTypeLogicGate:
+		rows, err = s.repo.ListProjectManagementTimelineProjectionRowsForLogicGate(companyID, entityID)
+	default:
+		return
+	}
+	if err != nil {
+		log.Printf("failed to read Project Management projection rows for permission delta company_id=%s entity_type=%s entity_id=%s: %v", companyID, entityType, entityID, err)
+		return
+	}
+	s.publishProjectionDeltasAsync(store.ProjectManagementProjectionUpsertDeltas(rows))
 }
 
 func (s *Server) publishKanbanProjectionUpsertsForNode(companyID, nodeID string) {

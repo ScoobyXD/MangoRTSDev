@@ -118,6 +118,7 @@ Event rows are durable live-update rows for projection delta delivery. Current e
 
 - `kanban.projection_delta`
 - `racio.projection_delta`
+- `project_management.projection_delta`
 - `editor.projection_delta`
 - `permission.changed`
 
@@ -167,6 +168,7 @@ one browser runtime
       logic_gate_graph:user:{userID}
       board:{boardID}
       racio:user:{userID}
+      project_management:user:{userID}
       editor:node:{nodeID}
       editor:logic_gate:{logicGateID}
       notifications:user:{userID}
@@ -267,6 +269,37 @@ node title changes
 ```
 
 The matrix does not need a separate subscription for every visible node. The user's RACIO projection is already the bounded user-specific surface.
+
+### Project Management Timeline
+
+```text
+project_management:user:{userID}
+```
+
+Project management is a user-shaped timeline projection. The source table is `project_management_timeline_items`; the hot read table is `project_management_timeline_projection`. The projection duplicates node/logic-gate title, status, assignee, date, and timeline bar fields so the week view can read without rebuilding rows from multiple joins.
+
+The read endpoint loads rows for one target user and returns the current projection sequence:
+
+```text
+GET /v1/project-management/timeline?company_id=...&target_user_id=...
+  -> rows for that user
+  -> projection = project_management_timeline
+  -> projection_sequence for projection scope user:{userID}
+```
+
+The WebSocket subscription uses:
+
+```text
+project_management:user:{userID}
+```
+
+The projection sequence scope internally uses:
+
+```text
+user:{userID}
+```
+
+Timeline item creates, resizes, moves, and deletes mutate `project_management_timeline_items`, sync `project_management_timeline_projection`, then append `project_management.projection_delta` rows in the same transaction. Node or logic-gate source changes that affect projected fields resync the project management projection and append project-management deltas alongside other affected projection deltas.
 
 ### Editor
 

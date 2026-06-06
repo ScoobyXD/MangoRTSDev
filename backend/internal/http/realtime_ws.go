@@ -396,6 +396,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
+		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	return false, "unsupported_scope", nil
 }
 
@@ -479,6 +485,18 @@ func realtimeRacioUserIDFromScope(scope string) string {
 	return strings.TrimSpace(strings.TrimPrefix(scope, "racio:user:"))
 }
 
+func realtimeProjectManagementScope(userID string) string {
+	return store.ProjectManagementRealtimeUserScope(userID)
+}
+
+func realtimeProjectManagementUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "project_management:user:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "project_management:user:"))
+}
+
 func realtimeWorkspaceScope(userID string) string {
 	return realtimeUserScopedWorkspaceScope("workspace", userID)
 }
@@ -549,6 +567,8 @@ func realtimeScopeType(scope string) string {
 		return realtimeWorkspaceDomainEventScopeType(scope)
 	case realtimeRacioUserIDFromScope(scope) != "":
 		return "racio"
+	case realtimeProjectManagementUserIDFromScope(scope) != "":
+		return "project_management"
 	default:
 		if index := strings.Index(scope, ":"); index > 0 {
 			return strings.TrimSpace(scope[:index])
@@ -574,11 +594,11 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"board", "communications", "notifications", "racio", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
+	for _, scopeType := range []string{"board", "communications", "notifications", "racio", "project_management", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 	for scopeType, count := range counts {
-		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "racio" ||
+		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "racio" || scopeType == "project_management" ||
 			scopeType == "workspace" || scopeType == "company_explorer" || scopeType == "node_graph" || scopeType == "logic_gate_graph" {
 			continue
 		}
@@ -681,6 +701,9 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameRacioMatrix
 		projectionScope = store.RacioProjectionUserScope(userID)
+	} else if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
+		projectionName = store.ProjectionNameProjectManagementTimeline
+		projectionScope = store.ProjectManagementProjectionUserScope(userID)
 	} else if realtimeEditorResourceIDFromScope(scope) != "" {
 		sequence, err := s.repo.CurrentEventRowSequence(companyID, scope)
 		if err != nil {

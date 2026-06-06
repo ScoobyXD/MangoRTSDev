@@ -95,6 +95,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 		return s.processKanbanProjectionDeltaEvent(row)
 	case store.EventTypeRacioProjectionDelta:
 		return s.processRacioProjectionDeltaEvent(row)
+	case store.EventTypeProjectManagementProjectionDelta:
+		return s.processProjectManagementProjectionDeltaEvent(row)
 	case store.EventTypeEditorProjectionDelta:
 		return s.processEditorProjectionDeltaEvent(row)
 	case store.EventTypePermissionChanged:
@@ -125,6 +127,21 @@ func (s *Server) processRacioProjectionDeltaEvent(row store.EventRow) error {
 		return err
 	}
 	if payload.Projection != store.ProjectionNameRacioMatrix {
+		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
+	}
+	if len(payload.Deltas) == 0 {
+		return nil
+	}
+	s.publishProjectionDeltasAsync(payload.Deltas)
+	return nil
+}
+
+func (s *Server) processProjectManagementProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeProjectManagementProjectionDeltaEventPayload(row)
+	if err != nil {
+		return err
+	}
+	if payload.Projection != store.ProjectionNameProjectManagementTimeline {
 		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
 	}
 	if len(payload.Deltas) == 0 {
@@ -186,6 +203,7 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
+		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	case store.EntityTypeLogicGate:
 		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
@@ -193,6 +211,7 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
+		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	default:
 		return nil

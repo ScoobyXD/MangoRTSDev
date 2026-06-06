@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
+import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { buildCompanyExplorerTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
@@ -8,7 +8,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
-import { getNodeTitle } from "../node-map/shared.js";
+import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket.js";
 import {
   fetchCommunicationsWorkspacePanel,
   listCompanyUserGroups,
@@ -20,34 +20,31 @@ import {
 import {
   CompanyPerspectiveSelector,
   companyPerspectiveLabel,
-  perspectiveStorageKey,
   userIDsForPerspective,
   type CompanyPerspective,
 } from "../perspectives/PerspectiveSelector.js";
+import {
+  createProjectManagementTimelineItem,
+  deleteProjectManagementTimelineItem,
+  fetchProjectManagementTimeline,
+  updateProjectManagementTimelineItem,
+  type ProjectManagementEntityType,
+  type ProjectManagementTimelineRow,
+} from "./projectManagementApi.js";
 
 type ProjectManagementContentProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
+  onNodeOpen?: (nodeID: string) => void;
 };
 
-type ProjectEntityType = "node" | "logic_gate";
-
 type ProjectTimelinePayload = {
-  entityType: ProjectEntityType;
+  entityType: ProjectManagementEntityType;
   entityID: string;
   label: string;
   color?: string;
-};
-
-type ProjectTimelineItem = ProjectTimelinePayload & {
-  id: string;
-  timelineKey: string;
-  startOffset: number;
-  durationDays: number;
-  status: string;
-  source: "stored" | "suggested";
 };
 
 type WorkspacePanelState = {
@@ -59,8 +56,25 @@ type WorkspacePanelState = {
   logicGates: LogicGateRecord[];
 };
 
+type ResizeState =
+  | { kind: "vertical"; pageTop: number; pageHeight: number }
+  | { kind: "horizontal"; bottomLeft: number; bottomWidth: number };
+
+type BarDraft = {
+  itemID: string;
+  startOffset: number;
+  durationDays: number;
+};
+
+type BarInteraction = {
+  item: ProjectManagementTimelineRow;
+  mode: "move" | "left" | "right";
+  startX: number;
+  startOffset: number;
+  durationDays: number;
+};
+
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
-const PROJECT_TIMELINE_STORAGE_KEY_PREFIX = "mangorts.project-management.timeline.v1";
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
   nodeFolderItems: [],
@@ -70,61 +84,9 @@ const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   logicGates: [],
 };
 const WEEK_DAY_COUNT = 7;
-const TIMELINE_LABEL_W = 258;
-const TIMELINE_DAY_W = 138;
-const TIMELINE_ROW_H = 42;
-
-function projectTimelineStorageKey(companyID: string): string {
-  return `${PROJECT_TIMELINE_STORAGE_KEY_PREFIX}:${companyID.trim() || "global"}`;
-}
-
-function readStoredTimelineItems(companyID: string): ProjectTimelineItem[] {
-  if (typeof localStorage === "undefined") return [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(projectTimelineStorageKey(companyID)) ?? "[]") as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const items: ProjectTimelineItem[] = [];
-    const seen = new Set<string>();
-    for (const item of parsed) {
-      if (!item || typeof item !== "object") continue;
-      const candidate = item as Partial<ProjectTimelineItem>;
-      const entityType = candidate.entityType === "logic_gate" ? "logic_gate" : candidate.entityType === "node" ? "node" : "";
-      const entityID = typeof candidate.entityID === "string" ? candidate.entityID.trim() : "";
-      const timelineKey = typeof candidate.timelineKey === "string" ? candidate.timelineKey.trim() : "";
-      const label = typeof candidate.label === "string" ? candidate.label.trim() : "";
-      if (!entityType || !entityID || !timelineKey || !label) continue;
-      const key = `${timelineKey}:${entityType}:${entityID}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      items.push({
-        id: typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : key,
-        timelineKey,
-        entityType,
-        entityID,
-        label,
-        color: typeof candidate.color === "string" ? candidate.color : undefined,
-        startOffset: clampInteger(candidate.startOffset, 0, WEEK_DAY_COUNT - 1),
-        durationDays: clampInteger(candidate.durationDays, 1, WEEK_DAY_COUNT),
-        status: typeof candidate.status === "string" && candidate.status.trim() ? candidate.status.trim() : entityType === "logic_gate" ? "Logic Gate" : "Node",
-        source: "stored",
-      });
-    }
-    return items;
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredTimelineItems(companyID: string, items: ProjectTimelineItem[]): void {
-  if (typeof localStorage === "undefined") return;
-  const stored = items.filter((item) => item.source === "stored");
-  localStorage.setItem(projectTimelineStorageKey(companyID), JSON.stringify(stored));
-}
-
-function clampInteger(value: unknown, min: number, max: number): number {
-  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : min;
-  return Math.max(min, Math.min(max, numeric));
-}
+const TIMELINE_LABEL_W = 280;
+const TIMELINE_DAY_W = 142;
+const TIMELINE_ROW_H = 44;
 
 function defaultUserPerspective(currentUserID: string): CompanyPerspective {
   return { scope: "mine", subjectType: "user", subjectID: currentUserID.trim() };
@@ -144,27 +106,54 @@ function addDays(date: Date, count: number): Date {
   return next;
 }
 
+function dateFromISO(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
 function isoDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function endDate(startDate: string, durationDays: number): string {
+  const parsed = dateFromISO(startDate);
+  if (!parsed) return startDate;
+  return isoDate(addDays(parsed, Math.max(1, durationDays) - 1));
+}
+
+function daysBetween(left: Date, right: Date): number {
+  const a = new Date(left.getFullYear(), left.getMonth(), left.getDate()).getTime();
+  const b = new Date(right.getFullYear(), right.getMonth(), right.getDate()).getTime();
+  return Math.round((a - b) / 86_400_000);
 }
 
 function shortDayLabel(date: Date): string {
   return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(date);
 }
 
-function normalizeISODate(value: string | null | undefined): string {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : "";
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function nodeStatusLabel(node: NodeRecord): string {
-  return node.status?.trim() || "Node";
+function normalizeTimelineRow(row: ProjectManagementTimelineRow): ProjectManagementTimelineRow {
+  const durationDays = clampInteger(Number(row.duration_days) || 1, 1, 90);
+  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(row.start_date ?? "") ? row.start_date : isoDate(weekStart(new Date()));
+  return {
+    ...row,
+    start_date: startDate,
+    end_date: row.end_date || endDate(startDate, durationDays),
+    duration_days: durationDays,
+    position: Number.isFinite(Number(row.position)) ? Number(row.position) : 0,
+    display_title: row.display_title?.trim() || row.resource_id,
+  };
 }
 
-function nodeColor(node: NodeRecord): string {
-  const explicit = node.status_color?.trim();
+function rowColor(row: ProjectManagementTimelineRow): string {
+  const explicit = row.status_color?.trim();
   if (explicit) return explicit;
-  const status = node.status?.trim().toLowerCase() ?? "";
+  if (row.resource_type === "logic_gate") return "#8b5cf6";
+  const status = row.status?.trim().toLowerCase() ?? "";
   if (status.includes("done") || status.includes("complete")) return "#22c55e";
   if (status.includes("progress")) return "#3b82f6";
   if (status.includes("verify")) return "#a855f7";
@@ -172,15 +161,26 @@ function nodeColor(node: NodeRecord): string {
   return "#06b6d4";
 }
 
-function logicGateColor(logicGate: LogicGateRecord): string {
-  const assignments = logicGate.raci_assignments ?? [];
-  if (assignments.some((assignment) => assignment.role === "responsible")) return "#8b5cf6";
-  if (assignments.some((assignment) => assignment.role === "accountable")) return "#f97316";
-  return "#64748b";
+function targetUserIDsForPerspective(input: {
+  perspective: CompanyPerspective;
+  companyUsers: CompanyUser[];
+  groupMembers: CompanyUserGroupMember[];
+  currentUserID: string;
+}): string[] {
+  const currentUserID = input.currentUserID.trim();
+  if (input.perspective.scope === "company" || input.perspective.subjectType === "company") {
+    const userIDs = input.companyUsers.map((user) => user.user_id.trim()).filter(Boolean);
+    return userIDs.length > 0 ? Array.from(new Set(userIDs)).sort() : currentUserID ? [currentUserID] : [];
+  }
+  const scoped = userIDsForPerspective(input.perspective, input.groupMembers, currentUserID);
+  const userIDs = Array.from(scoped ?? new Set(input.companyUsers.map((user) => user.user_id.trim()).filter(Boolean))).filter(Boolean);
+  return userIDs.length > 0 ? Array.from(new Set(userIDs)).sort() : currentUserID ? [currentUserID] : [];
 }
 
-function logicGateLabel(logicGate: LogicGateRecord): string {
-  return logicGate.header.trim() || logicGate.logic_gate_id;
+function writeUserIDForPerspective(userIDs: string[], currentUserID: string): string {
+  const current = currentUserID.trim();
+  if (current && userIDs.includes(current)) return current;
+  return userIDs[0] ?? current;
 }
 
 function filterNodesByPerspective(nodes: NodeRecord[], perspective: CompanyPerspective, members: CompanyUserGroupMember[], currentUserID: string): NodeRecord[] {
@@ -207,23 +207,18 @@ function readTimelinePayload(dataTransfer: DataTransfer): ProjectTimelinePayload
     const entityID = typeof parsed.entityID === "string" ? parsed.entityID.trim() : "";
     const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
     if (!entityType || !entityID || !label) return null;
-    return {
-      entityType,
-      entityID,
-      label,
-      color: typeof parsed.color === "string" ? parsed.color : undefined,
-    };
+    return { entityType, entityID, label, color: typeof parsed.color === "string" ? parsed.color : undefined };
   } catch {
     return null;
   }
 }
 
-function visibleRowsForKind(rows: ExplorerTreeNode[], kind: ProjectEntityType): ExplorerTreeNode[] {
+function visibleRowsForKind(rows: ExplorerTreeNode[], kind: ProjectManagementEntityType): ExplorerTreeNode[] {
   return rows.filter((row) => row.kind === "folder" || row.kind === kind);
 }
 
 function buildEntityRows(input: {
-  kind: ProjectEntityType;
+  kind: ProjectManagementEntityType;
   expanded: Set<string>;
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
@@ -242,51 +237,26 @@ function buildEntityRows(input: {
   return visibleRowsForKind(rows, input.kind);
 }
 
-function suggestedTimelineItems(input: {
-  timelineKey: string;
-  nodes: NodeRecord[];
-  logicGates: LogicGateRecord[];
-  weekDays: Date[];
-}): ProjectTimelineItem[] {
-  const weekIndexByISO = new Map(input.weekDays.map((day, index) => [isoDate(day), index]));
-  const nodeItems = input.nodes
-    .slice()
-    .sort((left, right) => (normalizeISODate(left.due_date) || "9999-99-99").localeCompare(normalizeISODate(right.due_date) || "9999-99-99") || getNodeTitle(left).localeCompare(getNodeTitle(right)))
-    .slice(0, 14)
-    .map((node, index): ProjectTimelineItem => {
-      const dueDate = normalizeISODate(node.due_date);
-      const dueOffset = dueDate ? weekIndexByISO.get(dueDate) : undefined;
-      const startOffset = dueOffset ?? (index % WEEK_DAY_COUNT);
-      return {
-        id: `suggested:node:${node.node_id}`,
-        timelineKey: input.timelineKey,
-        entityType: "node",
-        entityID: node.node_id,
-        label: getNodeTitle(node) || node.node_id,
-        color: nodeColor(node),
-        startOffset,
-        durationDays: Math.max(1, Math.min(3, node.priority ? Math.ceil(Number(node.priority) / 2) : 1)),
-        status: nodeStatusLabel(node),
-        source: "suggested",
-      };
-    });
-  const logicGateItems = input.logicGates
-    .slice()
-    .sort((left, right) => logicGateLabel(left).localeCompare(logicGateLabel(right)))
-    .slice(0, Math.max(0, 18 - nodeItems.length))
-    .map((logicGate, index): ProjectTimelineItem => ({
-      id: `suggested:logic_gate:${logicGate.logic_gate_id}`,
-      timelineKey: input.timelineKey,
-      entityType: "logic_gate",
-      entityID: logicGate.logic_gate_id,
-        label: logicGateLabel(logicGate),
-      color: logicGateColor(logicGate),
-      startOffset: (index * 2) % WEEK_DAY_COUNT,
-      durationDays: 2,
-      status: "Logic Gate",
-      source: "suggested",
-    }));
-  return [...logicGateItems, ...nodeItems];
+function rowOverlapsWeek(row: ProjectManagementTimelineRow, weekStartDate: Date): boolean {
+  const start = dateFromISO(row.start_date);
+  if (!start) return false;
+  const offset = daysBetween(start, weekStartDate);
+  const endOffset = offset + Math.max(1, row.duration_days) - 1;
+  return endOffset >= 0 && offset < WEEK_DAY_COUNT;
+}
+
+function displayStartOffset(row: ProjectManagementTimelineRow, weekStartDate: Date): number {
+  const start = dateFromISO(row.start_date);
+  return start ? daysBetween(start, weekStartDate) : 0;
+}
+
+function sortTimelineRows(rows: ProjectManagementTimelineRow[]): ProjectManagementTimelineRow[] {
+  return rows.slice().sort((left, right) => (
+    left.start_date.localeCompare(right.start_date) ||
+    (left.position ?? 0) - (right.position ?? 0) ||
+    left.display_title.localeCompare(right.display_title, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.item_id.localeCompare(right.item_id)
+  ));
 }
 
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({
@@ -294,25 +264,33 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   widgetId,
   hideTopControls: _hideTopControls,
   theme: _theme,
+  onNodeOpen,
 }) => {
   const companyID = getActiveCompanyID();
-  const storageScope = widgetId?.trim() || "project-management";
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const sequenceByUserRef = useRef(new Map<string, number>());
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [groupMembers, setGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [workspace, setWorkspace] = useState<WorkspacePanelState>(EMPTY_WORKSPACE_PANEL);
   const [loading, setLoading] = useState(true);
+  const [timelineLoading, setTimelineLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
-  const [timelineItems, setTimelineItems] = useState<ProjectTimelineItem[]>([]);
-  const timelineLoadedRef = useRef(false);
+  const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [logicGatePerspective, setLogicGatePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [nodePerspective, setNodePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [logicGateExpanded, setLogicGateExpanded] = useState<Set<string>>(() => new Set());
   const [nodeExpanded, setNodeExpanded] = useState<Set<string>>(() => new Set());
+  const [verticalSplit, setVerticalSplit] = useState(54);
+  const [horizontalSplit, setHorizontalSplit] = useState(50);
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
+  const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -343,23 +321,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         setTimelinePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
         setLogicGatePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
         setNodePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
-        setTimelineItems(readStoredTimelineItems(companyID));
-        timelineLoadedRef.current = true;
       })
       .catch((loadError) => {
-        if (cancelled) return;
-        setError(loadError instanceof Error ? loadError.message : "Failed to load project management data");
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load project management data");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [companyID]);
-
-  useEffect(() => {
-    if (!timelineLoadedRef.current) return;
-    saveStoredTimelineItems(companyID, timelineItems);
-  }, [companyID, timelineItems]);
 
   useEffect(() => {
     setLogicGateExpanded((current) => {
@@ -378,18 +350,157 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }, [workspace.nodeFolders]);
 
   const weekDays = useMemo(() => Array.from({ length: WEEK_DAY_COUNT }, (_, index) => addDays(weekAnchor, index)), [weekAnchor]);
-  const timelineKey = perspectiveStorageKey(timelinePerspective, currentUserID);
-  const timelineNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, timelinePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, timelinePerspective, workspace.nodes]);
-  const timelineLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, timelinePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, timelinePerspective, workspace.logicGates]);
-  const storedTimelineRows = useMemo(() => timelineItems.filter((item) => item.timelineKey === timelineKey), [timelineItems, timelineKey]);
-  const timelineRows = useMemo(() => (
-    storedTimelineRows.length > 0
-      ? storedTimelineRows
-      : suggestedTimelineItems({ timelineKey, nodes: timelineNodes, logicGates: timelineLogicGates, weekDays })
-  ), [storedTimelineRows, timelineKey, timelineLogicGates, timelineNodes, weekDays]);
+  const timelineTargetUserIDs = useMemo(() => targetUserIDsForPerspective({
+    perspective: timelinePerspective,
+    companyUsers,
+    groupMembers,
+    currentUserID,
+  }), [companyUsers, currentUserID, groupMembers, timelinePerspective]);
+  const timelineTargetKey = timelineTargetUserIDs.join("|");
+  const timelineWriteUserID = writeUserIDForPerspective(timelineTargetUserIDs, currentUserID);
+
+  const loadTimelineRows = useCallback(async () => {
+    if (!companyID || timelineTargetUserIDs.length === 0) {
+      setTimelineRows([]);
+      setTimelineLoading(false);
+      return;
+    }
+    setTimelineLoading(true);
+    setError("");
+    const settled = await Promise.allSettled(timelineTargetUserIDs.map((userID) => fetchProjectManagementTimeline(companyID, userID)));
+    const rows: ProjectManagementTimelineRow[] = [];
+    let failureCount = 0;
+    settled.forEach((result, index) => {
+      const userID = timelineTargetUserIDs[index];
+      if (result.status === "fulfilled") {
+        sequenceByUserRef.current.set(userID, Number(result.value.projection_sequence) || 0);
+        rows.push(...result.value.rows.map(normalizeTimelineRow));
+      } else {
+        failureCount += 1;
+      }
+    });
+    setTimelineRows(sortTimelineRows(rows));
+    if (failureCount > 0 && rows.length === 0) {
+      setError("Failed to load project management timeline");
+    }
+    setTimelineLoading(false);
+  }, [companyID, timelineTargetUserIDs]);
+
+  useEffect(() => {
+    void loadTimelineRows();
+  }, [loadTimelineRows]);
+
+  useEffect(() => {
+    if (!companyID || !timelineTargetKey) return undefined;
+    const apiBase = readAuthConfig().apiBase;
+    const unsubscribes = timelineTargetUserIDs.map((userID) => {
+      const scope = `project_management:user:${userID}`;
+      return subscribeRealtimeScope(apiBase, companyID, scope, {
+        getAfterSequence: () => sequenceByUserRef.current.get(userID),
+        onDelta: (message: RealtimeProjectionDeltaMessage) => {
+          if (message.projection !== "project_management_timeline") return;
+          if (typeof message.projection_sequence === "number") {
+            sequenceByUserRef.current.set(userID, Math.max(sequenceByUserRef.current.get(userID) ?? 0, message.projection_sequence));
+          }
+          void loadTimelineRows();
+        },
+        onRefetch: () => {
+          void loadTimelineRows();
+        },
+        onPermissionRevoked: () => {
+          void loadTimelineRows();
+        },
+      });
+    });
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [companyID, loadTimelineRows, timelineTargetKey, timelineTargetUserIDs]);
+
+  useEffect(() => {
+    if (!resizeState) return undefined;
+    const onPointerMove = (event: PointerEvent) => {
+      if (resizeState.kind === "vertical") {
+        const pct = ((event.clientY - resizeState.pageTop) / resizeState.pageHeight) * 100;
+        setVerticalSplit(clampInteger(pct, 36, 70));
+      } else {
+        const pct = ((event.clientX - resizeState.bottomLeft) / resizeState.bottomWidth) * 100;
+        setHorizontalSplit(clampInteger(pct, 34, 66));
+      }
+    };
+    const onPointerUp = () => setResizeState(null);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [resizeState]);
+
+  const updateTimelineItem = useCallback(async (item: ProjectManagementTimelineRow, startOffset: number, durationDays: number) => {
+    const nextStartDate = isoDate(addDays(weekDays[0], clampInteger(startOffset, 0, WEEK_DAY_COUNT - 1)));
+    const nextDuration = clampInteger(durationDays, 1, WEEK_DAY_COUNT);
+    const optimistic = normalizeTimelineRow({ ...item, start_date: nextStartDate, end_date: endDate(nextStartDate, nextDuration), duration_days: nextDuration });
+    setTimelineRows((current) => sortTimelineRows(current.map((row) => row.item_id === item.item_id ? optimistic : row)));
+    try {
+      const result = await updateProjectManagementTimelineItem({
+        companyID,
+        itemID: item.item_id,
+        startDate: nextStartDate,
+        durationDays: nextDuration,
+        position: item.position ?? 0,
+      });
+      if (result.item) {
+        setTimelineRows((current) => sortTimelineRows(current.map((row) => row.item_id === item.item_id ? normalizeTimelineRow(result.item!) : row)));
+      }
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Failed to update timeline item");
+      void loadTimelineRows();
+    }
+  }, [companyID, loadTimelineRows, weekDays]);
+
+  useEffect(() => {
+    if (!barInteraction) return undefined;
+    const onPointerMove = (event: PointerEvent) => {
+      const deltaDays = Math.round((event.clientX - barInteraction.startX) / TIMELINE_DAY_W);
+      if (barInteraction.mode === "move") {
+        setBarDraft({
+          itemID: barInteraction.item.item_id,
+          startOffset: clampInteger(barInteraction.startOffset + deltaDays, 0, WEEK_DAY_COUNT - barInteraction.durationDays),
+          durationDays: barInteraction.durationDays,
+        });
+      } else if (barInteraction.mode === "left") {
+        const nextStart = clampInteger(barInteraction.startOffset + deltaDays, 0, barInteraction.startOffset + barInteraction.durationDays - 1);
+        const nextDuration = clampInteger(barInteraction.durationDays + (barInteraction.startOffset - nextStart), 1, WEEK_DAY_COUNT - nextStart);
+        setBarDraft({ itemID: barInteraction.item.item_id, startOffset: nextStart, durationDays: nextDuration });
+      } else {
+        setBarDraft({
+          itemID: barInteraction.item.item_id,
+          startOffset: barInteraction.startOffset,
+          durationDays: clampInteger(barInteraction.durationDays + deltaDays, 1, WEEK_DAY_COUNT - barInteraction.startOffset),
+        });
+      }
+    };
+    const onPointerUp = () => {
+      const draft = barDraft;
+      const interaction = barInteraction;
+      setBarInteraction(null);
+      setBarDraft(null);
+      if (draft && interaction && (draft.startOffset !== interaction.startOffset || draft.durationDays !== interaction.durationDays)) {
+        void updateTimelineItem(interaction.item, draft.startOffset, draft.durationDays);
+      }
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [barDraft, barInteraction, updateTimelineItem]);
 
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, logicGatePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, logicGatePerspective, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, nodePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, nodePerspective, workspace.nodes]);
+  const visibleTimelineRows = useMemo(() => sortTimelineRows(timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0]))), [timelineRows, weekDays]);
   const logicGateRows = useMemo(() => buildEntityRows({
     kind: "logic_gate",
     expanded: logicGateExpanded,
@@ -407,42 +518,63 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     folderItems: workspace.nodeFolderItems,
   }), [filteredNodes, nodeExpanded, workspace.nodeFolderItems, workspace.nodeFolders]);
 
-  const addTimelineItem = useCallback((payload: ProjectTimelinePayload, startOffset: number) => {
-    const status = payload.entityType === "logic_gate"
-      ? "Logic Gate"
-      : workspace.nodes.find((node) => node.node_id === payload.entityID)?.status?.trim() || "Node";
-    const color = payload.color || (payload.entityType === "logic_gate"
-      ? logicGateColor(workspace.logicGates.find((logicGate) => logicGate.logic_gate_id === payload.entityID) ?? { company_id: companyID, logic_gate_id: payload.entityID, header: payload.label, created_timestamp: "" })
-      : nodeColor(workspace.nodes.find((node) => node.node_id === payload.entityID) ?? { company_id: companyID, node_id: payload.entityID, title: payload.label, created_timestamp: "" }));
-    setTimelineItems((current) => {
-      const key = `${timelineKey}:${payload.entityType}:${payload.entityID}`;
-      const nextItem: ProjectTimelineItem = {
-        id: key,
-        timelineKey,
+  const addTimelineItem = useCallback(async (payload: ProjectTimelinePayload, startOffset: number) => {
+    if (!timelineWriteUserID) return;
+    const startDate = isoDate(addDays(weekDays[0], startOffset));
+    const durationDays = payload.entityType === "logic_gate" ? 2 : 1;
+    try {
+      const result = await createProjectManagementTimelineItem({
+        companyID,
+        userID: timelineWriteUserID,
         entityType: payload.entityType,
         entityID: payload.entityID,
-        label: payload.label,
-        color,
-        startOffset,
-        durationDays: payload.entityType === "logic_gate" ? 2 : 1,
-        status,
-        source: "stored",
-      };
-      return [...current.filter((item) => !(item.timelineKey === timelineKey && item.entityType === payload.entityType && item.entityID === payload.entityID)), nextItem];
-    });
-    setNotice(`${payload.label} added to ${companyPerspectiveLabel(timelinePerspective, companyUsers, groups, currentUserID)}`);
-  }, [companyID, companyUsers, currentUserID, groups, timelineKey, timelinePerspective, workspace.logicGates, workspace.nodes]);
+        startDate,
+        durationDays,
+        position: visibleTimelineRows.length,
+      });
+      if (result.item) {
+        setTimelineRows((current) => sortTimelineRows([...current.filter((row) => row.item_id !== result.item!.item_id), normalizeTimelineRow(result.item!)]));
+      } else {
+        void loadTimelineRows();
+      }
+      setNotice(`${payload.label} scheduled`);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to add timeline item");
+    }
+  }, [companyID, loadTimelineRows, timelineWriteUserID, visibleTimelineRows.length, weekDays]);
 
-  const removeTimelineItem = (itemID: string) => {
-    setTimelineItems((current) => current.filter((item) => item.id !== itemID));
+  const removeTimelineItem = useCallback(async (item: ProjectManagementTimelineRow) => {
+    setTimelineRows((current) => current.filter((row) => row.item_id !== item.item_id));
+    try {
+      await deleteProjectManagementTimelineItem(companyID, item.item_id);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete timeline item");
+      void loadTimelineRows();
+    }
+  }, [companyID, loadTimelineRows]);
+
+  const clearTimelinePerspective = useCallback(() => {
+    const items = visibleTimelineRows.slice();
+    setTimelineRows((current) => current.filter((row) => !items.some((item) => item.item_id === row.item_id)));
+    void Promise.allSettled(items.map((item) => deleteProjectManagementTimelineItem(companyID, item.item_id))).then(() => loadTimelineRows());
+  }, [companyID, loadTimelineRows, visibleTimelineRows]);
+
+  const startVerticalResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = pageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    setResizeState({ kind: "vertical", pageTop: rect.top, pageHeight: rect.height });
   };
 
-  const clearTimelinePerspective = () => {
-    setTimelineItems((current) => current.filter((item) => item.timelineKey !== timelineKey));
+  const startHorizontalResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = bottomRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    setResizeState({ kind: "horizontal", bottomLeft: rect.left, bottomWidth: rect.width });
   };
 
   return (
-    <div style={pageStyle}>
+    <div ref={pageRef} style={pageStyle(verticalSplit)}>
       <section style={timelineSurfaceStyle}>
         <div style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
@@ -469,14 +601,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         {!error && notice && <div style={noticeStyle}>{notice}</div>}
         <TimelineChart
           accent={accent}
-          loading={loading}
+          loading={loading || timelineLoading}
           weekDays={weekDays}
-          rows={timelineRows}
+          rows={visibleTimelineRows}
+          draft={barDraft}
           onDropEntity={addTimelineItem}
           onRemoveItem={removeTimelineItem}
+          onNodeOpen={onNodeOpen}
+          onStartBarInteraction={setBarInteraction}
         />
       </section>
-      <section style={bottomGridStyle}>
+      <div role="separator" aria-orientation="horizontal" style={verticalResizerStyle} onPointerDown={startVerticalResize} />
+      <section ref={bottomRef} style={bottomGridStyle(horizontalSplit)}>
         <ProjectEntityExplorerPanel
           title="Logic Gates"
           rootLabel={`${companyPerspectiveLabel(logicGatePerspective, companyUsers, groups, currentUserID)} Logic Gates`}
@@ -492,6 +628,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           currentUserID={currentUserID}
           count={filteredLogicGates.length}
         />
+        <div role="separator" aria-orientation="vertical" style={horizontalResizerStyle} onPointerDown={startHorizontalResize} />
         <ProjectEntityExplorerPanel
           title="Nodes"
           rootLabel={`${companyPerspectiveLabel(nodePerspective, companyUsers, groups, currentUserID)} Nodes`}
@@ -506,9 +643,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           groupMembers={groupMembers}
           currentUserID={currentUserID}
           count={filteredNodes.length}
+          onNodeOpen={onNodeOpen}
         />
       </section>
-      <div aria-hidden="true" data-project-management-scope={storageScope} style={{ display: "none" }} />
+      <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
     </div>
   );
 };
@@ -518,24 +656,30 @@ function TimelineChart({
   loading,
   weekDays,
   rows,
+  draft,
   onDropEntity,
   onRemoveItem,
+  onNodeOpen,
+  onStartBarInteraction,
 }: {
   accent: string;
   loading: boolean;
   weekDays: Date[];
-  rows: ProjectTimelineItem[];
+  rows: ProjectManagementTimelineRow[];
+  draft: BarDraft | null;
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
-  onRemoveItem: (itemID: string) => void;
+  onRemoveItem: (item: ProjectManagementTimelineRow) => void;
+  onNodeOpen?: (nodeID: string) => void;
+  onStartBarInteraction: (interaction: BarInteraction) => void;
 }) {
   const [dropOffset, setDropOffset] = useState<number | null>(null);
   const gridWidth = TIMELINE_LABEL_W + WEEK_DAY_COUNT * TIMELINE_DAY_W;
+  const weekStartDate = weekDays[0];
   const dropOffsetForEvent = (event: React.DragEvent<HTMLDivElement>): number => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left - TIMELINE_LABEL_W;
     return clampInteger(Math.floor(x / TIMELINE_DAY_W), 0, WEEK_DAY_COUNT - 1);
   };
-  const hasRows = rows.length > 0;
   return (
     <div className="kanban-board-scroll" style={timelineScrollStyle}>
       <div
@@ -563,27 +707,72 @@ function TimelineChart({
         ))}
         {loading ? (
           <div style={{ ...timelineEmptyStyle, gridColumn: `1 / span ${WEEK_DAY_COUNT + 1}` }}>Loading</div>
-        ) : hasRows ? rows.map((item, rowIndex) => (
-          <React.Fragment key={item.id}>
-            <div style={timelineRowLabelStyle(rowIndex)}>
-              <span style={entityTypePillStyle(item.entityType, item.color)}>{item.entityType === "logic_gate" ? "Gate" : "Node"}</span>
-              <span style={timelineRowTitleStyle}>{item.label}</span>
-              <span style={timelineStatusStyle}>{item.status}</span>
-            </div>
-            {weekDays.map((day, dayIndex) => (
-              <div key={`${item.id}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent)} />
-            ))}
-            <div
-              style={timelineBarStyle(item, rowIndex)}
-              title={item.label}
-            >
-              <span style={timelineBarLabelStyle}>{item.label}</span>
-              {item.source === "stored" && (
-                <button type="button" aria-label={`Remove ${item.label}`} style={removeBarButtonStyle} onClick={() => onRemoveItem(item.id)}>x</button>
-              )}
-            </div>
-          </React.Fragment>
-        )) : (
+        ) : rows.length > 0 ? rows.map((item, rowIndex) => {
+          const actualStartOffset = displayStartOffset(item, weekStartDate);
+          const baseStart = clampInteger(actualStartOffset, 0, WEEK_DAY_COUNT - 1);
+          const baseDuration = clampInteger(Math.min(item.duration_days, WEEK_DAY_COUNT - baseStart), 1, WEEK_DAY_COUNT - baseStart);
+          const activeDraft = draft?.itemID === item.item_id ? draft : null;
+          const startOffset = activeDraft?.startOffset ?? baseStart;
+          const durationDays = activeDraft?.durationDays ?? baseDuration;
+          return (
+            <React.Fragment key={item.item_id}>
+              <div style={timelineRowLabelStyle(rowIndex)}>
+                <span style={entityTypePillStyle(rowColor(item))}>{item.resource_type === "logic_gate" ? "Gate" : "Node"}</span>
+                <span style={timelineRowTitleStyle}>{item.display_title}</span>
+                <span style={timelineStatusStyle}>{item.status || (item.resource_type === "logic_gate" ? "Logic Gate" : "Node")}</span>
+              </div>
+              {weekDays.map((day, dayIndex) => (
+                <div key={`${item.item_id}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent)} />
+              ))}
+              <div
+                style={timelineBarStyle(item, rowIndex, startOffset, durationDays)}
+                title={item.display_title}
+                onDoubleClick={() => {
+                  const nodeID = item.node_id?.trim() || (item.resource_type === "node" ? item.resource_id : "");
+                  if (nodeID) onNodeOpen?.(nodeID);
+                }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  onStartBarInteraction({ item, mode: "move", startX: event.clientX, startOffset, durationDays });
+                }}
+              >
+                <button
+                  type="button"
+                  aria-label={`Resize ${item.display_title} start`}
+                  style={barHandleStyle("left")}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    onStartBarInteraction({ item, mode: "left", startX: event.clientX, startOffset, durationDays });
+                  }}
+                />
+                <span style={timelineBarLabelStyle}>{item.display_title}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.display_title}`}
+                  style={removeBarButtonStyle}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemoveItem(item);
+                  }}
+                >
+                  x
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Resize ${item.display_title} end`}
+                  style={barHandleStyle("right")}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    onStartBarInteraction({ item, mode: "right", startX: event.clientX, startOffset, durationDays });
+                  }}
+                />
+              </div>
+            </React.Fragment>
+          );
+        }) : (
           <div style={{ ...timelineEmptyStyle, gridColumn: `1 / span ${WEEK_DAY_COUNT + 1}` }}>No scheduled work</div>
         )}
       </div>
@@ -605,10 +794,11 @@ function ProjectEntityExplorerPanel({
   groupMembers,
   currentUserID,
   count,
+  onNodeOpen,
 }: {
   title: string;
   rootLabel: string;
-  kind: ProjectEntityType;
+  kind: ProjectManagementEntityType;
   rows: ExplorerTreeNode[];
   expanded: Set<string>;
   onSetExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -619,6 +809,7 @@ function ProjectEntityExplorerPanel({
   groupMembers: CompanyUserGroupMember[];
   currentUserID: string;
   count: number;
+  onNodeOpen?: (nodeID: string) => void;
 }) {
   const [rootOpen, setRootOpen] = useState(true);
   const toggleRow = (rowID: string) => {
@@ -653,7 +844,7 @@ function ProjectEntityExplorerPanel({
           <span style={treeLabelStyle}>{rootLabel}</span>
         </button>
         {rootOpen && rows.map((row) => (
-          <ProjectExplorerRow key={row.id} row={row} kind={kind} expanded={expanded} onToggle={toggleRow} />
+          <ProjectExplorerRow key={row.id} row={row} kind={kind} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} />
         ))}
         {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No {kind === "logic_gate" ? "logic gates" : "nodes"}</div>}
       </div>
@@ -666,11 +857,13 @@ function ProjectExplorerRow({
   kind,
   expanded,
   onToggle,
+  onNodeOpen,
 }: {
   row: ExplorerTreeNode;
-  kind: ProjectEntityType;
+  kind: ProjectManagementEntityType;
   expanded: Set<string>;
   onToggle: (rowID: string) => void;
+  onNodeOpen?: (nodeID: string) => void;
 }) {
   const isFolder = row.kind === "folder";
   const entityID = kind === "logic_gate" ? row.logicGateID : row.nodeID;
@@ -695,6 +888,9 @@ function ProjectExplorerRow({
         event.dataTransfer.setData(PROJECT_TIMELINE_ENTITY_MIME, JSON.stringify(payload));
         event.dataTransfer.setData("text/plain", row.label);
       }}
+      onDoubleClick={() => {
+        if (kind === "node" && entityID) onNodeOpen?.(entityID);
+      }}
       style={treeRowWrapStyle(depth, draggable)}
     >
       <button
@@ -712,20 +908,22 @@ function ProjectExplorerRow({
   );
 }
 
-const pageStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
-  minHeight: 0,
-  display: "grid",
-  gridTemplateRows: "minmax(318px, 1.08fr) minmax(238px, 0.92fr)",
-  gap: 12,
-  padding: 12,
-  borderRadius: 14,
-  background: "linear-gradient(145deg, #f8fafc 0%, #eef2f7 100%)",
-  boxSizing: "border-box",
-  color: "#111827",
-  overflow: "visible",
-};
+function pageStyle(verticalSplit: number): React.CSSProperties {
+  return {
+    width: "100%",
+    height: "100%",
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: `minmax(260px, ${verticalSplit}%) 8px minmax(220px, 1fr)`,
+    gap: 0,
+    padding: 12,
+    borderRadius: 0,
+    background: "linear-gradient(145deg, #f8fafc 0%, #eef2f7 100%)",
+    boxSizing: "border-box",
+    color: "#111827",
+    overflow: "hidden",
+  };
+}
 
 const timelineSurfaceStyle: React.CSSProperties = {
   minHeight: 0,
@@ -738,7 +936,31 @@ const timelineSurfaceStyle: React.CSSProperties = {
   background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 247, 251, 0.92))",
   boxShadow: "9px 9px 20px rgba(174, 174, 192, 0.26), -8px -8px 18px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
   boxSizing: "border-box",
-  overflow: "visible",
+  overflow: "hidden",
+};
+
+const verticalResizerStyle: React.CSSProperties = {
+  cursor: "row-resize",
+  borderRadius: 999,
+  margin: "2px 34px",
+  background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.34), transparent)",
+};
+
+function bottomGridStyle(horizontalSplit: number): React.CSSProperties {
+  return {
+    minHeight: 0,
+    display: "grid",
+    gridTemplateColumns: `minmax(260px, ${horizontalSplit}%) 8px minmax(260px, 1fr)`,
+    gap: 0,
+    overflow: "hidden",
+  };
+}
+
+const horizontalResizerStyle: React.CSSProperties = {
+  cursor: "col-resize",
+  borderRadius: 999,
+  margin: "34px 2px",
+  background: "linear-gradient(180deg, transparent, rgba(100, 116, 139, 0.32), transparent)",
 };
 
 const surfaceHeaderStyle: React.CSSProperties = {
@@ -930,71 +1152,93 @@ function timelineCellStyle(rowIndex: number, active: boolean, accent: string): R
   };
 }
 
-function timelineBarStyle(item: ProjectTimelineItem, rowIndex: number): React.CSSProperties {
-  const start = Math.max(0, Math.min(WEEK_DAY_COUNT - 1, item.startOffset));
-  const duration = Math.max(1, Math.min(WEEK_DAY_COUNT - start, item.durationDays));
+function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, startOffset: number, durationDays: number): React.CSSProperties {
+  const start = clampInteger(startOffset, 0, WEEK_DAY_COUNT - 1);
+  const duration = clampInteger(durationDays, 1, WEEK_DAY_COUNT - start);
+  const color = rowColor(item);
   return {
     zIndex: 6,
     gridColumn: `${start + 2} / span ${duration}`,
     gridRow: rowIndex + 2,
     alignSelf: "center",
-    height: 25,
-    margin: "0 8px",
-    display: "flex",
+    minWidth: 0,
+    height: 26,
+    display: "grid",
+    gridTemplateColumns: "8px minmax(0, 1fr) 22px 8px",
     alignItems: "center",
-    gap: 7,
-    padding: "0 8px",
-    border: `1px solid ${item.color || "#64748b"}66`,
+    gap: 3,
+    margin: "0 8px",
+    padding: "0 5px",
+    border: `1px solid ${color}66`,
     borderRadius: 7,
-    background: `linear-gradient(145deg, ${item.color || "#64748b"}24, rgba(255, 255, 255, 0.88))`,
-    color: "#1f2937",
-    boxShadow: `0 6px 14px ${item.color || "#64748b"}22, inset 1px 1px 0 rgba(255, 255, 255, 0.82)`,
+    background: `linear-gradient(145deg, ${color}18, rgba(255, 255, 255, 0.94))`,
+    boxShadow: `0 7px 16px ${color}18, inset 1px 1px 0 rgba(255, 255, 255, 0.88)`,
+    color: "#111827",
     boxSizing: "border-box",
-    overflow: "hidden",
+    cursor: "grab",
+  };
+}
+
+function barHandleStyle(side: "left" | "right"): React.CSSProperties {
+  return {
+    width: 8,
+    height: 18,
+    border: 0,
+    borderRadius: 4,
+    background: "rgba(100, 116, 139, 0.34)",
+    cursor: side === "left" ? "w-resize" : "e-resize",
+    padding: 0,
   };
 }
 
 const timelineBarLabelStyle: React.CSSProperties = {
   minWidth: 0,
-  flex: "1 1 auto",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   fontSize: 11,
-  fontWeight: 900,
+  fontWeight: 950,
 };
 
 const removeBarButtonStyle: React.CSSProperties = {
-  width: 18,
-  height: 18,
-  flex: "0 0 18px",
-  display: "inline-grid",
+  width: 20,
+  height: 20,
+  display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.20)",
-  borderRadius: 5,
-  background: "rgba(255, 255, 255, 0.78)",
+  border: "1px solid rgba(148, 163, 184, 0.20)",
+  borderRadius: 6,
+  background: "rgba(255, 255, 255, 0.86)",
   color: "#64748b",
   cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 11,
+  fontSize: 10,
   fontWeight: 950,
-  padding: 0,
+  lineHeight: 1,
 };
 
-function entityTypePillStyle(kind: ProjectEntityType, color?: string): React.CSSProperties {
-  const resolved = color || (kind === "logic_gate" ? "#8b5cf6" : "#06b6d4");
+const timelineEmptyStyle: React.CSSProperties = {
+  gridRow: 2,
+  display: "grid",
+  placeItems: "center",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 850,
+  minHeight: 96,
+};
+
+function entityTypePillStyle(color: string): React.CSSProperties {
   return {
-    height: 21,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: `1px solid ${resolved}55`,
+    minWidth: 0,
+    height: 20,
+    display: "inline-grid",
+    placeItems: "center",
+    border: `1px solid ${color}66`,
     borderRadius: 6,
-    background: `${resolved}14`,
-    color: resolved,
+    background: `${color}12`,
+    color,
     fontSize: 9,
     fontWeight: 950,
     textTransform: "uppercase",
+    letterSpacing: 0,
   };
 }
 
@@ -1003,57 +1247,39 @@ const timelineRowTitleStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "#1f2937",
+  color: "#111827",
   fontSize: 11,
   fontWeight: 900,
 };
 
 const timelineStatusStyle: React.CSSProperties = {
-  maxWidth: 78,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   color: "#64748b",
   fontSize: 10,
-  fontWeight: 800,
-};
-
-const timelineEmptyStyle: React.CSSProperties = {
-  minHeight: 72,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "#64748b",
-  fontSize: 12,
   fontWeight: 850,
-};
-
-const bottomGridStyle: React.CSSProperties = {
-  minHeight: 0,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-  gap: 12,
 };
 
 const entityPanelStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  padding: 11,
-  border: "1px solid rgba(255, 255, 255, 0.76)",
+  gap: 8,
+  padding: 12,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
   borderRadius: 12,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 247, 251, 0.90))",
-  boxShadow: "8px 8px 18px rgba(174, 174, 192, 0.24), -7px -7px 16px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
-  overflow: "hidden",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 247, 251, 0.92))",
+  boxShadow: "8px 8px 18px rgba(174, 174, 192, 0.18), -7px -7px 16px rgba(255, 255, 255, 0.86)",
   boxSizing: "border-box",
+  overflow: "hidden",
 };
 
 const entityPanelHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(108px, 1fr) minmax(248px, auto)",
-  alignItems: "center",
+  gridTemplateColumns: "minmax(130px, 1fr) minmax(250px, auto)",
+  alignItems: "start",
   gap: 10,
-  marginBottom: 9,
 };
 
 const entityPanelTitleStyle: React.CSSProperties = {
@@ -1061,80 +1287,75 @@ const entityPanelTitleStyle: React.CSSProperties = {
   color: "#111827",
   fontSize: 13,
   fontWeight: 950,
+  letterSpacing: 0,
 };
 
 const treeScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
-  padding: 6,
+  padding: 8,
   border: "1px solid rgba(148, 163, 184, 0.18)",
   borderRadius: 10,
-  background: "rgba(255, 255, 255, 0.66)",
+  background: "rgba(255, 255, 255, 0.64)",
   boxSizing: "border-box",
 };
 
 const treeRootRowStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: 34,
+  height: 32,
   display: "grid",
-  gridTemplateColumns: "22px 22px minmax(0, 1fr)",
+  gridTemplateColumns: "18px 20px minmax(0, 1fr)",
   alignItems: "center",
-  gap: 5,
+  gap: 6,
   border: "1px solid rgba(148, 163, 184, 0.18)",
   borderRadius: 8,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.86))",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9))",
   color: "#334155",
   cursor: "pointer",
+  padding: "0 10px",
   fontFamily: "inherit",
-  fontSize: 11,
-  fontWeight: 950,
-  padding: "0 8px",
-  textAlign: "left",
-  boxShadow: "0 4px 11px rgba(15, 23, 42, 0.06), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
   boxSizing: "border-box",
+  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.12), -4px -4px 10px rgba(255, 255, 255, 0.82)",
 };
 
 function treeRowWrapStyle(depth: number, draggable: boolean): React.CSSProperties {
   return {
     paddingLeft: depth * 16,
-    opacity: draggable ? 1 : 0.92,
+    cursor: draggable ? "grab" : "default",
   };
 }
 
 function treeRowButtonStyle(draggable: boolean): React.CSSProperties {
   return {
     width: "100%",
-    minHeight: 30,
+    height: 30,
     display: "grid",
-    gridTemplateColumns: "20px 22px minmax(0, 1fr)",
+    gridTemplateColumns: "18px 20px minmax(0, 1fr)",
     alignItems: "center",
-    gap: 5,
-    border: "1px solid transparent",
+    gap: 6,
+    border: 0,
     borderRadius: 7,
     background: "transparent",
-    color: "#334155",
+    color: "#475569",
     cursor: draggable ? "grab" : "pointer",
-    fontFamily: "inherit",
     padding: "0 8px",
-    textAlign: "left",
+    fontFamily: "inherit",
     boxSizing: "border-box",
   };
 }
 
 const treeDisclosureStyle: React.CSSProperties = {
-  width: 18,
-  height: 18,
-  display: "inline-grid",
+  width: 16,
+  height: 16,
+  display: "grid",
   placeItems: "center",
-  color: "#64748b",
 };
 
 const treeIconStyle: React.CSSProperties = {
   width: 18,
   height: 18,
-  display: "inline-grid",
+  display: "grid",
   placeItems: "center",
-  color: "#64748b",
 };
 
 const treeLabelStyle: React.CSSProperties = {
@@ -1142,11 +1363,16 @@ const treeLabelStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  textAlign: "left",
+  fontSize: 12,
+  fontWeight: 800,
 };
 
 const emptyTreeStyle: React.CSSProperties = {
-  padding: "12px 10px",
-  color: "#64748b",
-  fontSize: 11,
+  minHeight: 80,
+  display: "grid",
+  placeItems: "center",
+  color: "#94a3b8",
+  fontSize: 12,
   fontWeight: 800,
 };
