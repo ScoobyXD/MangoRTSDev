@@ -173,6 +173,10 @@ func (r *PostgresRepo) UpdateLogicGateHeader(companyID, logicGateID, header stri
 	}
 	defer tx.Rollback()
 
+	projectManagementProjectionBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
 	const q = `
 UPDATE logic_gates
 SET header = $3
@@ -187,6 +191,17 @@ RETURNING company_id, logic_gate_id, header, created_timestamp
 		return domain.LogicGate{}, err
 	}
 	if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return domain.LogicGate{}, err
+	}
+	if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return domain.LogicGate{}, err
+	}
+	projectManagementProjectionAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	projectionDeltas := diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -712,6 +727,16 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return err
 	}
 	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
+	if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from project_management_timeline_items
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
 		return err
 	}
 	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {

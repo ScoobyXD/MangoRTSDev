@@ -375,6 +375,10 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	projectManagementProjectionBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -387,6 +391,10 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	projectManagementProjectionAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -394,6 +402,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
 	racioProjectionDeltas := diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)
 	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
+	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -485,6 +494,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		return domain.Node{}, err
 	}
 	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
+		return domain.Node{}, err
+	}
+	if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return domain.Node{}, err
 	}
 	return item, nil

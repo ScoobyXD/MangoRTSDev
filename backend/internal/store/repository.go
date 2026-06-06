@@ -39,6 +39,7 @@ type Repository interface {
 	MapLayoutRepository
 	WorkspaceEntityCommandRepository
 	KanbanRepository
+	ProjectManagementRepository
 	NotificationRepository
 	DomainEventRepository
 	EventRepository
@@ -187,6 +188,16 @@ type WorkItemReadRepository interface {
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
 	CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
 	NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
+}
+
+type ProjectManagementRepository interface {
+	ListProjectManagementTimelineProjectionRows(query ProjectManagementTimelineQuery) ([]ProjectManagementTimelineProjectionRow, error)
+	ListProjectManagementTimelineProjectionRowsForNode(companyID, nodeID string) ([]ProjectManagementTimelineProjectionRow, error)
+	ListProjectManagementTimelineProjectionRowsForLogicGate(companyID, logicGateID string) ([]ProjectManagementTimelineProjectionRow, error)
+	GetProjectManagementTimelineItemOwner(companyID, itemID string) (string, error)
+	UpsertProjectManagementTimelineItem(input ProjectManagementTimelineItemInput) (ProjectManagementTimelineMutationResult, error)
+	UpdateProjectManagementTimelineItem(input ProjectManagementTimelineItemUpdateInput) (ProjectManagementTimelineMutationResult, error)
+	DeleteProjectManagementTimelineItem(input ProjectManagementTimelineItemDeleteInput) (ProjectManagementTimelineMutationResult, error)
 }
 
 type CompanyExplorerRepository interface {
@@ -355,6 +366,7 @@ type WorkItemLogicGateInboxItem struct {
 
 type ProjectionRow struct {
 	CompanyID                  string    `json:"company_id"`
+	ItemID                     string    `json:"item_id,omitempty"`
 	UserID                     string    `json:"user_id,omitempty"`
 	ResourceType               string    `json:"resource_type,omitempty"`
 	ResourceID                 string    `json:"resource_id,omitempty"`
@@ -374,6 +386,9 @@ type ProjectionRow struct {
 	CardID                     string    `json:"card_id,omitempty"`
 	ColumnID                   string    `json:"column_id,omitempty"`
 	NodeID                     string    `json:"node_id,omitempty"`
+	StartDate                  string    `json:"start_date,omitempty"`
+	EndDate                    string    `json:"end_date,omitempty"`
+	DurationDays               int       `json:"duration_days,omitempty"`
 	NodeTitle                  string    `json:"node_title,omitempty"`
 	DescriptionSnapshot        string    `json:"description_snapshot,omitempty"`
 	IsIssue                    bool      `json:"is_issue,omitempty"`
@@ -390,9 +405,12 @@ type RacioMatrixProjectionRow = ProjectionRow
 
 type KanbanBoardProjectionRow = ProjectionRow
 
+type ProjectManagementTimelineProjectionRow = ProjectionRow
+
 const (
-	ProjectionNameRacioMatrix = "racio_matrix"
-	ProjectionNameKanbanBoard = "kanban_board"
+	ProjectionNameRacioMatrix               = "racio_matrix"
+	ProjectionNameKanbanBoard               = "kanban_board"
+	ProjectionNameProjectManagementTimeline = "project_management_timeline"
 
 	ProjectionDeltaOperationUpsert = "upsert"
 	ProjectionDeltaOperationDelete = "delete"
@@ -400,6 +418,7 @@ const (
 )
 
 type ProjectionRowKey struct {
+	ItemID       string `json:"item_id,omitempty"`
 	UserID       string `json:"user_id,omitempty"`
 	ResourceType string `json:"resource_type,omitempty"`
 	ResourceID   string `json:"resource_id,omitempty"`
@@ -407,6 +426,54 @@ type ProjectionRowKey struct {
 	LogicGateID  string `json:"logic_gate_id,omitempty"`
 	NodeID       string `json:"node_id,omitempty"`
 	CardID       string `json:"card_id,omitempty"`
+}
+
+const ProjectManagementTimelineDefaultLimit = 500
+const ProjectManagementTimelineMaxLimit = 1000
+const ProjectManagementTimelineMaxDurationDays = 90
+
+type ProjectManagementTimelineQuery struct {
+	CompanyID    string
+	UserID       string
+	ViewerUserID string
+	Limit        int
+}
+
+type ProjectManagementTimelineItemInput struct {
+	CompanyID    string
+	UserID       string
+	ViewerUserID string
+	ActorUserID  string
+	ItemID       string
+	EntityType   string
+	EntityID     string
+	StartDate    string
+	DurationDays int
+	Position     int
+}
+
+type ProjectManagementTimelineItemUpdateInput struct {
+	CompanyID    string
+	ViewerUserID string
+	ActorUserID  string
+	ItemID       string
+	StartDate    string
+	DurationDays int
+	Position     int
+}
+
+type ProjectManagementTimelineItemDeleteInput struct {
+	CompanyID    string
+	ViewerUserID string
+	ActorUserID  string
+	ItemID       string
+}
+
+type ProjectManagementTimelineMutationResult struct {
+	Item             *ProjectManagementTimelineProjectionRow `json:"item,omitempty"`
+	DeletedItemID    string                                  `json:"deleted_item_id,omitempty"`
+	UserID           string                                  `json:"user_id,omitempty"`
+	ProjectionDeltas []ProjectionDelta                       `json:"-"`
 }
 
 type ProjectionDelta struct {
@@ -453,6 +520,76 @@ func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
 		query.Limit = WorkItemInboxDefaultLimit
 	}
 	return query
+}
+
+func NormalizeProjectManagementTimelineQuery(query ProjectManagementTimelineQuery) ProjectManagementTimelineQuery {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.UserID = strings.TrimSpace(query.UserID)
+	query.ViewerUserID = strings.TrimSpace(query.ViewerUserID)
+	if query.ViewerUserID == "" {
+		query.ViewerUserID = query.UserID
+	}
+	if query.Limit <= 0 || query.Limit > ProjectManagementTimelineMaxLimit {
+		query.Limit = ProjectManagementTimelineDefaultLimit
+	}
+	return query
+}
+
+func NormalizeProjectManagementTimelineItemInput(input ProjectManagementTimelineItemInput) (ProjectManagementTimelineItemInput, error) {
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.ViewerUserID = strings.TrimSpace(input.ViewerUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.ItemID = strings.TrimSpace(input.ItemID)
+	input.EntityID = strings.TrimSpace(input.EntityID)
+	input.StartDate = strings.TrimSpace(input.StartDate)
+	if input.ViewerUserID == "" {
+		input.ViewerUserID = input.UserID
+	}
+	entityType, ok := NormalizeEntityType(input.EntityType)
+	if !ok || (entityType != EntityTypeNode && entityType != EntityTypeLogicGate) {
+		return ProjectManagementTimelineItemInput{}, ErrInvalid
+	}
+	input.EntityType = entityType
+	input.DurationDays = NormalizeProjectManagementDurationDays(input.DurationDays)
+	if input.CompanyID == "" || input.UserID == "" || input.EntityID == "" || input.StartDate == "" {
+		return ProjectManagementTimelineItemInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
+func NormalizeProjectManagementTimelineItemUpdateInput(input ProjectManagementTimelineItemUpdateInput) (ProjectManagementTimelineItemUpdateInput, error) {
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.ViewerUserID = strings.TrimSpace(input.ViewerUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.ItemID = strings.TrimSpace(input.ItemID)
+	input.StartDate = strings.TrimSpace(input.StartDate)
+	input.DurationDays = NormalizeProjectManagementDurationDays(input.DurationDays)
+	if input.CompanyID == "" || input.ItemID == "" || input.StartDate == "" {
+		return ProjectManagementTimelineItemUpdateInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
+func NormalizeProjectManagementTimelineItemDeleteInput(input ProjectManagementTimelineItemDeleteInput) (ProjectManagementTimelineItemDeleteInput, error) {
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.ViewerUserID = strings.TrimSpace(input.ViewerUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.ItemID = strings.TrimSpace(input.ItemID)
+	if input.CompanyID == "" || input.ItemID == "" {
+		return ProjectManagementTimelineItemDeleteInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
+func NormalizeProjectManagementDurationDays(durationDays int) int {
+	if durationDays <= 0 {
+		return 1
+	}
+	if durationDays > ProjectManagementTimelineMaxDurationDays {
+		return ProjectManagementTimelineMaxDurationDays
+	}
+	return durationDays
 }
 
 type WorkspaceEntityBatchItemInput struct {

@@ -119,6 +119,7 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 		r.kanbanBoards[boardKeyValue] = board
 	}
 	r.syncRacioProjectionForLogicGateLocked(companyID, logicGateID)
+	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
 	return r.withLogicGateRaciLocked(item), nil
 }
 
@@ -399,6 +400,12 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 		}
 	}
 	r.deleteRacioProjectionForLogicGateLocked(companyID, logicGateID)
+	for itemKey, item := range r.projectTimelineItems {
+		if item.CompanyID == companyID && item.EntityType == EntityTypeLogicGate && item.EntityID == logicGateID {
+			delete(r.projectTimelineItems, itemKey)
+			delete(r.projectTimelineProjection, itemKey)
+		}
+	}
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)

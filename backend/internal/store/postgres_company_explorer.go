@@ -1148,6 +1148,16 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 		return err
 	}
+	if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from project_management_timeline_items
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_relationships
 		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
@@ -1227,6 +1237,16 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		return err
 	}
 	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
+	if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from project_management_timeline_items
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
 		return err
 	}
 	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {

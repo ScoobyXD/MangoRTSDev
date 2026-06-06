@@ -37,7 +37,7 @@ import {
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { preloadDefaultDashboardModules, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
-import { LazyHomePage, LazyLogicGateArenaPage } from "../pages/lazyPages";
+import { LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage } from "../pages/lazyPages";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
@@ -414,7 +414,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   ), [frames]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isHomeView = activePrimaryPage === "home";
-  const isFullPageView = isLogicGateArenaView || isHomeView;
+  const isProjectManagementView = activePrimaryPage === "project-management";
+  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -451,8 +452,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       preloadHomeSurface();
       return;
     }
+    if (isProjectManagementView) {
+      preloadProjectManagementSurface();
+      return;
+    }
     preloadVisibleFrameModules(frames);
-  }, [frames, isHomeView, isLogicGateArenaView]);
+  }, [frames, isHomeView, isLogicGateArenaView, isProjectManagementView]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -1552,6 +1557,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onNodeOverlayOpen={openHomeNodeRoute}
               onNodeOverlayClose={closeHomeNodeRoute}
             />
+          </React.Suspense>
+        ) : isProjectManagementView ? (
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyProjectManagementPage onNodeOpen={openHomeNodeRoute} />
           </React.Suspense>
         ) : (
           <>

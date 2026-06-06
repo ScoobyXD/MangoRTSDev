@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
-import { preloadHomePage, preloadLogicGateArenaPage } from "../pages/lazyPages";
+import { preloadHomePage, preloadLogicGateArenaPage, preloadProjectManagementPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
 import {
   DEFAULT_DASHBOARD_MODULE_KINDS,
@@ -33,6 +33,7 @@ export function preloadHomeSurface(): void {
 }
 
 export function preloadProjectManagementSurface(): void {
+  preloadProjectManagementPage();
   preloadModuleKinds(PROJECT_MANAGEMENT_MODULE_KINDS);
 }
 
@@ -44,6 +45,7 @@ function preloadDashboardPlan(plan: DashboardPreloadPlan): void {
   for (const surface of plan.routeSurfaces) {
     if (surface === "logic-gate-arena") preloadLogicGateArenaPage();
     if (surface === "home") preloadHomePage();
+    if (surface === "project-management") preloadProjectManagementPage();
   }
   preloadModuleKinds(plan.moduleKinds);
 }

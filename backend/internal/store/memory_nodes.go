@@ -173,6 +173,7 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	racioProjectionBefore := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	projectManagementProjectionBefore := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
@@ -180,8 +181,10 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	}
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	racioProjectionAfter := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	projectManagementProjectionAfter := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
 	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
+	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
 		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
@@ -242,6 +245,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	}
 	r.nodes[k] = node
 	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
+	r.syncProjectManagementTimelineProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return r.withNodeReadModelLocked(node), nil
 }
 
@@ -439,6 +443,12 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 		return ErrNotFound
 	}
 	r.deleteRacioProjectionForNodeLocked(companyID, nodeID)
+	for itemKey, item := range r.projectTimelineItems {
+		if item.CompanyID == companyID && item.EntityType == EntityTypeNode && item.EntityID == nodeID {
+			delete(r.projectTimelineItems, itemKey)
+			delete(r.projectTimelineProjection, itemKey)
+		}
+	}
 
 	delete(r.nodes, k)
 	delete(r.nodeInfo, k)

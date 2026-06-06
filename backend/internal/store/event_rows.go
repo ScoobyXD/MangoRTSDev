@@ -12,14 +12,16 @@ const EventRowListMaxLimit = 100
 const DefaultEventRowProcessingLeaseTimeout = 5 * time.Minute
 
 const (
-	EventTypeKanbanProjectionDelta = "kanban.projection_delta"
-	EventTypeRacioProjectionDelta  = "racio.projection_delta"
-	EventTypeEditorProjectionDelta = "editor.projection_delta"
-	EventTypePermissionChanged     = "permission.changed"
+	EventTypeKanbanProjectionDelta            = "kanban.projection_delta"
+	EventTypeRacioProjectionDelta             = "racio.projection_delta"
+	EventTypeProjectManagementProjectionDelta = "project_management.projection_delta"
+	EventTypeEditorProjectionDelta            = "editor.projection_delta"
+	EventTypePermissionChanged                = "permission.changed"
 )
 
 const EventResourceTypeKanbanBoard = "kanban_board"
 const EventResourceTypeRacioMatrix = "racio_matrix"
+const EventResourceTypeProjectManagementTimeline = "project_management_timeline"
 
 type EventRow struct {
 	EventID             string         `json:"event_id"`
@@ -63,6 +65,13 @@ type KanbanProjectionDeltaEventPayload struct {
 }
 
 type RacioProjectionDeltaEventPayload struct {
+	Projection      string            `json:"projection"`
+	Scope           string            `json:"scope"`
+	ProjectionScope string            `json:"projection_scope,omitempty"`
+	Deltas          []ProjectionDelta `json:"deltas"`
+}
+
+type ProjectManagementProjectionDeltaEventPayload struct {
 	Projection      string            `json:"projection"`
 	Scope           string            `json:"scope"`
 	ProjectionScope string            `json:"projection_scope,omitempty"`
@@ -182,6 +191,7 @@ func normalizeEventScopes(scopes []string) []string {
 func ProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
 	inputs := KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)
 	inputs = append(inputs, RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
+	inputs = append(inputs, ProjectManagementProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	return inputs
 }
 
@@ -459,6 +469,63 @@ func RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey stri
 	return inputs
 }
 
+func ProjectManagementProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
+	type group struct {
+		userID string
+		deltas []ProjectionDelta
+	}
+	groups := map[string]group{}
+	for _, delta := range deltas {
+		if strings.TrimSpace(delta.Projection) != ProjectionNameProjectManagementTimeline {
+			continue
+		}
+		userID := projectionDeltaUserIDForEvent(delta)
+		if userID == "" {
+			continue
+		}
+		item := groups[userID]
+		item.userID = userID
+		item.deltas = append(item.deltas, delta)
+		groups[userID] = item
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	userIDs := make([]string, 0, len(groups))
+	for userID := range groups {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	inputs := make([]EventRowInput, 0, len(userIDs))
+	for _, userID := range userIDs {
+		item := groups[userID]
+		scope := ProjectManagementRealtimeUserScope(userID)
+		projectionScope := ProjectManagementProjectionUserScope(userID)
+		if scope == "" || projectionScope == "" {
+			continue
+		}
+		payloadBytes, _ := json.Marshal(ProjectManagementProjectionDeltaEventPayload{
+			Projection:      ProjectionNameProjectManagementTimeline,
+			Scope:           scope,
+			ProjectionScope: projectionScope,
+			Deltas:          item.deltas,
+		})
+		inputs = append(inputs, EventRowInput{
+			CompanyID:      companyID,
+			EventType:      EventTypeProjectManagementProjectionDelta,
+			ResourceType:   EventResourceTypeProjectManagementTimeline,
+			ResourceID:     userID,
+			PrimaryScope:   scope,
+			AffectedScopes: []string{scope},
+			ActorUserID:    actorUserID,
+			IdempotencyKey: scopedEventIdempotencyKey(idempotencyKey, scope),
+			SequenceScope:  projectionScope,
+			Payload:        NormalizeEventRowPayload(payloadBytes),
+		})
+	}
+	return inputs
+}
+
 func RacioRealtimeUserScope(userID string) string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -467,7 +534,23 @@ func RacioRealtimeUserScope(userID string) string {
 	return "racio:user:" + userID
 }
 
+func ProjectManagementRealtimeUserScope(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	return "project_management:user:" + userID
+}
+
 func RacioProjectionUserScope(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	return "user:" + userID
+}
+
+func ProjectManagementProjectionUserScope(userID string) string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ""
@@ -518,6 +601,21 @@ func DecodeRacioProjectionDeltaEventPayload(row EventRow) (RacioProjectionDeltaE
 	var payload RacioProjectionDeltaEventPayload
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return RacioProjectionDeltaEventPayload{}, err
+	}
+	payload.Projection = strings.TrimSpace(payload.Projection)
+	payload.Scope = strings.TrimSpace(payload.Scope)
+	payload.ProjectionScope = strings.TrimSpace(payload.ProjectionScope)
+	return payload, nil
+}
+
+func DecodeProjectManagementProjectionDeltaEventPayload(row EventRow) (ProjectManagementProjectionDeltaEventPayload, error) {
+	payloadBytes, err := json.Marshal(row.Payload)
+	if err != nil {
+		return ProjectManagementProjectionDeltaEventPayload{}, err
+	}
+	var payload ProjectManagementProjectionDeltaEventPayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return ProjectManagementProjectionDeltaEventPayload{}, err
 	}
 	payload.Projection = strings.TrimSpace(payload.Projection)
 	payload.Scope = strings.TrimSpace(payload.Scope)
