@@ -488,7 +488,8 @@ func (r *PostgresRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQ
 	query = NormalizeWorkItemInboxQuery(query)
 	companyID := cleanUUIDText(query.CompanyID)
 	userID := cleanUUIDText(query.UserID)
-	if companyID == "" || userID == "" {
+	viewerUserID := cleanUUIDText(query.ViewerUserID)
+	if companyID == "" || userID == "" || viewerUserID == "" {
 		return nil, ErrInvalid
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
@@ -511,9 +512,9 @@ from racio_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
   and entry.resource_type in ('node', 'logic_gate')
-  and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, entry.user_id, 'edit')
+  and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, $4::uuid, 'edit')
 order by entry.resource_type asc, entry.resource_created_timestamp asc, entry.resource_id::text asc
-limit $3`, companyID, userID, query.Limit)
+limit $3`, companyID, userID, query.Limit, viewerUserID)
 	if err != nil {
 		return nil, err
 	}

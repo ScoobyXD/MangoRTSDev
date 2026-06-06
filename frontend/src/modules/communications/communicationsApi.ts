@@ -148,6 +148,29 @@ export type CompanyUser = {
   role?: string;
 };
 
+export type CompanyUserGroup = {
+  company_id: string;
+  group_id: string;
+  parent_group_id?: string;
+  name: string;
+  position: number;
+};
+
+export type CompanyUserGroupMember = {
+  company_id: string;
+  group_id: string;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
+  created_timestamp?: string;
+  updated_timestamp?: string;
+};
+
+export type CompanyUserGroupsResponse = {
+  groups: CompanyUserGroup[];
+  members: CompanyUserGroupMember[];
+};
+
 export type CommunicationsWorkspacePanel = {
   logicGateFolders: CompanyExplorerFolder[];
   logicGateFolderItems: CompanyExplorerFolderItem[];
@@ -166,6 +189,7 @@ export type CommunicationsWorkspacePanelCacheScope = {
   nodeFolderItems?: boolean;
   nodes?: boolean;
   companyUsers?: boolean;
+  userGroups?: boolean;
 };
 
 export type MessagePage = {
@@ -558,6 +582,14 @@ export async function listCompanyUsers(companyID: string): Promise<CompanyUser[]
   }, cloneCompanyUsers);
 }
 
+export async function listCompanyUserGroups(companyID: string): Promise<CompanyUserGroupsResponse> {
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`company-user-groups:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const payload = await apiFetchJSON<{ groups?: CompanyUserGroup[]; members?: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(cleanCompanyID)}/user-groups`);
+    return cloneCompanyUserGroupsResponse({ groups: payload.groups ?? [], members: payload.members ?? [] });
+  }, cloneCompanyUserGroupsResponse);
+}
+
 export async function updateLogicGateRaciAssignments(
   companyID: string,
   logicGateID: string,
@@ -843,6 +875,7 @@ export function markCommunicationsWorkspacePanelStale(companyID: string, scope?:
     if (scope.logicGateFolders) invalidateCacheKey(`logic-gate-folders:${cleanCompanyID}`);
     if (scope.logicGateFolderItems) invalidateCacheKey(`logic-gate-folder-items:${cleanCompanyID}`);
     if (scope.companyUsers) invalidateCacheKey(`company-users:${cleanCompanyID}`);
+    if (scope.userGroups) invalidateCacheKey(`company-user-groups:${cleanCompanyID}`);
     return;
   }
   clearWorkspacePanelReadCache(cleanCompanyID);
@@ -1305,6 +1338,7 @@ function clearWorkspacePanelReadCache(cleanCompanyID: string): void {
     `logic-gate-folders:${cleanCompanyID}`,
     `logic-gate-folder-items:${cleanCompanyID}`,
     `company-users:${cleanCompanyID}`,
+    `company-user-groups:${cleanCompanyID}`,
   ]) {
     invalidateCacheKey(key);
   }
@@ -1456,6 +1490,13 @@ function cloneLogicGateRaciAssignments(assignments: LogicGateRaciAssignment[]): 
 
 function cloneCompanyUsers(users: CompanyUser[]): CompanyUser[] {
   return users.map((user) => ({ ...user }));
+}
+
+function cloneCompanyUserGroupsResponse(response: CompanyUserGroupsResponse): CompanyUserGroupsResponse {
+  return {
+    groups: response.groups.map((group) => ({ ...group })),
+    members: response.members.map((member) => ({ ...member })),
+  };
 }
 
 function cloneLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {

@@ -2628,6 +2628,732 @@ const inboxMatrixHeaderMetaStyle: React.CSSProperties = {
   minWidth: 72,
 };
 
+export type RacioMatrixViewerListEntry = {
+  kind: "group" | "user";
+  id: string;
+};
+
+type RacioMatrixViewerGroup = {
+  company_id: string;
+  group_id: string;
+  parent_group_id?: string;
+  name: string;
+  position: number;
+};
+
+type RacioMatrixViewerGroupMember = {
+  company_id: string;
+  group_id: string;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
+};
+
+function racioViewerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
+  return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID;
+}
+
+function racioViewerSearchText(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
+  return `${user.display_name ?? ""} ${user.email ?? ""} ${user.user_id}`.trim().toLowerCase();
+}
+
+function racioViewerGroupLabel(group: Pick<RacioMatrixViewerGroup, "group_id" | "name"> | null | undefined, fallbackGroupID: string): string {
+  return group?.name?.trim() || fallbackGroupID;
+}
+
+function racioViewerEntryKey(entry: RacioMatrixViewerListEntry): string {
+  return `${entry.kind}:${entry.id.trim()}`;
+}
+
+function normalizeRacioViewerEntries(entries: RacioMatrixViewerListEntry[]): RacioMatrixViewerListEntry[] {
+  const out: RacioMatrixViewerListEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const kind = entry.kind === "group" ? "group" : entry.kind === "user" ? "user" : "";
+    const id = entry.id.trim();
+    if (!kind || !id) continue;
+    const key = `${kind}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind, id });
+  }
+  return out;
+}
+
+function firstRacioViewerDefaultGroupID(groups: RacioMatrixViewerGroup[], members: RacioMatrixViewerGroupMember[], currentUserID: string): string {
+  const cleanCurrentUserID = currentUserID.trim();
+  if (!cleanCurrentUserID) return "";
+  const ownGroupIDs = new Set(members.filter((member) => member.user_id.trim() === cleanCurrentUserID).map((member) => member.group_id.trim()).filter(Boolean));
+  return groups
+    .filter((group) => ownGroupIDs.has(group.group_id))
+    .sort((left, right) => (
+      left.position - right.position ||
+      racioViewerGroupLabel(left, left.group_id).localeCompare(racioViewerGroupLabel(right, right.group_id), undefined, { numeric: true, sensitivity: "base" }) ||
+      left.group_id.localeCompare(right.group_id)
+    ))[0]?.group_id ?? "";
+}
+
+export function RacioMatrixViewerSelector({
+  companyUsers,
+  groups,
+  groupMembers,
+  currentUserID,
+  selectedUserID,
+  entries,
+  onEntriesChange,
+  onSelectUser,
+}: {
+  companyUsers: CompanyUser[];
+  groups: RacioMatrixViewerGroup[];
+  groupMembers: RacioMatrixViewerGroupMember[];
+  currentUserID: string;
+  selectedUserID: string;
+  entries: RacioMatrixViewerListEntry[];
+  onEntriesChange: (entries: RacioMatrixViewerListEntry[]) => void;
+  onSelectUser: (userID: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [addUserID, setAddUserID] = useState("");
+  const [addGroupID, setAddGroupID] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const cleanEntries = useMemo(() => normalizeRacioViewerEntries(entries), [entries]);
+  const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
+  const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id.trim(), group])), [groups]);
+  const membersByGroupID = useMemo(() => {
+    const grouped = new Map<string, RacioMatrixViewerGroupMember[]>();
+    for (const member of groupMembers) {
+      const groupID = member.group_id.trim();
+      if (!groupID) continue;
+      const list = grouped.get(groupID) ?? [];
+      list.push(member);
+      grouped.set(groupID, list);
+    }
+    for (const [groupID, list] of grouped) {
+      list.sort((left, right) => (
+        racioViewerUserLabel(userByID.get(left.user_id.trim()), left.user_id).localeCompare(
+          racioViewerUserLabel(userByID.get(right.user_id.trim()), right.user_id),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        ) ||
+        left.user_id.localeCompare(right.user_id)
+      ));
+      grouped.set(groupID, list);
+    }
+    return grouped;
+  }, [groupMembers, userByID]);
+  const defaultGroupID = useMemo(() => firstRacioViewerDefaultGroupID(groups, groupMembers, currentUserID), [currentUserID, groupMembers, groups]);
+  const effectiveEntries = cleanEntries.length > 0
+    ? cleanEntries
+    : defaultGroupID
+      ? [{ kind: "group" as const, id: defaultGroupID }]
+      : [];
+  const selectedUser = userByID.get(selectedUserID.trim()) ?? null;
+  const selectedLabel = racioViewerUserLabel(selectedUser, selectedUserID.trim() || currentUserID.trim() || "User");
+  const selectedInList = useMemo(() => {
+    const selected = selectedUserID.trim();
+    if (!selected) return false;
+    for (const entry of effectiveEntries) {
+      if (entry.kind === "user" && entry.id === selected) return true;
+      if (entry.kind === "group" && (membersByGroupID.get(entry.id) ?? []).some((member) => member.user_id.trim() === selected)) return true;
+    }
+    return false;
+  }, [effectiveEntries, membersByGroupID, selectedUserID]);
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [];
+    return companyUsers
+      .filter((user) => racioViewerSearchText(user).includes(query))
+      .sort((left, right) => (
+        racioViewerUserLabel(left, left.user_id).localeCompare(racioViewerUserLabel(right, right.user_id), undefined, { numeric: true, sensitivity: "base" }) ||
+        left.user_id.localeCompare(right.user_id)
+      ))
+      .slice(0, 8);
+  }, [companyUsers, searchQuery]);
+
+  useEffect(() => {
+    if (!open && !searchOpen) return undefined;
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open, searchOpen]);
+
+  const selectUser = (userID: string) => {
+    const cleanUserID = userID.trim();
+    if (!cleanUserID) return;
+    onSelectUser(cleanUserID);
+    setSearchOpen(false);
+  };
+  const addEntry = (entry: RacioMatrixViewerListEntry) => {
+    const baseEntries = cleanEntries.length > 0 ? cleanEntries : effectiveEntries;
+    const next = normalizeRacioViewerEntries([...baseEntries, entry]);
+    onEntriesChange(next);
+  };
+  const deleteEntry = (entry: RacioMatrixViewerListEntry) => {
+    const key = racioViewerEntryKey(entry);
+    onEntriesChange(cleanEntries.filter((item) => racioViewerEntryKey(item) !== key));
+  };
+  const moveEntry = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= cleanEntries.length || toIndex >= cleanEntries.length) return;
+    const next = [...cleanEntries];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    onEntriesChange(next);
+  };
+  const renderCheck = (userID: string) => (
+    userID.trim() === selectedUserID.trim() ? <span aria-hidden="true" style={racioViewerCheckStyle}>{"\u2713"}</span> : <span style={racioViewerCheckSpacerStyle} />
+  );
+  const renderUserRow = (userID: string, options: { key: string; entry?: RacioMatrixViewerListEntry; draggableIndex?: number; compact?: boolean }) => {
+    const user = userByID.get(userID.trim()) ?? null;
+    const label = racioViewerUserLabel(user, userID);
+    return (
+      <div
+        key={options.key}
+        role="button"
+        tabIndex={0}
+        draggable={options.draggableIndex !== undefined}
+        onDragStart={(event) => {
+          if (options.draggableIndex === undefined) return;
+          setDragIndex(options.draggableIndex);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(event) => {
+          if (options.draggableIndex === undefined || dragIndex === null) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (options.draggableIndex === undefined || dragIndex === null) return;
+          event.preventDefault();
+          moveEntry(dragIndex, options.draggableIndex);
+          setDragIndex(null);
+        }}
+        onClick={() => selectUser(userID)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          selectUser(userID);
+        }}
+        style={racioViewerUserRowStyle(userID.trim() === selectedUserID.trim(), options.compact)}
+      >
+        {options.draggableIndex !== undefined && <span aria-hidden="true" style={racioViewerDragGripStyle}>::</span>}
+        <span style={racioViewerUserTextStyle}>
+          <span style={racioViewerUserLabelStyle}>{label}</span>
+          {user?.email?.trim() && user.email.trim() !== label && <span style={racioViewerUserEmailStyle}>{user.email}</span>}
+        </span>
+        {options.entry && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`Remove ${label}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              deleteEntry(options.entry!);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              deleteEntry(options.entry!);
+            }}
+            style={racioViewerDeleteButtonStyle}
+          >
+            x
+          </span>
+        )}
+        {renderCheck(userID)}
+      </div>
+    );
+  };
+  const renderEntry = (entry: RacioMatrixViewerListEntry, index: number) => {
+    if (entry.kind === "user") {
+      return renderUserRow(entry.id, { key: racioViewerEntryKey(entry), entry, draggableIndex: index });
+    }
+    const group = groupByID.get(entry.id) ?? null;
+    const members = membersByGroupID.get(entry.id) ?? [];
+    return (
+      <div
+        key={racioViewerEntryKey(entry)}
+        draggable={cleanEntries.length > 0}
+        onDragStart={(event) => {
+          setDragIndex(index);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(event) => {
+          if (dragIndex === null) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (dragIndex === null) return;
+          event.preventDefault();
+          moveEntry(dragIndex, index);
+          setDragIndex(null);
+        }}
+        style={racioViewerGroupBlockStyle}
+      >
+        <div style={racioViewerGroupHeaderStyle}>
+          {cleanEntries.length > 0 && <span aria-hidden="true" style={racioViewerDragGripStyle}>::</span>}
+          <span style={racioViewerGroupTitleStyle}>{racioViewerGroupLabel(group, entry.id)}</span>
+          <span style={racioViewerGroupCountStyle}>{members.length}</span>
+          {cleanEntries.length > 0 && (
+            <button
+              type="button"
+              aria-label={`Remove ${racioViewerGroupLabel(group, entry.id)}`}
+              onClick={() => deleteEntry(entry)}
+              style={racioViewerSmallIconButtonStyle}
+            >
+              x
+            </button>
+          )}
+        </div>
+        <div style={racioViewerGroupUsersStyle}>
+          {members.length > 0
+            ? members.map((member) => renderUserRow(member.user_id, { key: `${entry.id}:${member.user_id}`, compact: true }))
+            : <div style={racioViewerEmptyStyle}>No users</div>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div ref={rootRef} style={racioViewerSelectorRootStyle}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        style={racioViewerDropdownButtonStyle(open)}
+      >
+        <span style={racioViewerDropdownLabelStyle}>{selectedLabel}</span>
+        <span aria-hidden="true" style={racioViewerChevronStyle}>v</span>
+      </button>
+      {open && (
+        <div className="kanban-board-scroll" style={racioViewerDropdownStyle}>
+          {!selectedInList && selectedUserID.trim() && (
+            <div style={racioViewerCurrentBlockStyle}>
+              <div style={racioViewerGroupTitleStyle}>Current view</div>
+              {renderUserRow(selectedUserID, { key: `current:${selectedUserID}`, compact: true })}
+            </div>
+          )}
+          <div style={racioViewerEntriesStyle}>
+            {effectiveEntries.length > 0
+              ? effectiveEntries.map(renderEntry)
+              : (
+                <div style={racioViewerGroupBlockStyle}>
+                  <div style={racioViewerGroupHeaderStyle}>
+                    <span style={racioViewerGroupTitleStyle}>Company</span>
+                    <span style={racioViewerGroupCountStyle}>{companyUsers.length}</span>
+                  </div>
+                  <div style={racioViewerGroupUsersStyle}>
+                    {companyUsers.map((user) => renderUserRow(user.user_id, { key: `company:${user.user_id}`, compact: true }))}
+                  </div>
+                </div>
+              )}
+          </div>
+          <div style={racioViewerCustomizeStyle}>
+            <div style={racioViewerAddRowStyle}>
+              <select value={addGroupID} onChange={(event) => setAddGroupID(event.currentTarget.value)} style={racioViewerSelectStyle} aria-label="Add RACIO viewer group">
+                <option value="">Add group</option>
+                {groups.map((group) => (
+                  <option key={group.group_id} value={group.group_id}>{racioViewerGroupLabel(group, group.group_id)}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                aria-label="Add group to RACIO viewer list"
+                disabled={!addGroupID}
+                onClick={() => {
+                  if (!addGroupID) return;
+                  addEntry({ kind: "group", id: addGroupID });
+                  setAddGroupID("");
+                }}
+                style={racioViewerAddButtonStyle(!addGroupID)}
+              >
+                +
+              </button>
+            </div>
+            <div style={racioViewerAddRowStyle}>
+              <select value={addUserID} onChange={(event) => setAddUserID(event.currentTarget.value)} style={racioViewerSelectStyle} aria-label="Add RACIO viewer user">
+                <option value="">Add user</option>
+                {companyUsers.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>{racioViewerUserLabel(user, user.user_id)}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                aria-label="Add user to RACIO viewer list"
+                disabled={!addUserID}
+                onClick={() => {
+                  if (!addUserID) return;
+                  addEntry({ kind: "user", id: addUserID });
+                  setAddUserID("");
+                }}
+                style={racioViewerAddButtonStyle(!addUserID)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={racioViewerSearchWrapStyle}>
+        <input
+          value={searchQuery}
+          onFocus={() => setSearchOpen(true)}
+          onChange={(event) => {
+            setSearchQuery(event.currentTarget.value);
+            setSearchOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && searchResults[0]) {
+              event.preventDefault();
+              selectUser(searchResults[0].user_id);
+            }
+            if (event.key === "Escape") setSearchOpen(false);
+          }}
+          placeholder="Search people"
+          aria-label="Search RACIO matrix people"
+          spellCheck={false}
+          style={racioViewerSearchInputStyle}
+        />
+        {searchOpen && searchQuery.trim() && (
+          <div style={racioViewerSearchResultsStyle}>
+            {searchResults.length > 0
+              ? searchResults.map((user) => renderUserRow(user.user_id, { key: `search:${user.user_id}`, compact: true }))
+              : <div style={racioViewerEmptyStyle}>No matches</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const racioViewerSelectorRootStyle: React.CSSProperties = {
+  position: "relative",
+  zIndex: 6,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  minWidth: 0,
+  flexWrap: "wrap",
+};
+
+function racioViewerDropdownButtonStyle(open: boolean): React.CSSProperties {
+  return {
+    height: 28,
+    minWidth: 142,
+    maxWidth: 220,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "0 8px",
+    border: `1px solid ${open ? "rgba(59, 130, 246, 0.48)" : "rgba(100, 116, 139, 0.20)"}`,
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, 0.72)",
+    color: "#334155",
+    boxShadow: open ? "0 6px 16px rgba(59, 130, 246, 0.14)" : "inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
+    cursor: "pointer",
+    font: "inherit",
+    boxSizing: "border-box",
+  };
+}
+
+const racioViewerDropdownLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const racioViewerChevronStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  fontSize: 10,
+  fontWeight: 900,
+  color: "#64748b",
+};
+
+const racioViewerDropdownStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  top: 34,
+  width: 318,
+  maxHeight: 420,
+  overflowY: "auto",
+  padding: 8,
+  border: "1px solid rgba(100, 116, 139, 0.20)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.96)",
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
+  boxSizing: "border-box",
+};
+
+const racioViewerEntriesStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const racioViewerCurrentBlockStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "0 0 8px",
+  marginBottom: 8,
+  borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
+};
+
+const racioViewerGroupBlockStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+};
+
+const racioViewerGroupHeaderStyle: React.CSSProperties = {
+  height: 28,
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  padding: "0 6px",
+  borderRadius: 6,
+  background: "rgba(241, 245, 249, 0.76)",
+  color: "#334155",
+  boxSizing: "border-box",
+};
+
+const racioViewerDragGripStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  width: 14,
+  color: "#94a3b8",
+  fontSize: 10,
+  fontWeight: 900,
+  letterSpacing: 0,
+};
+
+const racioViewerGroupTitleStyle: React.CSSProperties = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const racioViewerGroupCountStyle: React.CSSProperties = {
+  minWidth: 20,
+  height: 18,
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.18)",
+  borderRadius: 999,
+  background: "#ffffff",
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 800,
+};
+
+const racioViewerSmallIconButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.18)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#64748b",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 900,
+  fontFamily: "inherit",
+  padding: 0,
+};
+
+const racioViewerGroupUsersStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 2,
+};
+
+function racioViewerUserRowStyle(selected: boolean, compact?: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: compact ? 30 : 34,
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    padding: compact ? "3px 6px 3px 10px" : "4px 6px",
+    border: "1px solid transparent",
+    borderRadius: 6,
+    background: selected ? "rgba(219, 234, 254, 0.72)" : "transparent",
+    color: "#334155",
+    cursor: "pointer",
+    textAlign: "left",
+    font: "inherit",
+    boxSizing: "border-box",
+  };
+}
+
+const racioViewerUserTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  flex: "1 1 auto",
+  display: "grid",
+  gap: 1,
+};
+
+const racioViewerUserLabelStyle: React.CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const racioViewerUserEmailStyle: React.CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 10,
+  fontWeight: 600,
+  color: "#64748b",
+};
+
+const racioViewerDeleteButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  flex: "0 0 auto",
+  display: "inline-grid",
+  placeItems: "center",
+  borderRadius: 6,
+  color: "#64748b",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const racioViewerCheckStyle: React.CSSProperties = {
+  width: 18,
+  flex: "0 0 18px",
+  color: "#2563eb",
+  fontSize: 13,
+  fontWeight: 900,
+  textAlign: "center",
+};
+
+const racioViewerCheckSpacerStyle: React.CSSProperties = {
+  width: 18,
+  flex: "0 0 18px",
+};
+
+const racioViewerCustomizeStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  marginTop: 10,
+  paddingTop: 8,
+  borderTop: "1px solid rgba(100, 116, 139, 0.14)",
+};
+
+const racioViewerAddRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 28px",
+  gap: 6,
+};
+
+const racioViewerSelectStyle: React.CSSProperties = {
+  width: "100%",
+  height: 28,
+  minWidth: 0,
+  border: "1px solid rgba(100, 116, 139, 0.20)",
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#334155",
+  padding: "0 7px",
+  fontSize: 11,
+  fontWeight: 700,
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+};
+
+function racioViewerAddButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    height: 28,
+    border: "1px solid rgba(59, 130, 246, 0.30)",
+    borderRadius: 7,
+    background: disabled ? "rgba(226, 232, 240, 0.72)" : "#eff6ff",
+    color: disabled ? "#94a3b8" : "#2563eb",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontSize: 15,
+    fontWeight: 900,
+    fontFamily: "inherit",
+    padding: 0,
+  };
+}
+
+const racioViewerSearchWrapStyle: React.CSSProperties = {
+  position: "relative",
+  width: 190,
+  minWidth: 150,
+  flex: "0 1 220px",
+};
+
+const racioViewerSearchInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 28,
+  border: "1px solid rgba(100, 116, 139, 0.20)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.72)",
+  color: "#334155",
+  outline: "none",
+  padding: "0 9px",
+  fontSize: 11,
+  fontWeight: 750,
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+};
+
+const racioViewerSearchResultsStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  top: 34,
+  width: "100%",
+  minWidth: 230,
+  maxHeight: 260,
+  overflowY: "auto",
+  padding: 6,
+  border: "1px solid rgba(100, 116, 139, 0.20)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.97)",
+  boxShadow: "0 16px 36px rgba(15, 23, 42, 0.16)",
+  boxSizing: "border-box",
+};
+
+const racioViewerEmptyStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const racioMatrixHeaderLeftStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 4,
+};
+
+const racioMatrixHeaderTitleStyle: React.CSSProperties = {
+  ...panelTitleStyle,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
 function aciColumnNotificationRole(role: AciInboxRole): NotificationRaciRole | undefined {
   if (role === "accountable" || role === "consulted" || role === "informed") return role;
   return undefined;
@@ -2737,6 +3463,8 @@ export function RaciRoleInboxMatrix({
   nodeFolders,
   nodeFolderItems,
   currentUserID,
+  viewerSelector,
+  viewerTitle,
   notificationSummary,
   selectedRowIDs,
   selectedLogicGateRowIDs,
@@ -2766,6 +3494,8 @@ export function RaciRoleInboxMatrix({
   nodeFolders: CompanyExplorerFolder[];
   nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
+  viewerSelector?: React.ReactNode;
+  viewerTitle?: string;
   notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
   selectedLogicGateRowIDs: Set<string>;
@@ -2941,7 +3671,10 @@ export function RaciRoleInboxMatrix({
     <section style={logicGateRaciPanelStyle}>
       <div style={logicGateRaciMatrixSurfaceStyle}>
         <div style={logicGateRaciHeaderStyle}>
-          <h2 style={panelTitleStyle}>{section.title}</h2>
+          <div style={racioMatrixHeaderLeftStyle}>
+            {viewerSelector}
+            <h2 style={racioMatrixHeaderTitleStyle}>{viewerTitle || section.title}</h2>
+          </div>
           <div style={inboxMatrixHeaderControlsStyle}>
             <InboxMatrixUnreadToggle unreadOnly={unreadOnly} onChange={setUnreadOnly} />
             <div style={inboxMatrixHeaderMetaStyle}>
