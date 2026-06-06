@@ -3,8 +3,8 @@ import { resolveGlobalKeyboardShortcut } from "./keyboardShortcutRouting";
 
 interface KeyboardActions {
   deleteSelection: () => void;
-  copySelection: () => void;
-  pasteSelection: () => void;
+  copySelection: () => boolean;
+  pasteSelection: () => boolean;
   undo: () => void;
   redo: () => void;
 }
@@ -18,16 +18,25 @@ function hasNativeTextSelection(): boolean {
 export function useKeyboardShortcuts(actions: KeyboardActions) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const command = resolveGlobalKeyboardShortcut(e);
+      const selection = window.getSelection();
+      const command = resolveGlobalKeyboardShortcut({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        defaultPrevented: e.defaultPrevented,
+        target: e.target,
+        activeElement: document.activeElement,
+        selectionAnchorNode: selection?.anchorNode ?? null,
+      });
       if (!command) return;
 
       if (command === "copy") {
         if (hasNativeTextSelection()) return;
-        e.preventDefault();
-        actions.copySelection();
+        if (actions.copySelection()) e.preventDefault();
       } else if (command === "paste") {
-        e.preventDefault();
-        actions.pasteSelection();
+        if (actions.pasteSelection()) e.preventDefault();
       } else if (command === "undo") {
         e.preventDefault();
         actions.undo();

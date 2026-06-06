@@ -130,6 +130,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
               event.currentTarget.select();
             }}
             onMouseDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               event.stopPropagation();
               if (event.key === "Enter") {
