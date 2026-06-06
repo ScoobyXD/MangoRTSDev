@@ -13,7 +13,7 @@ param(
   [string]$CodexApproval = "never",
 
   [ValidateSet("elevated", "unelevated")]
-  [string]$WindowsSandbox = "unelevated",
+  [string]$WindowsSandbox = "elevated",
 
   [switch]$NoStart
 )
