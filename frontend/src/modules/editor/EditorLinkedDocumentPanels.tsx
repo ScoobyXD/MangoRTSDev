@@ -64,12 +64,54 @@ type EditorLinkedDocumentPanelsProps = {
 };
 
 const NODE_PRIORITY_OPTIONS = [
-  { value: "1", label: "1\u00A0\u00A0URGENT(<1hr)", color: "#334155" },
-  { value: "2", label: "2\u00A0\u00A0By end of day", color: "#475569" },
-  { value: "3", label: "3\u00A0\u00A0Tomorrow", color: "#334155" },
-  { value: "4", label: "4\u00A0\u00A0Sprint (1 week)", color: "#64748b" },
-  { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
-  { value: "0", label: "Unassigned to a Logic Gate", color: "#64748b" },
+  {
+    value: "1",
+    label: "1\u00A0\u00A0URGENT(<1hr)",
+    color: "#7f1d1d",
+    borderColor: "rgba(220, 38, 38, 0.42)",
+    surface: "linear-gradient(135deg, rgba(254, 226, 226, 0.96), rgba(254, 249, 195, 0.76))",
+    glow: "rgba(220, 38, 38, 0.12)",
+  },
+  {
+    value: "2",
+    label: "2\u00A0\u00A0By end of day",
+    color: "#7c2d12",
+    borderColor: "rgba(234, 88, 12, 0.38)",
+    surface: "linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 240, 138, 0.68))",
+    glow: "rgba(234, 88, 12, 0.11)",
+  },
+  {
+    value: "3",
+    label: "3\u00A0\u00A0Tomorrow",
+    color: "#064e3b",
+    borderColor: "rgba(5, 150, 105, 0.38)",
+    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(207, 250, 254, 0.70))",
+    glow: "rgba(5, 150, 105, 0.11)",
+  },
+  {
+    value: "4",
+    label: "4\u00A0\u00A0Sprint (1 week)",
+    color: "#312e81",
+    borderColor: "rgba(79, 70, 229, 0.34)",
+    surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(221, 214, 254, 0.70))",
+    glow: "rgba(79, 70, 229, 0.10)",
+  },
+  {
+    value: "5",
+    label: "5\u00A0\u00A0Later (low priority)",
+    color: "#4c1d95",
+    borderColor: "rgba(124, 58, 237, 0.30)",
+    surface: "linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(233, 213, 255, 0.62))",
+    glow: "rgba(124, 58, 237, 0.10)",
+  },
+  {
+    value: "0",
+    label: "Unassigned to a Logic Gate",
+    color: "#64748b",
+    borderColor: "rgba(100, 116, 139, 0.28)",
+    surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.76))",
+    glow: "rgba(15, 23, 42, 0.08)",
+  },
 ] as const;
 
 type NodeStatusValue = "backlog" | "pending" | "in_progress" | "verify" | "done";
@@ -722,9 +764,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         gridTemplateColumns: "minmax(0, 1fr) 18px",
                         alignItems: "center",
                         gap: 7,
-                        border: `1px solid ${priorityHasRequirementError ? "#334155" : `${selectedPriority.color}66`}`,
+                        border: `1px solid ${priorityHasRequirementError ? "#334155" : selectedPriority.borderColor}`,
                         borderRadius: 6,
-                        background: priorityHasRequirementError ? "rgba(100,116,139,0.08)" : hexWithAlpha(selectedPriority.color, "14"),
+                        background: priorityHasRequirementError ? "rgba(100,116,139,0.08)" : selectedPriority.surface,
                         color: priorityHasRequirementError ? "#334155" : selectedPriority.color,
                         font: "inherit",
                         fontSize: 11.5,
@@ -733,7 +775,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         cursor: canEdit ? "pointer" : "default",
                         opacity: canEdit ? 1 : 0.62,
                         textAlign: "left",
-                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(100,116,139,0.18)" : "none",
+                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(100,116,139,0.18)" : `0 8px 18px ${selectedPriority.glow}, inset 1px 1px 0 rgba(255,255,255,0.86)`,
                       }}
                     >
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
@@ -783,17 +825,17 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                                 gridTemplateColumns: "minmax(0, 1fr) 18px",
                                 alignItems: "center",
                                 gap: 8,
-                                border: highlighted ? "1px solid transparent" : "1px solid transparent",
+                                border: `1px solid ${highlighted ? option.borderColor : "transparent"}`,
                                 borderRadius: 6,
-                                background: highlighted ? `linear-gradient(135deg, ${hexWithAlpha(option.color, "22")}, rgba(255,255,255,0.88)) padding-box, linear-gradient(135deg, ${hexWithAlpha(option.color, "99")}, rgba(255,255,255,0.88)) border-box` : "transparent",
-                                color: highlighted ? option.color : "#1f2937",
+                                background: highlighted ? option.surface : "transparent",
+                                color: option.color,
                                 font: "inherit",
                                 fontSize: 11.5,
-                                fontWeight: highlighted ? 800 : 500,
+                                fontWeight: highlighted ? 850 : 700,
                                 padding: "7px 8px",
                                 cursor: "pointer",
                                 textAlign: "left",
-                                boxShadow: highlighted ? `0 8px 18px ${hexWithAlpha(option.color, "1a")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : undefined,
+                                boxShadow: highlighted ? `0 8px 18px ${option.glow}, inset 1px 1px 0 rgba(255,255,255,0.86)` : undefined,
                               }}
                             >
                               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
