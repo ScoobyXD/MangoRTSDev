@@ -176,6 +176,7 @@ import {
   contextMenuHoverHandlers,
   dataTransferIncludes,
   formatKanbanLoadError,
+  getNodeEditorOverlayMinLeftPx,
   isEditableKeyboardTarget,
   KANBAN_EDGE_FRAME,
   KANBAN_PANEL_BACKGROUND,
@@ -204,6 +205,13 @@ const KANBAN_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string
   { value: 4, label: "4  Sprint (1 week)" },
   { value: 5, label: "5  Later (low priority)" },
 ];
+
+function sameNodeEditorOverlayRatio(a: NodeEditorOverlayRatio, b: NodeEditorOverlayRatio): boolean {
+  return Math.abs(a.left - b.left) < 0.0001
+    && Math.abs(a.top - b.top) < 0.0001
+    && Math.abs(a.width - b.width) < 0.0001
+    && Math.abs(a.height - b.height) < 0.0001;
+}
 
 type KanbanPriorityMenuState = {
   x: number;
@@ -395,6 +403,35 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     nodeEditorOverlayRatioRef.current = nodeEditorOverlayRatio;
   }, [nodeEditorOverlayRatio]);
+
+  useEffect(() => {
+    if (!nodeEditorOverlay) return;
+    const reclampOverlay = () => {
+      const boardBounds = boardRootRef.current?.getBoundingClientRect();
+      const boardWidth = Math.max(1, boardBounds?.width ?? 1);
+      const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, arenaMode);
+      const minLeft = minLeftPx / boardWidth;
+      setNodeEditorOverlayRatio((current) => {
+        const next = clampNodeEditorOverlayRatio(current, { allowHorizontalOverflow: arenaMode, minLeft });
+        nodeEditorOverlayRatioRef.current = next;
+        return sameNodeEditorOverlayRatio(current, next) ? current : next;
+      });
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reclampOverlay);
+    if (boardRootRef.current) resizeObserver?.observe(boardRootRef.current);
+    if (typeof document !== "undefined") {
+      for (const selector of ["[data-app-sidebar=\"primary\"]", "[data-app-sidebar-resize-handle=\"primary\"]"]) {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (element) resizeObserver?.observe(element);
+      }
+    }
+    window.addEventListener("resize", reclampOverlay);
+    reclampOverlay();
+    return () => {
+      window.removeEventListener("resize", reclampOverlay);
+      resizeObserver?.disconnect();
+    };
+  }, [arenaMode, nodeEditorOverlay]);
 
   useEffect(() => {
     activeBoardIDRef.current = activeBoardID;

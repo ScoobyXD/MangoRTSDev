@@ -88,6 +88,7 @@ export const nodeEditorOverlayResizeHandles: Array<{
 ];
 
 export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.11, top: 0.06, width: 0.78, height: 0.82 };
+const NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX = 14;
 
 type NodeEditorOverlayClampOptions = {
   allowHorizontalOverflow?: boolean;
@@ -119,6 +120,37 @@ export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRati
     width,
     height,
   };
+}
+
+function appSidebarBoundaryPx(): number | null {
+  if (typeof document === "undefined") return null;
+  const selectors = [
+    "[data-app-sidebar=\"primary\"]",
+    "[data-app-sidebar-resize-handle=\"primary\"]",
+  ];
+  let boundary: number | null = null;
+  for (const selector of selectors) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) continue;
+    boundary = Math.max(boundary ?? 0, rect.right);
+  }
+  return boundary;
+}
+
+export function getNodeEditorOverlayMinLeftPx(boardRoot: HTMLElement | null, allowHorizontalOverflow: boolean): number {
+  const boardBounds = boardRoot?.getBoundingClientRect();
+  if (!boardBounds) return 0;
+  const arenaBounds = allowHorizontalOverflow
+    ? boardRoot?.parentElement?.parentElement?.getBoundingClientRect()
+    : null;
+  const arenaMinLeft = arenaBounds ? arenaBounds.left - boardBounds.left : 0;
+  const sidebarBoundary = appSidebarBoundaryPx();
+  const sidebarMinLeft = sidebarBoundary == null
+    ? Number.NEGATIVE_INFINITY
+    : Math.ceil(sidebarBoundary) + NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX - boardBounds.left;
+  return Math.max(arenaMinLeft, sidebarMinLeft);
 }
 
 export function readNodeEditorOverlayRatio(companyID: string, frameID: string, options?: NodeEditorOverlayClampOptions): NodeEditorOverlayRatio {

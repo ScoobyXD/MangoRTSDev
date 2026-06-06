@@ -1202,8 +1202,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
 
     closeMenus();
+    setActiveDockTabID(null);
+    routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.label });
-    if (onNavigate) onNavigate(buildNodeRoute(pin.id));
   }, [activatePrimaryPage, closeMenus, onNavigate]);
 
   const openTimelineEntity = useCallback((target: { kind: "node" | "logic_gate"; id: string; label: string }) => {
@@ -1453,7 +1454,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       </header>
       )}
 
-      <div style={appBodyStyle(appSidebarWidth)}>
+      <div data-app-shell-body="true" style={appBodyStyle(appSidebarWidth)}>
         <AppSidebar
           accountChrome={accountChrome}
           activePage={activePrimaryPage}
@@ -1478,6 +1479,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         />
         <button
           type="button"
+          data-app-sidebar-resize-handle="primary"
           aria-label="Resize left sidebar"
           style={appResizeHandleStyle}
           onPointerDown={(event) => {

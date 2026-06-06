@@ -6,6 +6,7 @@ import { type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
   contextMenuHoverHandlers,
+  getNodeEditorOverlayMinLeftPx,
   KANBAN_EDGE_FRAME,
   KANBAN_PANEL_BACKGROUND,
   KANBAN_PANEL_SHADOW,
@@ -123,6 +124,11 @@ export function KanbanNodeEditorOverlay({
   onClose: () => void;
   onCollapseToTab: () => void;
 }) {
+  const boardWidth = boardRootRef.current?.getBoundingClientRect().width ?? 0;
+  const renderedLeft = boardWidth > 0
+    ? Math.max(ratio.left, getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow) / boardWidth)
+    : ratio.left;
+
   return (
     <div
       data-frame-interactive="true"
@@ -132,7 +138,7 @@ export function KanbanNodeEditorOverlay({
         position: "absolute",
         zIndex: 40,
         top: `${Math.round(ratio.top * 1000) / 10}%`,
-        left: `${Math.round(ratio.left * 1000) / 10}%`,
+        left: `${Math.round(renderedLeft * 1000) / 10}%`,
         width: `${Math.round(ratio.width * 1000) / 10}%`,
         height: `${Math.round(ratio.height * 1000) / 10}%`,
         maxWidth: allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
@@ -223,9 +229,6 @@ export function KanbanNodeEditorOverlay({
             const boardBounds = boardRootRef.current?.getBoundingClientRect();
             const boardWidth = boardBounds?.width ?? window.innerWidth;
             const boardHeight = boardBounds?.height ?? window.innerHeight;
-            const arenaBounds = allowHorizontalOverflow
-              ? boardRootRef.current?.parentElement?.parentElement?.getBoundingClientRect()
-              : boardBounds;
             resizeRef.current = {
               edges: handle.edges,
               startX: event.clientX,
@@ -236,7 +239,7 @@ export function KanbanNodeEditorOverlay({
               startHeight: boardHeight * ratio.height,
               boardWidth,
               boardHeight,
-              minLeft: arenaBounds && boardBounds ? arenaBounds.left - boardBounds.left : 0,
+              minLeft: getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow),
             };
           }}
           style={{
