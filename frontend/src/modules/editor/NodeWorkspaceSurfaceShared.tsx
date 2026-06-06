@@ -57,6 +57,7 @@ export type TextBlockState = {
 
 export type TextBlockSelectionAnchor = {
   blockID: string;
+  source?: "text" | "email";
   quote: string;
   startOffset: number;
   endOffset: number;

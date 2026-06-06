@@ -16,6 +16,7 @@ function cleanOffset(value: number | undefined): number | null {
 }
 
 function resolveMessageAnchorRange(documentText: string, message: EditorTextBlockChatMessage): EditorTextBlockChatAnchorRange | null {
+  if (message.selectionSource === "email") return null;
   const quote = cleanQuote(message.selectionQuote);
   if (!quote) return null;
   const start = cleanOffset(message.selectionStart);
@@ -62,7 +63,7 @@ export function resolveEditorTextBlockChatAnchorMessageID(
     seen.add(cursor);
     const message = messagesByID.get(cursor);
     if (!message) return "";
-    if (cleanQuote(message.selectionQuote)) return message.id;
+    if (message.selectionSource !== "email" && cleanQuote(message.selectionQuote)) return message.id;
     cursor = message.parentID ?? "";
   }
   return "";

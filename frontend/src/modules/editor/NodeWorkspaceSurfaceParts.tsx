@@ -2324,6 +2324,14 @@ type EmailConversationPaneProps = {
   strokeColor: string;
   ruleColor: string;
   onError: (message: string) => void;
+  onSelectionChatRequest?: (quote: string) => void;
+  onSelectionNodeRequest?: (quote: string) => void;
+};
+
+type EmailSelectionDraft = {
+  quote: string;
+  x: number;
+  y: number;
 };
 
 function replySubject(subject: string): string {
@@ -2357,6 +2365,43 @@ function messageTextSummary(message: EmailMessage): string {
     .trim();
 }
 
+function emailBodyText(body: string): string {
+  const value = body.trim();
+  if (!value) return "";
+  if (/<\/?[a-z][\s\S]*>/i.test(value) && typeof DOMParser !== "undefined") {
+    const document = new DOMParser().parseFromString(value, "text/html");
+    document.querySelectorAll("script, style, noscript").forEach((element) => element.remove());
+    const blockTags = new Set(["address", "article", "aside", "blockquote", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "li", "p", "section", "tr"]);
+    const parts: string[] = [];
+    const appendText = (node: ChildNode) => {
+      if (node.nodeType === 3) {
+        parts.push(node.textContent ?? "");
+        return;
+      }
+      if (!(node instanceof HTMLElement)) return;
+      const tagName = node.tagName.toLowerCase();
+      if (tagName === "br") parts.push("\n");
+      for (const child of Array.from(node.childNodes)) appendText(child);
+      if (blockTags.has(tagName)) parts.push("\n");
+    };
+    for (const child of Array.from(document.body.childNodes)) appendText(child);
+    return parts.join("")
+      .replace(/[ \t\f\v]+/g, " ")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
   companyID,
@@ -2366,6 +2411,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   strokeColor,
   ruleColor,
   onError,
+  onSelectionChatRequest,
+  onSelectionNodeRequest,
 }) => {
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
@@ -2378,6 +2425,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2387,6 +2436,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSentReplies([]);
     setDraftAttachments([]);
     setPreviewAttachment(null);
+    setSelectionDraft(null);
     void getEmailMessage(messageID, companyID)
       .then((payload) => {
         if (cancelled) return;
@@ -2409,6 +2459,32 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const canSend = editable && !sending && Boolean(message) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
   const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
   const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
+  const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
+
+  const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
+    if (!canUseEmailSelection) return null;
+    const root = bodyRef.current;
+    if (!root) return null;
+    const selection = root.ownerDocument.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    const commonElement = range.commonAncestorContainer instanceof Element
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!commonElement || !root.contains(commonElement)) return null;
+    const quote = range.toString().trim();
+    if (!quote) return null;
+    const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    const selectionRect = rangeRects[rangeRects.length - 1] ?? range.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const x = Math.max(8, Math.min(selectionRect.right - rootRect.left + root.scrollLeft + 8, root.scrollWidth - 72));
+    const y = Math.max(8, Math.min(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - 32) / 2), root.scrollHeight - 44));
+    return { quote, x, y };
+  }, [canUseEmailSelection]);
+
+  const captureEmailSelection = useCallback(() => {
+    window.setTimeout(() => setSelectionDraft(readEmailSelectionDraft()), 0);
+  }, [readEmailSelectionDraft]);
 
   const addEmailDraftAttachments = useCallback((files: FileList | File[]) => {
     if (!editable) return;
@@ -2496,8 +2572,87 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         )}
       </div>
       {message ? (
-        <div style={{ minHeight: 0, border: `1px solid ${strokeColor}`, borderRadius: 12, background: "#ffffff", overflow: "hidden", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}>
-          <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 0, border: 0, background: "#ffffff" }} />
+        <div
+          ref={bodyRef}
+          className="editor-document-scroll"
+          onPointerDown={() => setSelectionDraft(null)}
+          onPointerUp={captureEmailSelection}
+          style={{
+            position: "relative",
+            minHeight: 0,
+            border: `1px solid ${strokeColor}`,
+            borderRadius: 12,
+            background: "#ffffff",
+            overflow: "auto",
+            color: "#111827",
+            padding: 14,
+            fontSize: 13.5,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)",
+            ["--editor-document-scroll-accent" as string]: accent,
+            ["--editor-document-scroll-track" as string]: "transparent",
+          }}
+        >
+          {emailBodyText(message.body || message.snippet || "") || "(empty email)"}
+          {canUseEmailSelection && selectionDraft && (
+            <div
+              role="toolbar"
+              aria-label="Email selection actions"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              style={{
+                position: "absolute",
+                left: selectionDraft.x,
+                top: selectionDraft.y,
+                zIndex: 4,
+                display: "grid",
+                gridTemplateColumns: "28px 28px",
+                gap: 5,
+                padding: 4,
+                border: "1px solid transparent",
+                borderRadius: 10,
+                background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+                boxShadow: EDITOR_NEU_SHADOW,
+              }}
+            >
+              {onSelectionChatRequest && (
+                <button
+                  type="button"
+                  title="Chat about selection"
+                  aria-label="Chat about selection"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectionChatRequest(selectionDraft.quote);
+                    setSelectionDraft(null);
+                    bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
+                  }}
+                  style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                >
+                  <ChatIcon color={accent} />
+                </button>
+              )}
+              {onSelectionNodeRequest && (
+                <button
+                  type="button"
+                  title="Create node from selection"
+                  aria-label="Create node from selection"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectionNodeRequest(selectionDraft.quote);
+                    setSelectionDraft(null);
+                    bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
+                  }}
+                  style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                >
+                  <PlusIcon color={accent} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div aria-hidden="true" style={{ minHeight: 0 }} />
