@@ -2718,6 +2718,7 @@ export function RacioMatrixViewerSelector({
   const [searchQuery, setSearchQuery] = useState("");
   const [addEntryValue, setAddEntryValue] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
   const cleanEntries = useMemo(() => normalizeRacioViewerEntries(entries), [entries]);
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id.trim(), group])), [groups]);
@@ -2821,6 +2822,14 @@ export function RacioMatrixViewerSelector({
     next.splice(toIndex, 0, moved);
     onEntriesChange(next);
   };
+  const toggleCollapsedGroup = (groupKey: string) => {
+    setCollapsedGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
   const renderCheck = (userID: string) => (
     userID.trim() === selectedUserID.trim() ? <span aria-hidden="true" style={racioViewerCheckStyle}>{"\u2713"}</span> : <span style={racioViewerCheckSpacerStyle} />
   );
@@ -2893,9 +2902,11 @@ export function RacioMatrixViewerSelector({
     }
     const group = groupByID.get(entry.id) ?? null;
     const members = membersByGroupID.get(entry.id) ?? [];
+    const groupKey = racioViewerEntryKey(entry);
+    const collapsed = collapsedGroupKeys.has(groupKey);
     return (
       <div
-        key={racioViewerEntryKey(entry)}
+        key={groupKey}
         draggable={cleanEntries.length > 0}
         onDragStart={(event) => {
           setDragIndex(index);
@@ -2915,9 +2926,19 @@ export function RacioMatrixViewerSelector({
         style={racioViewerGroupBlockStyle}
       >
         <div style={racioViewerGroupHeaderStyle}>
+          <button
+            type="button"
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${racioViewerGroupLabel(group, entry.id)}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleCollapsedGroup(groupKey);
+            }}
+            style={racioViewerCollapseButtonStyle}
+          >
+            {collapsed ? "\u25b8" : "\u25be"}
+          </button>
           {cleanEntries.length > 0 && <span aria-hidden="true" style={racioViewerDragGripStyle}>::</span>}
           <span style={racioViewerGroupTitleStyle}>{racioViewerGroupLabel(group, entry.id)}</span>
-          <span style={racioViewerGroupCountStyle}>{members.length}</span>
           {cleanEntries.length > 0 && (
             <button
               type="button"
@@ -2929,11 +2950,13 @@ export function RacioMatrixViewerSelector({
             </button>
           )}
         </div>
-        <div style={racioViewerGroupUsersStyle}>
-          {members.length > 0
-            ? members.map((member) => renderUserRow(member.user_id, { key: `${entry.id}:${member.user_id}`, compact: true }))
-            : <div style={racioViewerEmptyStyle}>No users</div>}
-        </div>
+        {!collapsed && (
+          <div style={racioViewerGroupUsersStyle}>
+            {members.length > 0
+              ? members.map((member) => renderUserRow(member.user_id, { key: `${entry.id}:${member.user_id}`, compact: true }))
+              : <div style={racioViewerEmptyStyle}>No users</div>}
+          </div>
+        )}
       </div>
     );
   };
@@ -3006,12 +3029,21 @@ export function RacioMatrixViewerSelector({
               : (
                 <div style={racioViewerGroupBlockStyle}>
                   <div style={racioViewerGroupHeaderStyle}>
+                    <button
+                      type="button"
+                      aria-label={`${collapsedGroupKeys.has("company") ? "Expand" : "Collapse"} Company`}
+                      onClick={() => toggleCollapsedGroup("company")}
+                      style={racioViewerCollapseButtonStyle}
+                    >
+                      {collapsedGroupKeys.has("company") ? "\u25b8" : "\u25be"}
+                    </button>
                     <span style={racioViewerGroupTitleStyle}>Company</span>
-                    <span style={racioViewerGroupCountStyle}>{companyUsers.length}</span>
                   </div>
-                  <div style={racioViewerGroupUsersStyle}>
-                    {companyUsers.map((user) => renderUserRow(user.user_id, { key: `company:${user.user_id}`, compact: true }))}
-                  </div>
+                  {!collapsedGroupKeys.has("company") && (
+                    <div style={racioViewerGroupUsersStyle}>
+                      {companyUsers.map((user) => renderUserRow(user.user_id, { key: `company:${user.user_id}`, compact: true }))}
+                    </div>
+                  )}
                 </div>
               )}
           </div>
@@ -3104,48 +3136,75 @@ const racioViewerDropdownStyle: React.CSSProperties = {
   width: 318,
   maxHeight: 420,
   overflowY: "auto",
-  padding: 8,
-  border: "1px solid rgba(100, 116, 139, 0.20)",
+  padding: 9,
+  border: "1px solid rgba(148, 163, 184, 0.30)",
   borderRadius: 8,
-  background: "rgba(255, 255, 255, 0.96)",
-  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94))",
+  boxShadow: "0 18px 42px rgba(15, 23, 42, 0.18), 0 1px 0 rgba(255, 255, 255, 0.96) inset",
   boxSizing: "border-box",
   zIndex: 30,
 };
 
 const racioViewerEntriesStyle: React.CSSProperties = {
   display: "grid",
-  gap: 8,
+  gap: 9,
 };
 
 const racioViewerCurrentBlockStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
-  padding: "8px 0",
+  gap: 6,
+  padding: 8,
   marginBottom: 8,
-  borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.88))",
+  boxShadow: "0 5px 14px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
 };
 
 const racioViewerGroupBlockStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
+  gap: 7,
+  padding: 7,
+  border: "1px solid rgba(148, 163, 184, 0.25)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.86))",
+  boxShadow: "0 6px 16px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.94)",
 };
 
 const racioViewerGroupHeaderStyle: React.CSSProperties = {
-  height: 28,
+  height: 30,
   display: "flex",
   alignItems: "center",
-  gap: 7,
-  padding: "0 6px",
+  gap: 6,
+  padding: "0 4px",
   borderRadius: 6,
-  background: "rgba(241, 245, 249, 0.76)",
+  background: "linear-gradient(145deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.82))",
   color: "#334155",
+  boxShadow: "inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
   boxSizing: "border-box",
+};
+
+const racioViewerCollapseButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  flex: "0 0 22px",
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#64748b",
+  cursor: "pointer",
+  fontSize: 10,
+  fontWeight: 900,
+  fontFamily: "inherit",
+  padding: 0,
+  boxShadow: "0 2px 5px rgba(15, 23, 42, 0.06)",
 };
 
 const racioViewerDragGripStyle: React.CSSProperties = {
   flex: "0 0 auto",
-  width: 14,
+  width: 12,
   color: "#94a3b8",
   fontSize: 10,
   fontWeight: 900,
@@ -3160,19 +3219,6 @@ const racioViewerGroupTitleStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   fontSize: 11,
   fontWeight: 900,
-};
-
-const racioViewerGroupCountStyle: React.CSSProperties = {
-  minWidth: 20,
-  height: 18,
-  display: "inline-grid",
-  placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.18)",
-  borderRadius: 999,
-  background: "#ffffff",
-  color: "#64748b",
-  fontSize: 10,
-  fontWeight: 800,
 };
 
 const racioViewerSmallIconButtonStyle: React.CSSProperties = {
@@ -3193,24 +3239,25 @@ const racioViewerSmallIconButtonStyle: React.CSSProperties = {
 
 const racioViewerGroupUsersStyle: React.CSSProperties = {
   display: "grid",
-  gap: 2,
+  gap: 6,
 };
 
 function racioViewerUserRowStyle(selected: boolean, compact?: boolean): React.CSSProperties {
   return {
     width: "100%",
-    minHeight: compact ? 30 : 34,
+    minHeight: compact ? 34 : 36,
     display: "flex",
     alignItems: "center",
     gap: 7,
-    padding: compact ? "3px 6px 3px 10px" : "4px 6px",
-    border: "1px solid transparent",
-    borderRadius: 6,
-    background: selected ? "rgba(219, 234, 254, 0.72)" : "transparent",
+    padding: compact ? "4px 6px 4px 9px" : "5px 7px",
+    border: selected ? "1px solid rgba(37, 99, 235, 0.75)" : "1px solid rgba(148, 163, 184, 0.20)",
+    borderRadius: 7,
+    background: selected ? "linear-gradient(145deg, rgba(219, 234, 254, 0.95), rgba(239, 246, 255, 0.84))" : "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.86))",
     color: "#334155",
     cursor: "pointer",
     textAlign: "left",
     font: "inherit",
+    boxShadow: selected ? "0 5px 13px rgba(37, 99, 235, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.88)" : "0 4px 11px rgba(15, 23, 42, 0.07), inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
     boxSizing: "border-box",
   };
 }
