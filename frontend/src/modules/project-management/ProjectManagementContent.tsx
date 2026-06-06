@@ -213,6 +213,10 @@ function readTimelinePayload(dataTransfer: DataTransfer): ProjectTimelinePayload
   }
 }
 
+function hasTimelinePayloadType(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(PROJECT_TIMELINE_ENTITY_MIME);
+}
+
 function visibleRowsForKind(rows: ExplorerTreeNode[], kind: ProjectManagementEntityType): ExplorerTreeNode[] {
   return rows.filter((row) => row.kind === "folder" || row.kind === kind);
 }
@@ -517,6 +521,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     folders: workspace.nodeFolders,
     folderItems: workspace.nodeFolderItems,
   }), [filteredNodes, nodeExpanded, workspace.nodeFolderItems, workspace.nodeFolders]);
+  const defaultTimelineStartOffset = useMemo(() => clampInteger(daysBetween(new Date(), weekDays[0]), 0, WEEK_DAY_COUNT - 1), [weekDays]);
 
   const addTimelineItem = useCallback(async (payload: ProjectTimelinePayload, startOffset: number) => {
     if (!timelineWriteUserID) return;
@@ -542,6 +547,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setError(createError instanceof Error ? createError.message : "Failed to add timeline item");
     }
   }, [companyID, loadTimelineRows, timelineWriteUserID, visibleTimelineRows.length, weekDays]);
+  const addExplorerEntityToTimeline = useCallback((payload: ProjectTimelinePayload) => {
+    void addTimelineItem(payload, defaultTimelineStartOffset);
+  }, [addTimelineItem, defaultTimelineStartOffset]);
 
   const removeTimelineItem = useCallback(async (item: ProjectManagementTimelineRow) => {
     setTimelineRows((current) => current.filter((row) => row.item_id !== item.item_id));
@@ -597,8 +605,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <button type="button" style={secondaryButtonStyle} onClick={clearTimelinePerspective}>Clear</button>
           </div>
         </div>
-        {error && <div style={errorStyle}>{error}</div>}
-        {!error && notice && <div style={noticeStyle}>{notice}</div>}
+        <div style={timelineMessageSlotStyle}>
+          {error && <div style={errorStyle}>{error}</div>}
+          {!error && notice && <div style={noticeStyle}>{notice}</div>}
+        </div>
         <TimelineChart
           accent={accent}
           loading={loading || timelineLoading}
@@ -627,6 +637,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           groupMembers={groupMembers}
           currentUserID={currentUserID}
           count={filteredLogicGates.length}
+          onAddEntity={addExplorerEntityToTimeline}
         />
         <div role="separator" aria-orientation="vertical" style={horizontalResizerStyle} onPointerDown={startHorizontalResize} />
         <ProjectEntityExplorerPanel
@@ -644,6 +655,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           currentUserID={currentUserID}
           count={filteredNodes.length}
           onNodeOpen={onNodeOpen}
+          onAddEntity={addExplorerEntityToTimeline}
         />
       </section>
       <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
@@ -675,6 +687,7 @@ function TimelineChart({
   const [dropOffset, setDropOffset] = useState<number | null>(null);
   const gridWidth = TIMELINE_LABEL_W + WEEK_DAY_COUNT * TIMELINE_DAY_W;
   const weekStartDate = weekDays[0];
+  const bodyRowCount = loading ? 3 : Math.max(rows.length, 6);
   const dropOffsetForEvent = (event: React.DragEvent<HTMLDivElement>): number => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left - TIMELINE_LABEL_W;
@@ -683,9 +696,9 @@ function TimelineChart({
   return (
     <div className="kanban-board-scroll" style={timelineScrollStyle}>
       <div
-        style={{ ...timelineGridStyle, width: gridWidth }}
+        style={{ ...timelineGridStyle(bodyRowCount), width: gridWidth }}
         onDragOver={(event) => {
-          if (!readTimelinePayload(event.dataTransfer)) return;
+          if (!hasTimelinePayloadType(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
           setDropOffset(dropOffsetForEvent(event));
@@ -773,7 +786,24 @@ function TimelineChart({
             </React.Fragment>
           );
         }) : (
-          <div style={{ ...timelineEmptyStyle, gridColumn: `1 / span ${WEEK_DAY_COUNT + 1}` }}>No scheduled work</div>
+          <>
+            {Array.from({ length: bodyRowCount }).map((_, rowIndex) => (
+              <React.Fragment key={`empty-lane:${rowIndex}`}>
+                <div style={timelineEmptyLaneLabelStyle(rowIndex, dropOffset !== null, accent)}>
+                  {rowIndex === 0 ? (
+                    <>
+                      <span style={timelineLanePlusStyle}>+</span>
+                      <span style={timelineLaneTextStyle}>Drop work here</span>
+                    </>
+                  ) : null}
+                </div>
+                {weekDays.map((day, dayIndex) => (
+                  <div key={`empty-lane:${rowIndex}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent)} />
+                ))}
+              </React.Fragment>
+            ))}
+            <div style={timelineEmptyOverlayStyle}>Drag a node or logic gate into the week, or use the + buttons in the lists below.</div>
+          </>
         )}
       </div>
     </div>
@@ -795,6 +825,7 @@ function ProjectEntityExplorerPanel({
   currentUserID,
   count,
   onNodeOpen,
+  onAddEntity,
 }: {
   title: string;
   rootLabel: string;
@@ -810,6 +841,7 @@ function ProjectEntityExplorerPanel({
   currentUserID: string;
   count: number;
   onNodeOpen?: (nodeID: string) => void;
+  onAddEntity?: (payload: ProjectTimelinePayload) => void;
 }) {
   const [rootOpen, setRootOpen] = useState(true);
   const toggleRow = (rowID: string) => {
@@ -844,7 +876,7 @@ function ProjectEntityExplorerPanel({
           <span style={treeLabelStyle}>{rootLabel}</span>
         </button>
         {rootOpen && rows.map((row) => (
-          <ProjectExplorerRow key={row.id} row={row} kind={kind} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} />
+          <ProjectExplorerRow key={row.id} row={row} kind={kind} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} onAddEntity={onAddEntity} />
         ))}
         {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No {kind === "logic_gate" ? "logic gates" : "nodes"}</div>}
       </div>
@@ -858,52 +890,74 @@ function ProjectExplorerRow({
   expanded,
   onToggle,
   onNodeOpen,
+  onAddEntity,
 }: {
   row: ExplorerTreeNode;
   kind: ProjectManagementEntityType;
   expanded: Set<string>;
   onToggle: (rowID: string) => void;
   onNodeOpen?: (nodeID: string) => void;
+  onAddEntity?: (payload: ProjectTimelinePayload) => void;
 }) {
   const isFolder = row.kind === "folder";
   const entityID = kind === "logic_gate" ? row.logicGateID : row.nodeID;
   const color = kind === "logic_gate" ? "#8b5cf6" : "#06b6d4";
   const depth = Math.max(0, row.depth + 1);
   const draggable = !isFolder && !!entityID;
+  const payload: ProjectTimelinePayload | null = draggable && entityID ? {
+    entityType: kind,
+    entityID,
+    label: row.label,
+    color,
+  } : null;
+  const startDrag = (event: React.DragEvent<HTMLElement>) => {
+    if (!payload) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(PROJECT_TIMELINE_ENTITY_MIME, JSON.stringify(payload));
+    event.dataTransfer.setData("text/plain", row.label);
+  };
   return (
     <div
       draggable={draggable}
-      onDragStart={(event) => {
-        if (!draggable || !entityID) {
-          event.preventDefault();
-          return;
-        }
-        const payload: ProjectTimelinePayload = {
-          entityType: kind,
-          entityID,
-          label: row.label,
-          color,
-        };
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.setData(PROJECT_TIMELINE_ENTITY_MIME, JSON.stringify(payload));
-        event.dataTransfer.setData("text/plain", row.label);
-      }}
+      onDragStart={startDrag}
       onDoubleClick={() => {
         if (kind === "node" && entityID) onNodeOpen?.(entityID);
       }}
       style={treeRowWrapStyle(depth, draggable)}
     >
-      <button
-        type="button"
-        style={treeRowButtonStyle(draggable)}
-        onClick={() => {
-          if (isFolder) onToggle(row.id);
-        }}
-      >
-        <span style={treeDisclosureStyle}>{isFolder ? <ExplorerDisclosureIcon open={expanded.has(row.id)} color="#64748b" /> : null}</span>
-        <span style={{ ...treeIconStyle, color }}><ExplorerRowIcon kind={row.kind} /></span>
-        <span style={treeLabelStyle}>{row.label}</span>
-      </button>
+      <div style={treeRowInnerStyle(draggable)}>
+        {payload ? (
+          <button
+            type="button"
+            aria-label={`Add ${row.label} to timeline`}
+            title="Add to timeline"
+            draggable={false}
+            style={treeAddButtonStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAddEntity?.(payload);
+            }}
+          >
+            +
+          </button>
+        ) : null}
+        <button
+          type="button"
+          draggable={draggable}
+          style={treeRowButtonStyle(draggable)}
+          onDragStart={startDrag}
+          onClick={() => {
+            if (isFolder) onToggle(row.id);
+          }}
+        >
+          <span style={treeDisclosureStyle}>{isFolder ? <ExplorerDisclosureIcon open={expanded.has(row.id)} color="#64748b" /> : null}</span>
+          <span style={{ ...treeIconStyle, color }}><ExplorerRowIcon kind={row.kind} /></span>
+          <span style={treeLabelStyle}>{row.label}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -1065,6 +1119,10 @@ const noticeStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
+const timelineMessageSlotStyle: React.CSSProperties = {
+  minHeight: 0,
+};
+
 const timelineScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
@@ -1073,13 +1131,15 @@ const timelineScrollStyle: React.CSSProperties = {
   background: "rgba(255, 255, 255, 0.74)",
 };
 
-const timelineGridStyle: React.CSSProperties = {
-  position: "relative",
-  display: "grid",
-  gridTemplateColumns: `${TIMELINE_LABEL_W}px repeat(${WEEK_DAY_COUNT}, ${TIMELINE_DAY_W}px)`,
-  gridAutoRows: `${TIMELINE_ROW_H}px`,
-  minHeight: "100%",
-};
+function timelineGridStyle(bodyRowCount: number): React.CSSProperties {
+  return {
+    position: "relative",
+    display: "grid",
+    gridTemplateColumns: `${TIMELINE_LABEL_W}px repeat(${WEEK_DAY_COUNT}, ${TIMELINE_DAY_W}px)`,
+    gridTemplateRows: `${TIMELINE_ROW_H}px repeat(${Math.max(1, bodyRowCount)}, minmax(${TIMELINE_ROW_H}px, 1fr))`,
+    minHeight: "100%",
+  };
+}
 
 const timelineCornerStyle: React.CSSProperties = {
   position: "sticky",
@@ -1225,6 +1285,57 @@ const timelineEmptyStyle: React.CSSProperties = {
   minHeight: 96,
 };
 
+function timelineEmptyLaneLabelStyle(rowIndex: number, active: boolean, accent: string): React.CSSProperties {
+  return {
+    ...timelineRowLabelStyle(rowIndex),
+    gridTemplateColumns: "24px minmax(0, 1fr)",
+    background: active && rowIndex === 0 ? `${accent}10` : rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.96)" : "rgba(248, 250, 252, 0.96)",
+  };
+}
+
+const timelineLanePlusStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(14, 165, 233, 0.30)",
+  borderRadius: 6,
+  background: "rgba(240, 249, 255, 0.88)",
+  color: "#0284c7",
+  fontSize: 14,
+  fontWeight: 950,
+  lineHeight: 1,
+};
+
+const timelineLaneTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const timelineEmptyOverlayStyle: React.CSSProperties = {
+  zIndex: 4,
+  gridColumn: `2 / span ${WEEK_DAY_COUNT}`,
+  gridRow: "2 / span 6",
+  alignSelf: "center",
+  justifySelf: "center",
+  maxWidth: 460,
+  padding: "8px 12px",
+  border: "1px solid rgba(148, 163, 184, 0.20)",
+  borderRadius: 9,
+  background: "rgba(255, 255, 255, 0.78)",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 850,
+  textAlign: "center",
+  pointerEvents: "none",
+  boxShadow: "4px 4px 12px rgba(174, 174, 192, 0.12), -4px -4px 12px rgba(255, 255, 255, 0.8)",
+};
+
 function entityTypePillStyle(color: string): React.CSSProperties {
   return {
     minWidth: 0,
@@ -1325,6 +1436,15 @@ function treeRowWrapStyle(depth: number, draggable: boolean): React.CSSPropertie
   };
 }
 
+function treeRowInnerStyle(draggable: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: draggable ? "24px minmax(0, 1fr)" : "minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 4,
+  };
+}
+
 function treeRowButtonStyle(draggable: boolean): React.CSSProperties {
   return {
     width: "100%",
@@ -1343,6 +1463,24 @@ function treeRowButtonStyle(draggable: boolean): React.CSSProperties {
     boxSizing: "border-box",
   };
 }
+
+const treeAddButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(14, 165, 233, 0.28)",
+  borderRadius: 7,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.90))",
+  color: "#0284c7",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 14,
+  fontWeight: 950,
+  lineHeight: 1,
+  padding: 0,
+  boxShadow: "3px 3px 8px rgba(174, 174, 192, 0.14), -3px -3px 8px rgba(255, 255, 255, 0.86)",
+};
 
 const treeDisclosureStyle: React.CSSProperties = {
   width: 16,
