@@ -84,6 +84,79 @@ const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label
 ];
 const CUSTOM_GROUP_ACCESS = "__custom__";
 
+function DefaultAccessToggle({
+  defaultAccess,
+  disabled,
+  onChange,
+}: {
+  defaultAccess: "edit" | "no_access";
+  disabled: boolean;
+  onChange: (value: "edit" | "no_access") => void;
+}) {
+  const noAccessActive = defaultAccess === "no_access";
+  const labelStyle = (active: boolean): React.CSSProperties => ({
+    position: "relative",
+    zIndex: 1,
+    color: active ? "#334155" : "#64748b",
+    display: "grid",
+    placeItems: "center",
+    fontSize: 11,
+    fontWeight: 800,
+    lineHeight: 1,
+    transition: "color 160ms ease",
+    whiteSpace: "nowrap",
+  });
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={noAccessActive}
+      aria-label={noAccessActive ? "Default no access" : "Default edit"}
+      disabled={disabled}
+      onClick={() => onChange(noAccessActive ? "edit" : "no_access")}
+      style={{
+        position: "relative",
+        height: 32,
+        width: 220,
+        flex: "0 0 220px",
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        alignItems: "center",
+        padding: 2,
+        border: "1px solid rgba(100, 116, 139, 0.18)",
+        borderRadius: 10,
+        background: "rgba(255, 255, 255, 0.56)",
+        boxSizing: "border-box",
+        color: "#334155",
+        cursor: disabled ? "default" : "pointer",
+        font: "inherit",
+        appearance: "none",
+        opacity: disabled ? 0.58 : 1,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: 2,
+          top: 2,
+          width: "calc((100% - 4px) / 2)",
+          height: 26,
+          border: "1px solid rgba(71, 85, 105, 0.38)",
+          borderRadius: 8,
+          background: "#ffffff",
+          boxShadow: "0 3px 8px rgba(15, 23, 42, 0.10)",
+          transform: noAccessActive ? "translateX(100%)" : "translateX(0)",
+          transition: "transform 180ms cubic-bezier(0.2, 0, 0, 1)",
+          boxSizing: "border-box",
+        }}
+      />
+      <span style={labelStyle(!noAccessActive)}>Default Edit</span>
+      <span style={labelStyle(noAccessActive)}>Default No Access</span>
+    </button>
+  );
+}
+
 export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
   companyID,
@@ -202,10 +275,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     });
   };
 
-  const toggleDefaultAccess = () => {
-    if (effectiveReadOnly) return;
+  const setDefaultAccessMode = (nextDefaultAccess: "edit" | "no_access") => {
+    if (effectiveReadOnly || defaultAccess === nextDefaultAccess) return;
     setSaved(false);
-    setDefaultAccess((previous) => oppositeDefaultAccess(previous));
+    setDefaultAccess(nextDefaultAccess);
   };
 
   const setUserOverride = (userID: string, enabled: boolean) => {
@@ -333,7 +406,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
       <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{usesDefaultAccessPolicy ? "Clear exceptions" : "Clear grants"}</button>
-      {usesDefaultAccessPolicy && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={toggleDefaultAccess} disabled={controlsDisabled}>{defaultAccess === "edit" ? "Default Edit" : "Default No Access"}</button>}
+      {usesDefaultAccessPolicy && <DefaultAccessToggle defaultAccess={defaultAccess} disabled={controlsDisabled} onChange={setDefaultAccessMode} />}
       {onClose && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
       <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
