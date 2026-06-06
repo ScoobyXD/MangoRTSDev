@@ -63,9 +63,9 @@ where entry.resource_type='node'
   and entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
   `+roleFilter+`
-  and mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, entry.user_id, 'edit')
+  and mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')
 order by entry.resource_created_timestamp asc, entry.resource_id::text asc
-limit $3`, query.CompanyID, query.UserID, query.Limit)
+limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,10 +130,10 @@ join logic_gate_raci_assignments assignment
 where entry.resource_type='logic_gate'
   and entry.company_id=$1::uuid
   and entry.user_id=$2::uuid`+roleFilter+`
-  and mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, entry.user_id, 'edit')
+  and mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')
 group by entry.company_id, entry.resource_id, entry.display_title, entry.resource_created_timestamp
 order by lower(entry.display_title) asc, entry.resource_id::text asc
-limit $3`, query.CompanyID, query.UserID, query.Limit)
+limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err != nil {
 		return nil, err
 	}

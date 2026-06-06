@@ -128,8 +128,8 @@ func TestRacioProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T
 	postgresReads := normalizeProjectionSource(string(postgresReadRaw))
 	for _, needle := range []string{
 		"from racio_matrix_projection_table entry",
-		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, entry.user_id, 'edit')",
-		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, entry.user_id, 'edit')",
+		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')",
+		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')",
 	} {
 		if !strings.Contains(postgresReads, needle) {
 			t.Fatalf("Postgres RACIO reads missing %q", needle)

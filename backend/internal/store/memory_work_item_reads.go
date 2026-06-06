@@ -64,7 +64,7 @@ func (r *MemoryRepo) listRacioProjectedNodes(ctx context.Context, query WorkItem
 		} else if row.LogicGateID != "" {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, row.Node)
@@ -122,7 +122,7 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 		if len(roles) == 0 {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, EntityTypeLogicGate, row.ResourceID, EntityPermissionEdit) {
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeLogicGate, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
 		item := WorkItemLogicGateInboxItem{
@@ -411,7 +411,7 @@ func (r *MemoryRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQue
 		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.UserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
 		items = append(items, memoryRacioProjectionRowToDTO(row))

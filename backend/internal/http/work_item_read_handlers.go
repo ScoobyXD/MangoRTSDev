@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -25,7 +26,7 @@ func isCanonicalUUID(value string) bool {
 	return true
 }
 
-func parseWorkItemInboxReadQuery(w http.ResponseWriter, r *http.Request) (store.WorkItemInboxQuery, bool) {
+func (s *Server) parseWorkItemInboxReadQuery(w http.ResponseWriter, r *http.Request) (store.WorkItemInboxQuery, bool) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -46,23 +47,36 @@ func parseWorkItemInboxReadQuery(w http.ResponseWriter, r *http.Request) (store.
 		return store.WorkItemInboxQuery{}, false
 	}
 
-	userID := strings.TrimSpace(actor.User.UserID)
-	if userID == "" {
+	viewerUserID := strings.TrimSpace(actor.User.UserID)
+	if viewerUserID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return store.WorkItemInboxQuery{}, false
 	}
 
-	requestedUserID, requestedUserIDSet, requestedUserIDOK := workItemInboxRequestedUserID(r)
+	requestedUserID, requestedUserIDSet, requestedWithUserAlias, requestedUserIDOK := workItemInboxRequestedUserID(r)
 	if !requestedUserIDOK {
 		writeError(w, http.StatusBadRequest, "invalid_user_id")
 		return store.WorkItemInboxQuery{}, false
 	}
-	if requestedUserIDSet && requestedUserID != userID {
-		if !actorCanManageCompany(actor, companyID) {
+	targetUserID := viewerUserID
+	if requestedUserIDSet {
+		if requestedWithUserAlias && requestedUserID != viewerUserID && !actorCanManageCompany(actor, companyID) {
 			writeError(w, http.StatusForbidden, "company_admin_required")
 			return store.WorkItemInboxQuery{}, false
 		}
-		userID = requestedUserID
+		if requestedUserID != viewerUserID {
+			if _, err := s.repo.GetCompanyUser(companyID, requestedUserID); errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "target_user_not_found")
+				return store.WorkItemInboxQuery{}, false
+			} else if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_user_id")
+				return store.WorkItemInboxQuery{}, false
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_target_user")
+				return store.WorkItemInboxQuery{}, false
+			}
+		}
+		targetUserID = requestedUserID
 	}
 
 	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), store.WorkItemInboxDefaultLimit, store.WorkItemInboxMaxLimit)
@@ -70,25 +84,28 @@ func parseWorkItemInboxReadQuery(w http.ResponseWriter, r *http.Request) (store.
 		writeError(w, http.StatusBadRequest, "invalid_limit")
 		return store.WorkItemInboxQuery{}, false
 	}
-	return store.WorkItemInboxQuery{CompanyID: companyID, UserID: userID, Limit: limit}, true
+	return store.WorkItemInboxQuery{CompanyID: companyID, UserID: targetUserID, ViewerUserID: viewerUserID, Limit: limit}, true
 }
 
-func workItemInboxRequestedUserID(r *http.Request) (string, bool, bool) {
+func workItemInboxRequestedUserID(r *http.Request) (string, bool, bool, bool) {
 	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
 	targetUserID := strings.TrimSpace(r.URL.Query().Get("target_user_id"))
 	switch {
 	case userID != "" && targetUserID != "" && userID != targetUserID:
-		return "", true, false
+		return "", true, true, false
 	case targetUserID != "":
-		userID = targetUserID
+		if !isCanonicalUUID(targetUserID) {
+			return "", true, false, false
+		}
+		return targetUserID, true, false, true
 	}
 	if userID == "" {
-		return "", false, true
+		return "", false, false, true
 	}
 	if !isCanonicalUUID(userID) {
-		return "", true, false
+		return "", true, true, false
 	}
-	return userID, true, true
+	return userID, true, true, true
 }
 
 func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +113,7 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := parseWorkItemInboxReadQuery(w, r)
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
 	if !ok {
 		return
 	}
@@ -118,7 +135,7 @@ func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := parseWorkItemInboxReadQuery(w, r)
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
 	if !ok {
 		return
 	}
@@ -140,7 +157,7 @@ func (s *Server) handleWorkItemMyNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := parseWorkItemInboxReadQuery(w, r)
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
 	if !ok {
 		return
 	}
@@ -162,7 +179,7 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := parseWorkItemInboxReadQuery(w, r)
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
 	if !ok {
 		return
 	}
@@ -184,7 +201,7 @@ func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *h
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := parseWorkItemInboxReadQuery(w, r)
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
 	if !ok {
 		return
 	}

@@ -22,6 +22,7 @@ import {
   invalidateCommunicationsWorkspacePanelCache,
   invalidateEmailMessageCache,
   listCompanyUsers,
+  listCompanyUserGroups,
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
@@ -34,6 +35,8 @@ import {
   sortEmailMessagesByDateDescending,
   updateCommunicationsSharedInboxRaciAssignments,
   type CompanyUser,
+  type CompanyUserGroup,
+  type CompanyUserGroupMember,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxRaciRole,
   type CommunicationsSharedInboxRaciSubjectType,
@@ -67,7 +70,7 @@ import { useNotificationSummary } from "../../modules/notifications/useNotificat
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
-import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
+import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
@@ -86,6 +89,55 @@ function isTriageMailViewID(viewID: HomeViewID): boolean {
 type HomeNoticeResourceAction =
   | { kind: "logic_gate"; logicGateID: string }
   | { kind: "node"; nodeID: string };
+
+const RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX = "mangorts.home.racioViewerList.v1";
+
+function racioViewerListStorageKey(companyID: string, userID: string): string {
+  const cleanCompanyID = companyID.trim() || "global";
+  const cleanUserID = userID.trim() || "anonymous";
+  return `${RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX}:${cleanCompanyID}:${cleanUserID}`;
+}
+
+function readRacioViewerListEntries(companyID: string, userID: string): RacioMatrixViewerListEntry[] {
+  if (typeof localStorage === "undefined" || !companyID.trim() || !userID.trim()) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(racioViewerListStorageKey(companyID, userID)) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const entries: RacioMatrixViewerListEntry[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const candidate = item as { kind?: unknown; id?: unknown };
+      const kind = candidate.kind === "group" ? "group" : candidate.kind === "user" ? "user" : "";
+      const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+      if (!kind || !id) continue;
+      const key = `${kind}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ kind, id });
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+function storeRacioViewerListEntries(companyID: string, userID: string, entries: RacioMatrixViewerListEntry[]): void {
+  if (typeof localStorage === "undefined" || !companyID.trim() || !userID.trim()) return;
+  const cleanEntries = entries
+    .map((entry) => ({ kind: entry.kind, id: entry.id.trim() }))
+    .filter((entry) => (entry.kind === "group" || entry.kind === "user") && entry.id);
+  const key = racioViewerListStorageKey(companyID, userID);
+  if (cleanEntries.length === 0) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, JSON.stringify(cleanEntries));
+}
+
+function homeCompanyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
+  return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID.trim() || "User";
+}
 
 function promptEmailProviderForConnection(): EmailProvider | "" {
   const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
@@ -227,6 +279,10 @@ export function HomePage({
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [nodeRelationships, setNodeRelationships] = useState<NodeRelationship[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
+  const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
+  const [racioViewerListEntries, setRacioViewerListEntries] = useState<RacioMatrixViewerListEntry[]>([]);
+  const [racioMatrixTargetUserID, setRacioMatrixTargetUserID] = useState("");
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
@@ -301,16 +357,28 @@ export function HomePage({
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
   const isNarrow = isInboxMatrixView ? viewportWidth < 980 : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
+  const activeRacioMatrixUserID = isInboxMatrixView ? (racioMatrixTargetUserID.trim() || currentUserID) : currentUserID;
   useEffect(() => {
-    const scopeKey = companyID && currentUserID ? `${companyID}\u0000${currentUserID}` : "";
+    setRacioMatrixTargetUserID(currentUserID);
+  }, [companyID, currentUserID]);
+  useEffect(() => {
+    setRacioViewerListEntries(readRacioViewerListEntries(companyID, currentUserID));
+  }, [companyID, currentUserID]);
+  const updateRacioViewerListEntries = useCallback((entries: RacioMatrixViewerListEntry[]) => {
+    setRacioViewerListEntries(entries);
+    storeRacioViewerListEntries(companyID, currentUserID, entries);
+  }, [companyID, currentUserID]);
+  useEffect(() => {
+    const scopeKey = companyID && currentUserID && activeRacioMatrixUserID ? `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}` : "";
     if (racioProjectionScopeKeyRef.current === scopeKey) return;
     racioProjectionScopeKeyRef.current = scopeKey;
     racioProjectionSequenceRef.current = 0;
+    racioProjectionRefetchInFlightRef.current = false;
     racioProjectionRowsRef.current = [];
     racioProjectionInitializedRef.current = false;
     racioProjectedNodeIDsRef.current = new Set();
     racioProjectedLogicGateIDsRef.current = new Set();
-  }, [companyID, currentUserID]);
+  }, [activeRacioMatrixUserID, companyID, currentUserID]);
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const connection = status?.connection;
@@ -636,6 +704,10 @@ export function HomePage({
         setFolders([]);
         setSharedInboxes([]);
         setCompanyUsers([]);
+        setCompanyUserGroups([]);
+        setCompanyUserGroupMembers([]);
+        setRacioViewerListEntries([]);
+        setRacioMatrixTargetUserID("");
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
@@ -709,15 +781,25 @@ export function HomePage({
   }, [companyID]);
   const loadCompanyUsers = useCallback(async (): Promise<boolean> => {
     if (!companyID) return false;
-    try {
-      const users = await listCompanyUsers(companyID);
-      setCompanyUsers(users);
-      return true;
-    } catch (usersError) {
+    const [usersResult, groupsResult] = await Promise.allSettled([
+      listCompanyUsers(companyID),
+      listCompanyUserGroups(companyID),
+    ]);
+    if (usersResult.status === "fulfilled") {
+      setCompanyUsers(usersResult.value);
+    } else {
       setCompanyUsers([]);
-      setError(formatError(usersError, "Failed to load company users"));
-      return false;
+      setError(formatError(usersResult.reason, "Failed to load company users"));
     }
+    if (groupsResult.status === "fulfilled") {
+      setCompanyUserGroups(groupsResult.value.groups);
+      setCompanyUserGroupMembers(groupsResult.value.members);
+    } else {
+      setCompanyUserGroups([]);
+      setCompanyUserGroupMembers([]);
+      setError(formatError(groupsResult.reason, "Failed to load company user groups"));
+    }
+    return usersResult.status === "fulfilled" && groupsResult.status === "fulfilled";
   }, [companyID]);
   const loadLogicGatePanel = useCallback(async (): Promise<boolean> => {
     if (!companyID) return false;
@@ -1147,7 +1229,7 @@ export function HomePage({
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeViewID, loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
-  useEffect(() => { if (status?.connected) void loadCompanyUsers(); }, [loadCompanyUsers, status?.connected]);
+  useEffect(() => { if (status?.connected || isInboxMatrixView) void loadCompanyUsers(); }, [isInboxMatrixView, loadCompanyUsers, status?.connected]);
   useEffect(() => {
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -2025,6 +2107,7 @@ export function HomePage({
   const logicGateByIDRef = useRef(logicGateByID);
   logicGateByIDRef.current = logicGateByID;
   const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
+  const workspacePanelUserID = isInboxMatrixView ? activeRacioMatrixUserID : currentUserID;
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
     const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID);
@@ -2056,13 +2139,13 @@ export function HomePage({
     return () => { cancelled = true; };
   }, [apiBase, companyID, logicGateByID, nodes]);
   const myNodes = useMemo(() => {
-    if (!currentUserID) return [];
-    return nodes.filter((node) => node.assignee_user_id?.trim() === currentUserID);
-  }, [currentUserID, nodes]);
+    if (!workspacePanelUserID) return [];
+    return nodes.filter((node) => node.assignee_user_id?.trim() === workspacePanelUserID);
+  }, [nodes, workspacePanelUserID]);
   const assignedMyLogicGates = useMemo(() => {
-    if (!currentUserID) return [];
-    return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, currentUserID));
-  }, [currentUserID, logicGates]);
+    if (!workspacePanelUserID) return [];
+    return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, workspacePanelUserID));
+  }, [logicGates, workspacePanelUserID]);
   const assignedMyLogicGateIDs = useMemo(() => new Set(assignedMyLogicGates.map((logicGate) => logicGate.logic_gate_id)), [assignedMyLogicGates]);
   const myLogicGateNodes = useMemo(() => (
     myNodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => assignedMyLogicGateIDs.has(logicGateID)))
@@ -2107,9 +2190,9 @@ export function HomePage({
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
   const activeRaciRoleLogicGates = useMemo(() => {
     const role = activeRaciInboxSection?.role;
-    if (!currentUserID || !role || role === "other") return [];
-    return logicGates.filter((logicGate) => logicGateHasRaciRole(logicGate, role, currentUserID));
-  }, [activeRaciInboxSection?.role, currentUserID, logicGates]);
+    if (!workspacePanelUserID || !role || role === "other") return [];
+    return logicGates.filter((logicGate) => logicGateHasRaciRole(logicGate, role, workspacePanelUserID));
+  }, [activeRaciInboxSection?.role, logicGates, workspacePanelUserID]);
   const activeRaciRoleLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
     shortcuts: [],
     assignedLogicGates: activeRaciRoleLogicGates,
@@ -2117,6 +2200,40 @@ export function HomePage({
     folders: logicGateFolders,
     folderItems: logicGateFolderItems,
   }), [activeRaciRoleLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders]);
+  const racioDirectoryUsers = useMemo(() => {
+    const users = [...companyUsers];
+    if (currentUserID && !users.some((user) => user.user_id.trim() === currentUserID)) {
+      users.push({
+        company_id: companyID,
+        user_id: currentUserID,
+        email: me?.user.email ?? "",
+        display_name: me?.user.display_name ?? "",
+        role: "",
+      });
+    }
+    return users.sort((left, right) => (
+      homeCompanyUserLabel(left, left.user_id).localeCompare(homeCompanyUserLabel(right, right.user_id), undefined, { numeric: true, sensitivity: "base" }) ||
+      left.user_id.localeCompare(right.user_id)
+    ));
+  }, [companyID, companyUsers, currentUserID, me?.user.display_name, me?.user.email]);
+  const racioMatrixViewerUser = useMemo(
+    () => racioDirectoryUsers.find((user) => user.user_id.trim() === activeRacioMatrixUserID) ?? null,
+    [activeRacioMatrixUserID, racioDirectoryUsers],
+  );
+  const racioMatrixViewerLabel = homeCompanyUserLabel(racioMatrixViewerUser, activeRacioMatrixUserID || currentUserID);
+  const racioMatrixViewerTitle = activeRaciInboxSection ? `${racioMatrixViewerLabel} - ${activeRaciInboxSection.title}` : racioMatrixViewerLabel;
+  const racioMatrixViewerSelector = (
+    <RacioMatrixViewerSelector
+      companyUsers={racioDirectoryUsers}
+      groups={companyUserGroups}
+      groupMembers={companyUserGroupMembers}
+      currentUserID={currentUserID}
+      selectedUserID={activeRacioMatrixUserID}
+      entries={racioViewerListEntries}
+      onEntriesChange={updateRacioViewerListEntries}
+      onSelectUser={setRacioMatrixTargetUserID}
+    />
+  );
   const markMessageReadFromListSelection = useCallback((message: EmailMessage) => {
     const messageID = message.id.trim();
     if (!messageID || !message.unread) return;
@@ -2468,11 +2585,11 @@ export function HomePage({
     mode?: "merge" | "replace";
     logicGates?: LogicGateRecord[];
   } = {}) => {
-    if (!companyID || !currentUserID) return;
+    if (!companyID || !activeRacioMatrixUserID) return;
     const mode = options.mode ?? "merge";
     const cleanRows = rows.filter((row) => (
       row.company_id?.trim() === companyID &&
-      row.user_id?.trim() === currentUserID &&
+      row.user_id?.trim() === activeRacioMatrixUserID &&
       (row.resource_type === "node" || row.resource_type === "logic_gate") &&
       row.resource_id?.trim()
     ));
@@ -2497,8 +2614,8 @@ export function HomePage({
           ? racioProjectedNodeIDsRef.current
           : new Set(previous
             .filter((node) => (
-              node.assignee_user_id?.trim() === currentUserID ||
-              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByIDRef.current.get(logicGateID), currentUserID))
+              node.assignee_user_id?.trim() === activeRacioMatrixUserID ||
+              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByIDRef.current.get(logicGateID), activeRacioMatrixUserID))
             ))
             .map((node) => node.node_id))
         : new Set<string>();
@@ -2538,7 +2655,7 @@ export function HomePage({
         ? racioProjectionInitializedRef.current
           ? racioProjectedLogicGateIDsRef.current
           : new Set(previous
-            .filter((logicGate) => logicGateHasAnyRaciRole(logicGate, currentUserID))
+            .filter((logicGate) => logicGateHasAnyRaciRole(logicGate, activeRacioMatrixUserID))
             .map((logicGate) => logicGate.logic_gate_id))
         : new Set<string>();
       for (const logicGateID of removeIDs) {
@@ -2574,16 +2691,18 @@ export function HomePage({
       for (const nodeID of nextProjectedNodeIDs) racioProjectedNodeIDsRef.current.add(nodeID);
       for (const logicGateID of nextProjectedLogicGateIDs) racioProjectedLogicGateIDsRef.current.add(logicGateID);
     }
-  }, [apiBase, companyID, currentUserID]);
+  }, [activeRacioMatrixUserID, apiBase, companyID]);
   const refreshRacioMatrixProjection = useCallback(async (minimumSequence = 0) => {
-    if (!companyID || !currentUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
+    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
     if (racioProjectionRefetchInFlightRef.current) return;
+    const requestScopeKey = `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}`;
     racioProjectionRefetchInFlightRef.current = true;
     try {
       const [projection, projectedLogicGates] = await Promise.all([
-        listRacioMatrixProjectionRows({ apiBase, companyID, targetUserID: currentUserID, limit: 500 }),
-        listMyLogicGates({ apiBase, companyID, targetUserID: currentUserID, limit: 500 }),
+        listRacioMatrixProjectionRows({ apiBase, companyID, targetUserID: activeRacioMatrixUserID, limit: 500 }),
+        listMyLogicGates({ apiBase, companyID, targetUserID: activeRacioMatrixUserID, limit: 500 }),
       ]);
+      if (racioProjectionScopeKeyRef.current !== requestScopeKey) return;
       applyRacioProjectionRows(projection.rows ?? [], {
         mode: "replace",
         logicGates: projectedLogicGates.logic_gates ?? [],
@@ -2597,7 +2716,7 @@ export function HomePage({
     } finally {
       racioProjectionRefetchInFlightRef.current = false;
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, currentUserID]);
+  }, [activeRacioMatrixUserID, apiBase, applyRacioProjectionRows, companyID, currentUserID]);
   const removeRacioProjectionNode = useCallback((nodeID: string) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
@@ -2611,12 +2730,13 @@ export function HomePage({
   }, [refreshRacioMatrixProjection]);
   requestRacioProjectionRefreshRef.current = requestRacioProjectionRefresh;
   const applyRealtimeRacioProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
-    if (!companyID || !currentUserID) return;
+    if (!companyID || !activeRacioMatrixUserID) return;
+    if (racioProjectionScopeKeyRef.current !== `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}`) return;
     const envelope = message as unknown as RacioProjectionDeltaEnvelope;
     const result = applyRacioProjectionEnvelope({
       envelope,
       companyID,
-      userID: currentUserID,
+      userID: activeRacioMatrixUserID,
       rows: racioProjectionRowsRef.current,
       lastSequence: racioProjectionSequenceRef.current,
     });
@@ -2638,15 +2758,16 @@ export function HomePage({
     if (upsertedLogicGateRows.length > 0 || result.removedRowKeys.some((key) => key.resource_type === "logic_gate")) {
       requestRacioProjectionRefresh(result.lastSequence ?? 0);
     }
-  }, [applyRacioProjectionRows, companyID, currentUserID, removeRacioProjectionNode, requestRacioProjectionRefresh]);
+  }, [activeRacioMatrixUserID, applyRacioProjectionRows, companyID, currentUserID, removeRacioProjectionNode, requestRacioProjectionRefresh]);
   useEffect(() => {
-    if (!companyID || !currentUserID || !isInboxMatrixView) return undefined;
+    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixView) return undefined;
     void refreshRacioMatrixProjection();
     return undefined;
-  }, [companyID, currentUserID, isInboxMatrixView, refreshRacioMatrixProjection]);
+  }, [activeRacioMatrixUserID, companyID, isInboxMatrixView, refreshRacioMatrixProjection]);
   useEffect(() => {
-    if (!companyID || !currentUserID || !isInboxMatrixView) return undefined;
-    return subscribeRealtimeScope(apiBase, companyID, racioRealtimeScope(currentUserID), {
+    const canSubscribeRacioTarget = activeRacioMatrixUserID === currentUserID || userHasFullSharedInboxAccess(me, companyID);
+    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixView || !canSubscribeRacioTarget) return undefined;
+    return subscribeRealtimeScope(apiBase, companyID, racioRealtimeScope(activeRacioMatrixUserID), {
       getAfterSequence: () => racioProjectionSequenceRef.current,
       onRejected: () => requestRacioProjectionRefresh(),
       onRefetch: (message) => requestRacioProjectionRefresh(parseRacioProjectionSequence(message.sequence)),
@@ -2654,7 +2775,7 @@ export function HomePage({
       onError: () => requestRacioProjectionRefresh(),
       onDelta: applyRealtimeRacioProjectionDelta,
     });
-  }, [apiBase, applyRealtimeRacioProjectionDelta, companyID, currentUserID, isInboxMatrixView, requestRacioProjectionRefresh]);
+  }, [activeRacioMatrixUserID, apiBase, applyRealtimeRacioProjectionDelta, companyID, currentUserID, isInboxMatrixView, me, requestRacioProjectionRefresh]);
   const attachMessagesToNode = useCallback(async (logicGateID: string, nodeID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     const cleanLogicGateID = logicGateID.trim();
@@ -3349,7 +3470,9 @@ export function HomePage({
                   logicGateByID={logicGateByID}
                   nodeFolders={nodeFolders}
                   nodeFolderItems={nodeFolderItems}
-                  currentUserID={currentUserID}
+                  currentUserID={activeRacioMatrixUserID}
+                  viewerSelector={racioMatrixViewerSelector}
+                  viewerTitle={racioMatrixViewerTitle}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}

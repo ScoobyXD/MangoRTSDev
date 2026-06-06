@@ -229,6 +229,45 @@ func TestWorkItemInboxReadUsesAuthenticatedActorUserID(t *testing.T) {
 		t.Fatalf("spoofed user_id status = %d, want %d body=%s", spoofRec.Code, http.StatusForbidden, spoofRec.Body.String())
 	}
 
+	targetReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID+"&target_user_id="+other.UserID, nil)
+	targetReq.Header.Set("Authorization", actorToken)
+	targetRec := httptest.NewRecorder()
+	handler.ServeHTTP(targetRec, targetReq)
+	if targetRec.Code != http.StatusOK {
+		t.Fatalf("target user status = %d, want %d body=%s", targetRec.Code, http.StatusOK, targetRec.Body.String())
+	}
+	var targetPayload struct {
+		UserID string        `json:"user_id"`
+		Nodes  []domain.Node `json:"nodes"`
+	}
+	decodeWorkItemInboxReadPayload(t, targetRec, &targetPayload)
+	if targetPayload.UserID != other.UserID || !inboxReadHTTPNodesExactly(targetPayload.Nodes, otherNode.NodeID) {
+		t.Fatalf("target user payload = %+v, want only target node %s", targetPayload, otherNode.NodeID)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         otherNode.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden other node: %v", err)
+	}
+	hiddenTargetReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID+"&target_user_id="+other.UserID, nil)
+	hiddenTargetReq.Header.Set("Authorization", actorToken)
+	hiddenTargetRec := httptest.NewRecorder()
+	handler.ServeHTTP(hiddenTargetRec, hiddenTargetReq)
+	if hiddenTargetRec.Code != http.StatusOK {
+		t.Fatalf("hidden target user status = %d, want %d body=%s", hiddenTargetRec.Code, http.StatusOK, hiddenTargetRec.Body.String())
+	}
+	var hiddenTargetPayload struct {
+		Nodes []domain.Node `json:"nodes"`
+	}
+	decodeWorkItemInboxReadPayload(t, hiddenTargetRec, &hiddenTargetPayload)
+	if len(hiddenTargetPayload.Nodes) != 0 {
+		t.Fatalf("hidden target user payload = %+v, want inaccessible target node filtered", hiddenTargetPayload.Nodes)
+	}
+
 	adminReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-nodes?company_id="+companyID+"&target_user_id="+other.UserID, nil)
 	adminReq.Header.Set("Authorization", adminToken)
 	adminRec := httptest.NewRecorder()

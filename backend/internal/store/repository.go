@@ -338,9 +338,10 @@ type LogicGateQuery struct {
 }
 
 type WorkItemInboxQuery struct {
-	CompanyID string
-	UserID    string
-	Limit     int
+	CompanyID    string
+	UserID       string
+	ViewerUserID string
+	Limit        int
 }
 
 type WorkItemLogicGateInboxItem struct {
@@ -444,6 +445,10 @@ const (
 func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
 	query.UserID = strings.TrimSpace(query.UserID)
+	query.ViewerUserID = strings.TrimSpace(query.ViewerUserID)
+	if query.ViewerUserID == "" {
+		query.ViewerUserID = query.UserID
+	}
 	if query.Limit <= 0 || query.Limit > WorkItemInboxMaxLimit {
 		query.Limit = WorkItemInboxDefaultLimit
 	}
