@@ -36,6 +36,8 @@ import {
   ArrowRightIcon,
   avatarBackgroundForName,
   buildChatThreads,
+  CHAT_ATTACHMENT_MAX_BYTES,
+  CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   clampChatPaneHeight,
   ChatIcon,
   type ChatThreadNode,
@@ -50,6 +52,7 @@ import {
   MailIcon,
   messageAttachmentPayload,
   PlusIcon,
+  readChatAttachment,
   readStoredChatPaneHeight,
   storeChatPaneHeight,
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -2369,9 +2372,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [toDraft, setToDraft] = useState("");
   const [subjectDraft, setSubjectDraft] = useState("");
   const [bodyDraft, setBodyDraft] = useState("");
+  const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2379,6 +2385,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setError("");
     setMessage(null);
     setSentReplies([]);
+    setDraftAttachments([]);
+    setPreviewAttachment(null);
     void getEmailMessage(messageID, companyID)
       .then((payload) => {
         if (cancelled) return;
@@ -2399,11 +2407,56 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const recipients = parseEmailAddressDraft(toDraft);
   const canSend = editable && !sending && Boolean(message) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
-  const replyLineCount = Math.min(12, Math.max(3, bodyDraft.split(/\r\n|\r|\n/).length));
-  const replyTextareaHeight = 78 + ((replyLineCount - 3) * 18);
+  const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
+  const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
+
+  const addEmailDraftAttachments = useCallback((files: FileList | File[]) => {
+    if (!editable) return;
+    const incomingFiles = Array.from(files);
+    if (incomingFiles.length === 0) return;
+    let nextTotalSize = draftAttachments.reduce((total, attachment) => total + attachment.size, 0);
+    const acceptedFiles: File[] = [];
+    for (const file of incomingFiles) {
+      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+        const nextError = `${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`;
+        setError(nextError);
+        onError(nextError);
+        continue;
+      }
+      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
+        const nextError = `Email draft attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`;
+        setError(nextError);
+        onError(nextError);
+        continue;
+      }
+      acceptedFiles.push(file);
+      nextTotalSize += file.size;
+    }
+    if (acceptedFiles.length === 0) return;
+    void Promise.all(acceptedFiles.map((file) => readChatAttachment(file)))
+      .then((attachments) => {
+        setError("");
+        setDraftAttachments((current) => [...current, ...attachments]);
+      })
+      .catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_read_attachment";
+        setError(nextError);
+        onError(nextError);
+      });
+  }, [draftAttachments, editable, onError]);
+
+  const removeEmailDraftAttachment = useCallback((attachmentID: string) => {
+    setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
+  }, []);
 
   const submitReply = () => {
     if (!message || !canSend) return;
+    if (draftAttachments.length > 0) {
+      const nextError = "Email attachment sending is not wired yet.";
+      setError(nextError);
+      onError(nextError);
+      return;
+    }
     setSending(true);
     void sendEmail({
       to: recipients,
@@ -2416,6 +2469,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
         setSentReplies((current) => [...current, sentWithTimestamp]);
         setBodyDraft("");
+        setDraftAttachments([]);
       })
       .catch((cause) => {
         const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
@@ -2426,6 +2480,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   };
 
   return (
+    <>
     <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 8, padding: 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
         {loading && <div style={{ padding: 10, color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
@@ -2472,39 +2527,80 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             <span>Subject:</span>
             <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
           </div>
-          <textarea
-            value={bodyDraft}
-            disabled={!editable}
-            rows={replyLineCount}
-            placeholder="Write a reply"
-            onChange={(event) => setBodyDraft(event.currentTarget.value)}
-            style={{ width: "100%", height: replyTextareaHeight, minHeight: 78, maxHeight: 240, resize: "none", overflowY: replyLineCount >= 12 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "#ffffff", color: surfaceText, outline: "none", padding: "8px 9px", fontSize: 12, lineHeight: 1.38, letterSpacing: 0, boxSizing: "border-box", boxShadow: "inset 1px 1px 5px rgba(174,174,192,0.14)" }}
-          />
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={submitReply}
-            style={{
-              justifySelf: "end",
-              minHeight: 30,
-              border: canSend ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-              borderRadius: 9,
-              background: canSend ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-              color: accent,
-              cursor: canSend ? "pointer" : "default",
-              opacity: canSend ? 1 : 0.48,
-              padding: "0 12px",
-              fontSize: 11.5,
-              fontWeight: 900,
-              letterSpacing: 0,
-              boxShadow: EDITOR_NEU_SHADOW,
-            }}
-          >
-            {sending ? "Sending" : "Send reply"}
-          </button>
+          {draftAttachments.length > 0 && (
+            <DraftAttachmentList
+              attachments={draftAttachments}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              onRemove={removeEmailDraftAttachment}
+              onPreviewImage={setPreviewAttachment}
+            />
+          )}
+          <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            <button
+              type="button"
+              aria-label="Add attachment"
+              title="Add attachment"
+              disabled={!editable}
+              onClick={() => fileInputRef.current?.click()}
+              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
+            >
+              <PlusIcon color={accent} />
+            </button>
+            <textarea
+              value={bodyDraft}
+              disabled={!editable}
+              readOnly={!editable}
+              rows={replyLineCount}
+              placeholder="Write a reply"
+              onChange={(event) => setBodyDraft(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (!editable) {
+                  event.preventDefault();
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  submitReply();
+                }
+              }}
+              style={{ width: "100%", height: replyTextareaHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: replyLineCount >= 5 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+            />
+            <button
+              type="button"
+              aria-label={sending ? "Sending" : "Send reply"}
+              title={sending ? "Sending" : "Send reply"}
+              disabled={!canSend}
+              onClick={submitReply}
+              style={{ width: 32, height: 32, border: canSend ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: canSend ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, borderRadius: 9, display: "grid", placeItems: "center", cursor: canSend ? "pointer" : "default", opacity: canSend ? 1 : 0.44, boxShadow: EDITOR_NEU_SHADOW }}
+            >
+              <ArrowRightIcon color={accent} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              tabIndex={-1}
+              disabled={!editable}
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (event.currentTarget.files) addEmailDraftAttachments(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
+    {previewAttachment && (
+      <ImageAttachmentPreviewModal
+        attachment={previewAttachment}
+        surfaceText={surfaceText}
+        strokeColor={strokeColor}
+        onClose={() => setPreviewAttachment(null)}
+      />
+    )}
+    </>
   );
 };
 
