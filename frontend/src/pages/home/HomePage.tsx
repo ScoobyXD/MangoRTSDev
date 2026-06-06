@@ -2216,12 +2216,6 @@ export function HomePage({
       left.user_id.localeCompare(right.user_id)
     ));
   }, [companyID, companyUsers, currentUserID, me?.user.display_name, me?.user.email]);
-  const racioMatrixViewerUser = useMemo(
-    () => racioDirectoryUsers.find((user) => user.user_id.trim() === activeRacioMatrixUserID) ?? null,
-    [activeRacioMatrixUserID, racioDirectoryUsers],
-  );
-  const racioMatrixViewerLabel = homeCompanyUserLabel(racioMatrixViewerUser, activeRacioMatrixUserID || currentUserID);
-  const racioMatrixViewerTitle = activeRaciInboxSection ? `${racioMatrixViewerLabel} - ${activeRaciInboxSection.title}` : racioMatrixViewerLabel;
   const racioMatrixViewerSelector = (
     <RacioMatrixViewerSelector
       companyUsers={racioDirectoryUsers}
@@ -3472,7 +3466,6 @@ export function HomePage({
                   nodeFolderItems={nodeFolderItems}
                   currentUserID={activeRacioMatrixUserID}
                   viewerSelector={racioMatrixViewerSelector}
-                  viewerTitle={racioMatrixViewerTitle}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}
