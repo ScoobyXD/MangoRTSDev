@@ -1552,7 +1552,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           )}
         </div>
         {showingEmail ? (
-          <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", overflowX: "hidden", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+          <div style={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
             {emailPane}
           </div>
         ) : (
@@ -2399,6 +2399,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const recipients = parseEmailAddressDraft(toDraft);
   const canSend = editable && !sending && Boolean(message) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
+  const replyLineCount = Math.min(12, Math.max(3, bodyDraft.split(/\r\n|\r|\n/).length));
+  const replyTextareaHeight = 78 + ((replyLineCount - 3) * 18);
 
   const submitReply = () => {
     if (!message || !canSend) return;
@@ -2424,11 +2426,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   };
 
   return (
-    <div style={{ minHeight: 0, display: "grid", gap: 9, padding: 9, color: surfaceText }}>
-      {loading && <div style={{ padding: 10, color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
-      {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
-      {message && (
-        <>
+    <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 8, padding: 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+      <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
+        {loading && <div style={{ padding: 10, color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
+        {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
+        {message && (
           <div style={{ display: "grid", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_SURFACE, padding: 8, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
             <div style={{ minWidth: 0, overflowWrap: "anywhere", fontSize: 13, fontWeight: 900 }}>{message.subject || "(no subject)"}</div>
             <div style={{ minWidth: 0, display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10.5, fontWeight: 750 }}>
@@ -2436,63 +2438,71 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               <div>Received: {formatTimestamp(message.date)}</div>
             </div>
           </div>
-          <div style={{ minHeight: 320, height: "min(54vh, 460px)", border: `1px solid ${strokeColor}`, borderRadius: 12, background: "#ffffff", overflow: "hidden", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}>
-            <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 320, border: 0, background: "#ffffff" }} />
-          </div>
-          <div style={{ display: "grid", gap: 7, border: `1px solid ${ruleColor}`, borderRadius: 12, background: EDITOR_NEU_ACTIVE_SURFACE, padding: 8, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
-              <span>To:</span>
-              <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
-              <span>Subject:</span>
-              <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+        )}
+      </div>
+      {message ? (
+        <div style={{ minHeight: 0, border: `1px solid ${strokeColor}`, borderRadius: 12, background: "#ffffff", overflow: "hidden", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}>
+          <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 0, border: 0, background: "#ffffff" }} />
+        </div>
+      ) : (
+        <div aria-hidden="true" style={{ minHeight: 0 }} />
+      )}
+      {message && (
+        <div style={{ display: "grid", gap: 7, border: `1px solid ${ruleColor}`, borderRadius: 12, background: EDITOR_NEU_ACTIVE_SURFACE, padding: 8, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}>
+          {sentReplies.length > 0 && (
+            <div style={{ display: "grid", gap: 6 }}>
+              {sentReplies.map((reply) => (
+                <div key={reply.id} style={{ display: "grid", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.42) 52%, rgba(247,239,255,0.48))", padding: 7, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, minWidth: 0, fontSize: 10.5, fontWeight: 900 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: accent }}>Sent reply</span>
+                    <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)" }}>{formatTimestamp(reply.date)}</span>
+                  </div>
+                  <div style={{ display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10, fontWeight: 750 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>From: {formatAddressList(reply.from) || "Me"}</div>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Send to: {formatAddressList(reply.to) || toDraft}</div>
+                  </div>
+                  <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.38, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{messageTextSummary(reply) || reply.body || bodyDraft}</div>
+                </div>
+              ))}
             </div>
-            <textarea
-              value={bodyDraft}
-              disabled={!editable}
-              rows={3}
-              placeholder="Write a reply"
-              onChange={(event) => setBodyDraft(event.currentTarget.value)}
-              style={{ width: "100%", minHeight: 86, resize: "vertical", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "#ffffff", color: surfaceText, outline: "none", padding: "8px 9px", fontSize: 12, lineHeight: 1.38, letterSpacing: 0, boxShadow: "inset 1px 1px 5px rgba(174,174,192,0.14)" }}
-            />
-            <button
-              type="button"
-              disabled={!canSend}
-              onClick={submitReply}
-              style={{
-                justifySelf: "end",
-                minHeight: 30,
-                border: canSend ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                borderRadius: 9,
-                background: canSend ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-                color: accent,
-                cursor: canSend ? "pointer" : "default",
-                opacity: canSend ? 1 : 0.48,
-                padding: "0 12px",
-                fontSize: 11.5,
-                fontWeight: 900,
-                letterSpacing: 0,
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              {sending ? "Sending" : "Send reply"}
-            </button>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
+            <span>To:</span>
+            <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+            <span>Subject:</span>
+            <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
           </div>
-          <div style={{ display: "grid", gap: 7, paddingBottom: 4 }}>
-            {sentReplies.map((reply) => (
-              <div key={reply.id} style={{ display: "grid", gap: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.42) 52%, rgba(247,239,255,0.48))", padding: 8, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, minWidth: 0, fontSize: 10.5, fontWeight: 900 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: accent }}>Sent reply</span>
-                  <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)" }}>{formatTimestamp(reply.date)}</span>
-                </div>
-                <div style={{ display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10, fontWeight: 750 }}>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>From: {formatAddressList(reply.from) || "Me"}</div>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Send to: {formatAddressList(reply.to) || toDraft}</div>
-                </div>
-                <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.38, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{messageTextSummary(reply) || reply.body || bodyDraft}</div>
-              </div>
-            ))}
-          </div>
-        </>
+          <textarea
+            value={bodyDraft}
+            disabled={!editable}
+            rows={replyLineCount}
+            placeholder="Write a reply"
+            onChange={(event) => setBodyDraft(event.currentTarget.value)}
+            style={{ width: "100%", height: replyTextareaHeight, minHeight: 78, maxHeight: 240, resize: "none", overflowY: replyLineCount >= 12 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "#ffffff", color: surfaceText, outline: "none", padding: "8px 9px", fontSize: 12, lineHeight: 1.38, letterSpacing: 0, boxSizing: "border-box", boxShadow: "inset 1px 1px 5px rgba(174,174,192,0.14)" }}
+          />
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={submitReply}
+            style={{
+              justifySelf: "end",
+              minHeight: 30,
+              border: canSend ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+              borderRadius: 9,
+              background: canSend ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+              color: accent,
+              cursor: canSend ? "pointer" : "default",
+              opacity: canSend ? 1 : 0.48,
+              padding: "0 12px",
+              fontSize: 11.5,
+              fontWeight: 900,
+              letterSpacing: 0,
+              boxShadow: EDITOR_NEU_SHADOW,
+            }}
+          >
+            {sending ? "Sending" : "Send reply"}
+          </button>
+        </div>
       )}
     </div>
   );
