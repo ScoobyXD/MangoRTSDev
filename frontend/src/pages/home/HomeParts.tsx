@@ -3832,7 +3832,6 @@ export function LogicGateInboxNodeGroupCard({
   onOpenPinContextMenu?: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
 }) {
   const canOpenLogicGate = group.logicGateID !== INBOX_NO_LOGIC_GATE_ID;
-  const firstNodeID = group.nodeIDs[0] ?? "";
   const [groupContextMenu, setGroupContextMenu] = useState<{ x: number; y: number } | null>(null);
   const selectedNodeIDsForMenu = useMemo(() => cleanIDList(Array.from(selectedRowIDs).map(nodeIDFromTreeID)).filter((nodeID) => nodeByID.has(nodeID)), [nodeByID, selectedRowIDs]);
   const explicitHeight = !collapsed && typeof heightPx === "number" && Number.isFinite(heightPx);
@@ -3928,7 +3927,7 @@ export function LogicGateInboxNodeGroupCard({
           if (!canOpenLogicGate) return;
           event.preventDefault();
           event.stopPropagation();
-          onOpenLogicGate(group.logicGateID, group.label, firstNodeID);
+          onOpenLogicGate(group.logicGateID, group.label, "");
         }}
       >
         <span style={logicGateInboxGroupIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>

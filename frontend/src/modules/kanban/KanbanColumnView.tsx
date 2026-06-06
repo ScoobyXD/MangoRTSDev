@@ -198,7 +198,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       <div
         className="kanban-column-scroll"
         onMouseDown={onBlankMouseDown}
-        style={{ minHeight: 0, overflow: "auto", display: "grid", gridTemplateColumns: isBacklogLayout ? "repeat(auto-fill, minmax(210px, 1fr))" : undefined, alignContent: "start", alignItems: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: columnColor, ["--kanban-column-scroll-track" as string]: "transparent" }}
+        style={{ minHeight: 0, overflow: "auto", display: "grid", gridTemplateColumns: isBacklogLayout ? "repeat(auto-fill, minmax(210px, 1fr))" : "minmax(0, 1fr)", gridAutoRows: "max-content", alignContent: "start", alignItems: "start", rowGap: 12, columnGap: isBacklogLayout ? 12 : 0, padding: 8, ["--kanban-column-scroll-accent" as string]: columnColor, ["--kanban-column-scroll-track" as string]: "transparent" }}
       >
         {renderedCards}
       </div>

@@ -87,6 +87,11 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       onDrop={onDrop}
       style={{
         position: "relative",
+        display: "block",
+        gridColumn: "auto",
+        gridRow: "auto",
+        width: "100%",
+        boxSizing: "border-box",
         border: "1px solid transparent",
         borderRadius: 11,
         background: isIssue
