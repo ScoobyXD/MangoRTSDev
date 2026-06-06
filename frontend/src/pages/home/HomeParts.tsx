@@ -2352,119 +2352,135 @@ export function NodeInboxRail({
     setTriagePriorityMenu({ x: event.clientX, y: event.clientY, logicGateID: cleanLogicGateID, messageIDs: ids });
   }, []);
   const showRoleLogicGates = inboxRole !== "other";
-
-  return (
-    <>
-    <aside ref={railSplit.railRef} style={nodeInboxRailStyle(railSplit.topHeight)}>
-      <section style={nodeInboxPrimarySectionStyle} onContextMenu={openCreateNodeMenu}>
-        <div style={nodeInboxRailHeaderStyle}>
-          <h2 style={nodeInboxPanelTitleStyle}>My Nodes</h2>
-          {loading && <span style={nodeInboxMutedSmallStyle}>Loading</span>}
-        </div>
-        <div className="mango-home-scroll" style={nodeInboxListStyle}>
-          {myNodeGroups.length === 0 && !loading ? (
-            <div style={nodeInboxEmptyStyle}>No assigned nodes</div>
-          ) : (
-            myNodeGroups.map((group) => (
-              <div key={group.key} style={nodeInboxGroupStyle}>
-                <div style={nodeInboxFolderLabelStyle}>
-                  <ExplorerRowIcon kind="folder" />
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
-                  <span style={nodeInboxGroupCountStyle}>{group.nodes.length}</span>
-                </div>
-                <div style={nodeInboxGridStyle}>
-                  {group.nodes.map((node) => (
-                    <MyNodeTile
-                      key={node.node_id}
-                      node={node}
-                      selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
-                      orderedRowIDs={myNodeOrderedRowIDs}
-                      nodeByID={nodeByID}
-                      getNodeDragIDs={getNodeDragIDs}
-                      onSelectNode={onSelectNode}
-                      onOpenNode={onOpenNode}
-                      onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-                      onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                      tone="orange"
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <RailRowResizeHandle onPointerDown={railSplit.startResize} />
-
-      {showRoleLogicGates ? (
-      <section style={nodeInboxOtherSectionStyle}>
-        <div style={nodeInboxRailHeaderStyle}>
-          <h2 style={nodeInboxOtherPanelTitleStyle}>My Logic Gates</h2>
-          {loading && <span style={nodeInboxOtherMutedSmallStyle}>Loading</span>}
-        </div>
-        <div className="mango-home-scroll" style={myLogicGatesListStyle}>
-          {myLogicGateGroups.length === 0 && !loading ? (
-            <div style={nodeInboxOtherEmptyStyle}>No assigned Logic Gates</div>
-          ) : myLogicGateGroups.map((group) => (
-            <div key={group.key} style={myLogicGateGroupStyle}>
-              <div style={myLogicGateFolderLabelStyle}>
+  const renderMyNodesSection = (
+    sectionStyle: React.CSSProperties,
+    titleStyle: React.CSSProperties,
+    mutedStyle: React.CSSProperties,
+    listStyle: React.CSSProperties,
+  ) => (
+    <section style={sectionStyle} onContextMenu={openCreateNodeMenu}>
+      <div style={nodeInboxRailHeaderStyle}>
+        <h2 style={titleStyle}>My Nodes</h2>
+        {loading && <span style={mutedStyle}>Loading</span>}
+      </div>
+      <div className="mango-home-scroll" style={listStyle}>
+        {myNodeGroups.length === 0 && !loading ? (
+          <div style={nodeInboxEmptyStyle}>No assigned nodes</div>
+        ) : (
+          myNodeGroups.map((group) => (
+            <div key={group.key} style={nodeInboxGroupStyle}>
+              <div style={nodeInboxFolderLabelStyle}>
                 <ExplorerRowIcon kind="folder" />
-                <span>{group.label}</span>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
+                <span style={nodeInboxGroupCountStyle}>{group.nodes.length}</span>
               </div>
-              <div style={myLogicGateGridStyle}>
-                {group.logicGates.map((logicGate) => (
-                  <MyLogicGateTile
-                    key={logicGate.logic_gate_id}
-                    logicGate={logicGate}
-                    selected={selectedLogicGateRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
-                    busy={busy}
-                    getLogicGateDragIDs={getLogicGateDragIDs}
-                    logicGateByID={logicGateByID}
-                    shortcut={false}
-                    onSelectShortcut={selectInboxLogicGate}
-                    onOpenLogicGate={onOpenLogicGate}
+              <div style={nodeInboxGridStyle}>
+                {group.nodes.map((node) => (
+                  <MyNodeTile
+                    key={node.node_id}
+                    node={node}
+                    selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
+                    orderedRowIDs={myNodeOrderedRowIDs}
+                    nodeByID={nodeByID}
+                    getNodeDragIDs={getNodeDragIDs}
+                    onSelectNode={onSelectNode}
+                    onOpenNode={onOpenNode}
+                    onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                     onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                    onRemoveShortcut={onRemoveLogicGateShortcut}
-                    onConvertMessages={requestTriageConversionPriority}
+                    tone="orange"
                   />
                 ))}
               </div>
             </div>
-          ))}
-        </div>
-      </section>
-      ) : (
-      <section style={nodeInboxOtherSectionStyle} onContextMenu={openCreateNodeMenu}>
-        <div style={nodeInboxRailHeaderStyle}>
-          <h2 style={nodeInboxOtherPanelTitleStyle}>Others</h2>
-          {loading && <span style={nodeInboxOtherMutedSmallStyle}>Loading</span>}
-        </div>
-        <div className="mango-home-scroll" style={nodeInboxOtherListStyle}>
-          {otherNodes.length === 0 && !loading ? (
-            <div style={nodeInboxOtherEmptyStyle}>No other nodes</div>
-          ) : (
-            <div style={nodeInboxGridStyle}>
-              {otherNodes.map((node) => (
-                <MyNodeTile
-                  key={node.node_id}
-                  node={node}
-                  selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
-                  orderedRowIDs={otherNodeOrderedRowIDs}
-                  nodeByID={nodeByID}
-                  getNodeDragIDs={getNodeDragIDs}
-                  onSelectNode={onSelectNode}
-                  onOpenNode={onOpenNode}
-                  onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+          ))
+        )}
+      </div>
+    </section>
+  );
+  const renderMyLogicGatesSection = (
+    sectionStyle: React.CSSProperties,
+    titleStyle: React.CSSProperties,
+    mutedStyle: React.CSSProperties,
+  ) => (
+    <section style={sectionStyle}>
+      <div style={nodeInboxRailHeaderStyle}>
+        <h2 style={titleStyle}>My Logic Gates</h2>
+        {loading && <span style={mutedStyle}>Loading</span>}
+      </div>
+      <div className="mango-home-scroll" style={myLogicGatesListStyle}>
+        {myLogicGateGroups.length === 0 && !loading ? (
+          <div style={nodeInboxOtherEmptyStyle}>No assigned Logic Gates</div>
+        ) : myLogicGateGroups.map((group) => (
+          <div key={group.key} style={myLogicGateGroupStyle}>
+            <div style={myLogicGateFolderLabelStyle}>
+              <ExplorerRowIcon kind="folder" />
+              <span>{group.label}</span>
+            </div>
+            <div style={myLogicGateGridStyle}>
+              {group.logicGates.map((logicGate) => (
+                <MyLogicGateTile
+                  key={logicGate.logic_gate_id}
+                  logicGate={logicGate}
+                  selected={selectedLogicGateRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
+                  busy={busy}
+                  getLogicGateDragIDs={getLogicGateDragIDs}
+                  logicGateByID={logicGateByID}
+                  shortcut={false}
+                  onSelectShortcut={selectInboxLogicGate}
+                  onOpenLogicGate={onOpenLogicGate}
                   onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                  tone="light"
+                  onRemoveShortcut={onRemoveLogicGateShortcut}
+                  onConvertMessages={requestTriageConversionPriority}
                 />
               ))}
             </div>
-          )}
-        </div>
-      </section>
-      )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+  const renderOtherNodesSection = () => (
+    <section style={nodeInboxOtherSectionStyle} onContextMenu={openCreateNodeMenu}>
+      <div style={nodeInboxRailHeaderStyle}>
+        <h2 style={nodeInboxOtherPanelTitleStyle}>Others</h2>
+        {loading && <span style={nodeInboxOtherMutedSmallStyle}>Loading</span>}
+      </div>
+      <div className="mango-home-scroll" style={nodeInboxOtherListStyle}>
+        {otherNodes.length === 0 && !loading ? (
+          <div style={nodeInboxOtherEmptyStyle}>No other nodes</div>
+        ) : (
+          <div style={nodeInboxGridStyle}>
+            {otherNodes.map((node) => (
+              <MyNodeTile
+                key={node.node_id}
+                node={node}
+                selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
+                orderedRowIDs={otherNodeOrderedRowIDs}
+                nodeByID={nodeByID}
+                getNodeDragIDs={getNodeDragIDs}
+                onSelectNode={onSelectNode}
+                onOpenNode={onOpenNode}
+                onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                tone="light"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  return (
+    <>
+    <aside ref={railSplit.railRef} style={nodeInboxRailStyle(railSplit.topHeight)}>
+      {showRoleLogicGates
+        ? renderMyLogicGatesSection(nodeInboxPrimarySectionStyle, nodeInboxPanelTitleStyle, nodeInboxMutedSmallStyle)
+        : renderMyNodesSection(nodeInboxPrimarySectionStyle, nodeInboxPanelTitleStyle, nodeInboxMutedSmallStyle, nodeInboxListStyle)}
+      <RailRowResizeHandle onPointerDown={railSplit.startResize} />
+      {showRoleLogicGates
+        ? renderMyNodesSection(nodeInboxOtherSectionStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherListStyle)
+        : renderOtherNodesSection()}
     </aside>
     <HomePinContextMenu
       menu={pinContextMenu}
