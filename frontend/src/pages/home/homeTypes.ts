@@ -4,10 +4,13 @@ import type { NodeRecord } from "../../modules/node-map/shared.js";
 
 export type HomePageProps = {
   me?: CurrentUserResponse;
-  onNavigate?: (path: string) => void;
+  onNavigate?: (path: string, options?: { replace?: boolean }) => void;
   embedded?: boolean;
   hideNavigation?: boolean;
   initialViewID?: HomeViewID;
+  deepLinkNodeID?: string;
+  onNodeOverlayOpen?: (nodeID: string) => void;
+  onNodeOverlayClose?: () => void;
 };
 
 export type ComposeState = {

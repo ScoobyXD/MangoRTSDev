@@ -46,6 +46,7 @@ import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeC
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
+import { buildLogicGateRoute, buildNodeRoute, buildRacioRoute, racioRoleForViewID, type DeepLinkRoute, type RacioDeepLinkRoute } from "./deepLinkRoutes";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -66,6 +67,7 @@ const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const SHOW_LEGACY_HEADER = false;
 
 type PrimaryPage = "map" | "home" | "logic-gate-arena";
+type NavigateOptions = { replace?: boolean };
 type ExplorerEntityActivatedDetail = {
   companyID?: string;
   sourceFrameID?: string;
@@ -91,6 +93,25 @@ type LogicGateArenaTarget = {
   suppressLegacyWorkspaceStream?: boolean;
   requestID: number;
 };
+
+function logicGateTargetFromRoute(route: DeepLinkRoute | null | undefined): LogicGateArenaTarget | null {
+  if (route?.kind !== "logic_gate") return null;
+  return {
+    logicGateID: route.logicGateID,
+    label: "Logic Gate",
+    nodeID: route.nodeID,
+    requestID: Date.now(),
+  };
+}
+
+function nodePopupFromRoute(route: DeepLinkRoute | null | undefined): NodeEditorPopupState | null {
+  if (route?.kind !== "node") return null;
+  return {
+    nodeID: route.nodeID,
+    nodeTitle: route.nodeID,
+    focusRequestID: Date.now(),
+  };
+}
 
 function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "home") return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
@@ -260,8 +281,9 @@ function routeForPage(page: PrimaryPage): string {
 type AppProps = {
   accountChrome?: React.ReactNode;
   initialPage?: "map" | "home" | "logic-gate-arena";
+  deepLink?: DeepLinkRoute | null;
   me?: CurrentUserResponse;
-  onNavigate?: (path: string) => void;
+  onNavigate?: (path: string, options?: NavigateOptions) => void;
   overrideContent?: React.ReactNode;
 };
 
@@ -291,7 +313,7 @@ const appResizeHandleStyle: React.CSSProperties = {
   touchAction: "none",
 };
 
-const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
+const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
   const activeCompanyID = getActiveCompanyID();
   const taskbarScope = useMemo(() => (
     appTaskbarStorageScope(me?.user.user_id || me?.user.email || "local", activeCompanyID)
@@ -303,7 +325,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, [initialPage, loaded.activeId, loaded.tabs, overrideContent]);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
-  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>("my-triage");
+  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "racio" ? deepLink.viewID : "my-triage"));
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
@@ -325,7 +347,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
   const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
   const [pinDropActive, setPinDropActive] = useState(false);
-  const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(null);
+  const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(() => nodePopupFromRoute(deepLink));
   const [taskbarData, setTaskbarData] = useState(() => ({
     scope: taskbarScope,
     dockTabs: readAppDockTabs(taskbarScope),
@@ -347,7 +369,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, []);
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
   const [taskbarExpanded, setTaskbarExpanded] = useState(false);
-  const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(null);
+  const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -362,6 +384,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const appSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const appRootRef = useRef<HTMLDivElement | null>(null);
+  const routeManagedExplorerNodePopupRef = useRef(deepLink?.kind === "node");
   const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
@@ -894,7 +917,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setActiveTabId(id);
   }, [tabs]);
 
-  const selectPrimaryPage = useCallback((page: PrimaryPage) => {
+  const activatePrimaryPage = useCallback((page: PrimaryPage) => {
     if (page === "home") preloadHomeSurface();
     if (page === "logic-gate-arena") preloadLogicGateArenaSurface();
     if (page === "map") preloadDefaultDashboardModules();
@@ -906,17 +929,83 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setSelectedFrameId(null);
     setSelectedFrameIds(new Set());
     setActiveDockTabID(null);
+    return ensured;
+  }, [tabs]);
+
+  const selectPrimaryPage = useCallback((page: PrimaryPage) => {
+    const ensured = activatePrimaryPage(page);
     closeMenus();
     if (onNavigate) {
       saveViews(ensured.tabs, ensured.tab.id);
       onNavigate(routeForPage(page));
     }
-  }, [closeMenus, onNavigate, tabs]);
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
 
   const selectHomeSidebarView = useCallback((view: HomeSidebarView) => {
     setHomeViewID(view);
-    selectPrimaryPage("home");
-  }, [selectPrimaryPage]);
+    const ensured = activatePrimaryPage("home");
+    closeMenus();
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      const role = racioRoleForViewID(view);
+      onNavigate(role ? buildRacioRoute(role) : routeForPage("home"));
+    }
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
+
+  const deepLinkLogicGateID = deepLink?.kind === "logic_gate" ? deepLink.logicGateID : "";
+  const deepLinkLogicGateNodeID = deepLink?.kind === "logic_gate" ? deepLink.nodeID ?? "" : "";
+  useEffect(() => {
+    if (!deepLinkLogicGateID) return;
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup(null);
+    activatePrimaryPage("logic-gate-arena");
+    setLogicGateArenaTarget((current) => {
+      const sameSelection = current?.logicGateID === deepLinkLogicGateID && (current.nodeID ?? "") === deepLinkLogicGateNodeID;
+      if (sameSelection) return current;
+      const preserveContext = current?.logicGateID === deepLinkLogicGateID;
+      return {
+        logicGateID: deepLinkLogicGateID,
+        label: preserveContext ? current.label : "Logic Gate",
+        nodeID: deepLinkLogicGateNodeID || undefined,
+        suppressLegacyWorkspaceStream: preserveContext ? current.suppressLegacyWorkspaceStream : undefined,
+        requestID: Date.now(),
+      };
+    });
+  }, [activatePrimaryPage, deepLinkLogicGateID, deepLinkLogicGateNodeID]);
+
+  const deepLinkNodeID = deepLink?.kind === "node" ? deepLink.nodeID : "";
+  useEffect(() => {
+    if (deepLinkNodeID) {
+      routeManagedExplorerNodePopupRef.current = true;
+      activatePrimaryPage("map");
+      setActiveDockTabID(null);
+      setExplorerNodePopup((current) => (
+        current?.nodeID === deepLinkNodeID
+          ? current
+          : { nodeID: deepLinkNodeID, nodeTitle: deepLinkNodeID, focusRequestID: Date.now() }
+      ));
+      return;
+    }
+    if (!routeManagedExplorerNodePopupRef.current) return;
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup(null);
+    setActiveDockTabID(null);
+  }, [activatePrimaryPage, deepLinkNodeID]);
+
+  const racioDeepLink = deepLink?.kind === "racio" ? deepLink : null;
+  const racioDeepLinkViewID: HomeSidebarView | "" = racioDeepLink?.viewID ?? "";
+  useEffect(() => {
+    if (!racioDeepLinkViewID) return;
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup(null);
+    setHomeViewID(racioDeepLinkViewID);
+    activatePrimaryPage("home");
+  }, [activatePrimaryPage, racioDeepLinkViewID]);
+
+  useEffect(() => {
+    if (overrideContent || deepLink || !initialPage) return;
+    activatePrimaryPage(initialPage);
+  }, [activatePrimaryPage, deepLink, initialPage, overrideContent]);
 
   const addSidebarPins = useCallback((pins: SidebarPin[]) => {
     const cleanPins = pins.filter((pin) => pin.id.trim() && (pin.kind === "node" || pin.kind === "logic_gate"));
@@ -973,6 +1062,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     if (tab.kind === "node") {
       setActiveDockTabID(tab.id);
       setExplorerNodePopup({ nodeID: tab.entityID, nodeTitle: tab.label });
+      if (onNavigate) onNavigate(buildNodeRoute(tab.entityID));
       return;
     }
 
@@ -990,9 +1080,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         label: tab.label,
       });
     }
-    selectPrimaryPage("logic-gate-arena");
+    const ensured = activatePrimaryPage("logic-gate-arena");
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      onNavigate(buildLogicGateRoute(tab.entityID));
+    }
     setActiveDockTabID(tab.id);
-  }, [closeMenus, selectPrimaryPage]);
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
 
   const reorderDockTab = useCallback((movingTabID: string, targetTabID: string, placement: "before" | "after") => {
     setDockTabs((previous) => {
@@ -1030,7 +1124,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     });
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
-  }, [explorerNodePopup, upsertDockTab]);
+    if (routeManagedExplorerNodePopupRef.current && onNavigate) {
+      routeManagedExplorerNodePopupRef.current = false;
+      onNavigate("/", { replace: true });
+    }
+  }, [explorerNodePopup, onNavigate, upsertDockTab]);
 
   const collapseLogicGateArenaToTab = useCallback((selection: { logicGateID: string; label: string }) => {
     upsertDockTab({
@@ -1041,6 +1139,28 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setActiveDockTabID(null);
     selectPrimaryPage("map");
   }, [selectPrimaryPage, upsertDockTab]);
+
+  const openLogicGateArenaNodeRoute = useCallback((selection: { logicGateID: string; nodeID: string }) => {
+    if (!onNavigate) return;
+    onNavigate(buildLogicGateRoute(selection.logicGateID, selection.nodeID));
+  }, [onNavigate]);
+
+  const closeLogicGateArenaNodeRoute = useCallback((selection: { logicGateID: string }) => {
+    if (!onNavigate) return;
+    onNavigate(buildLogicGateRoute(selection.logicGateID), { replace: true });
+  }, [onNavigate]);
+
+  const openHomeNodeRoute = useCallback((nodeID: string) => {
+    if (!onNavigate) return;
+    const role = racioRoleForViewID(homeViewID);
+    onNavigate(role ? buildRacioRoute(role, nodeID) : buildNodeRoute(nodeID));
+  }, [homeViewID, onNavigate]);
+
+  const closeHomeNodeRoute = useCallback(() => {
+    if (!onNavigate) return;
+    const role = (racioDeepLink as RacioDeepLinkRoute | null)?.role ?? racioRoleForViewID(homeViewID);
+    onNavigate(role ? buildRacioRoute(role) : "/", { replace: true });
+  }, [homeViewID, onNavigate, racioDeepLink]);
 
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
@@ -1056,13 +1176,18 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         logicGateID: pin.id,
         label: pin.label,
       });
-      selectPrimaryPage("logic-gate-arena");
+      const ensured = activatePrimaryPage("logic-gate-arena");
+      if (onNavigate) {
+        saveViews(ensured.tabs, ensured.tab.id);
+        onNavigate(buildLogicGateRoute(pin.id));
+      }
       return;
     }
 
     closeMenus();
     setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.label });
-  }, [closeMenus, selectPrimaryPage]);
+    if (onNavigate) onNavigate(buildNodeRoute(pin.id));
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
 
   const openTimelineEntity = useCallback((target: { kind: "node" | "logic_gate"; id: string; label: string }) => {
     openSidebarPin({
@@ -1143,7 +1268,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
           suppressLegacyWorkspaceStream,
         });
-        selectPrimaryPage("logic-gate-arena");
+        const ensured = activatePrimaryPage("logic-gate-arena");
+        if (onNavigate) {
+          saveViews(ensured.tabs, ensured.tab.id);
+          onNavigate(buildLogicGateRoute(id, typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined));
+        }
         return;
       }
 
@@ -1156,11 +1285,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           focusInformationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
           focusRequestID: Date.now(),
         });
+        if (onNavigate) onNavigate(buildNodeRoute(id));
       }
     };
     window.addEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
     return () => window.removeEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
-  }, [closeMenus, selectPrimaryPage]);
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
 
 
 
@@ -1390,10 +1520,23 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
               updateFrames={updateActiveFrames}
               targetLogicGate={logicGateArenaTarget}
               onCollapseToTab={collapseLogicGateArenaToTab}
+              onNodeOpen={openLogicGateArenaNodeRoute}
+              onNodeClose={closeLogicGateArenaNodeRoute}
             />
           </React.Suspense>
         ) : isHomeView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyHomePage embedded hideNavigation initialViewID={homeViewID} me={me} onNavigate={onNavigate} /></React.Suspense>
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyHomePage
+              embedded
+              hideNavigation
+              initialViewID={homeViewID}
+              deepLinkNodeID={racioDeepLink ? racioDeepLink.nodeID ?? "" : undefined}
+              me={me}
+              onNavigate={onNavigate}
+              onNodeOverlayOpen={openHomeNodeRoute}
+              onNodeOverlayClose={closeHomeNodeRoute}
+            />
+          </React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />
@@ -1661,11 +1804,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           focusInformationID={explorerNodePopup.focusInformationID}
           focusRequestID={explorerNodePopup.focusRequestID}
           onClose={() => {
+            const wasRouteManaged = routeManagedExplorerNodePopupRef.current || deepLink?.kind === "node";
             setExplorerNodePopup(null);
             setActiveDockTabID((current) => {
               const activeTab = dockTabs.find((tab) => tab.id === current);
               return activeTab?.kind === "node" && activeTab.entityID === explorerNodePopup.nodeID ? null : current;
             });
+            if (wasRouteManaged && onNavigate) {
+              routeManagedExplorerNodePopupRef.current = false;
+              onNavigate("/", { replace: true });
+            }
           }}
           onCollapseToTab={collapseExplorerNodePopupToTab}
         />

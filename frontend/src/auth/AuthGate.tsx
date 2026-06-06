@@ -22,9 +22,11 @@ import {
 } from "./cognitoAuth";
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
 import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
+import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
+type NavigateOptions = { replace?: boolean };
 
 let appLayoutPromise: Promise<AppLayoutModule> | null = null;
 
@@ -46,11 +48,16 @@ function preloadAuthenticatedShell(): void {
 }
 
 function preloadRouteSurface(path: string): void {
-  if (path === "/logic-gate-arena") {
+  const route = parseDeepLinkRoute(path);
+  if (path === "/logic-gate-arena" || route?.kind === "logic_gate") {
     preloadLogicGateArenaSurface();
     return;
   }
-  if (path === "/home" || path === "/communication" || path === "/communications") preloadHomeSurface();
+  if (path === "/home" || path === "/communication" || path === "/communications" || route?.kind === "racio") {
+    preloadHomeSurface();
+    return;
+  }
+  if (route?.kind === "node") preloadAppLayout();
 }
 function prefetchHandlers(preload: () => void) {
   return {
@@ -291,11 +298,12 @@ export default function AuthGate() {
   const [error, setError] = useState("");
   const [pendingChallenge, setPendingChallenge] = useState<PendingChallenge>(null);
 
-  const navigate = useCallback((nextPath: string) => {
-    const normalizedNextPath = nextPath.trim() || "/";
+  const navigate = useCallback((nextPath: string, options?: NavigateOptions) => {
+    const normalizedNextPath = normalizeAppPath(nextPath.trim() || "/");
     preloadRouteSurface(normalizedNextPath);
     if (window.location.pathname !== normalizedNextPath) {
-      window.history.pushState({}, "", normalizedNextPath);
+      if (options?.replace) window.history.replaceState({}, "", normalizedNextPath);
+      else window.history.pushState({}, "", normalizedNextPath);
     }
     setPath(normalizedNextPath);
   }, []);
@@ -341,10 +349,23 @@ export default function AuthGate() {
     void loadMe();
   }, [authEnabled, loadMe, navigate]);
 
-  if (!authEnabled) return <React.Suspense fallback={routeFallback}><LazyAppLayout /></React.Suspense>;
+  const normalizedPath = normalizeAppPath(path);
+  const deepLinkRoute = parseDeepLinkRoute(normalizedPath);
+  const deepLinkInitialPage = deepLinkRoute?.kind === "logic_gate"
+    ? "logic-gate-arena"
+    : deepLinkRoute?.kind === "racio"
+      ? "home"
+      : undefined;
+
+  if (!authEnabled) {
+    return (
+      <React.Suspense fallback={routeFallback}>
+        <LazyAppLayout initialPage={deepLinkInitialPage} deepLink={deepLinkRoute} onNavigate={navigate} />
+      </React.Suspense>
+    );
+  }
   if (loading) return <AuthPanel title="MangoRTS" error={error}><div>Loading</div></AuthPanel>;
 
-  const normalizedPath = path;
   if (!me || isAuthPath(normalizedPath)) {
     if (normalizedPath === "/accept-invite") {
       return <AcceptInvitePage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
@@ -375,6 +396,20 @@ export default function AuthGate() {
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="home" /></React.Suspense>;
+  }
+
+  if (deepLinkRoute) {
+    return (
+      <React.Suspense fallback={routeFallback}>
+        <LazyAppLayout
+          accountChrome={<AccountBar me={me} onNavigate={navigate} />}
+          me={me}
+          onNavigate={navigate}
+          initialPage={deepLinkInitialPage}
+          deepLink={deepLinkRoute}
+        />
+      </React.Suspense>
+    );
   }
 
   return (

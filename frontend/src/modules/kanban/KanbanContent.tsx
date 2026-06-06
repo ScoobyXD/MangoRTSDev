@@ -158,8 +158,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
   forcedHighlightedNodeID = "",
+  forcedOpenNodeID = "",
+  controlForcedOpenNode = false,
   suppressLegacyWorkspaceStream = false,
   onCollapseArenaToTab,
+  onNodeEditorOverlayOpen,
+  onNodeEditorOverlayClose,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -338,11 +342,28 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!arenaGroupingOpen) setArenaGroupMenuOpen(null);
   }, [arenaGroupingOpen]);
 
+  const openNodeEditorOverlay = useCallback((nodeID: string, nodeTitle: string, notifyRoute = true) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const cleanNodeTitle = humanLabelOrFallback(nodeTitle, cleanNodeID);
+    setNodeEditorOverlay((current) => (
+      current?.nodeID === cleanNodeID && current.nodeTitle === cleanNodeTitle
+        ? current
+        : { nodeID: cleanNodeID, nodeTitle: cleanNodeTitle }
+    ));
+    if (notifyRoute) onNodeEditorOverlayOpen?.(cleanNodeID);
+  }, [onNodeEditorOverlayOpen]);
+
+  const closeNodeEditorOverlay = useCallback((notifyRoute = true) => {
+    setNodeEditorOverlay(null);
+    if (notifyRoute) onNodeEditorOverlayClose?.();
+  }, [onNodeEditorOverlayClose]);
+
   const collapseNodeEditorOverlayToTab = useCallback(() => {
     if (!nodeEditorOverlay) return;
     requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
-    setNodeEditorOverlay(null);
-  }, [nodeEditorOverlay]);
+    closeNodeEditorOverlay();
+  }, [closeNodeEditorOverlay, nodeEditorOverlay]);
 
   useEffect(() => {
     if (!arenaGroupMenuOpen) return undefined;
@@ -671,6 +692,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setSelectedCardIDs(new Set(matchingCards.map((card) => card.card_id)));
     setSelectionAnchorCardID(matchingCards[0]?.card_id ?? "");
   }, [arenaMode, cards, forcedHighlightedNodeID, forcedLogicGateID]);
+
+  useEffect(() => {
+    if (!arenaMode || !controlForcedOpenNode) return;
+    const nodeID = forcedOpenNodeID.trim();
+    if (!nodeID) {
+      closeNodeEditorOverlay(false);
+      return;
+    }
+    const logicGateID = forcedLogicGateID.trim();
+    const expectedBoardID = logicGateID ? logicGateKanbanBoardID(logicGateID) : "";
+    const matchingCard = cards.find((card) => {
+      if (card.node_id !== nodeID) return false;
+      if (!logicGateID) return true;
+      return card.logic_gate_id === logicGateID || card.board_id === expectedBoardID;
+    });
+    openNodeEditorOverlay(nodeID, matchingCard?.node_title || nodeID, false);
+  }, [arenaMode, cards, closeNodeEditorOverlay, controlForcedOpenNode, forcedLogicGateID, forcedOpenNodeID, openNodeEditorOverlay]);
 
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
@@ -1935,7 +1973,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          setNodeEditorOverlay({ nodeID: card.node_id, nodeTitle: card.node_title });
+          openNodeEditorOverlay(card.node_id, card.node_title);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -2217,7 +2255,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           accent={accent}
           theme={theme}
           allowHorizontalOverflow={arenaMode}
-          onClose={() => setNodeEditorOverlay(null)}
+          onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
         />
       )}

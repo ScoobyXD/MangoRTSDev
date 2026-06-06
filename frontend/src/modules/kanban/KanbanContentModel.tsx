@@ -43,8 +43,12 @@ export type KanbanContentProps = {
   forcedLogicGateID?: string;
   forcedLogicGateLabel?: string;
   forcedHighlightedNodeID?: string;
+  forcedOpenNodeID?: string;
+  controlForcedOpenNode?: boolean;
   suppressLegacyWorkspaceStream?: boolean;
   onCollapseArenaToTab?: () => void;
+  onNodeEditorOverlayOpen?: (nodeID: string) => void;
+  onNodeEditorOverlayClose?: () => void;
 };
 
 export type OverlayResizeState = {

@@ -19,6 +19,8 @@ type LogicGateArenaPageProps = {
     requestID?: number;
   } | null;
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
+  onNodeOpen?: (selection: { logicGateID: string; label: string; nodeID: string }) => void;
+  onNodeClose?: (selection: { logicGateID: string; label: string }) => void;
 };
 
 type ArenaResizeState = {
@@ -121,7 +123,7 @@ function getArenaFrames(frames: FrameDataModel[]) {
   };
 }
 
-export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab }) => {
+export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab, onNodeOpen, onNodeClose }) => {
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
@@ -247,6 +249,16 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     });
   }, [onCollapseToTab, selectedLogicGate.id, selectedLogicGate.label, selectedLogicGate.nodeID]);
 
+  const openKanbanNode = useCallback((nodeID: string) => {
+    if (!selectedLogicGate.id) return;
+    onNodeOpen?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Logic Gate", nodeID });
+  }, [onNodeOpen, selectedLogicGate.id, selectedLogicGate.label]);
+
+  const closeKanbanNode = useCallback(() => {
+    if (!selectedLogicGate.id) return;
+    onNodeClose?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Logic Gate" });
+  }, [onNodeClose, selectedLogicGate.id, selectedLogicGate.label]);
+
   if (!editorFrame || !kanbanFrame) {
     return (
       <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#ffffff", color: "#111111", fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
@@ -300,8 +312,12 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           forcedLogicGateID={selectedLogicGate.id}
           forcedLogicGateLabel={selectedLogicGate.label}
           forcedHighlightedNodeID={selectedLogicGate.nodeID}
+          forcedOpenNodeID={selectedLogicGate.nodeID}
+          controlForcedOpenNode={!!targetLogicGate}
           suppressLegacyWorkspaceStream={selectedLogicGate.suppressLegacyWorkspaceStream}
           onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
+          onNodeEditorOverlayOpen={openKanbanNode}
+          onNodeEditorOverlayClose={closeKanbanNode}
         />
       </section>
     </div>
