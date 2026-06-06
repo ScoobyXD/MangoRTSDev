@@ -871,6 +871,45 @@ export function HomeNavButton({ label, active, depth = 0, meta, onClick }: {
   );
 }
 
+function HomeCustomViewButton({ active, onClick }: {
+  active: boolean;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button type="button" title="Create custom view" aria-label="Create custom view" style={homeCustomViewButtonStyle(active)} onClick={onClick}>
+      <span style={homeCustomViewPlusStyle}>+</span>
+      <span style={navLabelStyle}>Custom View</span>
+    </button>
+  );
+}
+
+function homeCustomViewButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    ...navButtonStyle(active),
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "25px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 7,
+    paddingLeft: 4,
+    marginTop: 2,
+  };
+}
+
+const homeCustomViewPlusStyle: React.CSSProperties = {
+  width: 23,
+  height: 23,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.32)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#334155",
+  fontSize: 17,
+  fontWeight: 800,
+  lineHeight: 1,
+};
+
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
@@ -1341,6 +1380,7 @@ export function HomeSidebar({
             />
           );
         })}
+        <HomeCustomViewButton active={activeViewID === "custom-matrix"} onClick={() => onSelectView("custom-matrix", "all")} />
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>

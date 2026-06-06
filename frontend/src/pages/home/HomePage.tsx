@@ -71,10 +71,11 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
+import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -355,7 +356,12 @@ export function HomePage({
   const columnResizeDragRef = useRef<HomeColumnResizeDrag | null>(null);
   const hideNavigationRef = useRef(hideNavigation);
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
-  const isNarrow = isInboxMatrixView ? viewportWidth < 980 : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
+  const isCustomMatrixView = isCustomMatrixViewID(activeViewID);
+  const isNarrow = isInboxMatrixView
+    ? viewportWidth < 980
+    : isCustomMatrixView
+      ? viewportWidth < 760
+      : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeRacioMatrixUserID = isInboxMatrixView ? (racioMatrixTargetUserID.trim() || currentUserID) : currentUserID;
   useEffect(() => {
@@ -896,7 +902,7 @@ export function HomePage({
   }, []);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
     if (!status?.connected) return;
-    if (isInboxMatrixViewID(activeViewID)) {
+    if (isInboxMatrixViewID(activeViewID) || isCustomMatrixViewID(activeViewID)) {
       setLoadedMessageListKey("");
       setMessages([]);
       setSelectedMessage(null);
@@ -1006,7 +1012,7 @@ export function HomePage({
     return page.next_page_token ?? "";
   }, []);
   const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
-    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
+    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
     const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1044,7 +1050,7 @@ export function HomePage({
     await request;
   }, [companyID, currentMessageFilterKey, handleEmailAccessExpired, status?.connected]);
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1110,7 +1116,7 @@ export function HomePage({
     if (messageListRefreshTimerRef.current !== null) window.clearTimeout(messageListRefreshTimerRef.current);
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
-      if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current)) return;
+      if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current)) return;
       void loadMessagesRef.current?.({ refresh: true });
     }, delayMs);
   }, [status?.connected]);
@@ -3359,27 +3365,31 @@ export function HomePage({
     unreadOnly,
   ]);
   useEffect(() => {
-    if (!status?.connected || isInboxMatrixView) return;
+    if (!status?.connected || isInboxMatrixView || isCustomMatrixView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
       detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
     }));
-  }, [activeViewID, companyID, isInboxMatrixView, status?.connected, unreadMessageCount]);
+  }, [activeViewID, companyID, isCustomMatrixView, isInboxMatrixView, status?.connected, unreadMessageCount]);
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
-  const layoutColumnWidths = isNarrow || isInboxMatrixView
+  const layoutColumnWidths = isNarrow || isInboxMatrixView || isCustomMatrixView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
-    : hideNavigation
+    : isCustomMatrixView
+      ? hideNavigation
+        ? "minmax(0, 1fr)"
+        : `${layoutColumnWidths[0]}px minmax(0, 1fr)`
+      : hideNavigation
       ? isInboxMatrixView
         ? getInboxMatrixGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
         : getHomeGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
       : isInboxMatrixView
         ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
         : getHomeGridTemplateColumns(layoutColumnWidths);
-  const matrixWorkspaceActive = isInboxMatrixView && !isNarrow;
+  const matrixWorkspaceActive = (isInboxMatrixView || isCustomMatrixView) && !isNarrow;
   const workspaceLayoutStyle: React.CSSProperties = {
     ...workspaceStyle,
     gridTemplateColumns: workspaceGridTemplateColumns,
@@ -3452,7 +3462,16 @@ export function HomePage({
               onDeleteSharedInbox={deleteSharedInboxFolder}
             />
           )}
-          {isInboxMatrixView ? (
+          {isCustomMatrixView ? (
+            <CustomMatrixView
+              loading={loadingNodes || loadingLogicGates}
+              nodes={nodes}
+              logicGateByID={logicGateByID}
+              companyUsers={companyUsers}
+              onOpenNode={openNodeEditorOverlay}
+              onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
+            />
+          ) : isInboxMatrixView ? (
             <>
               {activeRaciInboxSection && (
                 <RaciRoleInboxMatrix
