@@ -106,6 +106,8 @@ type StoredLogicGateColumnLayout = {
 
 type StoredLogicGateColumnLayouts = Record<string, StoredLogicGateColumnLayout>;
 
+const KANBAN_COLUMN_BOTTOM_BUFFER_HEIGHT_PX = 180;
+
 function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
   return `mango:kanban:logic-gate-column-layout:v1:${encodeURIComponent(companyID)}:${encodeURIComponent(boardID)}`;
 }
@@ -2128,7 +2130,52 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         key={column.column_id}
         column={column}
         columnCards={columnCards}
-        renderedCards={columnCards.map((card) => renderCard(card))}
+        renderedCards={[
+          ...columnCards.map((card) => renderCard(card)),
+          <button
+            key={`${column.column_id}-bottom-buffer`}
+            type="button"
+            aria-label={`Create node in ${column.title || "column"}`}
+            title={`Create node in ${column.title || "column"}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              requestCreateNodeInColumn(column.column_id, { x: event.clientX, y: event.clientY });
+            }}
+            onDragOver={(event) => {
+              if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME)) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onDrop={(event) => {
+              const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+              if (cardPayload) {
+                event.preventDefault();
+                event.stopPropagation();
+                setDragOverCard(null);
+                void reorderCards(cardPayload.cardIDs, column.column_id, null, "after");
+                return;
+              }
+              const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
+              if (explorerItems.length === 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              requestAddEntitiesToColumn(column.column_id, explorerItems, { x: event.clientX, y: event.clientY });
+            }}
+            style={{
+              gridColumn: layout === "backlog" ? "1 / -1" : undefined,
+              width: "100%",
+              minHeight: KANBAN_COLUMN_BOTTOM_BUFFER_HEIGHT_PX,
+              border: "1px dashed transparent",
+              borderRadius: 8,
+              background: "transparent",
+              boxShadow: "none",
+              cursor: "cell",
+              flex: "0 0 auto",
+              padding: 0,
+            }}
+          />,
+        ]}
         accent={accent}
         line={line}
         subtext={subtext}
