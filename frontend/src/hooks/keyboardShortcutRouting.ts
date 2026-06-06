@@ -8,12 +8,15 @@ export type KeyboardShortcutEventLike = {
   altKey?: boolean;
   defaultPrevented?: boolean;
   target?: unknown;
+  activeElement?: unknown;
+  selectionAnchorNode?: unknown;
 };
 
 type EditableTargetLike = {
   tagName?: string;
   isContentEditable?: boolean;
   closest?: (selector: string) => unknown;
+  parentElement?: EditableTargetLike | null;
 };
 
 const TEXT_EDITING_TARGET_SELECTOR = "input, textarea, select, [contenteditable='true'], [contenteditable=''], [contenteditable='plaintext-only'], [role='textbox']";
@@ -32,12 +35,15 @@ export function shouldDeferToNativeTextEditing(target: unknown): boolean {
   // Editable widgets can contain nested spans/buttons. Checking the closest
   // editable parent keeps browser text undo/copy/paste in charge for the whole
   // editing surface, not just the exact element that received the event.
-  return typeof target.closest === "function" && Boolean(target.closest(`${TEXT_EDITING_TARGET_SELECTOR}, ${NATIVE_COPY_TARGET_SELECTOR}`));
+  if (typeof target.closest === "function" && Boolean(target.closest(`${TEXT_EDITING_TARGET_SELECTOR}, ${NATIVE_COPY_TARGET_SELECTOR}`))) return true;
+  return Boolean(target.parentElement && shouldDeferToNativeTextEditing(target.parentElement));
 }
 
 export function resolveGlobalKeyboardShortcut(event: KeyboardShortcutEventLike): GlobalKeyboardCommand | null {
   if (event.defaultPrevented) return null;
   if (shouldDeferToNativeTextEditing(event.target)) return null;
+  if (shouldDeferToNativeTextEditing(event.activeElement)) return null;
+  if (shouldDeferToNativeTextEditing(event.selectionAnchorNode)) return null;
 
   const hasCommandModifier = Boolean(event.ctrlKey || event.metaKey);
   if (!hasCommandModifier) {

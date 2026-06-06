@@ -11,6 +11,7 @@ import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-
 import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME } from "../modules/kanban/shared";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { shouldDeferToNativeTextEditing } from "../hooks/keyboardShortcutRouting";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
 import { createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
@@ -778,15 +779,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [updateActiveFrames]);
 
   const copySelectedFrame = useCallback(() => {
-    if (!selectedFrameId) return;
+    if (!selectedFrameId) return false;
     const target = frames.find((w) => w.id === selectedFrameId);
-    if (!target) return;
+    if (!target) return false;
     copiedFrameRef.current = { ...target };
+    return true;
   }, [selectedFrameId, frames]);
 
   const pasteFrame = useCallback(() => {
     const copied = copiedFrameRef.current;
-    if (!copied) return;
+    if (!copied) return false;
     const id = createFrameId();
     const pasted: FrameDataModel = {
       ...copied,
@@ -797,6 +799,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     updateActiveFrames((prev) => [...prev, pasted]);
     setSelectedFrameId(id);
     setSelectedFrameIds(new Set([id]));
+    return true;
   }, [gridCols, gridRows, updateActiveFrames]);
 
   const undo = useCallback(() => {
@@ -1490,7 +1493,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       <FrameCanvas
         style={frameCanvasStyle}
         onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
-        onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => {
+        onContextMenu={isFullPageView ? (e) => {
+          if (shouldDeferToNativeTextEditing(e.target)) return;
+          e.preventDefault();
+        } : (e) => {
+          if (shouldDeferToNativeTextEditing(e.target)) return;
           e.preventDefault();
           const bounds = e.currentTarget.getBoundingClientRect();
           setCanvasMenu({
