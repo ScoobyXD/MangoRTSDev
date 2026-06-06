@@ -43,12 +43,14 @@ const editorModule = createLazyModule(() => import("./editor/EditorContent").the
 const companyExplorerModule = createLazyModule(() => import("./company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent as ModuleComponent })));
 const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").then((module) => ({ default: module.KanbanContent as ModuleComponent })));
 const homeModule = createLazyModule(() => import("../pages/home/HomePage").then((module) => ({ default: module.HomeFrameContent as ModuleComponent })));
+const projectManagementModule = createLazyModule(() => import("./project-management/ProjectManagementContent").then((module) => ({ default: module.ProjectManagementContent as ModuleComponent })));
 
 const moduleEntries = [
   { kind: "company-explorer", label: "Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, ...editorModule },
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, ...kanbanModule },
   { kind: "home", label: "Home", defaultW: 24, defaultH: 16, ...homeModule },
+  { kind: "project-management", label: "Project Management", defaultW: 42, defaultH: 30, ...projectManagementModule },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
 ];
 

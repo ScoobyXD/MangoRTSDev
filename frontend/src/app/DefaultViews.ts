@@ -67,6 +67,21 @@ export function createLogicGateArenaFrames(): FrameDataModel[] {
   ];
 }
 
+export function createProjectManagementFrames(): FrameDataModel[] {
+  return [
+    {
+      id: createFrameId(),
+      kind: "project-management",
+      x: 1,
+      y: 1,
+      w: 42,
+      h: 30,
+      title: "Project Management",
+      ...WHITE_FRAME,
+    },
+  ];
+}
+
 export function createHomeViewFrames(): FrameDataModel[] {
   const homeID = createFrameId();
 
