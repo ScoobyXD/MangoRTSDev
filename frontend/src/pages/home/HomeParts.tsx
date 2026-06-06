@@ -2716,8 +2716,7 @@ export function RacioMatrixViewerSelector({
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [addUserID, setAddUserID] = useState("");
-  const [addGroupID, setAddGroupID] = useState("");
+  const [addEntryValue, setAddEntryValue] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const cleanEntries = useMemo(() => normalizeRacioViewerEntries(entries), [entries]);
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
@@ -2772,6 +2771,17 @@ export function RacioMatrixViewerSelector({
       ))
       .slice(0, 8);
   }, [companyUsers, searchQuery]);
+  const groupedUserIDs = useMemo(() => {
+    const ids = new Set<string>();
+    for (const member of groupMembers) {
+      const userID = member.user_id.trim();
+      if (userID) ids.add(userID);
+    }
+    return ids;
+  }, [groupMembers]);
+  const ungroupedUsers = useMemo(() => (
+    companyUsers.filter((user) => !groupedUserIDs.has(user.user_id.trim()))
+  ), [companyUsers, groupedUserIDs]);
 
   useEffect(() => {
     if (!open && !searchOpen) return undefined;
@@ -2794,6 +2804,11 @@ export function RacioMatrixViewerSelector({
     const baseEntries = cleanEntries.length > 0 ? cleanEntries : effectiveEntries;
     const next = normalizeRacioViewerEntries([...baseEntries, entry]);
     onEntriesChange(next);
+  };
+  const selectedAddEntry = (): RacioMatrixViewerListEntry | null => {
+    const [kind, id] = addEntryValue.split(":", 2);
+    if ((kind !== "group" && kind !== "user") || !id?.trim()) return null;
+    return { kind, id: id.trim() };
   };
   const deleteEntry = (entry: RacioMatrixViewerListEntry) => {
     const key = racioViewerEntryKey(entry);
@@ -2937,6 +2952,48 @@ export function RacioMatrixViewerSelector({
       </button>
       {open && (
         <div className="kanban-board-scroll" style={racioViewerDropdownStyle}>
+          <div style={racioViewerCustomizeStyle}>
+            <div style={racioViewerAddRowStyle}>
+              <select value={addEntryValue} onChange={(event) => setAddEntryValue(event.currentTarget.value)} style={racioViewerSelectStyle} aria-label="Add RACIO viewer users">
+                <option value="">Add users</option>
+                {groups.map((group) => {
+                  const groupID = group.group_id.trim();
+                  const members = membersByGroupID.get(groupID) ?? [];
+                  return (
+                    <optgroup key={groupID} label={racioViewerGroupLabel(group, groupID)}>
+                      <option value={`group:${groupID}`}>{`${racioViewerGroupLabel(group, groupID)} group`}</option>
+                      {members.map((member) => {
+                        const userID = member.user_id.trim();
+                        const user = userByID.get(userID) ?? null;
+                        return <option key={`${groupID}:${userID}`} value={`user:${userID}`}>{racioViewerUserLabel(user, userID)}</option>;
+                      })}
+                    </optgroup>
+                  );
+                })}
+                {ungroupedUsers.length > 0 && (
+                  <optgroup label="Users">
+                    {ungroupedUsers.map((user) => (
+                      <option key={user.user_id} value={`user:${user.user_id}`}>{racioViewerUserLabel(user, user.user_id)}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <button
+                type="button"
+                aria-label="Add to RACIO viewer list"
+                disabled={!selectedAddEntry()}
+                onClick={() => {
+                  const entry = selectedAddEntry();
+                  if (!entry) return;
+                  addEntry(entry);
+                  setAddEntryValue("");
+                }}
+                style={racioViewerAddButtonStyle(!selectedAddEntry())}
+              >
+                +
+              </button>
+            </div>
+          </div>
           {!selectedInList && selectedUserID.trim() && (
             <div style={racioViewerCurrentBlockStyle}>
               <div style={racioViewerGroupTitleStyle}>Current view</div>
@@ -2957,50 +3014,6 @@ export function RacioMatrixViewerSelector({
                   </div>
                 </div>
               )}
-          </div>
-          <div style={racioViewerCustomizeStyle}>
-            <div style={racioViewerAddRowStyle}>
-              <select value={addGroupID} onChange={(event) => setAddGroupID(event.currentTarget.value)} style={racioViewerSelectStyle} aria-label="Add RACIO viewer group">
-                <option value="">Add group</option>
-                {groups.map((group) => (
-                  <option key={group.group_id} value={group.group_id}>{racioViewerGroupLabel(group, group.group_id)}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                aria-label="Add group to RACIO viewer list"
-                disabled={!addGroupID}
-                onClick={() => {
-                  if (!addGroupID) return;
-                  addEntry({ kind: "group", id: addGroupID });
-                  setAddGroupID("");
-                }}
-                style={racioViewerAddButtonStyle(!addGroupID)}
-              >
-                +
-              </button>
-            </div>
-            <div style={racioViewerAddRowStyle}>
-              <select value={addUserID} onChange={(event) => setAddUserID(event.currentTarget.value)} style={racioViewerSelectStyle} aria-label="Add RACIO viewer user">
-                <option value="">Add user</option>
-                {companyUsers.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>{racioViewerUserLabel(user, user.user_id)}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                aria-label="Add user to RACIO viewer list"
-                disabled={!addUserID}
-                onClick={() => {
-                  if (!addUserID) return;
-                  addEntry({ kind: "user", id: addUserID });
-                  setAddUserID("");
-                }}
-                style={racioViewerAddButtonStyle(!addUserID)}
-              >
-                +
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -3043,7 +3056,8 @@ const racioViewerSelectorRootStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   minWidth: 0,
-  flexWrap: "wrap",
+  flex: "0 1 auto",
+  flexWrap: "nowrap",
 };
 
 function racioViewerDropdownButtonStyle(open: boolean): React.CSSProperties {
@@ -3096,6 +3110,7 @@ const racioViewerDropdownStyle: React.CSSProperties = {
   background: "rgba(255, 255, 255, 0.96)",
   boxShadow: "0 18px 42px rgba(15, 23, 42, 0.18), inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
   boxSizing: "border-box",
+  zIndex: 30,
 };
 
 const racioViewerEntriesStyle: React.CSSProperties = {
@@ -3106,7 +3121,7 @@ const racioViewerEntriesStyle: React.CSSProperties = {
 const racioViewerCurrentBlockStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  padding: "0 0 8px",
+  padding: "8px 0",
   marginBottom: 8,
   borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
 };
@@ -3254,9 +3269,9 @@ const racioViewerCheckSpacerStyle: React.CSSProperties = {
 const racioViewerCustomizeStyle: React.CSSProperties = {
   display: "grid",
   gap: 6,
-  marginTop: 10,
-  paddingTop: 8,
-  borderTop: "1px solid rgba(100, 116, 139, 0.14)",
+  marginBottom: 8,
+  paddingBottom: 8,
+  borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
 };
 
 const racioViewerAddRowStyle: React.CSSProperties = {
@@ -3299,7 +3314,7 @@ const racioViewerSearchWrapStyle: React.CSSProperties = {
   position: "relative",
   width: 190,
   minWidth: 150,
-  flex: "0 1 220px",
+  flex: "0 0 190px",
 };
 
 const racioViewerSearchInputStyle: React.CSSProperties = {
@@ -3331,6 +3346,7 @@ const racioViewerSearchResultsStyle: React.CSSProperties = {
   background: "rgba(255, 255, 255, 0.97)",
   boxShadow: "0 16px 36px rgba(15, 23, 42, 0.16)",
   boxSizing: "border-box",
+  zIndex: 31,
 };
 
 const racioViewerEmptyStyle: React.CSSProperties = {
@@ -3341,14 +3357,18 @@ const racioViewerEmptyStyle: React.CSSProperties = {
 };
 
 const racioMatrixHeaderLeftStyle: React.CSSProperties = {
+  flex: "1 1 auto",
   minWidth: 0,
-  display: "grid",
-  gap: 4,
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  overflow: "visible",
 };
 
 const racioMatrixHeaderTitleStyle: React.CSSProperties = {
   ...panelTitleStyle,
-  minWidth: 0,
+  flex: "0 0 auto",
+  minWidth: 78,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -3464,7 +3484,6 @@ export function RaciRoleInboxMatrix({
   nodeFolderItems,
   currentUserID,
   viewerSelector,
-  viewerTitle,
   notificationSummary,
   selectedRowIDs,
   selectedLogicGateRowIDs,
@@ -3495,7 +3514,6 @@ export function RaciRoleInboxMatrix({
   nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
   viewerSelector?: React.ReactNode;
-  viewerTitle?: string;
   notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
   selectedLogicGateRowIDs: Set<string>;
@@ -3672,8 +3690,8 @@ export function RaciRoleInboxMatrix({
       <div style={logicGateRaciMatrixSurfaceStyle}>
         <div style={logicGateRaciHeaderStyle}>
           <div style={racioMatrixHeaderLeftStyle}>
+            <h2 style={racioMatrixHeaderTitleStyle}>{section.title}</h2>
             {viewerSelector}
-            <h2 style={racioMatrixHeaderTitleStyle}>{viewerTitle || section.title}</h2>
           </div>
           <div style={inboxMatrixHeaderControlsStyle}>
             <InboxMatrixUnreadToggle unreadOnly={unreadOnly} onChange={setUnreadOnly} />
