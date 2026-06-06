@@ -2294,9 +2294,12 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.14), -2px -2px 8px rgba(255,255,255,0.76)",
               }}
             >
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{email.subject}</span>
+              <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 8 }}>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{email.subject}</span>
+                <span style={{ flex: "0 0 auto", fontSize: 9.5, fontWeight: 850, color: accent }}>{formatTimestamp(email.date)}</span>
+              </span>
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
-                {email.from || formatTimestamp(email.date)}
+                From: {email.from || "Unknown sender"}
               </span>
               {email.snippet && (
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 650, color: "rgba(100,116,139,0.72)" }}>{email.snippet}</span>
@@ -2426,16 +2429,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
       {message && (
         <>
-          <div style={{ display: "grid", gap: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_SURFACE, padding: 9, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
+          <div style={{ display: "grid", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_SURFACE, padding: 8, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
             <div style={{ minWidth: 0, overflowWrap: "anywhere", fontSize: 13, fontWeight: 900 }}>{message.subject || "(no subject)"}</div>
             <div style={{ minWidth: 0, display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10.5, fontWeight: 750 }}>
               <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>From: {formatAddressList(message.from) || "Unknown sender"}</div>
-              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>To: {formatAddressList(message.to) || "You"}</div>
               <div>Received: {formatTimestamp(message.date)}</div>
             </div>
           </div>
-          <div style={{ minHeight: 170, border: `1px solid ${strokeColor}`, borderRadius: 12, background: "#ffffff", overflow: "hidden", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}>
-            <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 170, border: 0, background: "#ffffff" }} />
+          <div style={{ minHeight: 320, height: "min(54vh, 460px)", border: `1px solid ${strokeColor}`, borderRadius: 12, background: "#ffffff", overflow: "hidden", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}>
+            <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 320, border: 0, background: "#ffffff" }} />
           </div>
           <div style={{ display: "grid", gap: 7, border: `1px solid ${ruleColor}`, borderRadius: 12, background: EDITOR_NEU_ACTIVE_SURFACE, padding: 8, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}>
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
@@ -2447,7 +2449,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             <textarea
               value={bodyDraft}
               disabled={!editable}
-              rows={4}
+              rows={3}
               placeholder="Write a reply"
               onChange={(event) => setBodyDraft(event.currentTarget.value)}
               style={{ width: "100%", minHeight: 86, resize: "vertical", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "#ffffff", color: surfaceText, outline: "none", padding: "8px 9px", fontSize: 12, lineHeight: 1.38, letterSpacing: 0, boxShadow: "inset 1px 1px 5px rgba(174,174,192,0.14)" }}
