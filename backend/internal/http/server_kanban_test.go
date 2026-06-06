@@ -46,7 +46,7 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 	if err := json.NewDecoder(workRec.Body).Decode(&workPayload); err != nil {
 		t.Fatalf("decode work: %v", err)
 	}
-	if len(workPayload.Columns) != 4 || workPayload.Columns[0].ColumnID != store.LogicGateWorkStatusPending || workPayload.Columns[3].ColumnID != store.LogicGateWorkStatusDone {
+	if len(workPayload.Columns) != 5 || workPayload.Columns[0].ColumnID != store.LogicGateWorkStatusBacklog || workPayload.Columns[1].ColumnID != store.LogicGateWorkStatusPending || workPayload.Columns[4].ColumnID != store.LogicGateWorkStatusDone {
 		t.Fatalf("columns = %+v, want synthesized logic-gate work statuses", workPayload.Columns)
 	}
 

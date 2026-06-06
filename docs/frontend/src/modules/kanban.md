@@ -11,7 +11,6 @@ Users can:
 - create a new saved board view,
 - add columns,
 - rename column titles inline,
-- delete columns,
 - drag column headers left/right to reorder columns,
 - resize columns horizontally and vertically,
 - drag nodes from Company Explorer into a column,
@@ -26,9 +25,10 @@ Users can:
 - The right edge includes a square add-column control with a solid black border and a small hover shadow.
 - Column titles preserve user-entered casing; the UI must not force uppercase display.
 - Column title text enters edit mode on one click. Header dragging still starts from the header before a click is completed.
-- Column deletion is confirmation-gated with the same modal treatment as frame and map deletes.
-- Right-clicking a column opens column actions: rename, delete, and native RGB color selection for cards inside that column.
+- Column header actions create a new node in that column. Columns are not deleted from the board UI.
+- Right-clicking a column opens column actions: create a node, rename, and native RGB color selection for cards inside that column.
 - Right-clicking a card opens card actions: Find on company explorer and Delete card.
+- Logic Gate work boards include a `Backlogs` status before `Pending`. The standard work statuses remain in the top row, while `Backlogs` renders as a full-width bottom lane that still accepts the same card drops and create-node flow as other columns.
 - Selected cards use a thin, vibrant frame in the card's column item color. Do not use the old heavy global-accent outline.
 - The left color rail is always rendered from the card's column item color and must not disappear when selection changes.
 - Card deletion is confirmation-gated. Delete and the card context menu only open the confirmation modal; the card is removed only after Yes.

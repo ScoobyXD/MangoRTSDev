@@ -40,7 +40,6 @@ export function KanbanContextMenus({
   onCloseCardMenu,
   onCreateNodeInColumn,
   onEditColumn,
-  onRequestColumnDelete,
   onPersistColumnItemColor,
   onToggleCardIssue,
   onRenameNode,
@@ -58,7 +57,6 @@ export function KanbanContextMenus({
   onCloseCardMenu: () => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onEditColumn: (columnID: string) => void;
-  onRequestColumnDelete: (columnID: string) => void;
   onPersistColumnItemColor: (columnID: string, color: string) => void;
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
   onRenameNode: (card: KanbanCard) => void;
@@ -75,9 +73,6 @@ export function KanbanContextMenus({
           </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onEditColumn(contextColumn.column_id)} {...contextMenuHoverHandlers}>
             Rename column
-          </button>
-          <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => onRequestColumnDelete(contextColumn.column_id)} {...contextMenuHoverHandlers}>
-            Delete column
           </button>
           <label style={{ ...contextMenuButtonStyle, cursor: "default", justifyContent: "space-between" }}>
             <span>Column color</span>
@@ -332,23 +327,17 @@ function ModalShell({ title, detail, onConfirm, onCancel }: {
 export function KanbanDeleteConfirmations({
   deleteNodeConfirmation,
   deleteCardConfirmation,
-  deleteColumnConfirmation,
   onRemoveNodes,
   onRemoveCards,
-  onRemoveColumn,
   onCancelNodeDelete,
   onCancelCardDelete,
-  onCancelColumnDelete,
 }: {
   deleteNodeConfirmation: { nodeIDs: string[] } | null;
   deleteCardConfirmation: { cardIDs: string[] } | null;
-  deleteColumnConfirmation: { columnID: string; title: string } | null;
   onRemoveNodes: (nodeIDs: string[]) => void;
   onRemoveCards: (cardIDs: string[]) => void;
-  onRemoveColumn: (columnID: string) => void;
   onCancelNodeDelete: () => void;
   onCancelCardDelete: () => void;
-  onCancelColumnDelete: () => void;
 }) {
   if (deleteNodeConfirmation) {
     return (
@@ -367,16 +356,6 @@ export function KanbanDeleteConfirmations({
         detail={`The underlying node${deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.`}
         onConfirm={() => onRemoveCards(deleteCardConfirmation.cardIDs)}
         onCancel={onCancelCardDelete}
-      />
-    );
-  }
-  if (deleteColumnConfirmation) {
-    return (
-      <ModalShell
-        title="Are you sure you want to delete this Kanban column?"
-        detail={`This removes "${deleteColumnConfirmation.title}" and all cards in that column immediately.`}
-        onConfirm={() => onRemoveColumn(deleteColumnConfirmation.columnID)}
-        onCancel={onCancelColumnDelete}
       />
     );
   }

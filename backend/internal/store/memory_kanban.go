@@ -304,34 +304,24 @@ func (r *MemoryRepo) ensureLogicGateKanbanBoardLocked(companyID, logicGateID, ti
 	boardID := LogicGateKanbanBoardID(logicGateID)
 	logicGateIDCopy := logicGateID
 	board := r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, &logicGateIDCopy)
-	defaults := []struct {
-		key   string
-		title string
-		color string
-	}{
-		{key: LogicGateWorkStatusPending, title: "Pending", color: KanbanDefaultPendingColor},
-		{key: LogicGateWorkStatusInProgress, title: "In Progress", color: KanbanDefaultInProgressColor},
-		{key: LogicGateWorkStatusVerify, title: "Verify", color: KanbanDefaultVerifyColor},
-		{key: LogicGateWorkStatusDone, title: "Done", color: KanbanDefaultDoneColor},
-	}
 	existing := map[string]bool{}
 	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
 		existing[logicGateWorkStatusKeyOrDefault(column.ColumnID, column.Title)] = true
 	}
-	for index, column := range defaults {
-		if existing[column.key] {
+	for _, spec := range logicGateWorkStatusSpecs {
+		if existing[spec.Key] {
 			continue
 		}
 		now := time.Now().UTC()
 		r.kanbanColumns[boardKey(companyID, boardID)] = append(r.kanbanColumns[boardKey(companyID, boardID)], domain.KanbanColumn{
 			CompanyID:        companyID,
 			BoardID:          boardID,
-			ColumnID:         column.key,
-			Title:            column.title,
-			Position:         (index + 1) * 1000,
+			ColumnID:         spec.Key,
+			Title:            spec.Title,
+			Position:         spec.Position,
 			WidthPx:          normalizeKanbanColumnWidth(0),
 			HeightPx:         normalizeKanbanColumnHeight(0),
-			ItemColor:        column.color,
+			ItemColor:        spec.Color,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		})

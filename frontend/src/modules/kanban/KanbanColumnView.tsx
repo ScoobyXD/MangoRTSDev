@@ -48,11 +48,11 @@ type KanbanColumnViewProps = {
   onSetEditingColumnID: React.Dispatch<React.SetStateAction<string>>;
   onCommitColumnTitle: (columnID: string, title: string) => void;
   onRefreshBoard: () => void;
-  onRequestColumnDelete: (columnID: string) => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
   showCreateNodeButton?: boolean;
+  layout?: "column" | "backlog";
   minimumColumnHeightPx?: number;
 };
 
@@ -80,15 +80,16 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   onSetEditingColumnID,
   onCommitColumnTitle,
   onRefreshBoard,
-  onRequestColumnDelete,
   onCreateNodeInColumn,
   onDropColumn,
   dataTransferIncludes,
   showCreateNodeButton = true,
+  layout = "column",
   minimumColumnHeightPx,
 }) => {
   const columnWidth = getColumnWidth(column);
-  const minimumColumnHeight = Math.max(KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2, minimumColumnHeightPx ?? 0);
+  const isBacklogLayout = layout === "backlog";
+  const minimumColumnHeight = Math.max(isBacklogLayout ? 190 : KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2, minimumColumnHeightPx ?? 0);
   const columnHeight = Math.max(getColumnHeight(column), minimumColumnHeight);
   const columnColor = getKanbanColumnDisplayColor(column);
   const columnDropActive = dragOverColumnID === column.column_id;
@@ -118,8 +119,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       onDrop={(event) => onDropColumn(event, column.column_id)}
       style={{
         position: "relative",
-        flex: `0 0 ${columnWidth}px`,
-        width: columnWidth,
+        flex: isBacklogLayout ? "1 1 100%" : `0 0 ${columnWidth}px`,
+        width: isBacklogLayout ? "100%" : columnWidth,
         height: columnHeight,
         minHeight: minimumColumnHeight,
         background: `${columnFill} padding-box, ${columnFrame} border-box`,
@@ -145,7 +146,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.38)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.36)}, rgba(255,255,255,0.80) 58%, ${hexToRgba(columnColor, 0.18)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px" : "20px minmax(0, 1fr)", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.38)}`, background: `linear-gradient(135deg, ${hexToRgba(columnColor, 0.36)}, rgba(255,255,255,0.80) 58%, ${hexToRgba(columnColor, 0.18)})`, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)", cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (
@@ -184,6 +185,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           <button
             className="mango-elevated-action"
             title="Create node"
+            aria-label={`Create node in ${column.title}`}
             type="button"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => onCreateNodeInColumn(column.column_id, { x: event.clientX, y: event.clientY })}
@@ -192,43 +194,35 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             +
           </button>
         )}
-        <button
-          className="mango-elevated-action"
-          title="Delete column"
-          type="button"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={() => onRequestColumnDelete(column.column_id)}
-          style={{ width: 24, height: 24, border: "1px solid rgba(255,255,255,0.74)", borderRadius: 7, background: KANBAN_SURFACE, color: subtext, cursor: "pointer", fontSize: 17, lineHeight: 1, boxShadow: "3px 3px 8px rgba(174,174,192,0.18), -3px -3px 8px rgba(255,255,255,0.78)" }}
-        >
-          x
-        </button>
       </div>
       <div
         className="kanban-column-scroll"
         onMouseDown={onBlankMouseDown}
-        style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: columnColor, ["--kanban-column-scroll-track" as string]: "transparent" }}
+        style={{ minHeight: 0, overflow: "auto", display: "grid", gridTemplateColumns: isBacklogLayout ? "repeat(auto-fill, minmax(210px, 1fr))" : undefined, alignContent: "start", alignItems: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: columnColor, ["--kanban-column-scroll-track" as string]: "transparent" }}
       >
         {renderedCards}
       </div>
-      <div
-        title="Resize column width"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          resizeRef.current = {
-            axis: "width",
-            columnID: column.column_id,
-            startX: event.clientX,
-            startY: event.clientY,
-            startWidth: columnWidth,
-            startHeight: columnHeight,
-            currentWidth: columnWidth,
-            currentHeight: columnHeight,
-            minHeight: minimumColumnHeight,
-          };
-        }}
-        style={{ position: "absolute", top: 0, right: -4, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2 }}
-      />
+      {!isBacklogLayout && (
+        <div
+          title="Resize column width"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            resizeRef.current = {
+              axis: "width",
+              columnID: column.column_id,
+              startX: event.clientX,
+              startY: event.clientY,
+              startWidth: columnWidth,
+              startHeight: columnHeight,
+              currentWidth: columnWidth,
+              currentHeight: columnHeight,
+              minHeight: minimumColumnHeight,
+            };
+          }}
+          style={{ position: "absolute", top: 0, right: -4, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2 }}
+        />
+      )}
       <div
         title="Resize column height"
         onMouseDown={(event) => {
