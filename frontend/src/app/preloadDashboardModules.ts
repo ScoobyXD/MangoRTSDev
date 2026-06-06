@@ -7,6 +7,7 @@ import {
   HOME_MODULE_KINDS,
   HOT_DASHBOARD_MODULE_KINDS,
   LOGIC_GATE_ARENA_MODULE_KINDS,
+  PROJECT_MANAGEMENT_MODULE_KINDS,
   planLikelyDashboardPreload,
   type DashboardPreloadPlan,
 } from "./preloadDashboardPlan";
@@ -29,6 +30,10 @@ export function preloadLogicGateArenaSurface(): void {
 export function preloadHomeSurface(): void {
   preloadHomePage();
   preloadModuleKinds(HOME_MODULE_KINDS);
+}
+
+export function preloadProjectManagementSurface(): void {
+  preloadModuleKinds(PROJECT_MANAGEMENT_MODULE_KINDS);
 }
 
 export function preloadVisibleFrameModules(frames: Iterable<Pick<FrameDataModel, "kind">>): void {

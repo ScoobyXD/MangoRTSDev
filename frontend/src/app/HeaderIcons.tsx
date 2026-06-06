@@ -21,6 +21,14 @@ export const HeaderMapIcon: React.FC<{ color?: string }> = ({ color = "currentCo
   </svg>
 );
 
+export const HeaderProjectManagementIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <rect x="2.1" y="3" width="11.8" height="9.8" rx="1.45" fill="none" stroke={color} strokeWidth="1.25" />
+    <path d="M4.5 1.9v2.2M11.5 1.9v2.2M2.5 5.9h11" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" />
+    <path d="M4.4 8.2h3.9M6.1 10.5h5.4" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
+  </svg>
+);
+
 export const HeaderLogicGateArenaIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />

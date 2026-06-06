@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
+import { preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../app/preloadDashboardModules";
 import { HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -57,6 +57,10 @@ function preloadRouteSurface(path: string): void {
     preloadHomeSurface();
     return;
   }
+  if (path === "/project-management") {
+    preloadProjectManagementSurface();
+    return;
+  }
   if (route?.kind === "node") preloadAppLayout();
 }
 function prefetchHandlers(preload: () => void) {
@@ -69,6 +73,7 @@ function prefetchHandlers(preload: () => void) {
 
 const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
 const homePrefetch = prefetchHandlers(preloadHomeSurface);
+const projectManagementPrefetch = prefetchHandlers(preloadProjectManagementSurface);
 
 type CompanyUser = {
   company_id: string;
@@ -355,7 +360,9 @@ export default function AuthGate() {
     ? "logic-gate-arena"
     : deepLinkRoute?.kind === "racio"
       ? "home"
-      : undefined;
+      : normalizedPath === "/project-management"
+        ? "project-management"
+        : undefined;
 
   if (!authEnabled) {
     return (
@@ -392,6 +399,10 @@ export default function AuthGate() {
 
   if (normalizedPath === "/logic-gate-arena") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
+  }
+
+  if (normalizedPath === "/project-management") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="project-management" /></React.Suspense>;
   }
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
@@ -1305,6 +1316,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         {!embedded && <div style={settingsNavStyle}>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/project-management")} {...projectManagementPrefetch}>Project Management</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
         </div>}
       </div>
