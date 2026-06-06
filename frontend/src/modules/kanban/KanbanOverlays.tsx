@@ -239,6 +239,9 @@ export function KanbanNodeEditorOverlay({
             const boardBounds = boardRootRef.current?.getBoundingClientRect();
             const boardWidth = boardBounds?.width ?? window.innerWidth;
             const boardHeight = boardBounds?.height ?? window.innerHeight;
+            const arenaBounds = allowHorizontalOverflow
+              ? boardRootRef.current?.parentElement?.parentElement?.getBoundingClientRect()
+              : boardBounds;
             resizeRef.current = {
               edges: handle.edges,
               startX: event.clientX,
@@ -249,6 +252,7 @@ export function KanbanNodeEditorOverlay({
               startHeight: boardHeight * ratio.height,
               boardWidth,
               boardHeight,
+              minLeft: arenaBounds && boardBounds ? arenaBounds.left - boardBounds.left : 0,
             };
           }}
           style={{

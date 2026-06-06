@@ -1604,8 +1604,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           );
           const toggleChat = () => {
             setFocusedTextBlockID("");
-            const chatCurrentlyOpen = activeChatBlockID === block.id && activeCommunicationTab === "chat";
-            if (chatCurrentlyOpen) {
+            if (communicationPaneIsVisible) {
               setActiveChatBlockID("");
               setClosedChatBlockIDs((current) => {
                 const next = new Set(current);
@@ -1712,9 +1711,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     </div>
                     <button
                       type="button"
-                      title={chatIsActive && activeCommunicationTab === "chat" ? "Hide chat" : "Open chat"}
+                      title={communicationPaneIsVisible ? "Hide chat and email" : "Open chat"}
                       onClick={toggleChat}
-                      style={{ width: 26, height: 24, borderRadius: 8, border: chatIsActive && activeCommunicationTab === "chat" ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatIsActive && activeCommunicationTab === "chat" ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
+                      style={{ width: 26, height: 24, borderRadius: 8, border: communicationPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: communicationPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
                     >
                       <ChatIcon color={accent} />
                     </button>
@@ -1751,7 +1750,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     scrollbarTrack={scrollbarTrack}
                     onFocus={() => {
                       setFocusedTextBlockID(block.id);
-                      setActiveChatBlockID("");
                     }}
                     onBlur={() => {
                       setFocusedTextBlockID((current) => current === block.id ? "" : current);
