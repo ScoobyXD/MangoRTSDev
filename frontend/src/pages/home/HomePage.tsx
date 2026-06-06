@@ -66,6 +66,7 @@ import { subscribeWorkspaceRealtime, workspaceRealtimeScope } from "../../module
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
+import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
@@ -176,7 +177,16 @@ function messageListContentScrollHeight(container: HTMLDivElement): number {
   return container.scrollHeight - messageListAutoArchiveSpacerHeight(container);
 }
 
-export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
+export function HomePage({
+  me,
+  onNavigate,
+  embedded = false,
+  hideNavigation = false,
+  initialViewID = "my-triage",
+  deepLinkNodeID,
+  onNodeOverlayOpen,
+  onNodeOverlayClose,
+}: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -2378,7 +2388,30 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       focusInformationID: cleanInformationID || undefined,
       focusRequestID: cleanInformationID ? Date.now() : undefined,
     });
-  }, []);
+    onNodeOverlayOpen?.(nodeID);
+  }, [onNodeOverlayOpen]);
+
+  useEffect(() => {
+    if (deepLinkNodeID === undefined) return;
+    const nodeID = deepLinkNodeID.trim();
+    if (!nodeID) {
+      setNodeEditorOverlay(null);
+      return;
+    }
+    const node = nodeByID.get(nodeID);
+    const nodeTitleValue = node ? nodeTitle(node) : nodeID;
+    setNodeEditorOverlay((current) => (
+      current?.nodeID === nodeID && current.nodeTitle === nodeTitleValue
+        ? current
+        : { nodeID, nodeTitle: nodeTitleValue, focusRequestID: Date.now() }
+    ));
+  }, [deepLinkNodeID, nodeByID]);
+
+  const closeNodeEditorOverlay = useCallback(() => {
+    setNodeEditorOverlay(null);
+    onNodeOverlayClose?.();
+  }, [onNodeOverlayClose]);
+
   const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
@@ -2406,8 +2439,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();
-    if (onNavigate) onNavigate("/logic-gate-arena");
-    else window.location.assign("/logic-gate-arena");
+    const targetPath = buildLogicGateRoute(cleanLogicGateID, cleanNodeID || undefined);
+    if (onNavigate) onNavigate(targetPath);
+    else window.location.assign(targetPath);
   }, [companyID, isInboxMatrixView, onNavigate]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
@@ -3553,10 +3587,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           nodeTitle={nodeEditorOverlay.nodeTitle}
           focusInformationID={nodeEditorOverlay.focusInformationID}
           focusRequestID={nodeEditorOverlay.focusRequestID}
-          onClose={() => setNodeEditorOverlay(null)}
+          onClose={closeNodeEditorOverlay}
           onCollapseToTab={() => {
             requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
-            setNodeEditorOverlay(null);
+            closeNodeEditorOverlay();
           }}
         />
       )}
