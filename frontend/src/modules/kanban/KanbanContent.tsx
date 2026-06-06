@@ -97,6 +97,72 @@ import {
   type KanbanGroupSortDirection,
   type ExplorerEntityDragItem,
 } from "./shared";
+
+type StoredLogicGateColumnLayout = {
+  width_px?: number;
+  height_px?: number;
+  item_color?: string;
+};
+
+type StoredLogicGateColumnLayouts = Record<string, StoredLogicGateColumnLayout>;
+
+function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
+  return `mango:kanban:logic-gate-column-layout:v1:${encodeURIComponent(companyID)}:${encodeURIComponent(boardID)}`;
+}
+
+function readStoredLogicGateColumnLayouts(companyID: string, boardID: string): StoredLogicGateColumnLayouts {
+  if (typeof window === "undefined") return {};
+  const cleanCompanyID = companyID.trim();
+  const cleanBoardID = boardID.trim();
+  if (!cleanCompanyID || !cleanBoardID) return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(logicGateColumnLayoutStorageKey(cleanCompanyID, cleanBoardID)) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as StoredLogicGateColumnLayouts : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredLogicGateColumnLayout(companyID: string, boardID: string, columnID: string, patch: StoredLogicGateColumnLayout): void {
+  if (typeof window === "undefined") return;
+  const cleanCompanyID = companyID.trim();
+  const cleanBoardID = boardID.trim();
+  const cleanColumnID = columnID.trim();
+  if (!cleanCompanyID || !cleanBoardID || !cleanColumnID) return;
+  const layouts = readStoredLogicGateColumnLayouts(cleanCompanyID, cleanBoardID);
+  const current = layouts[cleanColumnID] ?? {};
+  const next: StoredLogicGateColumnLayout = { ...current };
+  if (patch.width_px !== undefined && Number.isFinite(patch.width_px)) {
+    next.width_px = Math.max(1, Math.round(patch.width_px));
+  }
+  if (patch.height_px !== undefined && Number.isFinite(patch.height_px)) {
+    next.height_px = clampColumnHeight(patch.height_px);
+  }
+  if (patch.item_color !== undefined) {
+    const cleanColor = patch.item_color.trim();
+    if (cleanColor) next.item_color = cleanColor;
+  }
+  layouts[cleanColumnID] = next;
+  try {
+    window.localStorage.setItem(logicGateColumnLayoutStorageKey(cleanCompanyID, cleanBoardID), JSON.stringify(layouts));
+  } catch {
+    // Local layout is a convenience overlay; the board should keep working if storage is unavailable.
+  }
+}
+
+function applyStoredLogicGateColumnLayouts(companyID: string, boardID: string, columns: KanbanColumn[]): KanbanColumn[] {
+  const layouts = readStoredLogicGateColumnLayouts(companyID, boardID);
+  if (Object.keys(layouts).length === 0) return columns;
+  return columns.map((column) => {
+    const layout = layouts[column.column_id];
+    if (!layout) return column;
+    const widthPx = layout.width_px !== undefined && Number.isFinite(layout.width_px) ? Math.max(1, Math.round(layout.width_px)) : column.width_px;
+    const heightPx = layout.height_px !== undefined && Number.isFinite(layout.height_px) ? clampColumnHeight(layout.height_px) : column.height_px;
+    const itemColor = layout.item_color?.trim() || column.item_color;
+    if (widthPx === column.width_px && heightPx === column.height_px && itemColor === column.item_color) return column;
+    return { ...column, width_px: widthPx, height_px: heightPx, item_color: itemColor };
+  });
+}
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
@@ -239,11 +305,28 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
+  const usesLocalColumnLayout = useCallback((targetBoardID: string): boolean => {
+    const cleanBoardID = targetBoardID.trim();
+    if (!cleanBoardID) return false;
+    return !!logicGateIDFromKanbanBoardID(cleanBoardID) || (cleanBoardID === activeBoardIDRef.current && !!activeLogicGateID);
+  }, [activeLogicGateID]);
+
+  const applyLocalColumnLayout = useCallback((nextColumns: KanbanColumn[], targetBoardID: string = activeBoardIDRef.current): KanbanColumn[] => {
+    return usesLocalColumnLayout(targetBoardID) ? applyStoredLogicGateColumnLayouts(companyID, targetBoardID, nextColumns) : nextColumns;
+  }, [companyID, usesLocalColumnLayout]);
+
+  const storeLocalColumnLayout = useCallback((columnID: string, patch: StoredLogicGateColumnLayout, targetBoardID: string = activeBoardIDRef.current): boolean => {
+    if (!usesLocalColumnLayout(targetBoardID)) return false;
+    writeStoredLogicGateColumnLayout(companyID, targetBoardID, columnID, patch);
+    return true;
+  }, [companyID, usesLocalColumnLayout]);
+
   const applyColumns = useCallback((next: React.SetStateAction<KanbanColumn[]>) => {
     const resolved = typeof next === "function" ? next(columnsRef.current) : next;
-    columnsRef.current = resolved;
-    setColumns(resolved);
-  }, []);
+    const withLocalLayout = applyLocalColumnLayout(resolved);
+    columnsRef.current = withLocalLayout;
+    setColumns(withLocalLayout);
+  }, [applyLocalColumnLayout]);
 
   const applyCards = useCallback((next: React.SetStateAction<KanbanCard[]>) => {
     const resolved = typeof next === "function" ? next(cardsRef.current) : next;
@@ -1273,6 +1356,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [columns, kanbanCommandContext, refreshBoard]);
 
   const persistColumnSize = useCallback(async (columnID: string, size: { widthPx?: number; heightPx?: number }) => {
+    if (storeLocalColumnLayout(columnID, { width_px: size.widthPx, height_px: size.heightPx })) {
+      setError("");
+      return;
+    }
     setError("");
     try {
       const updated = await persistKanbanColumnLayoutCommand({ context: kanbanCommandContext, columnID, ...size });
@@ -1281,20 +1368,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setError("Column resize failed");
       refreshBoard();
     }
-  }, [kanbanCommandContext, refreshBoard]);
+  }, [kanbanCommandContext, refreshBoard, storeLocalColumnLayout]);
 
   const persistColumnItemColor = useCallback(async (columnID: string, itemColor: string) => {
     const cleanColor = normalizeKanbanColumnItemColor(itemColor);
     setColumns((previous) => previous.map((column) => (column.column_id === columnID ? { ...column, item_color: cleanColor } : column)));
     setError("");
     try {
+      if (storeLocalColumnLayout(columnID, { item_color: cleanColor })) {
+        return;
+      }
       const updated = await persistKanbanColumnLayoutCommand({ context: kanbanCommandContext, columnID, itemColor: cleanColor });
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column color update failed");
       refreshBoard();
     }
-  }, [kanbanCommandContext, refreshBoard]);
+  }, [kanbanCommandContext, refreshBoard, storeLocalColumnLayout]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
