@@ -61,6 +61,7 @@ export type OverlayResizeState = {
   startHeight: number;
   boardWidth: number;
   boardHeight: number;
+  minLeft: number;
 };
 
 export type NodeEditorOverlayRatio = {
@@ -90,6 +91,7 @@ export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left:
 
 type NodeEditorOverlayClampOptions = {
   allowHorizontalOverflow?: boolean;
+  minLeft?: number;
 };
 
 export function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
@@ -106,7 +108,8 @@ export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRati
   const width = Math.max(0.42, Math.min(finiteRatio(value.width, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width), maxWidth));
   const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.94));
   const defaultLeft = (1 - width) / 2;
-  const minLeft = allowHorizontalOverflow ? Math.min(0.02, 0.24 - width) : 0.02;
+  const optionMinLeft = finiteRatio(options?.minLeft, Number.NEGATIVE_INFINITY);
+  const minLeft = Math.max(optionMinLeft, allowHorizontalOverflow ? Math.min(0.02, 0.24 - width) : 0.02);
   const maxLeft = allowHorizontalOverflow ? Math.max(minLeft, 0.98 - width) : Math.max(0.02, 0.98 - width);
   const minTop = 0.02;
   const maxTop = Math.max(minTop, 0.98 - height);

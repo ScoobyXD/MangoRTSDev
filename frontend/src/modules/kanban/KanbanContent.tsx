@@ -396,18 +396,24 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         width: width / boardWidth,
         height: height / boardHeight,
       }, { allowHorizontalOverflow: arenaMode });
-      const left = state.edges.left
+      let nextWidth = nextSize.width;
+      let left = state.edges.left
         ? state.startLeft + state.startWidth - nextSize.width * boardWidth
         : state.startLeft;
       const top = state.edges.top
         ? state.startTop + state.startHeight - nextSize.height * boardHeight
         : state.startTop;
+      if (state.edges.left && left < state.minLeft) {
+        left = state.minLeft;
+        nextWidth = Math.max(0, (state.startLeft + state.startWidth - left) / boardWidth);
+      }
+      const resizeMinLeftRatio = state.edges.left ? state.minLeft / boardWidth : undefined;
       const nextRatio = clampNodeEditorOverlayRatio({
         left: left / boardWidth,
         top: top / boardHeight,
-        width: nextSize.width,
+        width: nextWidth,
         height: nextSize.height,
-      }, { allowHorizontalOverflow: arenaMode });
+      }, { allowHorizontalOverflow: arenaMode, minLeft: resizeMinLeftRatio });
       nodeEditorOverlayRatioRef.current = nextRatio;
       setNodeEditorOverlayRatio(nextRatio);
     };
