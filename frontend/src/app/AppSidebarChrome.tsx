@@ -63,6 +63,7 @@ const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
+const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 const NODE_EDITOR_POPUP_NOTIFICATION_Z_INDEX = 160;
 const NODE_EDITOR_POPUP_Z_INDEX = 130;
@@ -946,7 +947,7 @@ export function AppSidebar({
   };
 
   return (
-    <aside className="company-explorer-scroll" style={appSidebarStyle}>
+    <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
         <MangoWordmark size={22} weight={600} />
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
@@ -1581,13 +1582,53 @@ function nodeEditorPopupViewportPadding(): { x: number; y: number } {
   };
 }
 
+function nodeEditorPopupSidebarBoundary(): number | null {
+  if (typeof document === "undefined") return null;
+  const selectors = [
+    "[data-app-sidebar=\"primary\"]",
+    "[data-app-sidebar-resize-handle=\"primary\"]",
+  ];
+  let boundary: number | null = null;
+  for (const selector of selectors) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) continue;
+    boundary = Math.max(boundary ?? 0, rect.right);
+  }
+  return boundary;
+}
+
+function nodeEditorPopupMinimumLeft(): number {
+  const padding = nodeEditorPopupViewportPadding();
+  const sidebarBoundary = nodeEditorPopupSidebarBoundary();
+  if (sidebarBoundary == null) return padding.x;
+  return Math.max(padding.x, Math.ceil(sidebarBoundary) + NODE_EDITOR_POPUP_SIDEBAR_BUFFER);
+}
+
+function nodeEditorPopupAvailableWidth(left: number): number {
+  if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
+  const padding = nodeEditorPopupViewportPadding();
+  return Math.max(1, window.innerWidth - padding.x - left);
+}
+
+function nodeEditorPopupDynamicBoundsStyle(left: number): React.CSSProperties {
+  if (typeof window === "undefined") return {};
+  const availableWidth = nodeEditorPopupAvailableWidth(left);
+  return {
+    maxWidth: availableWidth,
+    minWidth: Math.min(NODE_EDITOR_POPUP_MIN_WIDTH, availableWidth),
+  };
+}
+
 function clampNodeEditorPopupRect(rect: NodeEditorPopupRect): NodeEditorPopupRect {
-  const size = clampNodeEditorPopupSize(rect);
+  let size = clampNodeEditorPopupSize(rect);
   if (typeof window === "undefined") {
     return { left: Math.max(0, Math.round(rect.left)), top: Math.max(0, Math.round(rect.top)), ...size };
   }
   const padding = nodeEditorPopupViewportPadding();
-  const minLeft = padding.x;
+  const minLeft = nodeEditorPopupMinimumLeft();
+  size = { ...size, width: Math.min(size.width, nodeEditorPopupAvailableWidth(minLeft)) };
   const minTop = padding.y;
   const maxLeft = Math.max(minLeft, window.innerWidth - padding.x - size.width);
   const maxTop = Math.max(minTop, window.innerHeight - padding.y - size.height);
@@ -1710,8 +1751,17 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
 
   useEffect(() => {
     const onResize = () => setPopupRect((current) => clampNodeEditorPopupRect(current));
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(onResize);
+    for (const selector of ["[data-app-sidebar=\"primary\"]", "[data-app-sidebar-resize-handle=\"primary\"]"]) {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (element) resizeObserver?.observe(element);
+    }
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    onResize();
+    return () => {
+      window.removeEventListener("resize", onResize);
+      resizeObserver?.disconnect();
+    };
   }, []);
 
   const startPopupResize = useCallback((event: React.PointerEvent<HTMLDivElement>, handle: NodeEditorPopupResizeHandle) => {
@@ -1771,7 +1821,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
         aria-modal="true"
         aria-label={`${nodeTitle} node editor`}
         data-frame-interactive="true"
-        style={{ ...nodeEditorPopupStyle, left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
+        style={{ ...nodeEditorPopupStyle, ...nodeEditorPopupDynamicBoundsStyle(popupRect.left), left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
       >
