@@ -51,7 +51,6 @@ import {
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
   formatFileSize,
-  formatTimestamp,
   ChatIcon,
   MailIcon,
   messageAttachmentPayload,
@@ -77,6 +76,15 @@ const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
 const TEXT_CHAT_PANE_MIN_WIDTH_PX = 300;
 const TEXT_CHAT_PANE_MAX_WIDTH_PX = 520;
+
+function formatTextBlockMetadataTimestamp(value: string | number | undefined): string {
+  if (value === undefined || value === "") return "";
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  const day = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric", year: "numeric" }).format(date);
+  return `${time} ${day}`;
+}
 
 function clampTextChatSplitRatio(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
@@ -1539,12 +1547,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 <div style={{ border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
                     <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: compact ? "normal" : "nowrap", overflow: "hidden" }}>
-                      <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        Last updated {formatTimestamp(block.updatedTimestamp)}
+                      <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)}
                       </span>
                       <span aria-hidden="true" style={{ flex: "0 0 auto", opacity: 0.62 }}>|</span>
-                      <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        Created {formatTimestamp(block.createdTimestamp)}
+                      <span title={`Created: ${formatTextBlockMetadataTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                       </span>
                     </div>
                     {messages.length > 0 || chatIsVisible ? (
