@@ -70,6 +70,7 @@ export type HomeViewID =
   | "c-inbox"
   | "i-inbox"
   | "o-inbox"
+  | "custom-matrix"
   | "my-nodes"
   | "my-logic-gates"
   | `shared:${string}`;

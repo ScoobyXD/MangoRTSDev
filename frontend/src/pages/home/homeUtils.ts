@@ -934,6 +934,7 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (viewID === "shared-root") return "Shared Triage";
   const raciSection = raciInboxSectionForView(viewID);
   if (raciSection) return raciSection.title;
+  if (viewID === "custom-matrix") return "Custom View";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
@@ -960,6 +961,10 @@ export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMa
 
 export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
   return raciInboxSectionForView(viewID) !== null;
+}
+
+export function isCustomMatrixViewID(viewID: HomeViewID): boolean {
+  return viewID === "custom-matrix";
 }
 
 export function workspaceEventTouchesHomePanel(type: string): boolean {
@@ -992,7 +997,7 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
 }
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {
-  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || viewID === "my-nodes" || viewID === "my-logic-gates";
+  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || isCustomMatrixViewID(viewID) || viewID === "my-nodes" || viewID === "my-logic-gates";
 }
 
 export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {
