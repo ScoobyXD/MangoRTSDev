@@ -10,9 +10,18 @@ import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket.js";
 import {
+  companyExplorerRealtimeScope,
+  subscribeWorkspaceUserRealtime,
+  type WorkspaceReconciliationScope,
+  type WorkspaceStreamEventContext,
+  type WorkspaceStreamGapSignal,
+} from "../workspace/workspaceRealtime.js";
+import {
   fetchCommunicationsWorkspacePanel,
+  invalidateCommunicationsWorkspacePanelCache,
   listCompanyUserGroups,
   listCompanyUsers,
+  type CommunicationsWorkspacePanel,
   type CompanyUser,
   type CompanyUserGroup,
   type CompanyUserGroupMember,
@@ -87,6 +96,66 @@ const WEEK_DAY_COUNT = 7;
 const TIMELINE_LABEL_W = 280;
 const TIMELINE_DAY_W = 142;
 const TIMELINE_ROW_H = 44;
+
+type WorkspaceEventEnvelope = {
+  company_id?: string;
+  type?: string;
+};
+
+function workspacePanelStateFromResponse(panel: CommunicationsWorkspacePanel): WorkspacePanelState {
+  return {
+    nodeFolders: panel.nodeFolders,
+    nodeFolderItems: panel.nodeFolderItems,
+    nodes: panel.nodes,
+    logicGateFolders: panel.logicGateFolders,
+    logicGateFolderItems: panel.logicGateFolderItems,
+    logicGates: panel.logicGates,
+  };
+}
+
+function projectManagementWorkspaceScopeTouchesPanel(scope: WorkspaceReconciliationScope): boolean {
+  switch (scope.kind) {
+    case "node_graph":
+    case "logic_gate_graph":
+    case "work_item_assignment":
+    case "workspace":
+      return true;
+    case "company_explorer":
+      return !scope.folderKind || scope.folderKind === "node" || scope.folderKind === "logic_gate" ||
+        !scope.itemType || scope.itemType === "node" || scope.itemType === "logic_gate";
+    default:
+      return false;
+  }
+}
+
+function projectManagementWorkspaceScopesTouchPanel(scopes: WorkspaceReconciliationScope[]): boolean {
+  return scopes.some(projectManagementWorkspaceScopeTouchesPanel);
+}
+
+function projectManagementWorkspaceEventTouchesPanel(type: string): boolean {
+  const cleanType = type.trim();
+  if (!cleanType) return false;
+  if (
+    cleanType === "workspace_derived_projection_requested" ||
+    cleanType === "company_explorer_folder_item_assign_requested" ||
+    cleanType === "node_map_position_upsert_requested" ||
+    cleanType === "logic_gate_map_position_upsert_requested"
+  ) {
+    return false;
+  }
+  return cleanType === "node_created" ||
+    cleanType === "node_updated" ||
+    cleanType === "node_deleted" ||
+    cleanType === "node_permissions_updated" ||
+    cleanType === "relationship_created" ||
+    cleanType === "relationship_deleted" ||
+    cleanType === "logic_gate_created" ||
+    cleanType === "logic_gate_updated" ||
+    cleanType === "logic_gate_deleted" ||
+    cleanType === "logic_gate_raci_updated" ||
+    cleanType === "logic_gate_permissions_updated" ||
+    cleanType.startsWith("company_explorer_folder_");
+}
 
 function defaultUserPerspective(currentUserID: string): CompanyPerspective {
   return { scope: "mine", subjectType: "user", subjectID: currentUserID.trim() };
@@ -274,6 +343,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const pageRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const sequenceByUserRef = useRef(new Map<string, number>());
+  const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
@@ -296,6 +366,51 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
 
+  const loadWorkspacePanel = useCallback(async () => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) return;
+    try {
+      const panel = await fetchCommunicationsWorkspacePanel(cleanCompanyID);
+      setWorkspace(workspacePanelStateFromResponse(panel));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load project management data");
+    }
+  }, [companyID]);
+
+  const scheduleWorkspacePanelReload = useCallback(() => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) return;
+    invalidateCommunicationsWorkspacePanelCache(cleanCompanyID);
+    if (workspacePanelReloadTimerRef.current !== null) {
+      window.clearTimeout(workspacePanelReloadTimerRef.current);
+    }
+    workspacePanelReloadTimerRef.current = window.setTimeout(() => {
+      workspacePanelReloadTimerRef.current = null;
+      void loadWorkspacePanel();
+    }, 250);
+  }, [companyID, loadWorkspacePanel]);
+
+  const handleWorkspaceGap = useCallback((gap: WorkspaceStreamGapSignal) => {
+    if (gap.companyID !== companyID) return;
+    if (projectManagementWorkspaceScopesTouchPanel(gap.scopes)) scheduleWorkspacePanelReload();
+  }, [companyID, scheduleWorkspacePanelReload]);
+
+  const handleWorkspaceEvent = useCallback((event: { event: string; data: string }, context: WorkspaceStreamEventContext) => {
+    if (event.event !== "workspace" || event.data.length === 0) return;
+    let envelope: WorkspaceEventEnvelope;
+    try {
+      envelope = JSON.parse(event.data) as WorkspaceEventEnvelope;
+    } catch {
+      scheduleWorkspacePanelReload();
+      return;
+    }
+    const eventCompanyID = envelope.company_id?.trim() ?? "";
+    if (eventCompanyID && eventCompanyID !== companyID) return;
+    if (projectManagementWorkspaceScopesTouchPanel(context.scopes) || projectManagementWorkspaceEventTouchesPanel(envelope.type ?? "")) {
+      scheduleWorkspacePanelReload();
+    }
+  }, [companyID, scheduleWorkspacePanelReload]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -313,14 +428,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         setCompanyUsers(users);
         setGroups(userGroups.groups);
         setGroupMembers(userGroups.members);
-        setWorkspace({
-          nodeFolders: panel.nodeFolders,
-          nodeFolderItems: panel.nodeFolderItems,
-          nodes: panel.nodes,
-          logicGateFolders: panel.logicGateFolders,
-          logicGateFolderItems: panel.logicGateFolderItems,
-          logicGates: panel.logicGates,
-        });
+        setWorkspace(workspacePanelStateFromResponse(panel));
         const defaultPerspective = defaultUserPerspective(userID);
         setTimelinePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
         setLogicGatePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
@@ -336,6 +444,24 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       cancelled = true;
     };
   }, [companyID]);
+
+  useEffect(() => {
+    if (!companyID) return undefined;
+    return subscribeWorkspaceUserRealtime(readAuthConfig().apiBase, companyID, companyExplorerRealtimeScope, {
+      onGap: handleWorkspaceGap,
+      onEvent: handleWorkspaceEvent,
+      onError() {
+        // The timeline projection stream remains independent; panel reload errors surface through loadWorkspacePanel.
+      },
+    });
+  }, [companyID, handleWorkspaceEvent, handleWorkspaceGap]);
+
+  useEffect(() => () => {
+    if (workspacePanelReloadTimerRef.current !== null) {
+      window.clearTimeout(workspacePanelReloadTimerRef.current);
+      workspacePanelReloadTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     setLogicGateExpanded((current) => {

@@ -301,6 +301,14 @@ user:{userID}
 
 Timeline item creates, resizes, moves, and deletes mutate `project_management_timeline_items`, sync `project_management_timeline_projection`, then append `project_management.projection_delta` rows in the same transaction. Node or logic-gate source changes that affect projected fields resync the project management projection and append project-management deltas alongside other affected projection deltas.
 
+The Project Management page also embeds node and logic-gate picker panels. Those panels are not driven by the timeline projection; they use the existing workspace/company-explorer live path:
+
+```text
+company_explorer:user:{currentUserID}
+```
+
+When workspace events touch node, logic-gate, work-item assignment, or node/logic-gate folder scopes, the page marks the communications workspace-panel snapshot stale and reloads `fetchCommunicationsWorkspacePanel`. This keeps the embedded picker data aligned with Home and Company Explorer instead of adding a project-management-specific exception.
+
 ### Editor
 
 ```text
