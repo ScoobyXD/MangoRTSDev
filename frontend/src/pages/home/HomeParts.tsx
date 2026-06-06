@@ -636,6 +636,37 @@ function clampNodeEditorPopupSize(size: { width: number; height: number }): { wi
   };
 }
 
+type NodeEditorPopupRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+function nodeEditorPopupViewportPadding(): { x: number; y: number } {
+  return {
+    x: NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET / 2,
+    y: NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET / 2,
+  };
+}
+
+function clampNodeEditorPopupRect(rect: NodeEditorPopupRect): NodeEditorPopupRect {
+  const size = clampNodeEditorPopupSize(rect);
+  if (typeof window === "undefined") {
+    return { left: Math.max(0, Math.round(rect.left)), top: Math.max(0, Math.round(rect.top)), ...size };
+  }
+  const padding = nodeEditorPopupViewportPadding();
+  const minLeft = padding.x;
+  const minTop = padding.y;
+  const maxLeft = Math.max(minLeft, window.innerWidth - padding.x - size.width);
+  const maxTop = Math.max(minTop, window.innerHeight - padding.y - size.height);
+  return {
+    left: Math.max(minLeft, Math.min(Math.round(rect.left), maxLeft)),
+    top: Math.max(minTop, Math.min(Math.round(rect.top), maxTop)),
+    ...size,
+  };
+}
+
 function nodeEditorPopupSizeStorageKey(): string {
   const companyID = getActiveCompanyID().trim() || "global";
   return `${NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX}:${companyID}`;
@@ -663,6 +694,16 @@ function defaultNodeEditorPopupSize(): { width: number; height: number } {
   return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
 }
 
+function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
+  const size = defaultNodeEditorPopupSize();
+  if (typeof window === "undefined") return { left: 0, top: 0, ...size };
+  return clampNodeEditorPopupRect({
+    left: (window.innerWidth - size.width) / 2,
+    top: (window.innerHeight - size.height) / 2,
+    ...size,
+  });
+}
+
 export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
@@ -671,12 +712,12 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   onClose: () => void;
   onCollapseToTab?: () => void;
 }) {
-  const [popupSize, setPopupSize] = useState(defaultNodeEditorPopupSize);
-  const popupSizeRef = useRef(popupSize);
+  const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
+  const popupRectRef = useRef(popupRect);
 
   useEffect(() => {
-    popupSizeRef.current = popupSize;
-  }, [popupSize]);
+    popupRectRef.current = popupRect;
+  }, [popupRect]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -689,7 +730,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   }, [onClose]);
 
   useEffect(() => {
-    const onResize = () => setPopupSize((current) => clampNodeEditorPopupSize(current));
+    const onResize = () => setPopupRect((current) => clampNodeEditorPopupRect(current));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -700,24 +741,38 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
     const ownerDocument = event.currentTarget.ownerDocument;
     const startX = event.clientX;
     const startY = event.clientY;
-    const startSize = popupSizeRef.current;
+    const startRect = popupRectRef.current;
     const previousCursor = ownerDocument.body.style.cursor;
     ownerDocument.body.style.cursor = handle.cursor;
 
     const onPointerMove = (pointerEvent: PointerEvent) => {
-      const nextSize = clampNodeEditorPopupSize({
-        width: startSize.width + (pointerEvent.clientX - startX) * handle.horizontal,
-        height: startSize.height + (pointerEvent.clientY - startY) * handle.vertical,
+      const deltaX = pointerEvent.clientX - startX;
+      const deltaY = pointerEvent.clientY - startY;
+      const desiredWidth = handle.horizontal < 0
+        ? startRect.width - deltaX
+        : handle.horizontal > 0
+          ? startRect.width + deltaX
+          : startRect.width;
+      const desiredHeight = handle.vertical < 0
+        ? startRect.height - deltaY
+        : handle.vertical > 0
+          ? startRect.height + deltaY
+          : startRect.height;
+      const nextSize = clampNodeEditorPopupSize({ width: desiredWidth, height: desiredHeight });
+      const nextRect = clampNodeEditorPopupRect({
+        left: handle.horizontal < 0 ? startRect.left + startRect.width - nextSize.width : startRect.left,
+        top: handle.vertical < 0 ? startRect.top + startRect.height - nextSize.height : startRect.top,
+        ...nextSize,
       });
-      popupSizeRef.current = nextSize;
-      setPopupSize(nextSize);
+      popupRectRef.current = nextRect;
+      setPopupRect(nextRect);
     };
     const finish = () => {
       ownerDocument.body.style.cursor = previousCursor;
       ownerDocument.removeEventListener("pointermove", onPointerMove);
       ownerDocument.removeEventListener("pointerup", finish);
       ownerDocument.removeEventListener("pointercancel", finish);
-      storeNodeEditorPopupSize(popupSizeRef.current);
+      storeNodeEditorPopupSize(popupRectRef.current);
     };
 
     ownerDocument.addEventListener("pointermove", onPointerMove);
@@ -737,7 +792,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
         aria-modal="true"
         aria-label={`${nodeTitle} node editor`}
         data-frame-interactive="true"
-        style={{ ...nodeEditorPopupStyle, width: popupSize.width, height: popupSize.height }}
+        style={{ ...nodeEditorPopupStyle, left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
       >
