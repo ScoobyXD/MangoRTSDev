@@ -1831,8 +1831,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions";
-  const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
-  const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 16) : fallbackDocumentTopPx;
+  const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 128 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
+  const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 6) : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
@@ -1918,7 +1918,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
-          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 5, pointerEvents: "none" }}>
+          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 60, pointerEvents: "none" }}>
           <EditorTabBar
             activeTab={activeTab}
             outlineStyle={outlineStyle}
@@ -1987,7 +1987,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         )}
 
         {hasLinkedDocument && (visibleCollaborators.length > 0 || collaborationStatus) && (
-          <div style={{ position: "absolute", top: 42, right: 12, zIndex: 6, display: "flex", alignItems: "center", gap: 6, maxWidth: "58%", pointerEvents: "none", justifyContent: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ position: "absolute", top: 42, right: 12, zIndex: 61, display: "flex", alignItems: "center", gap: 6, maxWidth: "58%", pointerEvents: "none", justifyContent: "flex-end", flexWrap: "wrap" }}>
             {collaborationStatus && (
               <div style={{ border: `1px solid ${strokeColor}`, background: tabSelectedBackground, color: surfaceText, borderRadius: 6, padding: "4px 7px", fontSize: 10, fontWeight: 700, boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
                 {collaborationStatus}

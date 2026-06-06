@@ -43,7 +43,6 @@ export function KanbanContextMenus({
   onPersistColumnItemColor,
   onToggleCardIssue,
   onRenameNode,
-  onRevertCardsToMyTriage,
   onRequestNodeDeleteFromCards,
   onRequestCardDelete,
 }: {
@@ -60,7 +59,6 @@ export function KanbanContextMenus({
   onPersistColumnItemColor: (columnID: string, color: string) => void;
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
   onRenameNode: (card: KanbanCard) => void;
-  onRevertCardsToMyTriage: (cardIDs: string[]) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
   onRequestCardDelete: (cardIDs: string[]) => void;
 }) {
@@ -105,9 +103,6 @@ export function KanbanContextMenus({
           </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
             Rename node
-          </button>
-          <button type="button" style={contextMenuButtonStyle} onClick={() => onRevertCardsToMyTriage(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
-            Revert back to Pending
           </button>
           <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Delete node
