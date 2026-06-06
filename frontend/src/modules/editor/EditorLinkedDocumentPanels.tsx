@@ -414,20 +414,22 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
-                columnGap: 24,
-                rowGap: 6,
-                maxWidth: "min(720px, 100%)",
-                padding: "2px 0 8px",
+                gridTemplateColumns: "minmax(145px, 0.74fr) minmax(154px, 0.70fr) minmax(250px, 1.18fr) minmax(220px, 1fr)",
+                columnGap: 10,
+                rowGap: 0,
+                maxWidth: "100%",
+                overflowX: "auto",
+                overflowY: "visible",
+                padding: "1px 0 6px",
                 borderBottom: `1px dashed ${ruleColor}`,
                 fontFamily: "var(--mango-font-family)",
-                fontSize: 13,
+                fontSize: 12,
                 lineHeight: 1.35,
                 color: "inherit",
                 pointerEvents: "auto",
               }}
             >
-              <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <div style={{ gridColumn: 1, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Status:</strong>
                 <span ref={statusMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 170px)" }}>
                   <button
@@ -528,7 +530,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </div>
-              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ gridColumn: 3, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Person In Charge:</strong>
                 <span ref={assigneeMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 290px)" }}>
                   <input
@@ -616,7 +618,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </label>
-              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
@@ -669,7 +671,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   />
                 </span>
               </label>
-              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
                 <strong style={{ paddingTop: 3 }}>Priority:</strong>
                 <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
                   <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>

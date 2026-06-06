@@ -45,6 +45,7 @@ export function canDeleteEditorTextBlockChatMessage(message: Pick<EditorTextBloc
 
 export type EditorAttachedEmail = {
   id: string;
+  blockID?: string;
   messageID: string;
   threadID?: string;
   subject: string;
@@ -142,6 +143,7 @@ export function buildEditorTextBlockChatPayload(input: {
 }
 
 export function buildEditorAttachedEmailPayload(input: {
+  blockID?: string;
   messageID: string;
   threadID?: string;
   subject: string;
@@ -151,6 +153,7 @@ export function buildEditorAttachedEmailPayload(input: {
   attachedTimestamp: string;
 }): string {
   return JSON.stringify({
+    block_id: input.blockID?.trim() ?? "",
     message_id: input.messageID,
     thread_id: input.threadID ?? "",
     subject: input.subject,
@@ -271,11 +274,13 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   const record = payload as Record<string, unknown>;
   const messageID = stringValue(record, "message_id");
   if (!messageID) return null;
+  const blockID = stringValue(record, "block_id");
   const threadID = stringValue(record, "thread_id");
   const snippet = stringValue(record, "snippet");
   const from = stringValue(record, "from");
   return {
     id: item.information_id,
+    blockID: blockID || undefined,
     messageID,
     threadID: threadID || undefined,
     subject: stringValue(record, "subject") || "(no subject)",
