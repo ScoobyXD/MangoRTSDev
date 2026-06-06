@@ -30,9 +30,10 @@ import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
 
 import {
-  AttachedEmailsPanel,
   ChatPane,
   DeleteTextBlockConfirmationModal,
+  EmailConversationPane,
+  EmailCountDropdown,
   EmailDetailModal,
   EmailPickerModal,
   NodeTextBlockEditor,
@@ -239,10 +240,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
+  const [activeCommunicationTabs, setActiveCommunicationTabs] = useState<Record<string, "chat" | "email">>({});
+  const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
-  const [emailPickerOpen, setEmailPickerOpen] = useState(false);
+  const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [selectedEmailID, setSelectedEmailID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
@@ -275,10 +278,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return grouped;
   }, [chatMessages]);
+  const globalAttachedEmails = useMemo(() => attachedEmails.filter((email) => !email.blockID), [attachedEmails]);
+  const attachedEmailsByBlock = useMemo(() => {
+    const grouped = new Map<string, EditorAttachedEmail[]>();
+    for (const email of attachedEmails) {
+      const blockID = email.blockID?.trim() ?? "";
+      if (!blockID) continue;
+      const emails = grouped.get(blockID) ?? [];
+      emails.push(email);
+      grouped.set(blockID, emails);
+    }
+    return grouped;
+  }, [attachedEmails]);
   const compact = width > 0 && width < 720;
   const hasVisibleTextChat = !compact && blocks.some((block) => {
     const messages = chatMessagesByBlock.get(block.id) ?? [];
-    return activeChatBlockID === block.id || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
+    return activeChatBlockID === block.id || Boolean(selectedEmailIDsByBlock[block.id]) || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
   });
   const textChatResizableWidth = Math.max(
     TEXT_CHAT_PANE_MIN_WIDTH_PX,
@@ -403,7 +418,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (canEdit) return;
     setLogicGateAssignerOpen(false);
-    setEmailPickerOpen(false);
+    setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
@@ -434,10 +449,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setBlocks(textBlocks);
     contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document }]));
     setChatMessages(parsedChatMessages);
-    setAttachedEmails(parseEditorAttachedEmails(projections));
+    const parsedAttachedEmails = parseEditorAttachedEmails(projections);
+    setAttachedEmails(parsedAttachedEmails);
     const nodeChanged = previousNodeIDRef.current !== nodeID;
     previousNodeIDRef.current = nodeID;
     const blockIDs = new Set(textBlocks.map((block) => block.id));
+    const emailIDsByBlock = new Map<string, Set<string>>();
+    for (const email of parsedAttachedEmails) {
+      const blockID = email.blockID?.trim() ?? "";
+      if (!blockID) continue;
+      const messageIDs = emailIDsByBlock.get(blockID) ?? new Set<string>();
+      messageIDs.add(email.messageID);
+      emailIDsByBlock.set(blockID, messageIDs);
+    }
     const messageIDsByBlock = new Map<string, Set<string>>();
     for (const message of parsedChatMessages) {
       const messageIDs = messageIDsByBlock.get(message.blockID) ?? new Set<string>();
@@ -456,6 +480,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
+    setSelectedEmailIDsByBlock((current) => {
+      if (nodeChanged) return {};
+      return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID))));
+    });
+    setActiveCommunicationTabs((current) => {
+      if (nodeChanged) return {};
+      return Object.fromEntries(Object.entries(current).filter(([blockID]) => blockIDs.has(blockID)));
+    });
     setClosedChatBlockIDs((current) => {
       if (nodeChanged) return new Set();
       return new Set(Array.from(current).filter((id) => blockIDs.has(id)));
@@ -700,6 +732,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setActiveChatMessageIDs((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setSelectedEmailIDsByBlock((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setActiveCommunicationTabs((current) => {
       if (!(blockID in current)) return current;
       const next = { ...current };
       delete next[blockID];
@@ -997,15 +1041,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [blocks, canEdit, onCreateNodeFromImage, onError]);
 
-  const attachEmail = useCallback(async (email: ReturnType<typeof messageAttachmentPayload>) => {
+  const attachEmail = useCallback(async (email: ReturnType<typeof messageAttachmentPayload>, blockID = "") => {
     if (!canEdit) return;
-    if (attachedEmails.some((item) => item.messageID === email.messageID)) {
-      setEmailPickerOpen(false);
+    const cleanBlockID = blockID.trim();
+    if (attachedEmails.some((item) => item.messageID === email.messageID && (item.blockID ?? "") === cleanBlockID)) {
+      setEmailPickerTargetBlockID(null);
       return;
     }
     const id = generateStableInformationID();
     const attached: EditorAttachedEmail = {
       id,
+      blockID: cleanBlockID || undefined,
       messageID: email.messageID,
       threadID: email.threadID,
       subject: email.subject,
@@ -1015,14 +1061,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       attachedTimestamp: email.attachedTimestamp,
     };
     setAttachedEmails((current) => [attached, ...current]);
-    setEmailPickerOpen(false);
+    setEmailPickerTargetBlockID(null);
+    if (cleanBlockID) {
+      setSelectedEmailIDsByBlock((current) => ({ ...current, [cleanBlockID]: email.messageID }));
+      setActiveCommunicationTabs((current) => ({ ...current, [cleanBlockID]: "email" }));
+      setClosedChatBlockIDs((current) => {
+        if (!current.has(cleanBlockID)) return current;
+        const next = new Set(current);
+        next.delete(cleanBlockID);
+        return next;
+      });
+      setActiveChatBlockID(cleanBlockID);
+    }
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
           type: EDITOR_ATTACHED_EMAIL_TYPE,
-          information: buildEditorAttachedEmailPayload(email),
+          information: buildEditorAttachedEmailPayload({ ...email, blockID: cleanBlockID }),
           information_id: id,
         }),
       });
@@ -1088,6 +1145,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setDropActive(false);
     void attachEmail({ ...email, attachedTimestamp: new Date().toISOString() });
   }, [attachEmail, canEdit]);
+
+  const openBlockEmail = useCallback((blockID: string, messageID: string) => {
+    const cleanBlockID = blockID.trim();
+    const cleanMessageID = messageID.trim();
+    if (!cleanBlockID || !cleanMessageID) return;
+    setSelectedEmailIDsByBlock((current) => ({ ...current, [cleanBlockID]: cleanMessageID }));
+    setActiveCommunicationTabs((current) => ({ ...current, [cleanBlockID]: "email" }));
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(cleanBlockID)) return current;
+      const next = new Set(current);
+      next.delete(cleanBlockID);
+      return next;
+    });
+    setActiveChatBlockID(cleanBlockID);
+    setFocusedTextBlockID("");
+  }, []);
 
   const startTextChatSplitResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!canEdit) return;
@@ -1269,9 +1342,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }}
     >
       <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 12, alignItems: "start", minWidth: 0 }}>
-        <div aria-hidden="true" style={{ minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
+        <div aria-hidden="true" style={{ position: "sticky", top: 0, zIndex: 42, minHeight: 38, padding: "0 0 7px", background: panelBackground }} />
 
-        <div style={{ gridColumn: hasVisibleTextChat ? "2 / -1" : undefined, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", overflow: "hidden", padding: "2px 0 10px", borderBottom: hasVisibleTextChat ? `1px solid ${ruleColor}` : undefined, background: "inherit" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 43, gridColumn: hasVisibleTextChat ? "2 / -1" : undefined, display: "flex", alignItems: "center", gap: 7, flexWrap: "nowrap", overflow: "visible", padding: "0 0 7px", borderBottom: hasVisibleTextChat ? `1px solid ${ruleColor}` : undefined, background: panelBackground }}>
           {canEdit && (
             <button
               type="button"
@@ -1323,7 +1396,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           {canEdit && (
             <button
               type="button"
-              onClick={() => setEmailPickerOpen(true)}
+              onClick={() => setEmailPickerTargetBlockID("")}
               style={{
                 minHeight: 30,
                 borderRadius: 9,
@@ -1347,6 +1420,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               Attach email
             </button>
           )}
+          <EmailCountDropdown
+            emails={globalAttachedEmails}
+            accent={accent}
+            surfaceText={surfaceText}
+            align="left"
+            onOpenEmail={setSelectedEmailID}
+          />
           {canEdit && (
             <button
               type="button"
@@ -1483,23 +1563,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         {blocks.map((block, index) => {
           const messages = chatMessagesByBlock.get(block.id) ?? [];
+          const blockEmails = attachedEmailsByBlock.get(block.id) ?? [];
+          const selectedBlockEmailID = selectedEmailIDsByBlock[block.id] ?? "";
+          const displayedBlockEmailID = selectedBlockEmailID || blockEmails[0]?.messageID || "";
           const chatIsActive = activeChatBlockID === block.id;
           const chatIsVisible = chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
+          const emailIsVisible = Boolean(selectedBlockEmailID);
+          const communicationPaneIsVisible = chatIsVisible || emailIsVisible;
+          const activeCommunicationTab = emailIsVisible
+            ? (activeCommunicationTabs[block.id] ?? "email")
+            : "chat";
           const textBlockIsFocused = focusedTextBlockID === block.id;
           const selectionAnchor = chatSelectionAnchors[block.id];
           const activeChatMessageID = activeChatMessageIDs[block.id] ?? "";
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
-          const toggleChat = () => {
-            setFocusedTextBlockID("");
-            const nextOpen = !chatIsVisible;
-            setClosedChatBlockIDs((closed) => {
-              const next = new Set(closed);
-              if (nextOpen) next.delete(block.id);
-              else next.add(block.id);
-              return next;
-            });
-            setActiveChatBlockID(nextOpen ? block.id : "");
-          };
           const focusChat = () => {
             setFocusedTextBlockID("");
             setClosedChatBlockIDs((current) => {
@@ -1509,6 +1586,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               return next;
             });
             setActiveChatBlockID(block.id);
+            setActiveCommunicationTabs((current) => ({ ...current, [block.id]: "chat" }));
+          };
+          const setCommunicationTab = (tab: "chat" | "email") => {
+            if (tab === "email" && !displayedBlockEmailID) return;
+            if (tab === "email" && !selectedBlockEmailID) {
+              setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: displayedBlockEmailID }));
+            }
+            setActiveCommunicationTabs((current) => ({ ...current, [block.id]: tab }));
+            if (tab === "chat") focusChat();
+            else {
+              setFocusedTextBlockID("");
+              setActiveChatBlockID(block.id);
+            }
           };
           const replyToMessage = (messageID: string) => {
             focusChat();
@@ -1545,7 +1635,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto 26px 26px", alignItems: "center", gap: 6, minHeight: 34, borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 5px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", overflow: "visible" }}>
                     <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: compact ? "normal" : "nowrap", overflow: "hidden" }}>
                       <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                         Last Updated: {formatTextBlockMetadataTimestamp(block.updatedTimestamp)}
@@ -1555,18 +1645,34 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         Created: {formatTextBlockMetadataTimestamp(block.createdTimestamp)}
                       </span>
                     </div>
-                    {messages.length > 0 || chatIsVisible ? (
+                    {canEdit ? (
                       <button
                         type="button"
-                        title={chatIsVisible ? "Hide chat" : "Open chat"}
-                        onClick={toggleChat}
-                        style={{ width: 26, height: 24, borderRadius: 8, border: chatIsActive ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatIsActive ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
+                        title="Add email to this text box"
+                        onClick={() => setEmailPickerTargetBlockID(block.id)}
+                        style={{ minHeight: 24, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 10.5, fontWeight: 900, letterSpacing: 0, padding: "2px 7px", whiteSpace: "nowrap", boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.80)" }}
                       >
-                        <ChatIcon color={accent} />
+                        <MailIcon color={accent} />
+                        Add email
                       </button>
                     ) : (
-                      <div aria-hidden="true" style={{ width: 26, height: 24 }} />
+                      <div aria-hidden="true" />
                     )}
+                    <EmailCountDropdown
+                      emails={blockEmails}
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      compact
+                      onOpenEmail={(messageID) => openBlockEmail(block.id, messageID)}
+                    />
+                    <button
+                      type="button"
+                      title="Open chat"
+                      onClick={focusChat}
+                      style={{ width: 26, height: 24, borderRadius: 8, border: chatIsActive && activeCommunicationTab === "chat" ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatIsActive && activeCommunicationTab === "chat" ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
+                    >
+                      <ChatIcon color={accent} />
+                    </button>
                     {canEdit ? (
                       <TextBlockActionsMenu
                         accent={accent}
@@ -1616,15 +1722,29 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
                   />
                 </div>
-                {compact && chatIsVisible && (
+                {compact && communicationPaneIsVisible && (
                   <ChatPane
                     blockID={block.id}
                     editable={canEdit}
                     messages={messages}
+                    emailPane={displayedBlockEmailID ? (
+                      <EmailConversationPane
+                        messageID={displayedBlockEmailID}
+                        companyID={companyID}
+                        editable={canEdit}
+                        accent={accent}
+                        surfaceText={surfaceText}
+                        strokeColor={strokeColor}
+                        ruleColor={ruleColor}
+                        onError={onError}
+                      />
+                    ) : undefined}
+                    emailCount={blockEmails.length}
+                    activeTab={activeCommunicationTab}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     companyUsers={companyUsers}
-                    active={chatIsActive}
+                    active={chatIsActive || activeCommunicationTab === "email"}
                     currentUserID={author.userID}
                     activeMessageID={activeChatMessageID}
                     accent={accent}
@@ -1636,6 +1756,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     draftAttachments={chatDraftAttachments[block.id] ?? []}
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
+                    onActiveTabChange={setCommunicationTab}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onActivateMessage={activateChatMessage}
                     onNavigateToMessage={(messageID) => navigateToChatMessage(block.id, messages, messageID)}
@@ -1648,17 +1769,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   />
                 )}
               </div>
-              {hasVisibleTextChat && renderTextChatSplitHandle(chatIsVisible)}
+              {hasVisibleTextChat && renderTextChatSplitHandle(communicationPaneIsVisible)}
               {hasVisibleTextChat && (
-                chatIsVisible ? (
+                communicationPaneIsVisible ? (
                   <ChatPane
                     blockID={block.id}
                     editable={canEdit}
                     messages={messages}
+                    emailPane={displayedBlockEmailID ? (
+                      <EmailConversationPane
+                        messageID={displayedBlockEmailID}
+                        companyID={companyID}
+                        editable={canEdit}
+                        accent={accent}
+                        surfaceText={surfaceText}
+                        strokeColor={strokeColor}
+                        ruleColor={ruleColor}
+                        onError={onError}
+                      />
+                    ) : undefined}
+                    emailCount={blockEmails.length}
+                    activeTab={activeCommunicationTab}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     companyUsers={companyUsers}
-                    active={chatIsActive}
+                    active={chatIsActive || activeCommunicationTab === "email"}
                     currentUserID={author.userID}
                     activeMessageID={activeChatMessageID}
                     accent={accent}
@@ -1670,6 +1805,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     draftAttachments={chatDraftAttachments[block.id] ?? []}
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
+                    onActiveTabChange={setCommunicationTab}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onActivateMessage={activateChatMessage}
                     onNavigateToMessage={(messageID) => navigateToChatMessage(block.id, messages, messageID)}
@@ -1687,58 +1823,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         })}
 
         <div />
-        <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
-          {canEdit && (
-            <div
-              onDragEnter={() => setDropActive(true)}
-              onDragOver={(event) => {
-                if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
-              }}
-              onDragLeave={() => setDropActive(false)}
-              onDrop={onDropEmail}
-              style={{
-                minHeight: 58,
-                border: dropActive ? "1px solid transparent" : `1px dashed ${EDITOR_NEU_SOFT_BORDER}`,
-                borderRadius: 14,
-                background: dropActive ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : panelBackground,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "10px 12px",
-                color: surfaceText,
-                fontSize: 12,
-                fontWeight: 800,
-                boxShadow: dropActive ? "0 10px 24px rgba(15,23,42,0.12), 0 0 16px rgba(183,124,255,0.18)" : EDITOR_NEU_SHADOW,
-              }}
-            >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                <MailIcon color={accent} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Attach email</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setEmailPickerOpen(true)}
-                style={{ border: "1px solid transparent", background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, color: accent, borderRadius: 9, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto", boxShadow: EDITOR_NEU_SHADOW }}
-              >
-                Add email
-              </button>
-            </div>
-          )}
-          <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onOpenEmail={setSelectedEmailID} />
-        </div>
+        <div
+          onDragEnter={() => { if (canEdit) setDropActive(true); }}
+          onDragOver={(event) => {
+            if (canEdit && event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
+          }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={onDropEmail}
+          style={{ minHeight: dropActive ? 48 : 14, border: dropActive ? "1px solid transparent" : "none", borderRadius: 14, background: dropActive ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent", boxShadow: dropActive ? "0 10px 24px rgba(15,23,42,0.12), 0 0 16px rgba(183,124,255,0.18)" : undefined }}
+        />
         {hasVisibleTextChat && <div aria-hidden="true" />}
         {hasVisibleTextChat && <div />}
       </div>
 
-      {canEdit && emailPickerOpen && (
+      {canEdit && emailPickerTargetBlockID !== null && (
         <EmailPickerModal
           accent={accent}
           surfaceText={surfaceText}
           panelBackground={panelBackground}
           strokeColor={strokeColor}
-          onClose={() => setEmailPickerOpen(false)}
-          onAttach={(message) => { void attachEmail(messageAttachmentPayload(message)); }}
+          onClose={() => setEmailPickerTargetBlockID(null)}
+          onAttach={(message) => { void attachEmail(messageAttachmentPayload(message), emailPickerTargetBlockID ?? ""); }}
         />
       )}
       {selectedEmailID && (
