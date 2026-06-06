@@ -30,7 +30,6 @@ import {
   addExplorerNodesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
-  deleteKanbanColumnCommand,
   persistKanbanColumnLayoutCommand,
   renameKanbanColumnCommand,
   reorderKanbanCardsCommand,
@@ -71,9 +70,11 @@ import {
   getKanbanBoardDisplayTitle,
   getKanbanColumnDisplayColor,
   getKanbanConditionalColor,
+  getColumnWidth,
   getDefaultKanbanYAxisSortDirection,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
+  isKanbanBacklogColumn,
   logicGateKanbanBoardID,
   logicGateIDFromKanbanBoardID,
   nextCardPosition,
@@ -210,7 +211,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [priorityMenu, setPriorityMenu] = useState<KanbanPriorityMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID, { allowHorizontalOverflow: arenaMode }));
-  const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
@@ -497,6 +497,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
+  const backlogColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBacklogColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
+  const mainBoardColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter((column) => !isKanbanBacklogColumn(column)) : orderedColumns), [activeBoardIsLogicGate, orderedColumns]);
+  const useBacklogBottomLayout = activeBoardIsLogicGate && backlogColumns.length > 0;
+  const boardColumnsMinWidth = useMemo(() => {
+    const columnsForWidth = useBacklogBottomLayout ? mainBoardColumns : orderedColumns;
+    return columnsForWidth.reduce((total, column) => total + getColumnWidth(column), 0) + Math.max(0, columnsForWidth.length - 1) * 10;
+  }, [mainBoardColumns, orderedColumns, useBacklogBottomLayout]);
   const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Logic Gate")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
@@ -1245,29 +1252,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       refreshBoard();
     }
   }, [cards, columns, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
-
-  const removeColumn = useCallback(async (columnID: string) => {
-    const previousColumns = columns;
-    const previousCards = cards;
-    setColumns((current) => current.filter((column) => column.column_id !== columnID));
-    setCards((current) => current.filter((card) => card.column_id !== columnID));
-    setError("");
-    try {
-      await deleteKanbanColumnCommand({ context: kanbanCommandContext, columnID });
-    } catch {
-      setError("Column delete failed");
-      setColumns(previousColumns);
-      setCards(previousCards);
-    }
-  }, [cards, columns, kanbanCommandContext]);
-
-  const requestColumnDelete = useCallback((columnID: string) => {
-    const column = columns.find((item) => item.column_id === columnID);
-    if (!column) return;
-    setColumnContextMenu(null);
-    setCardContextMenu(null);
-    setDeleteColumnConfirmation({ columnID, title: column.title });
-  }, [columns]);
 
   const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before") => {
     setDraggingColumnID("");
@@ -2047,6 +2031,44 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     );
   };
 
+  const renderColumnView = (column: KanbanColumn, layout: "column" | "backlog" = "column"): React.ReactNode => {
+    const columnCards = cardsByColumn.get(column.column_id) ?? [];
+    return (
+      <KanbanColumnView
+        key={column.column_id}
+        column={column}
+        columnCards={columnCards}
+        renderedCards={columnCards.map((card) => renderCard(card))}
+        accent={accent}
+        line={line}
+        subtext={subtext}
+        text={text}
+        laneBackground={laneBackground}
+        laneBorder={laneBorder}
+        laneShadow={laneShadow}
+        draggingColumnID={draggingColumnID}
+        dragOverColumnID={dragOverColumnID}
+        editingColumnID={editingColumnID}
+        resizeRef={resizeRef}
+        onBlankMouseDown={clearCardSelectionFromBlankClick}
+        onSetCardContextMenu={setCardContextMenu}
+        onSetColumnContextMenu={setColumnContextMenu}
+        onSetDraggingColumnID={setDraggingColumnID}
+        onSetDragOverColumnID={setDragOverColumnID}
+        onSetColumns={setColumns}
+        onSetEditingColumnID={setEditingColumnID}
+        onCommitColumnTitle={(columnID, title) => void commitColumnTitle(columnID, title)}
+        onRefreshBoard={() => void refreshBoard()}
+        onCreateNodeInColumn={(columnID, anchor) => requestCreateNodeInColumn(columnID, anchor)}
+        onDropColumn={onDropColumn}
+        dataTransferIncludes={dataTransferIncludes}
+        showCreateNodeButton
+        layout={layout}
+        minimumColumnHeightPx={layout === "backlog" ? 190 : (arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : undefined)}
+      />
+    );
+  };
+
   const contextColumn = columnContextMenu ? columns.find((column) => column.column_id === columnContextMenu.columnID) : null;
   const contextCard = cardContextMenu ? cards.find((card) => card.card_id === cardContextMenu.cardID) : null;
   const contextCardSelectionIDs = contextCard
@@ -2124,45 +2146,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} /> : (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
-          {orderedColumns.map((column) => {
-            const columnCards = cardsByColumn.get(column.column_id) ?? [];
-            return (
-              <KanbanColumnView
-                key={column.column_id}
-                column={column}
-                columnCards={columnCards}
-                renderedCards={columnCards.map((card) => renderCard(card))}
-                accent={accent}
-                line={line}
-                subtext={subtext}
-                text={text}
-                laneBackground={laneBackground}
-                laneBorder={laneBorder}
-                laneShadow={laneShadow}
-                draggingColumnID={draggingColumnID}
-                dragOverColumnID={dragOverColumnID}
-                editingColumnID={editingColumnID}
-                resizeRef={resizeRef}
-                onBlankMouseDown={clearCardSelectionFromBlankClick}
-                onSetCardContextMenu={setCardContextMenu}
-                onSetColumnContextMenu={setColumnContextMenu}
-                onSetDraggingColumnID={setDraggingColumnID}
-                onSetDragOverColumnID={setDragOverColumnID}
-                onSetColumns={setColumns}
-                onSetEditingColumnID={setEditingColumnID}
-                onCommitColumnTitle={(columnID, title) => void commitColumnTitle(columnID, title)}
-                onRefreshBoard={() => void refreshBoard()}
-                onRequestColumnDelete={requestColumnDelete}
-                onCreateNodeInColumn={(columnID, anchor) => requestCreateNodeInColumn(columnID, anchor)}
-                onDropColumn={onDropColumn}
-                dataTransferIncludes={dataTransferIncludes}
-                showCreateNodeButton={!arenaMode}
-                minimumColumnHeightPx={arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : undefined}
-              />
-            );
-          })}
-          {!arenaMode && !activeBoardIsLogicGate && <button
+        <div style={{ display: "grid", alignItems: "start", gap: useBacklogBottomLayout ? 12 : 0, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: useBacklogBottomLayout ? 0 : 16 }}>
+            {mainBoardColumns.map((column) => renderColumnView(column))}
+            {!arenaMode && !activeBoardIsLogicGate && <button
             className="mango-elevated-action"
             type="button"
             title="Add column"
@@ -2193,7 +2180,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             }}
           >
             +
-          </button>}
+            </button>}
+          </div>
+          {useBacklogBottomLayout && (
+            <div style={{ display: "grid", alignItems: "start", paddingBottom: 16 }}>
+              {backlogColumns.map((column) => renderColumnView(column, "backlog"))}
+            </div>
+          )}
         </div>
         )}
       </div>
@@ -2214,7 +2207,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setEditingColumnID(columnID);
           setColumnContextMenu(null);
         }}
-        onRequestColumnDelete={requestColumnDelete}
         onPersistColumnItemColor={(columnID, color) => void persistColumnItemColor(columnID, color)}
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
         onRenameNode={requestNodeRename}
@@ -2262,7 +2254,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <KanbanDeleteConfirmations
         deleteNodeConfirmation={deleteNodeConfirmation}
         deleteCardConfirmation={deleteCardConfirmation}
-        deleteColumnConfirmation={deleteColumnConfirmation}
         onRemoveNodes={(nodeIDs) => {
           void removeNodes(nodeIDs);
           setDeleteNodeConfirmation(null);
@@ -2271,13 +2262,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void removeCards(cardIDs);
           setDeleteCardConfirmation(null);
         }}
-        onRemoveColumn={(columnID) => {
-          void removeColumn(columnID);
-          setDeleteColumnConfirmation(null);
-        }}
         onCancelNodeDelete={() => setDeleteNodeConfirmation(null)}
         onCancelCardDelete={() => setDeleteCardConfirmation(null)}
-        onCancelColumnDelete={() => setDeleteColumnConfirmation(null)}
       />
     </div>
   );

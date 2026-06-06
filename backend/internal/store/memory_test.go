@@ -795,15 +795,16 @@ func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListKanbanColumns failed: %v", err)
 	}
+	backlog := mustFindKanbanColumn(t, columns, "Backlogs")
 	pending := mustFindKanbanColumn(t, columns, "Pending")
 	inProgress := mustFindKanbanColumn(t, columns, "In Progress")
 	verify := mustFindKanbanColumn(t, columns, "Verify")
 	done := mustFindKanbanColumn(t, columns, "Done")
-	if pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || verify.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
-		t.Fatalf("default colors = %q/%q/%q/%q", pending.ItemColor, inProgress.ItemColor, verify.ItemColor, done.ItemColor)
+	if backlog.ItemColor != KanbanDefaultBacklogColor || pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || verify.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
+		t.Fatalf("default colors = %q/%q/%q/%q/%q", backlog.ItemColor, pending.ItemColor, inProgress.ItemColor, verify.ItemColor, done.ItemColor)
 	}
-	if pending.Position >= inProgress.Position || inProgress.Position >= verify.Position || verify.Position >= done.Position {
-		t.Fatalf("default column order = %d/%d/%d/%d, want Pending, In Progress, Verify, Done", pending.Position, inProgress.Position, verify.Position, done.Position)
+	if backlog.Position >= pending.Position || pending.Position >= inProgress.Position || inProgress.Position >= verify.Position || verify.Position >= done.Position {
+		t.Fatalf("default column order = %d/%d/%d/%d/%d, want Backlogs, Pending, In Progress, Verify, Done", backlog.Position, pending.Position, inProgress.Position, verify.Position, done.Position)
 	}
 	if err := repo.DeleteKanbanBoard(companyID, boards[0].BoardID); err != ErrInvalid {
 		t.Fatalf("expected attached board delete to return ErrInvalid, got %v", err)
