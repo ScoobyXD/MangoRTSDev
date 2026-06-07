@@ -72,9 +72,10 @@ const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
 const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
 const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
+const TEXT_BLOCK_RESIZE_MIN_WIDTH_PX = 160;
 const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
-const TEXT_SIDE_PANE_MAX_WIDTH_PX = 760;
+const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v1";
 
@@ -97,9 +98,25 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
   return `${time} ${day}`;
 }
 
-function clampTextSidePaneWidth(value: number): number {
+function clampTextSidePaneWidth(value: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number {
   if (!Number.isFinite(value)) return TEXT_SIDE_PANE_DEFAULT_WIDTH_PX;
-  return Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(TEXT_SIDE_PANE_MAX_WIDTH_PX, Math.round(value)));
+  const safeMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(TEXT_SIDE_PANE_MAX_WIDTH_PX, Math.round(maxWidth)));
+  return Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(safeMaxWidth, Math.round(value)));
+}
+
+function fitTextSidePaneWidths(widths: number[], maxCombinedWidth: number): number[] {
+  if (widths.length === 0) return [];
+  const minTotalWidth = TEXT_SIDE_PANE_MIN_WIDTH_PX * widths.length;
+  const safeMaxCombinedWidth = Math.max(minTotalWidth, Math.round(maxCombinedWidth));
+  const maxSingleWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, safeMaxCombinedWidth - (TEXT_SIDE_PANE_MIN_WIDTH_PX * (widths.length - 1)));
+  const clamped = widths.map((width) => clampTextSidePaneWidth(width, maxSingleWidth));
+  const totalWidth = clamped.reduce((sum, width) => sum + width, 0);
+  if (totalWidth <= safeMaxCombinedWidth) return clamped;
+  const requestedExtras = clamped.map((width) => Math.max(0, width - TEXT_SIDE_PANE_MIN_WIDTH_PX));
+  const totalRequestedExtra = requestedExtras.reduce((sum, width) => sum + width, 0);
+  const availableExtra = Math.max(0, safeMaxCombinedWidth - minTotalWidth);
+  if (totalRequestedExtra <= 0) return clamped.map(() => TEXT_SIDE_PANE_MIN_WIDTH_PX);
+  return requestedExtras.map((extra) => Math.round(TEXT_SIDE_PANE_MIN_WIDTH_PX + ((extra / totalRequestedExtra) * availableExtra)));
 }
 
 function textSidePaneWidthStorageKey(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind): string {
@@ -349,16 +366,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return Array.from(byMessageID.values());
   }, [attachedEmails]);
   const compact = width > 0 && width < 720;
-  const textSidePaneAvailableWidth = Math.max(
-    TEXT_SIDE_PANE_MIN_WIDTH_PX,
+  const textCommunicationContentWidth = Math.max(
+    TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX,
     width
       - TEXT_CHAT_HORIZONTAL_PADDING_PX
       - TEXT_TIMELINE_COLUMN_WIDTH_PX
+      - TEXT_CHAT_GRID_COLUMN_GAP_PX,
+  );
+  const textSidePaneAvailableWidth = Math.max(
+    TEXT_SIDE_PANE_MIN_WIDTH_PX,
+    textCommunicationContentWidth
+      - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX
       - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX
-      - (TEXT_CHAT_GRID_COLUMN_GAP_PX * 3),
+      - (TEXT_CHAT_GRID_COLUMN_GAP_PX * 2),
   );
   const textSidePaneDefaultWidth = clampTextSidePaneWidth(
     Math.min(TEXT_SIDE_PANE_DEFAULT_WIDTH_PX, Math.round(textSidePaneAvailableWidth * 0.36)),
+    textSidePaneAvailableWidth,
   );
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
@@ -1234,13 +1258,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID("");
   }, []);
 
-  const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number): number => {
+  const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
-    if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth);
-    return readStoredTextSidePaneWidth(companyID, nodeID, blockID, pane, fallback);
+    if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth, maxWidth);
+    return clampTextSidePaneWidth(readStoredTextSidePaneWidth(companyID, nodeID, blockID, pane, fallback), maxWidth);
   }, [companyID, nodeID, sidePaneWidths]);
 
-  const startTextSidePaneResize = useCallback((blockID: string, pane: TextSidePaneKind, fallbackWidth: number, event: React.PointerEvent<HTMLDivElement>) => {
+  const startTextSidePaneResize = useCallback((blockID: string, pane: TextSidePaneKind, fallbackWidth: number, maxWidth: number, event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const paneElement = event.currentTarget.nextElementSibling;
@@ -1251,10 +1275,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const ownerDocument = event.currentTarget.ownerDocument;
     const previousCursor = ownerDocument.body.style.cursor;
     ownerDocument.body.style.cursor = "col-resize";
-    let latestWidth = clampTextSidePaneWidth(startWidth);
+    let latestWidth = clampTextSidePaneWidth(startWidth, maxWidth);
 
     const updateWidth = (clientX: number) => {
-      latestWidth = clampTextSidePaneWidth(startWidth + startX - clientX);
+      latestWidth = clampTextSidePaneWidth(startWidth + startX - clientX, maxWidth);
       setSidePaneWidths((current) => ({
         ...current,
         [blockID]: {
@@ -1311,7 +1335,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks, canEdit, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
 
-  const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, fallbackWidth: number) => {
+  const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, fallbackWidth: number, maxWidth: number) => {
     if (compact) return null;
     return (
       <div
@@ -1319,7 +1343,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         aria-label={`Resize ${pane} column`}
         aria-orientation="vertical"
         data-frame-interactive="true"
-        onPointerDown={(event) => startTextSidePaneResize(blockID, pane, fallbackWidth, event)}
+        onPointerDown={(event) => startTextSidePaneResize(blockID, pane, fallbackWidth, maxWidth, event)}
         style={{
           alignSelf: "stretch",
           minHeight: 40,
@@ -1645,14 +1669,38 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatPaneIsVisible = chatIsVisible;
           const sidePaneCount = (emailPaneIsVisible ? 1 : 0) + (chatPaneIsVisible ? 1 : 0);
           const stackedSidePanes = compact || (sidePaneCount > 1 && width > 0 && width < 1080);
+          const sidePaneChromeWidth = sidePaneCount > 0
+            ? (TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX * sidePaneCount) + (TEXT_CHAT_GRID_COLUMN_GAP_PX * sidePaneCount * 2)
+            : 0;
+          const maxCombinedSidePaneWidth = sidePaneCount > 0
+            ? Math.max(
+              TEXT_SIDE_PANE_MIN_WIDTH_PX * sidePaneCount,
+              textCommunicationContentWidth - TEXT_BLOCK_RESIZE_MIN_WIDTH_PX - sidePaneChromeWidth,
+            )
+            : TEXT_SIDE_PANE_MIN_WIDTH_PX;
+          const sidePaneMaxWidth = Math.max(
+            TEXT_SIDE_PANE_MIN_WIDTH_PX,
+            maxCombinedSidePaneWidth - (TEXT_SIDE_PANE_MIN_WIDTH_PX * Math.max(0, sidePaneCount - 1)),
+          );
           const sidePaneFallbackWidth = sidePaneCount > 1
-            ? clampTextSidePaneWidth(Math.min(420, Math.floor(Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, textSidePaneAvailableWidth - 360) / sidePaneCount)))
+            ? clampTextSidePaneWidth(Math.min(420, Math.floor(maxCombinedSidePaneWidth / sidePaneCount)), sidePaneMaxWidth)
             : textSidePaneDefaultWidth;
-          const emailPaneWidth = sidePaneWidthForBlock(block.id, "email", sidePaneFallbackWidth);
-          const chatPaneWidth = sidePaneWidthForBlock(block.id, "chat", sidePaneFallbackWidth);
+          const rawEmailPaneWidth = sidePaneWidthForBlock(block.id, "email", sidePaneFallbackWidth, sidePaneMaxWidth);
+          const rawChatPaneWidth = sidePaneWidthForBlock(block.id, "chat", sidePaneFallbackWidth, sidePaneMaxWidth);
+          const fittedSidePaneWidths = fitTextSidePaneWidths(
+            [
+              emailPaneIsVisible ? rawEmailPaneWidth : 0,
+              chatPaneIsVisible ? rawChatPaneWidth : 0,
+            ].filter((paneWidth) => paneWidth > 0),
+            maxCombinedSidePaneWidth,
+          );
+          const emailPaneWidth = emailPaneIsVisible ? fittedSidePaneWidths[0] ?? rawEmailPaneWidth : rawEmailPaneWidth;
+          const chatPaneWidth = chatPaneIsVisible ? fittedSidePaneWidths[emailPaneIsVisible ? 1 : 0] ?? rawChatPaneWidth : rawChatPaneWidth;
+          const emailPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (chatPaneIsVisible ? chatPaneWidth : 0));
+          const chatPaneMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, maxCombinedSidePaneWidth - (emailPaneIsVisible ? emailPaneWidth : 0));
           const blockCommunicationGridTemplateColumns = !stackedSidePanes && sidePaneCount > 0
             ? [
-              "minmax(360px, 1fr)",
+              `minmax(${TEXT_BLOCK_RESIZE_MIN_WIDTH_PX}px, 1fr)`,
               emailPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
               emailPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${emailPaneWidth}px)` : "",
               chatPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
@@ -1677,6 +1725,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 openBlockEmail(block.id, messageID);
                 setSelectedEmailID(messageID);
               }}
+              onError={onError}
             />
           );
           const toggleChat = () => {
@@ -1847,13 +1896,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
                   />
                 </div>
-                {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth)}
+                {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth, emailPaneMaxWidth)}
                 {emailPaneIsVisible && (
                   <div style={{ minWidth: 0, height: CHAT_PANE_DEFAULT_HEIGHT, gridColumn: stackedSidePanes ? "1 / -1" : undefined, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}>
                     {blockEmailPane}
                   </div>
                 )}
-                {chatPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "chat", chatPaneWidth)}
+                {chatPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "chat", chatPaneWidth, chatPaneMaxWidth)}
                 {chatPaneIsVisible && (
                   <div style={{ minWidth: 0, gridColumn: stackedSidePanes ? "1 / -1" : undefined }}>
                   <ChatPane

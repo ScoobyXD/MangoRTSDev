@@ -2323,6 +2323,7 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
 type AttachedEmailFolderLayout = {
   id: string;
   name: string;
+  parentID?: string;
   collapsed: boolean;
 };
 
@@ -2343,6 +2344,7 @@ type AttachedEmailOrganizerPaneProps = {
   strokeColor: string;
   ruleColor: string;
   onOpenEmail: (messageID: string) => void;
+  onError: (message: string) => void;
 };
 
 const EMPTY_ATTACHED_EMAIL_LAYOUT: AttachedEmailPaneLayout = {
@@ -2391,7 +2393,8 @@ function readStoredAttachedEmailPaneLayout(storageKey: string): AttachedEmailPan
           .map((folder): AttachedEmailFolderLayout | null => {
             const id = typeof folder?.id === "string" ? folder.id.trim() : "";
             const name = typeof folder?.name === "string" ? folder.name.trim() : "";
-            return id && name ? { id, name, collapsed: Boolean(folder.collapsed) } : null;
+            const parentID = typeof folder?.parentID === "string" ? folder.parentID.trim() : "";
+            return id && name ? { id, name, parentID: parentID || undefined, collapsed: Boolean(folder.collapsed) } : null;
           })
           .filter((folder): folder is AttachedEmailFolderLayout => Boolean(folder))
         : [],
@@ -2418,8 +2421,34 @@ function writeStoredAttachedEmailPaneLayout(storageKey: string, layout: Attached
 function normalizeAttachedEmailPaneLayout(layout: AttachedEmailPaneLayout, emails: EditorAttachedEmail[]): AttachedEmailPaneLayout {
   const emailIDs = uniqueAttachedEmailsByMessageID(emails).map((email) => email.messageID);
   const emailIDSet = new Set(emailIDs);
-  const folders = layout.folders.filter((folder) => folder.id.trim() && folder.name.trim());
-  const folderIDs = new Set(folders.map((folder) => folder.id));
+  const folders = layout.folders.reduce<AttachedEmailFolderLayout[]>((next, folder) => {
+    const id = folder.id.trim();
+    const name = folder.name.trim();
+    if (!id || !name || next.some((item) => item.id === id)) return next;
+    next.push({ id, name, parentID: folder.parentID?.trim() || undefined, collapsed: Boolean(folder.collapsed) });
+    return next;
+  }, []);
+  const initialFolderIDs = new Set(folders.map((folder) => folder.id));
+  const foldersWithValidParents = folders.map((folder) => {
+    const parentID = folder.parentID?.trim() ?? "";
+    if (!parentID || parentID === folder.id || !initialFolderIDs.has(parentID)) return { ...folder, parentID: undefined };
+    return { ...folder, parentID };
+  });
+  const folderByID = new Map(foldersWithValidParents.map((folder) => [folder.id, folder]));
+  const createsCycle = (folderID: string, parentID: string): boolean => {
+    let cursor = parentID;
+    const visited = new Set<string>();
+    while (cursor) {
+      if (cursor === folderID || visited.has(cursor)) return true;
+      visited.add(cursor);
+      cursor = folderByID.get(cursor)?.parentID ?? "";
+    }
+    return false;
+  };
+  const normalizedFolders = foldersWithValidParents.map((folder) => (
+    folder.parentID && createsCycle(folder.id, folder.parentID) ? { ...folder, parentID: undefined } : folder
+  ));
+  const folderIDs = new Set(normalizedFolders.map((folder) => folder.id));
   const emailOrder = layout.emailOrder.filter((id) => emailIDSet.has(id));
   for (const id of emailIDs) {
     if (!emailOrder.includes(id)) emailOrder.push(id);
@@ -2429,7 +2458,7 @@ function normalizeAttachedEmailPaneLayout(layout: AttachedEmailPaneLayout, email
     if (emailIDSet.has(emailID) && folderIDs.has(folderID)) emailFolderByID[emailID] = folderID;
   }
   return {
-    folders,
+    folders: normalizedFolders,
     emailOrder,
     emailFolderByID,
     collapsedThreadIDs: layout.collapsedThreadIDs.filter((id) => emailIDSet.has(id)),
@@ -2466,6 +2495,7 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
 const AttachedEmailThreadCard: React.FC<{
   email: EditorAttachedEmail;
   companyID: string;
+  editable: boolean;
   accent: string;
   surfaceText: string;
   strokeColor: string;
@@ -2473,21 +2503,25 @@ const AttachedEmailThreadCard: React.FC<{
   selected: boolean;
   collapsed: boolean;
   draggable: boolean;
+  replyTargetMessageID?: string;
   onToggleCollapsed: () => void;
   onSelect: () => void;
-  onOpenEmail: () => void;
+  onOpenEmail: (messageID: string) => void;
+  onReply: (messageID: string) => void;
+  onCloseReply: () => void;
+  onError: (message: string) => void;
   onDragStart: React.DragEventHandler<HTMLDivElement>;
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
-}> = ({ email, companyID, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, onToggleCollapsed, onSelect, onOpenEmail, onDragStart, onDropOnEmail }) => {
+}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", onToggleCollapsed, onSelect, onOpenEmail, onReply, onCloseReply, onError, onDragStart, onDropOnEmail }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    if (collapsed) return;
     setLoading(true);
     setLoadError("");
+    setThreadMessages([]);
     void loadAttachedEmailThreadPreview(email, companyID)
       .then((messages) => {
         if (!cancelled) setThreadMessages(messages);
@@ -2499,10 +2533,29 @@ const AttachedEmailThreadCard: React.FC<{
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [collapsed, companyID, email]);
+  }, [companyID, email]);
 
   const childMessages = threadMessages.filter((message) => message.id !== email.messageID);
-  const canCollapse = childMessages.length > 0 || loading || !collapsed;
+  const hasThreadChildren = childMessages.length > 0;
+  const replyComposerOpen = Boolean(replyTargetMessageID);
+  const replyButtonStyle = (enabled: boolean): React.CSSProperties => ({
+    minHeight: 22,
+    border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+    borderRadius: 7,
+    background: EDITOR_NEU_SURFACE,
+    color: accent,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    cursor: enabled ? "pointer" : "default",
+    opacity: enabled ? 1 : 0.45,
+    padding: "2px 7px",
+    fontSize: 9.5,
+    fontWeight: 850,
+    letterSpacing: 0,
+    boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
+  });
 
   return (
     <div
@@ -2521,7 +2574,7 @@ const AttachedEmailThreadCard: React.FC<{
         tabIndex={0}
         title={email.subject}
         onClick={onSelect}
-        onDoubleClick={onOpenEmail}
+        onDoubleClick={() => onOpenEmail(email.messageID)}
         onKeyDown={(event) => {
           if (event.key === "Enter") onSelect();
         }}
@@ -2533,73 +2586,175 @@ const AttachedEmailThreadCard: React.FC<{
           borderRadius: 10,
           background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
           color: surfaceText,
-          cursor: "grab",
+          cursor: draggable ? "grab" : "pointer",
           padding: "9px 10px",
           boxShadow: selected ? "0 9px 22px rgba(15,23,42,0.12), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 8px rgba(174,174,192,0.15), -2px -2px 8px rgba(255,255,255,0.76), inset 1px 1px 0 rgba(255,255,255,0.86)",
         }}
       >
-        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7 }}>
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `${hasThreadChildren ? "22px " : ""}minmax(0, 1fr) auto auto`, alignItems: "center", gap: 7 }}>
+          {hasThreadChildren && (
+            <button
+              type="button"
+              title={collapsed ? "Expand email thread" : "Collapse email thread"}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleCollapsed();
+              }}
+              style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+            >
+              <TinyDisclosureIcon open={!collapsed} color={accent} />
+            </button>
+          )}
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
+          <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
           <button
             type="button"
-            title={collapsed ? "Expand email thread" : "Collapse email thread"}
+            disabled={!editable}
+            title="Reply"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onToggleCollapsed();
+              if (editable) onReply(email.messageID);
             }}
-            style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: canCollapse ? "pointer" : "default", padding: 0, opacity: canCollapse ? 1 : 0.45 }}
+            style={replyButtonStyle(editable)}
           >
-            <TinyDisclosureIcon open={!collapsed} color={accent} />
+            <ChatIcon color={accent} />
+            Reply
           </button>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
-          <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
         </div>
         <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 800 }}>
           {email.from || "Unknown sender"}
         </div>
         {email.snippet && <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.72)", fontSize: 10.5, fontWeight: 650 }}>{email.snippet}</div>}
       </div>
-      {!collapsed && (
+      {!collapsed && (loading || loadError || hasThreadChildren) && (
         <div style={{ minWidth: 0, display: "grid", gap: 6, marginLeft: 22, paddingLeft: 10, borderLeft: `2px solid ${ruleColor}` }}>
           {loading && <div style={{ color: accent, fontSize: 10.5, fontWeight: 850, padding: "2px 0" }}>Loading thread</div>}
           {loadError && <div style={{ color: "#991b1b", fontSize: 10.5, fontWeight: 800 }}>{loadError}</div>}
           {childMessages.map((message) => {
             const relative = formatEmailRelativeTime(message.date);
             return (
-              <button
+              <div
                 key={message.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 title={message.subject || email.subject}
-                onClick={onOpenEmail}
+                onClick={() => onOpenEmail(message.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onOpenEmail(message.id);
+                }}
                 style={{ minWidth: 0, display: "grid", gap: 3, border: `1px solid ${strokeColor}`, borderRadius: 9, background: "rgba(255,255,255,0.82)", color: surfaceText, cursor: "pointer", padding: "7px 8px", textAlign: "left", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}
               >
-                <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 7, alignItems: "center" }}>
+                <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 7, alignItems: "center" }}>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</span>
                   <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.3, fontWeight: 760, whiteSpace: "nowrap" }}>{formatTimestamp(message.date)}{relative ? ` (${relative})` : ""}</span>
+                  <button
+                    type="button"
+                    disabled={!editable}
+                    title="Reply"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (editable) onReply(message.id);
+                    }}
+                    style={replyButtonStyle(editable)}
+                  >
+                    <ChatIcon color={accent} />
+                    Reply
+                  </button>
                 </span>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.76)", fontSize: 10, fontWeight: 650 }}>{emailBodyText(message.body || message.snippet || "") || "(empty email)"}</span>
-              </button>
+              </div>
             );
           })}
+        </div>
+      )}
+      {replyComposerOpen && (
+        <div
+          style={{
+            minWidth: 0,
+            height: 394,
+            display: "grid",
+            gridTemplateRows: "auto minmax(0, 1fr)",
+            gap: 7,
+            marginLeft: hasThreadChildren ? 22 : 0,
+            border: "1px solid transparent",
+            borderRadius: 12,
+            background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+            boxShadow: "0 12px 28px rgba(15,23,42,0.12), 0 0 18px rgba(6,182,212,0.14), inset 1px 1px 0 rgba(255,255,255,0.84)",
+            padding: 8,
+          }}
+        >
+          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7 }}>
+            <ChatIcon color={accent} />
+            <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 11, fontWeight: 900 }}>Reply</span>
+            <button
+              type="button"
+              title="Close reply"
+              onClick={onCloseReply}
+              style={{ width: 24, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, fontSize: 13, fontWeight: 900, boxShadow: "1px 1px 5px rgba(174,174,192,0.16), -1px -1px 5px rgba(255,255,255,0.78)" }}
+            >
+              x
+            </button>
+          </div>
+          <div style={{ minHeight: 0, overflow: "hidden" }}>
+            <EmailConversationPane
+              messageID={email.messageID}
+              companyID={companyID}
+              editable={editable}
+              accent={accent}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              ruleColor={ruleColor}
+              initialReplyTargetMessageID={replyTargetMessageID}
+              onError={onError}
+            />
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, onOpenEmail }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, onOpenEmail, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [selectedMessageID, setSelectedMessageID] = useState("");
+  const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
   const uniqueEmails = useMemo(() => uniqueAttachedEmailsByMessageID(emails), [emails]);
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
   const orderedEmails = useMemo(() => normalizedLayout.emailOrder.map((id) => emailByID.get(id)).filter((email): email is EditorAttachedEmail => Boolean(email)), [emailByID, normalizedLayout.emailOrder]);
   const collapsedThreadIDs = useMemo(() => new Set(normalizedLayout.collapsedThreadIDs), [normalizedLayout.collapsedThreadIDs]);
+  const childFoldersByParentID = useMemo(() => {
+    const groups = new Map<string, AttachedEmailFolderLayout[]>();
+    for (const folder of normalizedLayout.folders) {
+      const parentID = folder.parentID ?? "";
+      const group = groups.get(parentID) ?? [];
+      group.push(folder);
+      groups.set(parentID, group);
+    }
+    return groups;
+  }, [normalizedLayout.folders]);
+  const emailsByFolderID = useMemo(() => {
+    const groups = new Map<string, EditorAttachedEmail[]>();
+    for (const email of orderedEmails) {
+      const folderID = normalizedLayout.emailFolderByID[email.messageID] ?? "";
+      const group = groups.get(folderID) ?? [];
+      group.push(email);
+      groups.set(folderID, group);
+    }
+    return groups;
+  }, [normalizedLayout.emailFolderByID, orderedEmails]);
 
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));
   }, [storageKey]);
+
+  useEffect(() => {
+    if (replyComposer && !emailByID.has(replyComposer.rootMessageID)) setReplyComposer(null);
+  }, [emailByID, replyComposer]);
 
   useEffect(() => {
     writeStoredAttachedEmailPaneLayout(storageKey, normalizedLayout);
@@ -2609,13 +2764,13 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     setLayout((current) => normalizeAttachedEmailPaneLayout(recipe(normalizeAttachedEmailPaneLayout(current, uniqueEmails)), uniqueEmails));
   }, [uniqueEmails]);
 
-  const createFolder = useCallback(() => {
+  const createFolder = useCallback((parentID = "") => {
     if (!editable) return;
     const folderName = window.prompt("Folder name", `Email folder ${normalizedLayout.folders.length + 1}`)?.trim();
     if (!folderName) return;
     updateLayout((current) => ({
       ...current,
-      folders: [...current.folders, { id: createAttachedEmailFolderID(), name: folderName, collapsed: false }],
+      folders: [...current.folders, { id: createAttachedEmailFolderID(), name: folderName, parentID: parentID || undefined, collapsed: false }],
     }));
   }, [editable, normalizedLayout.folders.length, updateLayout]);
 
@@ -2650,67 +2805,149 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     });
   }, [updateLayout]);
 
-  const renderDropSection = (folderID: string, label: string, folder?: AttachedEmailFolderLayout) => {
-    const folderEmails = orderedEmails.filter((email) => (normalizedLayout.emailFolderByID[email.messageID] ?? "") === folderID);
-    const collapsed = folder?.collapsed ?? false;
+  const countFolderEmails = useCallback((folderID: string) => {
+    const visit = (id: string): number => {
+      const directCount = emailsByFolderID.get(id)?.length ?? 0;
+      return directCount + (childFoldersByParentID.get(id) ?? []).reduce((sum, folder) => sum + visit(folder.id), 0);
+    };
+    return visit(folderID);
+  }, [childFoldersByParentID, emailsByFolderID]);
+
+  const renderEmailCards = (folderID: string) => (emailsByFolderID.get(folderID) ?? []).map((email) => (
+    <AttachedEmailThreadCard
+      key={email.messageID}
+      email={email}
+      companyID={companyID}
+      editable={editable}
+      accent={accent}
+      surfaceText={surfaceText}
+      strokeColor={strokeColor}
+      ruleColor={ruleColor}
+      selected={selectedMessageID === email.messageID}
+      collapsed={collapsedThreadIDs.has(email.messageID)}
+      draggable={editable}
+      replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
+      onToggleCollapsed={() => toggleThread(email.messageID)}
+      onSelect={() => setSelectedMessageID(email.messageID)}
+      onOpenEmail={onOpenEmail}
+      onReply={(targetMessageID) => setReplyComposer({ rootMessageID: email.messageID, targetMessageID })}
+      onCloseReply={() => setReplyComposer((current) => (current?.rootMessageID === email.messageID ? null : current))}
+      onError={onError}
+      onDragStart={(event) => {
+        if (!editable) return;
+        setDraggingMessageID(email.messageID);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", email.subject);
+      }}
+      onDropOnEmail={(event) => {
+        if (!draggingMessageID || draggingMessageID === email.messageID) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveEmail(draggingMessageID, folderID, email.messageID);
+        setDraggingMessageID("");
+      }}
+    />
+  ));
+
+  const renderFolder = (folder: AttachedEmailFolderLayout, depth = 0): React.ReactNode => {
+    const childFolders = childFoldersByParentID.get(folder.id) ?? [];
+    const directEmails = emailsByFolderID.get(folder.id) ?? [];
+    const totalEmailCount = countFolderEmails(folder.id);
+    const hasContent = childFolders.length > 0 || directEmails.length > 0;
+    const nested = depth > 0;
     return (
-      <div key={folderID || "unfiled"} style={{ minWidth: 0, display: "grid", gap: 7 }}>
-        <div
-          onDragOver={(event) => {
-            if (!editable || !draggingMessageID) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-          }}
-          onDrop={(event) => {
-            if (!draggingMessageID) return;
-            event.preventDefault();
-            moveEmail(draggingMessageID, folderID);
-            setDraggingMessageID("");
-          }}
-          style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 28, border: `1px solid ${strokeColor}`, borderRadius: 9, background: folderID ? "rgba(255,255,255,0.78)" : "transparent", padding: folderID ? "4px 7px" : "0 2px", color: surfaceText }}
-        >
-          {folder && (
-            <button type="button" title={collapsed ? "Expand folder" : "Collapse folder"} onClick={() => toggleFolder(folder.id)} style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
-              <TinyDisclosureIcon open={!collapsed} color={accent} />
+      <div
+        key={folder.id}
+        onDragOver={(event) => {
+          if (!editable || !draggingMessageID) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (!draggingMessageID) return;
+          event.preventDefault();
+          event.stopPropagation();
+          moveEmail(draggingMessageID, folder.id);
+          setDraggingMessageID("");
+        }}
+        style={{
+          minWidth: 0,
+          display: "grid",
+          gap: folder.collapsed ? 0 : 8,
+          border: "1px solid transparent",
+          borderRadius: 13,
+          background: `${nested ? "rgba(255,255,255,0.76)" : EDITOR_NEU_PANEL_BACKGROUND} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+          boxShadow: nested ? "2px 2px 8px rgba(174,174,192,0.13), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.8)" : EDITOR_NEU_SHADOW,
+          padding: 8,
+        }}
+      >
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}>
+          {hasContent ? (
+            <button type="button" title={folder.collapsed ? "Expand folder" : "Collapse folder"} onClick={() => toggleFolder(folder.id)} style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_ACTIVE_SURFACE, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
+              <TinyDisclosureIcon open={!folder.collapsed} color={accent} />
+            </button>
+          ) : (
+            <span aria-hidden="true" style={{ width: 22, height: 22 }} />
+          )}
+          <FolderIcon color={accent} />
+          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}>{folder.name}</span>
+          {editable && (
+            <button type="button" title="Create nested folder" onClick={(event) => { event.stopPropagation(); createFolder(folder.id); }} style={{ width: 24, height: 23, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, boxShadow: "1px 1px 5px rgba(174,174,192,0.14), -1px -1px 5px rgba(255,255,255,0.78)" }}>
+              <FolderPlusIcon color={accent} />
             </button>
           )}
-          {folder ? <FolderIcon color={accent} /> : <MailIcon color={accent} />}
-          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{label}</span>
-          <span style={{ flex: "0 0 auto", minWidth: 20, height: 20, borderRadius: 999, background: "rgba(100,116,139,0.10)", color: "rgba(51,65,85,0.82)", display: "grid", placeItems: "center", fontSize: 9.5, fontWeight: 900 }}>{folderEmails.length}</span>
+          <span style={{ flex: "0 0 auto", minWidth: 22, height: 21, borderRadius: 999, background: "rgba(100,116,139,0.11)", color: "rgba(51,65,85,0.84)", display: "grid", placeItems: "center", fontSize: 9.5, fontWeight: 900 }}>{totalEmailCount}</span>
         </div>
-        {!collapsed && (
-          <div style={{ minWidth: 0, display: "grid", gap: 8, paddingLeft: folderID ? 18 : 0 }}>
-            {folderEmails.map((email) => (
-              <AttachedEmailThreadCard
-                key={email.messageID}
-                email={email}
-                companyID={companyID}
-                accent={accent}
-                surfaceText={surfaceText}
-                strokeColor={strokeColor}
-                ruleColor={ruleColor}
-                selected={selectedMessageID === email.messageID}
-                collapsed={collapsedThreadIDs.has(email.messageID)}
-                draggable={editable}
-                onToggleCollapsed={() => toggleThread(email.messageID)}
-                onSelect={() => setSelectedMessageID(email.messageID)}
-                onOpenEmail={() => onOpenEmail(email.messageID)}
-                onDragStart={(event) => {
-                  if (!editable) return;
-                  setDraggingMessageID(email.messageID);
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", email.subject);
-                }}
-                onDropOnEmail={(event) => {
-                  if (!draggingMessageID || draggingMessageID === email.messageID) return;
-                  event.preventDefault();
-                  moveEmail(draggingMessageID, folderID, email.messageID);
-                  setDraggingMessageID("");
-                }}
-              />
-            ))}
+        {!folder.collapsed && (
+          <div style={{ minWidth: 0, display: "grid", gap: 8, marginLeft: 12, paddingLeft: 11, paddingBottom: 2, borderLeft: `2px solid ${ruleColor}` }}>
+            {childFolders.map((childFolder) => renderFolder(childFolder, depth + 1))}
+            {renderEmailCards(folder.id)}
+            {!hasContent && (
+              <div style={{ minWidth: 0, minHeight: 34, display: "grid", placeItems: "center", border: `1px dashed ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, color: "rgba(100,116,139,0.68)", fontSize: 10.5, fontWeight: 850, background: "rgba(255,255,255,0.5)" }}>
+                Drop emails here
+              </div>
+            )}
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderUnfiledGroup = () => {
+    const label = normalizedLayout.folders.length > 0 ? "Unfiled emails" : "Attached emails";
+    const unfiledCount = emailsByFolderID.get("")?.length ?? 0;
+    return (
+      <div
+        key="unfiled"
+        onDragOver={(event) => {
+          if (!editable || !draggingMessageID) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (!draggingMessageID) return;
+          event.preventDefault();
+          event.stopPropagation();
+          moveEmail(draggingMessageID, "");
+          setDraggingMessageID("");
+        }}
+        style={{ minWidth: 0, display: "grid", gap: 8, border: "1px solid transparent", borderRadius: 13, background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, boxShadow: EDITOR_NEU_SHADOW, padding: 8 }}
+      >
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}>
+          <MailIcon color={accent} />
+          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}>{label}</span>
+          <span style={{ flex: "0 0 auto", minWidth: 22, height: 21, borderRadius: 999, background: "rgba(100,116,139,0.11)", color: "rgba(51,65,85,0.84)", display: "grid", placeItems: "center", fontSize: 9.5, fontWeight: 900 }}>{unfiledCount}</span>
+        </div>
+        <div style={{ minWidth: 0, display: "grid", gap: 8, padding: "0 1px 1px" }}>
+          {renderEmailCards("")}
+          {unfiledCount === 0 && (
+            <div style={{ minWidth: 0, minHeight: 34, display: "grid", placeItems: "center", border: `1px dashed ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, color: "rgba(100,116,139,0.68)", fontSize: 10.5, fontWeight: 850, background: "rgba(255,255,255,0.5)" }}>
+              Drop emails here
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -2721,7 +2958,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         <MailIcon color={accent} />
         <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Email</span>
         {editable && (
-          <button type="button" title="Create email folder" onClick={createFolder} style={{ width: 26, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}>
+          <button type="button" title="Create email folder" onClick={() => createFolder("")} style={{ width: 26, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}>
             <FolderPlusIcon color={accent} />
           </button>
         )}
@@ -2737,8 +2974,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           </div>
         ) : (
           <>
-            {normalizedLayout.folders.map((folder) => renderDropSection(folder.id, folder.name, folder))}
-            {renderDropSection("", normalizedLayout.folders.length > 0 ? "Unfiled emails" : "Attached emails")}
+            {(childFoldersByParentID.get("") ?? []).map((folder) => renderFolder(folder))}
+            {renderUnfiledGroup()}
           </>
         )}
       </div>
@@ -2755,6 +2992,7 @@ type EmailConversationPaneProps = {
   strokeColor: string;
   ruleColor: string;
   activeSelection?: EmailActiveSelection | null;
+  initialReplyTargetMessageID?: string;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (quote: string) => void;
@@ -2978,6 +3216,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   strokeColor,
   ruleColor,
   activeSelection,
+  initialReplyTargetMessageID,
   onError,
   onSelectionChatRequest,
   onSelectionNodeRequest,
@@ -2996,6 +3235,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const appliedInitialReplyTargetRef = useRef("");
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
@@ -3082,6 +3322,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyTargetMessage = useMemo(() => (
     replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
   ), [displayThreadMessages, replyTargetMessageID]);
+
+  useEffect(() => {
+    const targetID = initialReplyTargetMessageID?.trim() ?? "";
+    const targetKey = `${messageID}:${targetID}`;
+    if (!editable || !targetID || appliedInitialReplyTargetRef.current === targetKey) return;
+    const target = displayThreadMessages.find((item) => item.id === targetID);
+    if (!target) return;
+    appliedInitialReplyTargetRef.current = targetKey;
+    setReplyTargetMessageID(target.id);
+    setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
+  }, [displayThreadMessages, editable, initialReplyTargetMessageID, message?.subject, messageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
