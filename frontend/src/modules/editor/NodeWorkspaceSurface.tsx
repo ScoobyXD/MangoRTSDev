@@ -1964,10 +1964,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       {selectedEmailID && (
         <EmailDetailModal
           messageID={selectedEmailID}
+          companyID={companyID}
+          editable={canEdit}
           accent={accent}
           surfaceText={surfaceText}
           panelBackground={panelBackground}
           strokeColor={strokeColor}
+          onError={onError}
           onClose={() => setSelectedEmailID("")}
         />
       )}

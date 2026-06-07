@@ -2719,7 +2719,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
+  const [editingFolder, setEditingFolder] = useState<{ folderID: string; draft: string; isNew: boolean } | null>(null);
   const folderMenuRef = useRef<HTMLDivElement | null>(null);
+  const folderTitleInputRef = useRef<HTMLInputElement | null>(null);
   const uniqueEmails = useMemo(() => uniqueAttachedEmailsByMessageID(emails), [emails]);
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
@@ -2764,33 +2766,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     setLayout((current) => normalizeAttachedEmailPaneLayout(recipe(normalizeAttachedEmailPaneLayout(current, uniqueEmails)), uniqueEmails));
   }, [uniqueEmails]);
 
-  const createFolder = useCallback((parentID = "") => {
-    if (!editable) return;
-    const folderName = window.prompt("Folder name", `Email folder ${normalizedLayout.folders.length + 1}`)?.trim();
-    if (!folderName) return;
-    updateLayout((current) => ({
-      ...current,
-      folders: [...current.folders, { id: createAttachedEmailFolderID(), name: folderName, parentID: parentID || undefined, collapsed: false }],
-    }));
-  }, [editable, normalizedLayout.folders.length, updateLayout]);
-
-  const renameFolder = useCallback((folderID: string) => {
-    if (!editable) return;
+  const removeFolder = useCallback((folderID: string) => {
     const folder = normalizedLayout.folders.find((item) => item.id === folderID);
     if (!folder) return;
-    const nextName = window.prompt("Folder name", folder.name)?.trim();
-    if (!nextName || nextName === folder.name) return;
-    updateLayout((current) => ({
-      ...current,
-      folders: current.folders.map((item) => item.id === folderID ? { ...item, name: nextName } : item),
-    }));
-  }, [editable, normalizedLayout.folders, updateLayout]);
-
-  const deleteFolder = useCallback((folderID: string) => {
-    if (!editable) return;
-    const folder = normalizedLayout.folders.find((item) => item.id === folderID);
-    if (!folder) return;
-    if (!window.confirm(`Delete "${folder.name}"? Emails stay attached.`)) return;
     updateLayout((current) => {
       const childFolders = new Map<string, AttachedEmailFolderLayout[]>();
       for (const item of current.folders) {
@@ -2820,7 +2798,74 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         emailFolderByID: nextFolderByID,
       };
     });
-  }, [editable, normalizedLayout.folders, updateLayout]);
+  }, [normalizedLayout.folders, updateLayout]);
+
+  const beginFolderTitleEdit = useCallback((folderID: string, draft: string, isNew = false) => {
+    if (!editable) return;
+    closeFolderMenu();
+    setEditingFolder({ folderID, draft, isNew });
+  }, [closeFolderMenu, editable]);
+
+  const createFolder = useCallback((parentID = "") => {
+    if (!editable) return;
+    const folderID = createAttachedEmailFolderID();
+    const folderName = `Email folder ${normalizedLayout.folders.length + 1}`;
+    updateLayout((current) => ({
+      ...current,
+      folders: [
+        ...current.folders.map((folder) => folder.id === parentID ? { ...folder, collapsed: false } : folder),
+        { id: folderID, name: folderName, parentID: parentID || undefined, collapsed: false },
+      ],
+    }));
+    beginFolderTitleEdit(folderID, folderName, true);
+  }, [beginFolderTitleEdit, editable, normalizedLayout.folders.length, updateLayout]);
+
+  const renameFolder = useCallback((folderID: string) => {
+    if (!editable) return;
+    const folder = normalizedLayout.folders.find((item) => item.id === folderID);
+    if (!folder) return;
+    beginFolderTitleEdit(folderID, folder.name);
+  }, [beginFolderTitleEdit, editable, normalizedLayout.folders]);
+
+  const commitFolderTitleEdit = useCallback(() => {
+    if (!editingFolder) return;
+    const cleanName = editingFolder.draft.trim();
+    const folder = normalizedLayout.folders.find((item) => item.id === editingFolder.folderID);
+    if (!folder) {
+      setEditingFolder(null);
+      return;
+    }
+    if (!cleanName) {
+      if (editingFolder.isNew) removeFolder(editingFolder.folderID);
+      setEditingFolder(null);
+      return;
+    }
+    updateLayout((current) => ({
+      ...current,
+      folders: current.folders.map((item) => item.id === editingFolder.folderID ? { ...item, name: cleanName } : item),
+    }));
+    setEditingFolder(null);
+  }, [editingFolder, normalizedLayout.folders, removeFolder, updateLayout]);
+
+  const cancelFolderTitleEdit = useCallback(() => {
+    if (editingFolder?.isNew) removeFolder(editingFolder.folderID);
+    setEditingFolder(null);
+  }, [editingFolder, removeFolder]);
+
+  const deleteFolder = useCallback((folderID: string) => {
+    if (!editable) return;
+    if (editingFolder?.folderID === folderID) setEditingFolder(null);
+    removeFolder(folderID);
+  }, [editable, editingFolder?.folderID, removeFolder]);
+
+  useEffect(() => {
+    if (!editingFolder) return;
+    const frame = window.requestAnimationFrame(() => {
+      folderTitleInputRef.current?.focus();
+      folderTitleInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editingFolder?.folderID]);
 
   const moveEmail = useCallback((messageID: string, folderID: string, beforeMessageID = "") => {
     if (!editable || !messageID) return;
@@ -2931,7 +2976,38 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}
         >
           <FolderIcon color={accent} />
-          <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}>{folder.name}</span>
+          {editingFolder?.folderID === folder.id ? (
+            <input
+              ref={folderTitleInputRef}
+              value={editingFolder.draft}
+              onChange={(event) => setEditingFolder((current) => current?.folderID === folder.id ? { ...current, draft: event.currentTarget.value } : current)}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              onBlur={commitFolderTitleEdit}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitFolderTitleEdit();
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelFolderTitleEdit();
+                }
+              }}
+              style={{ minWidth: 0, flex: "1 1 auto", height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 6px", fontSize: 11.5, fontWeight: 950, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.14)" }}
+            />
+          ) : (
+            <span
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                renameFolder(folder.id);
+              }}
+              style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}
+            >
+              {folder.name}
+            </span>
+          )}
           {editable && (
             <button type="button" title="Create nested folder" onClick={(event) => { event.stopPropagation(); createFolder(folder.id); }} style={{ width: 24, height: 23, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, boxShadow: "1px 1px 5px rgba(174,174,192,0.14), -1px -1px 5px rgba(255,255,255,0.78)" }}>
               <FolderPlusIcon color={accent} />
@@ -3909,17 +3985,101 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
 
 type EmailDetailModalProps = {
   messageID: string;
+  companyID: string;
+  editable: boolean;
   accent: string;
   surfaceText: string;
   panelBackground: string;
   strokeColor: string;
+  onError: (message: string) => void;
   onClose: () => void;
 };
 
-export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, accent, surfaceText, panelBackground, strokeColor, onClose }) => {
+type EmailDetailModalFrame = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+const EMAIL_DETAIL_MODAL_SIZE_STORAGE_KEY = "node-editor-email-viewer-size-v1";
+const EMAIL_DETAIL_MODAL_DEFAULT_WIDTH = 820;
+const EMAIL_DETAIL_MODAL_DEFAULT_HEIGHT = 690;
+const EMAIL_DETAIL_MODAL_MIN_WIDTH = 460;
+const EMAIL_DETAIL_MODAL_MIN_HEIGHT = 420;
+const EMAIL_DETAIL_MODAL_MARGIN = 14;
+
+function readStoredEmailDetailModalSize(): { width: number; height: number } {
+  if (typeof localStorage === "undefined") return { width: EMAIL_DETAIL_MODAL_DEFAULT_WIDTH, height: EMAIL_DETAIL_MODAL_DEFAULT_HEIGHT };
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EMAIL_DETAIL_MODAL_SIZE_STORAGE_KEY) ?? "{}") as Partial<{ width: number; height: number }>;
+    return {
+      width: Number.isFinite(parsed.width) ? Math.round(parsed.width ?? EMAIL_DETAIL_MODAL_DEFAULT_WIDTH) : EMAIL_DETAIL_MODAL_DEFAULT_WIDTH,
+      height: Number.isFinite(parsed.height) ? Math.round(parsed.height ?? EMAIL_DETAIL_MODAL_DEFAULT_HEIGHT) : EMAIL_DETAIL_MODAL_DEFAULT_HEIGHT,
+    };
+  } catch {
+    return { width: EMAIL_DETAIL_MODAL_DEFAULT_WIDTH, height: EMAIL_DETAIL_MODAL_DEFAULT_HEIGHT };
+  }
+}
+
+function storeEmailDetailModalSize(frame: Pick<EmailDetailModalFrame, "width" | "height">): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(EMAIL_DETAIL_MODAL_SIZE_STORAGE_KEY, JSON.stringify({ width: Math.round(frame.width), height: Math.round(frame.height) }));
+}
+
+function clampEmailDetailModalFrame(frame: EmailDetailModalFrame): EmailDetailModalFrame {
+  if (typeof window === "undefined") return frame;
+  const viewportWidth = Math.max(EMAIL_DETAIL_MODAL_MIN_WIDTH + (EMAIL_DETAIL_MODAL_MARGIN * 2), window.innerWidth);
+  const viewportHeight = Math.max(EMAIL_DETAIL_MODAL_MIN_HEIGHT + (EMAIL_DETAIL_MODAL_MARGIN * 2), window.innerHeight);
+  const maxWidth = Math.max(EMAIL_DETAIL_MODAL_MIN_WIDTH, viewportWidth - (EMAIL_DETAIL_MODAL_MARGIN * 2));
+  const maxHeight = Math.max(EMAIL_DETAIL_MODAL_MIN_HEIGHT, viewportHeight - (EMAIL_DETAIL_MODAL_MARGIN * 2));
+  const width = Math.min(Math.max(Math.round(frame.width), EMAIL_DETAIL_MODAL_MIN_WIDTH), maxWidth);
+  const height = Math.min(Math.max(Math.round(frame.height), EMAIL_DETAIL_MODAL_MIN_HEIGHT), maxHeight);
+  const left = Math.min(Math.max(Math.round(frame.left), EMAIL_DETAIL_MODAL_MARGIN), viewportWidth - width - EMAIL_DETAIL_MODAL_MARGIN);
+  const top = Math.min(Math.max(Math.round(frame.top), EMAIL_DETAIL_MODAL_MARGIN), viewportHeight - height - EMAIL_DETAIL_MODAL_MARGIN);
+  return { left, top, width, height };
+}
+
+function createInitialEmailDetailModalFrame(): EmailDetailModalFrame {
+  const size = readStoredEmailDetailModalSize();
+  const viewportWidth = typeof window === "undefined" ? 1100 : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? 820 : window.innerHeight;
+  const width = Math.min(Math.max(size.width, EMAIL_DETAIL_MODAL_MIN_WIDTH), Math.max(EMAIL_DETAIL_MODAL_MIN_WIDTH, viewportWidth - (EMAIL_DETAIL_MODAL_MARGIN * 2)));
+  const height = Math.min(Math.max(size.height, EMAIL_DETAIL_MODAL_MIN_HEIGHT), Math.max(EMAIL_DETAIL_MODAL_MIN_HEIGHT, viewportHeight - (EMAIL_DETAIL_MODAL_MARGIN * 2)));
+  return clampEmailDetailModalFrame({
+    width,
+    height,
+    left: Math.max(EMAIL_DETAIL_MODAL_MARGIN, Math.round((viewportWidth - width) / 2)),
+    top: Math.max(EMAIL_DETAIL_MODAL_MARGIN, Math.round((viewportHeight - height) / 2)),
+  });
+}
+
+type EmailDetailResizeEdges = {
+  top?: boolean;
+  right?: boolean;
+  bottom?: boolean;
+  left?: boolean;
+};
+
+export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, companyID, editable, accent, surfaceText, panelBackground, strokeColor, onError, onClose }) => {
   const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
+  const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
+  const [replyTargetMessageID, setReplyTargetMessageID] = useState("");
+  const [toDraft, setToDraft] = useState("");
+  const [subjectDraft, setSubjectDraft] = useState("");
+  const [bodyDraft, setBodyDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [frame, setFrame] = useState<EmailDetailModalFrame>(() => createInitialEmailDetailModalFrame());
+  const [bodyFrameHeights, setBodyFrameHeights] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const frameRef = useRef(frame);
+  const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    frameRef.current = frame;
+  }, [frame]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3930,13 +4090,53 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, a
   }, [onClose]);
 
   useEffect(() => {
+    const onResize = () => setFrame((current) => clampEmailDetailModalFrame(current));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
-    void getEmailMessage(messageID)
-      .then((payload) => {
-        if (!cancelled) setMessage(payload);
-      })
+    setMessage(null);
+    setThreadMessages([]);
+    setSentReplies([]);
+    setReplyTargetMessageID("");
+    setBodyDraft("");
+    setBodyFrameHeights({});
+    void (async () => {
+      const payload = await getEmailMessage(messageID, companyID);
+      if (cancelled) return;
+      setMessage(payload);
+      setThreadMessages([payload]);
+      setSentReplies(payload.local_replies ?? []);
+      setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
+      setSubjectDraft(replySubject(payload.subject));
+      const threadID = payload.thread_id?.trim();
+      if (!threadID) return;
+      try {
+        const thread = await getEmailThread(threadID, companyID);
+        if (cancelled) return;
+        let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
+        if (ids.length === 0) {
+          const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+          ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
+        }
+        if (!ids.includes(payload.id)) ids.unshift(payload.id);
+        const details = await Promise.all(ids.map(async (id) => {
+          if (id === payload.id) return payload;
+          try {
+            return await getEmailMessage(id, companyID);
+          } catch {
+            return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
+          }
+        }));
+        if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
+      } catch {
+        if (!cancelled) setThreadMessages([payload]);
+      }
+    })()
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
       })
@@ -3944,40 +4144,287 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, a
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [messageID]);
+  }, [companyID, messageID]);
+
+  const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  const replyTargetMessage = useMemo(() => (
+    replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
+  ), [displayThreadMessages, replyTargetMessageID]);
+  const recipients = parseEmailAddressDraft(toDraft);
+  const canSend = editable && !sending && Boolean(replyTargetMessage) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
+  const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
+  const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
+
+  const selectReplyTarget = useCallback((target: EmailMessage) => {
+    if (!editable) return;
+    setReplyTargetMessageID(target.id);
+    setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
+  }, [editable, message?.subject]);
+
+  const submitReply = useCallback(() => {
+    if (!replyTargetMessage || !canSend) return;
+    setSending(true);
+    setError("");
+    void sendEmail({
+      to: recipients,
+      subject: subjectDraft.trim(),
+      body: bodyDraft.trim(),
+      reply_to_message_id: replyTargetMessage.id,
+      company_id: companyID,
+    })
+      .then((sent) => {
+        const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
+        setSentReplies((current) => [...current, sentWithTimestamp]);
+        setBodyDraft("");
+      })
+      .catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
+        setError(nextError);
+        onError(nextError);
+      })
+      .finally(() => setSending(false));
+  }, [bodyDraft, canSend, companyID, onError, recipients, replyTargetMessage, subjectDraft]);
+
+  const startResize = useCallback((edges: EmailDetailResizeEdges, event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const startFrame = frameRef.current;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const previousCursor = ownerDocument.body.style.cursor;
+    const cursor = edges.top && edges.left || edges.bottom && edges.right
+      ? "nwse-resize"
+      : edges.top && edges.right || edges.bottom && edges.left
+        ? "nesw-resize"
+        : edges.left || edges.right
+          ? "ew-resize"
+          : "ns-resize";
+    ownerDocument.body.style.cursor = cursor;
+    let latestFrame = startFrame;
+    const updateFrame = (clientX: number, clientY: number) => {
+      const dx = clientX - startX;
+      const dy = clientY - startY;
+      let nextLeft = startFrame.left;
+      let nextTop = startFrame.top;
+      let nextWidth = startFrame.width;
+      let nextHeight = startFrame.height;
+      if (edges.right) nextWidth = startFrame.width + dx;
+      if (edges.bottom) nextHeight = startFrame.height + dy;
+      if (edges.left) {
+        nextLeft = startFrame.left + dx;
+        nextWidth = startFrame.width - dx;
+      }
+      if (edges.top) {
+        nextTop = startFrame.top + dy;
+        nextHeight = startFrame.height - dy;
+      }
+      if (nextWidth < EMAIL_DETAIL_MODAL_MIN_WIDTH) {
+        if (edges.left) nextLeft = startFrame.left + startFrame.width - EMAIL_DETAIL_MODAL_MIN_WIDTH;
+        nextWidth = EMAIL_DETAIL_MODAL_MIN_WIDTH;
+      }
+      if (nextHeight < EMAIL_DETAIL_MODAL_MIN_HEIGHT) {
+        if (edges.top) nextTop = startFrame.top + startFrame.height - EMAIL_DETAIL_MODAL_MIN_HEIGHT;
+        nextHeight = EMAIL_DETAIL_MODAL_MIN_HEIGHT;
+      }
+      latestFrame = clampEmailDetailModalFrame({ left: nextLeft, top: nextTop, width: nextWidth, height: nextHeight });
+      setFrame(latestFrame);
+    };
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      pointerEvent.preventDefault();
+      updateFrame(pointerEvent.clientX, pointerEvent.clientY);
+    };
+    const finish = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.removeEventListener("pointermove", onPointerMove);
+      ownerDocument.removeEventListener("pointerup", finish);
+      ownerDocument.removeEventListener("pointercancel", finish);
+      storeEmailDetailModalSize(latestFrame);
+    };
+    ownerDocument.addEventListener("pointermove", onPointerMove);
+    ownerDocument.addEventListener("pointerup", finish);
+    ownerDocument.addEventListener("pointercancel", finish);
+  }, []);
+
+  const renderResizeHandle = (edges: EmailDetailResizeEdges, style: React.CSSProperties) => (
+    <div
+      aria-hidden="true"
+      onPointerDown={(event) => startResize(edges, event)}
+      style={{ position: "absolute", zIndex: 3, ...style }}
+    />
+  );
+
+  const updateBodyFrameHeight = (messageIDForFrame: string, iframe: HTMLIFrameElement) => {
+    try {
+      const documentHeight = Math.max(
+        iframe.contentDocument?.body?.scrollHeight ?? 0,
+        iframe.contentDocument?.documentElement?.scrollHeight ?? 0,
+      );
+      const nextHeight = Math.min(1400, Math.max(190, documentHeight + 4));
+      setBodyFrameHeights((current) => current[messageIDForFrame] === nextHeight ? current : { ...current, [messageIDForFrame]: nextHeight });
+    } catch {
+      setBodyFrameHeights((current) => current[messageIDForFrame] ? current : { ...current, [messageIDForFrame]: 420 });
+    }
+  };
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      style={{ position: "fixed", inset: 0, zIndex: 142, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      style={{ position: "fixed", inset: 0, zIndex: 142, background: "rgba(17, 24, 39, 0.32)" }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div style={{ width: "min(720px, 100%)", maxHeight: "min(760px, 92%)", display: "grid", gridTemplateRows: "auto auto minmax(260px, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "start", padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
+      <div
+        style={{
+          position: "fixed",
+          left: frame.left,
+          top: frame.top,
+          width: frame.width,
+          height: frame.height,
+          minWidth: EMAIL_DETAIL_MODAL_MIN_WIDTH,
+          minHeight: EMAIL_DETAIL_MODAL_MIN_HEIGHT,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr) auto",
+          border: `1px solid ${strokeColor}`,
+          borderRadius: 10,
+          background: "#ffffff",
+          color: surfaceText,
+          boxShadow: "0 22px 58px rgba(0,0,0,0.26)",
+          overflow: "hidden",
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {renderResizeHandle({ top: true }, { top: -5, left: 14, right: 14, height: 10, cursor: "ns-resize" })}
+        {renderResizeHandle({ right: true }, { top: 14, right: -5, bottom: 14, width: 10, cursor: "ew-resize" })}
+        {renderResizeHandle({ bottom: true }, { left: 14, right: 14, bottom: -5, height: 10, cursor: "ns-resize" })}
+        {renderResizeHandle({ left: true }, { top: 14, left: -5, bottom: 14, width: 10, cursor: "ew-resize" })}
+        {renderResizeHandle({ top: true, left: true }, { top: -6, left: -6, width: 18, height: 18, cursor: "nwse-resize" })}
+        {renderResizeHandle({ top: true, right: true }, { top: -6, right: -6, width: 18, height: 18, cursor: "nesw-resize" })}
+        {renderResizeHandle({ bottom: true, right: true }, { bottom: -6, right: -6, width: 18, height: 18, cursor: "nwse-resize" })}
+        {renderResizeHandle({ bottom: true, left: true }, { bottom: -6, left: -6, width: 18, height: 18, cursor: "nesw-resize" })}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "start", padding: "12px 14px", borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: surfaceText, fontSize: 15, fontWeight: 800, overflowWrap: "anywhere" }}>{message?.subject || "(no subject)"}</div>
-            <div style={{ marginTop: 4, color: surfaceText, opacity: 0.64, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ color: surfaceText, fontSize: 15, fontWeight: 850, overflowWrap: "anywhere" }}>{message?.subject || "(no subject)"}</div>
+            <div style={{ marginTop: 4, color: surfaceText, opacity: 0.64, fontSize: 11, fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {message ? `${formatAddressList(message.from) || "Unknown sender"}${message.date ? ` - ${formatTimestamp(message.date)}` : ""}` : "Email"}
             </div>
           </div>
-          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1, boxShadow: "1px 1px 5px rgba(174,174,192,0.16)" }}>
             x
           </button>
         </div>
-        {(loading || error) && (
-          <div style={{ padding: "9px 12px", borderBottom: `1px solid ${strokeColor}`, color: error ? "#334155" : accent, fontSize: 12, fontWeight: 800 }}>
-            {error || "Loading"}
-          </div>
-        )}
-        <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message?.body || message?.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 320, border: 0, background: "#ffffff" }} />
+        <div
+          className="editor-document-scroll"
+          style={{ minHeight: 0, overflowY: "auto", overflowX: "hidden", padding: "0 14px 14px", background: "#ffffff", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}
+        >
+          {(loading || error) && (
+            <div style={{ padding: "10px 0", color: error ? "#991b1b" : accent, fontSize: 12, fontWeight: 850 }}>
+              {error || "Loading"}
+            </div>
+          )}
+          {!loading && !error && displayThreadMessages.length === 0 && (
+            <div style={{ padding: "14px 0", color: "rgba(100,116,139,0.74)", fontSize: 12, fontWeight: 800 }}>No email content</div>
+          )}
+          {displayThreadMessages.map((threadMessage, index) => {
+            const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
+            const toLine = formatAddressList(threadMessage.to) || "Me";
+            const relativeTime = formatEmailRelativeTime(threadMessage.date);
+            const selectedReply = replyTargetMessage?.id === threadMessage.id;
+            return (
+              <section
+                key={threadMessage.id || `${index}`}
+                style={{
+                  minWidth: 0,
+                  display: "grid",
+                  gap: 9,
+                  padding: "14px 0 16px",
+                  borderTop: index === 0 ? "none" : `1px solid ${strokeColor}`,
+                  boxShadow: selectedReply ? "0 0 0 2px rgba(124,58,237,0.18), 0 0 0 3px rgba(6,182,212,0.18)" : undefined,
+                }}
+              >
+                <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "center", gap: 9 }}>
+                  <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>{fromLine}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750 }}>to {toLine}</span>
+                  </div>
+                  <span style={{ color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 760, whiteSpace: "nowrap" }}>
+                    {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!editable}
+                    onClick={() => selectReplyTarget(threadMessage)}
+                    style={{ minHeight: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46, padding: "0 9px", fontSize: 10.5, fontWeight: 900, letterSpacing: 0, boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                  >
+                    Reply
+                  </button>
+                </div>
+                <iframe
+                  title={`Email body ${index + 1}`}
+                  sandbox="allow-same-origin"
+                  srcDoc={messageDocument(threadMessage.body || threadMessage.snippet || "")}
+                  onLoad={(event) => updateBodyFrameHeight(threadMessage.id || `${index}`, event.currentTarget)}
+                  style={{ width: "100%", height: bodyFrameHeights[threadMessage.id || `${index}`] ?? 420, border: 0, borderRadius: 8, background: "#ffffff" }}
+                />
+              </section>
+            );
+          })}
+        </div>
+        <div style={{ minWidth: 0, display: "grid", gap: 7, borderTop: `1px solid ${strokeColor}`, background: panelBackground, padding: replyTargetMessage ? "9px 12px" : 0 }}>
+          {replyTargetMessage && (
+            <>
+              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 850 }}>
+                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
+                <span>To:</span>
+                <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+                <span>Subject:</span>
+                <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 34px", alignItems: "end", gap: 7 }}>
+                <textarea
+                  ref={replyTextareaRef}
+                  value={bodyDraft}
+                  disabled={!editable}
+                  readOnly={!editable}
+                  rows={replyLineCount}
+                  placeholder="Write a reply"
+                  onChange={(event) => setBodyDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (!editable) {
+                      event.preventDefault();
+                      return;
+                    }
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      submitReply();
+                    }
+                  }}
+                  style={{ width: "100%", height: replyTextareaHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: replyLineCount >= 5 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                />
+                <button
+                  type="button"
+                  aria-label={sending ? "Sending" : "Send reply"}
+                  title={sending ? "Sending" : "Send reply"}
+                  disabled={!canSend}
+                  onClick={submitReply}
+                  style={{ width: 34, height: 34, border: canSend ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: canSend ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, borderRadius: 9, display: "grid", placeItems: "center", cursor: canSend ? "pointer" : "default", opacity: canSend ? 1 : 0.44, boxShadow: EDITOR_NEU_SHADOW }}
+                >
+                  <ArrowRightIcon color={accent} />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 };
-
 function messageDocument(body: string): string {
   const value = body.trim();
   const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
