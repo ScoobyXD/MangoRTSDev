@@ -1,4 +1,5 @@
 import React from "react";
+import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
 
 // Reusable line-divider style for panel sections in node-map side UI.
 export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
@@ -406,17 +407,10 @@ export function changedPersistedMapPositions(input: {
   return changed;
 }
 
-type KeydownTargetLike = {
-  isContentEditable?: boolean;
-  closest?: (selector: string) => KeydownTargetLike | null;
-};
-
 // Editor canvas key-routing guard:
 // key presses from editable controls must never be treated as canvas create-textbox intent.
-export function shouldIgnoreCanvasKeydownTarget(target: KeydownTargetLike | null | undefined): boolean {
-  if (!target) return false;
-  if (target.isContentEditable) return true;
-  return Boolean(target.closest?.("[contenteditable='true'], textarea, input, [data-mango-copyable-image='true']"));
+export function shouldIgnoreCanvasKeydownTarget(target: unknown): boolean {
+  return shouldDeferToNativeTextEditing(target);
 }
 
 // Relationship anchor helper for opposite-side calculations.

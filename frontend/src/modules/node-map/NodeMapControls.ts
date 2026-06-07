@@ -1,4 +1,5 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from "react";
+import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
 import { NodeDirection, NodePosition, NodeRecord, PanelEdge, clamp, snapToGrid } from "./shared.js";
 
 export type NodeMapScreenPoint = { x: number; y: number };
@@ -351,17 +352,8 @@ export function resolveNodeMapBlankCanvasSelection(input: {
   };
 }
 
-type DeleteKeyTargetLike = {
-  tagName?: string;
-  isContentEditable?: boolean;
-  closest?: (selector: string) => DeleteKeyTargetLike | null;
-};
-
-export function shouldIgnoreMapDeleteKeyTarget(target: DeleteKeyTargetLike | null | undefined): boolean {
-  if (!target) return false;
-  const tag = target.tagName ?? "";
-  if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return true;
-  return Boolean(target.closest?.("[contenteditable='true'], textarea, input, [data-mango-copyable-image='true']"));
+export function shouldIgnoreMapDeleteKeyTarget(target: unknown): boolean {
+  return shouldDeferToNativeTextEditing(target);
 }
 
 export function resolveNodeMapDeleteSelection(input: {

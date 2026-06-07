@@ -109,3 +109,33 @@ test("document undo restores image-bearing HTML snapshots", () => {
   assert.equal(history.undoStack.length, 0);
   assert.equal(history.redoStack.length, 0);
 });
+
+test("document undo skips stale newer snapshots without clearing usable history", () => {
+  const history = createEditorDocumentUndoHistory();
+  const start = snapshotEditorDocumentHTML("start", 0, 0);
+  const middle = snapshotEditorDocumentHTML("middle", 6, 6);
+  const stale = snapshotEditorDocumentHTML("stale", 5, 5);
+
+  recordEditorDocumentUndoChange(history, start, middle, "typing", 0);
+  recordEditorDocumentUndoChange(history, middle, stale, "typing", 700);
+
+  assert.deepEqual(undoEditorDocument(history, middle.html), start);
+  assert.equal(history.undoStack.length, 0);
+  assert.equal(history.redoStack.length, 1);
+  assert.deepEqual(redoEditorDocument(history, start.html), middle);
+});
+
+test("document redo skips stale newer snapshots without clearing usable history", () => {
+  const history = createEditorDocumentUndoHistory();
+  const start = snapshotEditorDocumentHTML("start", 0, 0);
+  const middle = snapshotEditorDocumentHTML("middle", 6, 6);
+  const stale = snapshotEditorDocumentHTML("stale", 5, 5);
+
+  recordEditorDocumentUndoChange(history, start, middle, "typing", 0);
+  assert.deepEqual(undoEditorDocument(history, middle.html), start);
+  history.redoStack.push({ before: stale, after: snapshotEditorDocumentHTML("stale-after", 11, 11), kind: "typing", timestamp: 700 });
+
+  assert.deepEqual(redoEditorDocument(history, start.html), middle);
+  assert.equal(history.redoStack.length, 0);
+  assert.equal(history.undoStack.length, 1);
+});

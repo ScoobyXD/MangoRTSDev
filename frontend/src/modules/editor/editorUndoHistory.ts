@@ -213,26 +213,30 @@ export function redoEditorText(history: EditorUndoHistory, currentValue: string)
 }
 
 export function undoEditorDocument(history: EditorDocumentUndoHistory, currentHTML: string): EditorDocumentUndoSnapshot | null {
-  const group = history.undoStack.pop();
+  const group = popLatestMatchingDocumentGroup(history.undoStack, currentHTML, "after");
   if (!group) return null;
-  if (currentHTML !== group.after.html) {
-    resetEditorDocumentUndoHistory(history);
-    return null;
-  }
   history.redoStack.push(group);
   return group.before;
 }
 
 export function redoEditorDocument(history: EditorDocumentUndoHistory, currentHTML: string): EditorDocumentUndoSnapshot | null {
-  const group = history.redoStack.pop();
+  const group = popLatestMatchingDocumentGroup(history.redoStack, currentHTML, "before");
   if (!group) return null;
-  if (currentHTML !== group.before.html) {
-    resetEditorDocumentUndoHistory(history);
-    return null;
-  }
   history.undoStack.push(group);
   trimDocumentUndoHistory(history);
   return group.after;
+}
+
+function popLatestMatchingDocumentGroup(
+  groups: EditorDocumentUndoGroup[],
+  currentHTML: string,
+  side: "before" | "after",
+): EditorDocumentUndoGroup | null {
+  let index = groups.length - 1;
+  while (index >= 0 && groups[index]?.[side].html !== currentHTML) index -= 1;
+  if (index < 0) return null;
+  groups.splice(index + 1);
+  return groups.pop() ?? null;
 }
 
 function deriveEditorTextChange(before: EditorTextSnapshot, after: EditorTextSnapshot): EditorTextChange {
