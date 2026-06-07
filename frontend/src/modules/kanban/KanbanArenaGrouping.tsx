@@ -2,6 +2,14 @@ import React from "react";
 import {
   KANBAN_CARD_DRAG_MIME,
   KANBAN_GROUP_FIELDS,
+  KANBAN_ISSUE_CARD_COLOR,
+  KANBAN_LOGIC_GATE_BACKLOG_COLOR,
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+  KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
+  hexToRgba,
   parseKanbanCardDragPayload,
   type KanbanCard,
   type KanbanGroupedBoardLayout,
@@ -269,35 +277,65 @@ export type KanbanArenaGroupedCellContext = {
   rowKey: string;
 };
 
-const ARENA_GROUP_CELL_TINTS = [
-  ["rgba(14, 165, 233, 0.10)", "rgba(34, 197, 94, 0.08)"],
-  ["rgba(249, 115, 22, 0.10)", "rgba(168, 85, 247, 0.08)"],
-  ["rgba(20, 184, 166, 0.10)", "rgba(244, 63, 94, 0.07)"],
-  ["rgba(234, 179, 8, 0.10)", "rgba(59, 130, 246, 0.08)"],
-];
+function normalizeArenaGroupKeyValue(groupKey: string, prefix: string): string {
+  return groupKey.startsWith(prefix) ? groupKey.slice(prefix.length).trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+}
 
-function arenaGroupCellBackground(isDark: boolean, columnIndex: number, rowIndex: number): string {
-  const tintPair = ARENA_GROUP_CELL_TINTS[(columnIndex + rowIndex) % ARENA_GROUP_CELL_TINTS.length];
-  const tint = tintPair[rowIndex % tintPair.length];
+function arenaGroupAccent(field: KanbanGroupField, groupKey: string): string {
+  if (field === "status") {
+    if (groupKey === "issue") return KANBAN_ISSUE_CARD_COLOR;
+    const status = normalizeArenaGroupKeyValue(groupKey, "status:");
+    if (status === "backlog") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
+    if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
+    if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+    if (status === "verify") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+    if (status === "done") return KANBAN_LOGIC_GATE_DONE_COLOR;
+    return "";
+  }
+  if (field === "priority") {
+    const priority = normalizeArenaGroupKeyValue(groupKey, "priority:");
+    return KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((option) => option.value === priority)?.color ?? "";
+  }
+  if (field === "person") return "#db2777";
+  if (field === "due_date") return "#0891b2";
+  return "";
+}
+
+function arenaGroupCellBackground(isDark: boolean, columnAccent: string, rowAccent: string): string {
+  const first = columnAccent || rowAccent || "#475569";
+  const second = rowAccent || columnAccent || "#0891b2";
   return isDark
-    ? `linear-gradient(135deg, rgba(15, 23, 42, 0.72), ${tint}), ${ARENA_GROUP_FRAME_BACKGROUND}`
-    : `linear-gradient(135deg, rgba(255,255,255,0.86), ${tint}), ${ARENA_GROUP_FRAME_BACKGROUND}`;
+    ? `linear-gradient(135deg, ${hexToRgba(first, 0.34)}, rgba(15, 23, 42, 0.80) 48%, ${hexToRgba(second, 0.27)}), ${ARENA_GROUP_FRAME_BACKGROUND}`
+    : `linear-gradient(135deg, ${hexToRgba(first, 0.28)}, rgba(255,255,255,0.90) 45%, ${hexToRgba(second, 0.24)}), ${ARENA_GROUP_FRAME_BACKGROUND}`;
+}
+
+function arenaGroupLabelBackground(isDark: boolean, accent: string): string {
+  if (!accent) return ARENA_GROUP_FRAME_BACKGROUND;
+  return isDark
+    ? `linear-gradient(135deg, ${hexToRgba(accent, 0.36)}, rgba(15, 23, 42, 0.76))`
+    : `linear-gradient(135deg, ${hexToRgba(accent, 0.22)}, rgba(255,255,255,0.94))`;
 }
 
 export function KanbanArenaGroupedBoard({
   groupedBoard,
+  xGroupBy,
+  yGroupBy,
   isDark,
   text,
   renderCard,
   onDropCardIDsToCell,
   onCreateNodeInCell,
+  onCellContextMenu,
 }: {
   groupedBoard: KanbanGroupedBoardLayout;
+  xGroupBy: KanbanGroupField;
+  yGroupBy: KanbanGroupField;
   isDark: boolean;
   text: string;
   renderCard: (card: KanbanCard, groupedCell?: KanbanArenaGroupedCellContext) => React.ReactNode;
   onDropCardIDsToCell?: (cardIDs: string[], columnKey: string, rowKey: string) => void;
   onCreateNodeInCell?: (columnKey: string, rowKey: string) => void;
+  onCellContextMenu?: (columnKey: string, rowKey: string, event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [activeDropCellKey, setActiveDropCellKey] = React.useState("");
   const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
@@ -319,22 +357,35 @@ export function KanbanArenaGroupedBoard({
       }}
     >
       <div aria-hidden="true" style={{ position: "sticky", left: 0, zIndex: 7, border: `1px solid ${glassBorder}`, borderTopLeftRadius: 8, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8 }} />
-      {groupedBoard.columns.map((column, columnIndex) => (
-        <div key={column.key} style={{ border: `1px solid ${glassBorder}`, borderLeft: columnIndex === 0 ? "none" : undefined, borderTopRightRadius: columnIndex === groupedBoard.columns.length - 1 ? 8 : 0, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{column.label}</div>
-        </div>
-      ))}
-      {groupedBoard.rows.flatMap((row, rowIndex) => [
-        <div key={`row-label:${row.key}`} style={{ position: "sticky", left: 0, zIndex: 6, border: `1px solid ${glassBorder}`, borderTop: rowIndex === 0 ? "none" : undefined, borderBottomLeftRadius: rowIndex === rowCount - 1 ? 8 : 0, background: groupFrameBackground, boxShadow: groupFrameShadow, padding: 8, display: "flex", alignItems: "center", minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX, color: text, fontSize: 11, fontWeight: 700 }}>
+      {groupedBoard.columns.map((column, columnIndex) => {
+        const columnAccent = arenaGroupAccent(xGroupBy, column.key);
+        return (
+          <div key={column.key} style={{ border: `1px solid ${columnAccent ? hexToRgba(columnAccent, 0.40) : glassBorder}`, borderLeft: columnIndex === 0 ? "none" : undefined, borderTopRightRadius: columnIndex === groupedBoard.columns.length - 1 ? 8 : 0, background: arenaGroupLabelBackground(isDark, columnAccent), boxShadow: columnAccent ? `${groupFrameShadow}, inset 0 -2px 0 ${hexToRgba(columnAccent, 0.72)}` : groupFrameShadow, padding: 8, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: columnAccent || text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{column.label}</div>
+          </div>
+        );
+      })}
+      {groupedBoard.rows.flatMap((row, rowIndex) => {
+        const rowAccent = arenaGroupAccent(yGroupBy, row.key);
+        return [
+        <div key={`row-label:${row.key}`} style={{ position: "sticky", left: 0, zIndex: 6, border: `1px solid ${rowAccent ? hexToRgba(rowAccent, 0.40) : glassBorder}`, borderTop: rowIndex === 0 ? "none" : undefined, borderBottomLeftRadius: rowIndex === rowCount - 1 ? 8 : 0, background: arenaGroupLabelBackground(isDark, rowAccent), boxShadow: rowAccent ? `${groupFrameShadow}, inset -2px 0 0 ${hexToRgba(rowAccent, 0.72)}` : groupFrameShadow, padding: 8, display: "flex", alignItems: "center", minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX, color: rowAccent || text, fontSize: 11, fontWeight: 800 }}>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{row.label}</span>
         </div>,
         ...groupedBoard.columns.map((column, columnIndex) => {
           const cell = column.cells.find((item) => item.rowKey === row.key) ?? { rowKey: row.key, cards: [] };
           const cellKey = `cell:${column.key}:${row.key}`;
           const activeDrop = activeDropCellKey === cellKey;
+          const columnAccent = arenaGroupAccent(xGroupBy, column.key);
+          const activeAccent = columnAccent || rowAccent || "#475569";
           return (
             <div
               key={cellKey}
+              onContextMenu={(event) => {
+                if (!onCellContextMenu) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onCellContextMenu(column.key, row.key, event);
+              }}
               onDragOver={(event) => {
                 if (!onDropCardIDsToCell || !dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
                 event.preventDefault();
@@ -365,8 +416,8 @@ export function KanbanArenaGroupedBoard({
                 borderLeft: columnIndex === 0 ? "none" : undefined,
                 borderTop: rowIndex === 0 ? "none" : undefined,
                 borderBottomRightRadius: rowIndex === rowCount - 1 && columnIndex === groupedBoard.columns.length - 1 ? 8 : 0,
-                background: arenaGroupCellBackground(isDark, columnIndex, rowIndex),
-                boxShadow: activeDrop ? `${groupFrameShadow}, inset 0 0 0 2px rgba(71, 85, 105, 0.34)` : groupFrameShadow,
+                background: arenaGroupCellBackground(isDark, columnAccent, rowAccent),
+                boxShadow: activeDrop ? `${groupFrameShadow}, inset 0 0 0 2px ${hexToRgba(activeAccent, 0.48)}` : groupFrameShadow,
                 padding: 8,
               }}
             >
@@ -401,7 +452,8 @@ export function KanbanArenaGroupedBoard({
             </div>
           );
         }),
-      ])}
+      ];
+      })}
     </div>
   );
 }

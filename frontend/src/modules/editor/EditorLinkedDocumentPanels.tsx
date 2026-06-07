@@ -6,6 +6,7 @@ import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_VERIFY_COLOR,
 } from "../kanban/shared";
@@ -63,56 +64,7 @@ type EditorLinkedDocumentPanelsProps = {
   onRemoveLogicGateRaciUser: (role: LogicGateRaciRole, userID: string) => void;
 };
 
-const NODE_PRIORITY_OPTIONS = [
-  {
-    value: "1",
-    label: "1\u00A0\u00A0URGENT(<1hr)",
-    color: "#7f1d1d",
-    borderColor: "rgba(220, 38, 38, 0.42)",
-    surface: "linear-gradient(135deg, rgba(254, 226, 226, 0.96), rgba(254, 249, 195, 0.76))",
-    glow: "rgba(220, 38, 38, 0.12)",
-  },
-  {
-    value: "2",
-    label: "2\u00A0\u00A0By end of day",
-    color: "#7c2d12",
-    borderColor: "rgba(234, 88, 12, 0.38)",
-    surface: "linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 240, 138, 0.68))",
-    glow: "rgba(234, 88, 12, 0.11)",
-  },
-  {
-    value: "3",
-    label: "3\u00A0\u00A0Tomorrow",
-    color: "#064e3b",
-    borderColor: "rgba(5, 150, 105, 0.38)",
-    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(207, 250, 254, 0.70))",
-    glow: "rgba(5, 150, 105, 0.11)",
-  },
-  {
-    value: "4",
-    label: "4\u00A0\u00A0Sprint (1 week)",
-    color: "#312e81",
-    borderColor: "rgba(79, 70, 229, 0.34)",
-    surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(221, 214, 254, 0.70))",
-    glow: "rgba(79, 70, 229, 0.10)",
-  },
-  {
-    value: "5",
-    label: "5\u00A0\u00A0Later (low priority)",
-    color: "#4c1d95",
-    borderColor: "rgba(124, 58, 237, 0.30)",
-    surface: "linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(233, 213, 255, 0.62))",
-    glow: "rgba(124, 58, 237, 0.10)",
-  },
-  {
-    value: "0",
-    label: "Unassigned to a Logic Gate",
-    color: "#64748b",
-    borderColor: "rgba(100, 116, 139, 0.28)",
-    surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.76))",
-    glow: "rgba(15, 23, 42, 0.08)",
-  },
-] as const;
+const NODE_PRIORITY_OPTIONS = KANBAN_NODE_PRIORITY_STYLE_OPTIONS;
 
 type NodeStatusValue = "backlog" | "pending" | "in_progress" | "verify" | "done";
 
@@ -481,9 +433,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(145px, 0.74fr) minmax(154px, 0.70fr) minmax(250px, 1.18fr) minmax(220px, 1fr)",
-                columnGap: 10,
-                rowGap: 0,
+                gridTemplateColumns: "164px 250px minmax(236px, 310px) 160px",
+                justifyContent: "start",
+                columnGap: 8,
+                rowGap: 6,
                 maxWidth: "100%",
                 overflow: "visible",
                 padding: "1px 0 6px",
@@ -687,7 +640,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </label>
-              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
@@ -740,7 +693,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   />
                 </span>
               </label>
-              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
                 <strong style={{ paddingTop: 3 }}>Priority:</strong>
                 <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
                   <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>
