@@ -23,6 +23,7 @@ import {
   removeLogicGateRaciAssignments,
   sendEmail,
   unarchiveEmailMessage,
+  updateEmailMessage,
   updateCommunicationsSharedInbox,
   updateCommunicationsSharedInboxRaciAssignments,
   type EmailMessage,
@@ -263,6 +264,7 @@ test("communications stream helpers insert created messages by message date", ()
 
 test("archive mailbox filter matches messages outside inbox but not trash or sent", () => {
   assert.equal(emailMessageMatchesListFilters(message("archived", { folders: ["UNREAD", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("starred-archived", { folders: ["CATEGORY_PERSONAL"], starred: true }), { mailbox: "archive" }), false);
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), false);
   assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT"] }), { mailbox: "archive" }), false);
 });
@@ -277,6 +279,62 @@ test("primary mailbox filter matches real inbox labels, not archived Gmail categ
 test("starred mailbox filter only matches starred messages", () => {
   assert.equal(emailMessageMatchesListFilters(message("starred", { starred: true }), { mailbox: "starred" }), true);
   assert.equal(emailMessageMatchesListFilters(message("plain", { starred: false }), { mailbox: "starred" }), false);
+});
+
+test("star updates move inbox messages between cached mailbox buckets without changing folders", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    if (init?.method === "PUT") {
+      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: true }) });
+    }
+    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] })] });
+    if (path.includes("mailbox=starred")) return jsonResponse({ messages: [] });
+    if (path.includes("mailbox=all")) return jsonResponse({ messages: [] });
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    await listEmailMessages({ mailbox: "primary", limit: 25 });
+    await listEmailMessages({ mailbox: "starred", limit: 25 });
+    await listEmailMessages({ mailbox: "all", limit: 25 });
+    await updateEmailMessage("msg-1", { starred: true });
+
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), []);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("unstar updates return cached inbox messages to primary and remove them from starred", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    if (init?.method === "PUT") {
+      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: false }) });
+    }
+    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [] });
+    if (path.includes("mailbox=starred")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true })] });
+    if (path.includes("mailbox=all")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true })] });
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    await listEmailMessages({ mailbox: "primary", limit: 25 });
+    await listEmailMessages({ mailbox: "starred", limit: 25 });
+    await listEmailMessages({ mailbox: "all", limit: 25 });
+    await updateEmailMessage("msg-1", { starred: false });
+
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => item.id), []);
+    assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", false]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
 });
 
 test("archive helpers call mailbox action endpoints", async () => {

@@ -1655,7 +1655,8 @@ export function HomePage({
   }, [currentMessageListParams]);
   const moveStarredMessageToStarredTab = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
-    if (!cleanMessageID || mailboxRef.current === "starred") return false;
+    const currentMailbox = mailboxRef.current;
+    if (!cleanMessageID || (currentMailbox !== "primary" && currentMailbox !== "archive")) return false;
     cancelPendingAutoArchiveMessages([cleanMessageID]);
     addPendingStarredMessages([cleanMessageID]);
     if (!starredRemovalTimerIDsRef.current.has(cleanMessageID)) {
