@@ -2323,8 +2323,9 @@ type EmailConversationPaneProps = {
   surfaceText: string;
   strokeColor: string;
   ruleColor: string;
+  activeSelection?: EmailActiveSelection | null;
   onError: (message: string) => void;
-  onSelectionChatRequest?: (quote: string) => void;
+  onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (quote: string) => void;
 };
 
@@ -2338,6 +2339,13 @@ type EmailSelectionDraft = {
 
 type EmailLocalHighlight = {
   id: string;
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+type EmailActiveSelection = {
+  messageID?: string;
   quote: string;
   startOffset: number;
   endOffset: number;
@@ -2375,9 +2383,19 @@ function storeEmailLocalHighlights(messageID: string, highlights: EmailLocalHigh
   localStorage.setItem(emailLocalHighlightsStorageKey(messageID), JSON.stringify(highlights.slice(-80)));
 }
 
-function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighlight[]): React.ReactNode[] {
-  if (!text || highlights.length === 0) return [text];
-  const ranges = highlights
+function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighlight[], activeSelection?: EmailActiveSelection | null): React.ReactNode[] {
+  if (!text) return [text];
+  const activeHighlight: EmailLocalHighlight | null = activeSelection?.quote.trim()
+    ? {
+      id: "active-email-chat-selection",
+      quote: activeSelection.quote.trim(),
+      startOffset: activeSelection.startOffset,
+      endOffset: activeSelection.endOffset,
+    }
+    : null;
+  const sourceHighlights = activeHighlight ? [activeHighlight, ...highlights] : highlights;
+  if (sourceHighlights.length === 0) return [text];
+  const ranges = sourceHighlights
     .map((highlight) => {
       let start = Math.max(0, Math.min(text.length, Math.round(highlight.startOffset)));
       let end = Math.max(start, Math.min(text.length, Math.round(highlight.endOffset)));
@@ -2390,7 +2408,7 @@ function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighl
       return { ...highlight, start, end };
     })
     .filter((range): range is EmailLocalHighlight & { start: number; end: number } => Boolean(range))
-    .sort((a, b) => a.start - b.start || a.end - b.end);
+    .sort((a, b) => a.start - b.start || a.end - b.end || (a.id === "active-email-chat-selection" ? -1 : b.id === "active-email-chat-selection" ? 1 : 0));
   if (ranges.length === 0) return [text];
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
@@ -2402,8 +2420,10 @@ function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighl
         key={range.id}
         style={{
           borderRadius: 4,
-          background: "rgba(250,204,21,0.36)",
-          boxShadow: "0 0 0 1px rgba(234,179,8,0.26)",
+          background: range.id === "active-email-chat-selection" ? "rgba(125,92,255,0.26)" : "rgba(250,204,21,0.36)",
+          boxShadow: range.id === "active-email-chat-selection"
+            ? "0 0 0 2px rgba(125,92,255,0.44), 0 0 0 5px rgba(125,92,255,0.12)"
+            : "0 0 0 1px rgba(234,179,8,0.26)",
         }}
       >
         {text.slice(range.start, range.end)}
@@ -2485,6 +2505,9 @@ function mergeEmailThreadMessages(primary: EmailMessage | null, fetchedMessages:
   };
   for (const threadMessage of fetchedMessages) append(threadMessage);
   append(primary);
+  for (const threadMessage of fetchedMessages) {
+    for (const reply of threadMessage.local_replies ?? []) append(reply);
+  }
   for (const reply of primary?.local_replies ?? []) append(reply);
   for (const reply of sentReplies) append(reply);
   return Array.from(byID.values()).sort((a, b) => (
@@ -2501,6 +2524,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   surfaceText,
   strokeColor,
   ruleColor,
+  activeSelection,
   onError,
   onSelectionChatRequest,
   onSelectionNodeRequest,
@@ -2511,12 +2535,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [toDraft, setToDraft] = useState("");
   const [subjectDraft, setSubjectDraft] = useState("");
   const [bodyDraft, setBodyDraft] = useState("");
+  const [replyTargetMessageID, setReplyTargetMessageID] = useState("");
   const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
@@ -2529,6 +2555,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setMessage(null);
     setThreadMessages([]);
     setSentReplies([]);
+    setReplyTargetMessageID("");
     setDraftAttachments([]);
     setPreviewAttachment(null);
     setSelectionDraft(null);
@@ -2539,6 +2566,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       setMessage(payload);
       setThreadMessages([payload]);
       setSentReplies(payload.local_replies ?? []);
+      setReplyTargetMessageID(payload.id);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
@@ -2546,7 +2574,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
       try {
-        const page = await listEmailMessages({ companyID, mailbox: "all", limit: 30, threadID });
+        const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
         if (cancelled) return;
         const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
         const details = await Promise.all(ids.map(async (id) => {
@@ -2578,6 +2606,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  const replyTargetMessage = useMemo(() => (
+    displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? message
+  ), [displayThreadMessages, message, replyTargetMessageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -2667,8 +2698,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
   }, []);
 
+  const selectReplyTarget = useCallback((target: EmailMessage) => {
+    if (!editable) return;
+    setReplyTargetMessageID(target.id);
+    setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
+  }, [editable, message?.subject]);
+
   const submitReply = () => {
-    if (!message || !canSend) return;
+    if (!message || !replyTargetMessage || !canSend) return;
     if (draftAttachments.length > 0) {
       const nextError = "Email attachment sending is not wired yet.";
       setError(nextError);
@@ -2680,7 +2719,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       to: recipients,
       subject: subjectDraft.trim(),
       body: bodyDraft.trim(),
-      reply_to_message_id: message.id,
+      reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
     })
       .then((sent) => {
@@ -2734,6 +2773,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
+              const isReplyTarget = replyTargetMessage?.id === threadMessage.id;
               return (
                 <div
                   key={threadMessage.id || `${index}`}
@@ -2744,13 +2784,34 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
                   }}
                 >
-                  <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "start", gap: 10 }}>
+                  <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
                     <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
                       {fromLine}
                     </div>
                     <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
                       {formatTimestamp(threadMessage.date)}
                     </div>
+                    <button
+                      type="button"
+                      disabled={!editable}
+                      onClick={() => selectReplyTarget(threadMessage)}
+                      style={{
+                        minHeight: 22,
+                        border: isReplyTarget ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                        borderRadius: 7,
+                        background: isReplyTarget ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                        color: accent,
+                        cursor: editable ? "pointer" : "default",
+                        opacity: editable ? 1 : 0.46,
+                        padding: "0 8px",
+                        fontSize: 10.5,
+                        fontWeight: 900,
+                        letterSpacing: 0,
+                        boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
+                      }}
+                    >
+                      Reply
+                    </button>
                   </div>
                   <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
                     to {toLine}
@@ -2767,7 +2828,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     }}
                   >
                     {isSelectedMessage
-                      ? renderEmailTextWithHighlights(threadBody || "(empty email)", emailHighlights)
+                      ? renderEmailTextWithHighlights(threadBody || "(empty email)", emailHighlights, activeSelection)
                       : (threadBody || "(empty email)")}
                   </div>
                 </div>
@@ -2804,7 +2865,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     onClick={(event) => {
                       event.stopPropagation();
                       addEmailLocalHighlight(selectionDraft);
-                      onSelectionChatRequest(selectionDraft.quote);
+                      onSelectionChatRequest(selectionDraft);
                       setSelectionDraft(null);
                       bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
                     }}
@@ -2838,6 +2899,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         )}
         {message && (
           <div style={{ display: "grid", gap: 7, borderTop: `1px solid ${ruleColor}`, paddingTop: 8 }}>
+            {replyTargetMessage && (
+              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
+                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>To:</span>
               <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
@@ -2865,6 +2931,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               <PlusIcon color={accent} />
             </button>
             <textarea
+              ref={replyTextareaRef}
               value={bodyDraft}
               disabled={!editable}
               readOnly={!editable}

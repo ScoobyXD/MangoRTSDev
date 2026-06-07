@@ -76,8 +76,23 @@ const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 760;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
+const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v1";
 
 type TextSidePaneKind = "email" | "chat";
+
+type TextPaneLayoutSnapshot = {
+  openEmailBlockIDs: string[];
+  openChatBlockIDs: string[];
+  closedChatBlockIDs: string[];
+  selectedEmailIDsByBlock: Record<string, string>;
+  activeChatBlockID?: string;
+};
+
+type EmailSelectionRequest = {
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
 
 function formatTextBlockMetadataTimestamp(value: string | number | undefined): string {
   if (value === undefined || value === "") return "";
@@ -106,6 +121,85 @@ function readStoredTextSidePaneWidth(companyID: string, nodeID: string, blockID:
 function storeTextSidePaneWidth(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind, width: number) {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(textSidePaneWidthStorageKey(companyID, nodeID, blockID, pane), String(clampTextSidePaneWidth(width)));
+}
+
+function textPaneLayoutStorageKey(companyID: string, nodeID: string): string {
+  return `${TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX}:${companyID || "company"}:${nodeID || "node"}`;
+}
+
+function cleanIDList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean)));
+}
+
+function cleanSelectedEmailMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const next: Record<string, string> = {};
+  for (const [blockID, messageID] of Object.entries(value as Record<string, unknown>)) {
+    const cleanBlockID = blockID.trim();
+    const cleanMessageID = typeof messageID === "string" ? messageID.trim() : "";
+    if (cleanBlockID && cleanMessageID) next[cleanBlockID] = cleanMessageID;
+  }
+  return next;
+}
+
+function readStoredTextPaneLayout(companyID: string, nodeID: string): TextPaneLayoutSnapshot {
+  if (typeof localStorage === "undefined") {
+    return { openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(textPaneLayoutStorageKey(companyID, nodeID)) ?? "{}") as Record<string, unknown>;
+    return {
+      openEmailBlockIDs: cleanIDList(parsed.openEmailBlockIDs),
+      openChatBlockIDs: cleanIDList(parsed.openChatBlockIDs),
+      closedChatBlockIDs: cleanIDList(parsed.closedChatBlockIDs),
+      selectedEmailIDsByBlock: cleanSelectedEmailMap(parsed.selectedEmailIDsByBlock),
+      activeChatBlockID: typeof parsed.activeChatBlockID === "string" && parsed.activeChatBlockID.trim() ? parsed.activeChatBlockID.trim() : undefined,
+    };
+  } catch {
+    return { openEmailBlockIDs: [], openChatBlockIDs: [], closedChatBlockIDs: [], selectedEmailIDsByBlock: {} };
+  }
+}
+
+function storeTextPaneLayout(companyID: string, nodeID: string, snapshot: TextPaneLayoutSnapshot) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(textPaneLayoutStorageKey(companyID, nodeID), JSON.stringify({
+    openEmailBlockIDs: cleanIDList(snapshot.openEmailBlockIDs),
+    openChatBlockIDs: cleanIDList(snapshot.openChatBlockIDs),
+    closedChatBlockIDs: cleanIDList(snapshot.closedChatBlockIDs),
+    selectedEmailIDsByBlock: cleanSelectedEmailMap(snapshot.selectedEmailIDsByBlock),
+    activeChatBlockID: snapshot.activeChatBlockID?.trim() || "",
+  }));
+}
+
+function resolveActiveEmailChatSelection(
+  messages: EditorTextBlockChatMessage[],
+  activeMessageID: string,
+  displayedEmailMessageID: string,
+): (EmailSelectionRequest & { messageID: string }) | null {
+  const cleanActiveMessageID = activeMessageID.trim();
+  if (!cleanActiveMessageID) return null;
+  const messagesByID = new Map(messages.map((message) => [message.id, message]));
+  const seen = new Set<string>();
+  let cursor = cleanActiveMessageID;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const message = messagesByID.get(cursor);
+    if (!message) return null;
+    const quote = message.selectionQuote?.trim() ?? "";
+    if (message.selectionSource === "email" && quote) {
+      const messageID = message.selectionMessageID?.trim() || displayedEmailMessageID.trim();
+      if (displayedEmailMessageID.trim() && messageID && messageID !== displayedEmailMessageID.trim()) return null;
+      return {
+        messageID,
+        quote,
+        startOffset: typeof message.selectionStart === "number" && Number.isFinite(message.selectionStart) ? message.selectionStart : 0,
+        endOffset: typeof message.selectionEnd === "number" && Number.isFinite(message.selectionEnd) ? message.selectionEnd : 0,
+      };
+    }
+    cursor = message.parentID ?? "";
+  }
+  return null;
 }
 
 function logicGateOptionLabel(logicGate: LogicGateRecord): string {
@@ -231,6 +325,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
   const previousNodeIDRef = useRef(nodeID);
+  const initialPaneLayoutRef = useRef(readStoredTextPaneLayout(companyID, nodeID));
+  const skipNextPaneLayoutPersistRef = useRef(false);
   const [width, setWidth] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
@@ -240,12 +336,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
-  const [activeChatBlockID, setActiveChatBlockID] = useState("");
-  const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
-  const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
+  const [activeChatBlockID, setActiveChatBlockID] = useState(initialPaneLayoutRef.current.activeChatBlockID ?? "");
+  const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>(() => initialPaneLayoutRef.current.selectedEmailIDsByBlock);
+  const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openEmailBlockIDs));
+  const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openChatBlockIDs));
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
-  const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
+  const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [selectedEmailID, setSelectedEmailID] = useState("");
@@ -417,6 +514,30 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [canEdit]);
 
   useEffect(() => {
+    const layout = readStoredTextPaneLayout(companyID, nodeID);
+    skipNextPaneLayoutPersistRef.current = true;
+    setSelectedEmailIDsByBlock(layout.selectedEmailIDsByBlock);
+    setOpenEmailBlockIDs(new Set(layout.openEmailBlockIDs));
+    setOpenChatBlockIDs(new Set(layout.openChatBlockIDs));
+    setClosedChatBlockIDs(new Set(layout.closedChatBlockIDs));
+    setActiveChatBlockID(layout.activeChatBlockID ?? "");
+  }, [companyID, nodeID]);
+
+  useEffect(() => {
+    if (skipNextPaneLayoutPersistRef.current) {
+      skipNextPaneLayoutPersistRef.current = false;
+      return;
+    }
+    storeTextPaneLayout(companyID, nodeID, {
+      openEmailBlockIDs: Array.from(openEmailBlockIDs),
+      openChatBlockIDs: Array.from(openChatBlockIDs),
+      closedChatBlockIDs: Array.from(closedChatBlockIDs),
+      selectedEmailIDsByBlock,
+      activeChatBlockID,
+    });
+  }, [activeChatBlockID, closedChatBlockIDs, companyID, nodeID, openChatBlockIDs, openEmailBlockIDs, selectedEmailIDsByBlock]);
+
+  useEffect(() => {
     const textBlocks = loadedTextBlockProjections.map((item) => {
       const content = parseEditorTextBlockContent(item.information);
       return {
@@ -463,21 +584,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (nodeChanged) return {};
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
-    setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
-    setSelectedEmailIDsByBlock((current) => {
-      if (nodeChanged) return {};
-      return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID))));
-    });
-    setOpenEmailBlockIDs((current) => {
-      if (nodeChanged) return new Set();
-      return new Set(Array.from(current).filter((id) => blockIDs.has(id)));
-    });
-    setClosedChatBlockIDs((current) => {
-      if (nodeChanged) return new Set();
-      return new Set(Array.from(current).filter((id) => blockIDs.has(id)));
-    });
+    if (projectionsLoaded) {
+      setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
+      setSelectedEmailIDsByBlock((current) => Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(emailIDsByBlock.get(blockID)?.has(messageID)))));
+      setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
+      setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
+      setClosedChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
+    }
     setFocusedTextBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
-  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections]);
+  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -733,6 +848,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       next.delete(blockID);
       return next;
     });
+    setOpenChatBlockIDs((current) => {
+      if (!current.has(blockID)) return current;
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
     setClosedChatBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -825,6 +946,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       id,
       blockID,
       parentID: parentID || undefined,
+      selectionSource: selectionAnchor?.source,
+      selectionMessageID: selectionAnchor?.messageID,
       selectionQuote: selectionAnchor?.quote,
       selectionStart: selectionAnchor?.startOffset,
       selectionEnd: selectionAnchor?.endOffset,
@@ -855,6 +978,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     setChatMessages((current) => [...current, nextMessage]);
     setActiveChatMessageIDs((current) => ({ ...current, [blockID]: id }));
+    setOpenChatBlockIDs((current) => {
+      if (current.has(blockID)) return current;
+      const next = new Set(current);
+      next.add(blockID);
+      return next;
+    });
     setClosedChatBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -871,6 +1000,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             blockID,
             parentID,
             selectionSource: selectionAnchor?.source,
+            selectionMessageID: selectionAnchor?.messageID,
             selectionQuote: selectionAnchor?.quote,
             selectionStart: selectionAnchor?.startOffset,
             selectionEnd: selectionAnchor?.endOffset,
@@ -1026,10 +1156,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [blocks, canEdit, onCreateNodeFromImage, onError]);
 
-  const openEmailSelectionChat = useCallback((blockID: string, quote: string) => {
+  const openEmailSelectionChat = useCallback((blockID: string, messageID: string, selection: EmailSelectionRequest) => {
     if (!canEdit) return;
     const cleanBlockID = blockID.trim();
-    const cleanQuote = quote.trim();
+    const cleanMessageID = messageID.trim();
+    const cleanQuote = selection.quote.trim();
     if (!cleanBlockID || !cleanQuote) return;
     setFocusedTextBlockID("");
     setChatReplyTargets((current) => {
@@ -1043,9 +1174,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       [cleanBlockID]: {
         blockID: cleanBlockID,
         source: "email",
+        messageID: cleanMessageID || undefined,
         quote: cleanQuote,
-        startOffset: 0,
-        endOffset: 0,
+        startOffset: Math.max(0, Math.trunc(selection.startOffset)),
+        endOffset: Math.max(0, Math.trunc(selection.endOffset)),
       },
     }));
     setActiveChatMessageIDs((current) => {
@@ -1058,6 +1190,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (!current.has(cleanBlockID)) return current;
       const next = new Set(current);
       next.delete(cleanBlockID);
+      return next;
+    });
+    setOpenChatBlockIDs((current) => {
+      if (current.has(cleanBlockID)) return current;
+      const next = new Set(current);
+      next.add(cleanBlockID);
       return next;
     });
     setActiveChatBlockID(cleanBlockID);
@@ -1614,7 +1752,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const selectedBlockEmailID = selectedEmailIDsByBlock[block.id] ?? "";
           const displayedBlockEmailID = selectedBlockEmailID || blockEmails[0]?.messageID || "";
           const chatIsActive = activeChatBlockID === block.id;
-          const chatIsVisible = chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
+          const chatIsVisible = openChatBlockIDs.has(block.id) || chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
           const emailPaneIsVisible = openEmailBlockIDs.has(block.id);
           const chatPaneIsVisible = chatIsVisible;
           const sidePaneCount = (emailPaneIsVisible ? 1 : 0) + (chatPaneIsVisible ? 1 : 0);
@@ -1637,6 +1775,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const selectionAnchor = chatSelectionAnchors[block.id];
           const activeChatMessageID = activeChatMessageIDs[block.id] ?? "";
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
+          const activeEmailSelection = resolveActiveEmailChatSelection(messages, activeChatMessageID, displayedBlockEmailID);
           const blockEmailPane = displayedBlockEmailID ? (
             <EmailConversationPane
               messageID={displayedBlockEmailID}
@@ -1646,8 +1785,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               surfaceText={surfaceText}
               strokeColor={strokeColor}
               ruleColor={ruleColor}
+              activeSelection={activeEmailSelection}
               onError={onError}
-              onSelectionChatRequest={(quote) => openEmailSelectionChat(block.id, quote)}
+              onSelectionChatRequest={(selection) => openEmailSelectionChat(block.id, displayedBlockEmailID, selection)}
               onSelectionNodeRequest={(quote) => { void createNodeFromEmailSelection(block.id, quote); }}
             />
           ) : (
@@ -1671,6 +1811,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             setFocusedTextBlockID("");
             if (chatPaneIsVisible) {
               setActiveChatBlockID("");
+              setOpenChatBlockIDs((current) => {
+                if (!current.has(block.id)) return current;
+                const next = new Set(current);
+                next.delete(block.id);
+                return next;
+              });
               setClosedChatBlockIDs((current) => {
                 const next = new Set(current);
                 next.add(block.id);
@@ -1684,10 +1830,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               next.delete(block.id);
               return next;
             });
+            setOpenChatBlockIDs((current) => {
+              if (current.has(block.id)) return current;
+              const next = new Set(current);
+              next.add(block.id);
+              return next;
+            });
             setActiveChatBlockID(block.id);
           };
           const focusChat = () => {
             setFocusedTextBlockID("");
+            setOpenChatBlockIDs((current) => {
+              if (current.has(block.id)) return current;
+              const next = new Set(current);
+              next.add(block.id);
+              return next;
+            });
             setClosedChatBlockIDs((current) => {
               if (!current.has(block.id)) return current;
               const next = new Set(current);

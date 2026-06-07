@@ -234,6 +234,8 @@ const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
 const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const RECENT_PRIMARY_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const LOCAL_EMAIL_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-replies-v1";
+const LOCAL_EMAIL_THREAD_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-thread-replies-v1";
 export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communications-shared-inboxes-updated";
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
@@ -356,7 +358,7 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
   const cacheKey = messageDetailCacheKey(messageID, companyID, sharedInboxID);
   const cacheEntry = messageDetailCache.get(cacheKey) ?? null;
   const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
-  if (cached && isEmailMessageDetailed(cached)) return cached;
+  if (cached && isEmailMessageDetailed(cached)) return hydrateEmailMessageLocalReplies(cached);
   const existingInflight = messageDetailInflight.get(cacheKey);
   if (existingInflight) return cloneMessage(await existingInflight);
   const queryParams = new URLSearchParams();
@@ -367,7 +369,11 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
     .then((payload) => {
       const message = cloneMessage(payload.message);
       const previous = messageDetailCache.get(cacheKey)?.value;
-      const replies = mergeLocalReplies(previous?.local_replies ?? [], message.local_replies ?? []);
+      const replies = mergeLocalReplies(previous?.local_replies ?? [], [
+        ...(message.local_replies ?? []),
+        ...readStoredLocalEmailReplies(message.id),
+        ...readStoredLocalThreadReplies(message.thread_id),
+      ]);
       const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
       messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now() });
       return value;
@@ -898,6 +904,7 @@ export function removeEmailMessageFromCache(messageID: string): void {
 export function addLocalEmailReply(replyToMessageID: string, reply: EmailMessage): void {
   const cleanReplyToMessageID = replyToMessageID.trim();
   if (!cleanReplyToMessageID || !reply.id.trim()) return;
+  persistLocalEmailReply(cleanReplyToMessageID, reply);
   for (const [key, entry] of messageDetailCache.entries()) {
     if (!messageCacheKeyMatchesID(key, cleanReplyToMessageID)) continue;
     const message = addLocalReplyToEmailMessage(entry.value, reply);
@@ -1122,6 +1129,63 @@ function sentEmailMessageForLocalLists(message: EmailMessage): EmailMessage {
   sent.unread = false;
   if (messageFolderTokens(sent).length === 0) sent.folders = ["sent"];
   return sent;
+}
+
+function localEmailRepliesStorageKey(messageID: string): string {
+  return `${LOCAL_EMAIL_REPLIES_STORAGE_PREFIX}:${messageID.trim()}`;
+}
+
+function localEmailThreadRepliesStorageKey(threadID: string): string {
+  return `${LOCAL_EMAIL_THREAD_REPLIES_STORAGE_PREFIX}:${threadID.trim()}`;
+}
+
+function readStoredLocalReplies(key: string): EmailMessage[] {
+  if (typeof localStorage === "undefined" || !key.trim()) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return mergeLocalReplies([], parsed.filter((item): item is EmailMessage => Boolean(item && typeof item === "object")));
+  } catch {
+    return [];
+  }
+}
+
+function storeStoredLocalReplies(key: string, replies: EmailMessage[]) {
+  if (typeof localStorage === "undefined" || !key.trim()) return;
+  localStorage.setItem(key, JSON.stringify(mergeLocalReplies([], replies).slice(-80)));
+}
+
+function readStoredLocalEmailReplies(messageID: string): EmailMessage[] {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return [];
+  return readStoredLocalReplies(localEmailRepliesStorageKey(cleanMessageID));
+}
+
+function readStoredLocalThreadReplies(threadID: string | undefined): EmailMessage[] {
+  const cleanThreadID = threadID?.trim() ?? "";
+  if (!cleanThreadID) return [];
+  return readStoredLocalReplies(localEmailThreadRepliesStorageKey(cleanThreadID));
+}
+
+function persistLocalEmailReply(replyToMessageID: string, reply: EmailMessage) {
+  const cleanReplyToMessageID = replyToMessageID.trim();
+  const cleanReplyID = reply.id.trim();
+  if (!cleanReplyToMessageID || !cleanReplyID) return;
+  const messageKey = localEmailRepliesStorageKey(cleanReplyToMessageID);
+  storeStoredLocalReplies(messageKey, mergeLocalReplies(readStoredLocalReplies(messageKey), [reply]));
+  const cleanThreadID = reply.thread_id?.trim() ?? "";
+  if (cleanThreadID) {
+    const threadKey = localEmailThreadRepliesStorageKey(cleanThreadID);
+    storeStoredLocalReplies(threadKey, mergeLocalReplies(readStoredLocalReplies(threadKey), [reply]));
+  }
+}
+
+function hydrateEmailMessageLocalReplies(message: EmailMessage): EmailMessage {
+  const replies = mergeLocalReplies(message.local_replies ?? [], [
+    ...readStoredLocalEmailReplies(message.id),
+    ...readStoredLocalThreadReplies(message.thread_id),
+  ]);
+  return cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
 }
 
 function replyForLocalThread(reply: EmailMessage): EmailMessage {
@@ -1364,15 +1428,16 @@ function primeMessageCaches(message: EmailMessage): void {
   const cleanMessageID = message.id.trim();
   if (!cleanMessageID) return;
   const now = Date.now();
+  const hydratedMessage = hydrateEmailMessageLocalReplies(message);
   for (const [key, entry] of messageDetailCache.entries()) {
     if (!messageCacheKeyMatchesID(key, cleanMessageID)) continue;
-    const replies = mergeLocalReplies(entry.value.local_replies ?? [], message.local_replies ?? []);
-    const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
+    const replies = mergeLocalReplies(entry.value.local_replies ?? [], hydratedMessage.local_replies ?? []);
+    const value = cloneMessage({ ...hydratedMessage, local_replies: replies.length > 0 ? replies : undefined });
     messageDetailCache.set(key, { value, fetchedAt: now });
   }
   const existing = messageDetailCache.get(cleanMessageID)?.value;
-  const replies = mergeLocalReplies(existing?.local_replies ?? [], message.local_replies ?? []);
-  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
+  const replies = mergeLocalReplies(existing?.local_replies ?? [], hydratedMessage.local_replies ?? []);
+  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...hydratedMessage, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
 }
 
 function messageDetailCacheKey(messageID: string, companyID?: string, sharedInboxID?: string): string {
