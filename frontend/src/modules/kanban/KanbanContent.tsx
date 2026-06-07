@@ -73,6 +73,7 @@ import {
   getDefaultKanbanYAxisSortDirection,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
+  hydrateKanbanCardsFromNodes,
   isKanbanBacklogColumn,
   logicGateKanbanBoardID,
   logicGateIDFromKanbanBoardID,
@@ -753,7 +754,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         upsertBoardInList(board);
         setActiveLogicGateLabel(logicGateLabel);
         const nextColumns = sortColumns(view.columns ?? []);
-        const nextCards = view.cards ?? [];
+        const nextCards = hydrateKanbanCardsFromNodes(view.cards ?? [], view.nodes ?? []);
         kanbanProjectionSequenceRef.current = nextKanbanProjectionCursor(kanbanProjectionSequenceRef.current, view.projection_sequence);
         applyColumns(nextColumns);
         applyCards(nextCards);

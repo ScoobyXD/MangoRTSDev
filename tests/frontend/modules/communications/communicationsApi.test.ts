@@ -269,6 +269,7 @@ test("archive mailbox filter matches messages outside inbox but not trash or sen
 
 test("primary mailbox filter matches real inbox labels, not archived Gmail category labels", () => {
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "primary" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("starred-inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"], starred: true }), { mailbox: "primary" }), false);
   assert.equal(emailMessageMatchesListFilters(message("archived-category", { folders: ["CATEGORY_PERSONAL"] }), { mailbox: "primary" }), false);
   assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT", "INBOX"] }), { mailbox: "primary" }), false);
 });

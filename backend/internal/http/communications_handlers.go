@@ -395,6 +395,14 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "email_message_update_required")
 			return
 		}
+		if err := s.applyStarredMessageMailboxMove(r.Context(), connection, messageID, &update); err != nil {
+			if errors.Is(err, errCommunicationsArchiveUnavailable) {
+				writeError(w, http.StatusConflict, "archive_folder_unavailable")
+				return
+			}
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
 		var message NylasMessage
 		err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
 			var err error
@@ -407,7 +415,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		}
 		now := time.Now().UTC()
 		s.commCache.patchMessagePages(connection.UserID, message, now)
-		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, req.Folders != nil)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, req.Folders != nil || update.Folders != nil)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
@@ -552,6 +560,39 @@ func (s *Server) archiveCommunicationsMessagesBatch(ctx context.Context, connect
 	close(jobs)
 	wg.Wait()
 	return result
+}
+
+func (s *Server) applyStarredMessageMailboxMove(ctx context.Context, connection domain.UserEmailConnection, messageID string, update *NylasMessageUpdate) error {
+	if update == nil || update.Starred == nil || !*update.Starred || update.Folders != nil {
+		return nil
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return store.ErrInvalid
+	}
+
+	message, err := s.communicationsMessageForFolderMutation(ctx, connection, messageID)
+	if err != nil {
+		return err
+	}
+	if !nylasMessageHasAnyFolder(message, []string{"inbox", "\\inbox"}) {
+		return nil
+	}
+	if connection.Provider == "google" {
+		update.Folders = archiveMessageFolderIDs(connection.Provider, message.Folders, "")
+		return nil
+	}
+
+	emailFolders, err := s.communicationsFolders(ctx, connection)
+	if err != nil {
+		return err
+	}
+	folderID := findNylasArchiveFolderID(emailFolders)
+	if folderID == "" {
+		return errCommunicationsArchiveUnavailable
+	}
+	update.Folders = []string{folderID}
+	return nil
 }
 
 func (s *Server) archiveCommunicationsMessageByID(ctx context.Context, connection domain.UserEmailConnection, messageID, archiveFolderID string) (NylasMessage, error) {
@@ -1170,6 +1211,8 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			query.FolderID = ""
 			return query, nil
 		}
+		starred := false
+		query.Starred = &starred
 		return s.applySystemFolderMailbox(ctx, connection, query, "inbox")
 	case "sent":
 		if strings.TrimSpace(query.FolderID) != "" {
@@ -1247,7 +1290,7 @@ func gmailUserSearch(userQuery string, unread *bool) string {
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	return gmailSearch([]string{"in:inbox", "-category:social", "-category:promotions"}, userQuery, unread)
+	return gmailSearch([]string{"in:inbox", "-category:social", "-category:promotions", "-is:starred"}, userQuery, unread)
 }
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {

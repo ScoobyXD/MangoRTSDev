@@ -707,7 +707,7 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&q=from%3Aops%40example.com&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions from:ops@example.com is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions -is:starred from:ops@example.com is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -823,6 +823,56 @@ func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
 		t.Fatalf("query = %+v, want Gmail-native starred search only", nylas.lastQuery)
+	}
+}
+
+func TestCommunicationsStarMessageRemovesGmailInboxLabel(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", `{"starred":true}`, token, http.StatusOK)
+	if nylas.update.Starred == nil || !*nylas.update.Starred {
+		t.Fatalf("starred update = %v, want true", nylas.update.Starred)
+	}
+	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123"; got != want {
+		t.Fatalf("folders = %q, want %q", got, want)
+	}
+}
+
+func TestCommunicationsCachePrimaryExcludesStarredInboxMessages(t *testing.T) {
+	t.Parallel()
+
+	message := NylasMessage{ID: "message-1", Starred: true, Folders: []string{"INBOX", "CATEGORY_PERSONAL"}}
+	if nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "primary"}) {
+		t.Fatal("primary cache matcher included a starred inbox message")
+	}
+	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "starred"}) {
+		t.Fatal("starred cache matcher excluded a starred inbox message")
 	}
 }
 

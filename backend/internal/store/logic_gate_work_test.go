@@ -66,6 +66,9 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 	if len(work.Cards) != 2 || work.Cards[1].ColumnID != LogicGateWorkStatusInProgress {
 		t.Fatalf("synthesized cards = %+v, want canonical in_progress card", work.Cards)
 	}
+	if work.Cards[0].Priority == nil || *work.Cards[0].Priority != 2 || work.Cards[1].Priority == nil || *work.Cards[1].Priority != 4 {
+		t.Fatalf("synthesized card priorities = %+v, want node priorities 2 and 4", work.Cards)
+	}
 }
 
 func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
@@ -76,6 +79,9 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	}
 	if !strings.Contains(normalizedPostgres, "join node_logic_gate_assignments assignment") {
 		t.Fatalf("postgres logic gate work read does not join assignment metadata narrowly")
+	}
+	if !strings.Contains(normalizedPostgres, "projection.priority") {
+		t.Fatalf("postgres logic gate work read does not select projection priority")
 	}
 	for _, forbidden := range []string{
 		"from kanban_boards",
@@ -118,6 +124,36 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	} {
 		if strings.Contains(workItemHandlerSource, forbidden) {
 			t.Fatalf("work item assignment handler contains replaced notification helper %q", forbidden)
+		}
+	}
+}
+
+func TestPostgresKanbanProjectionCardListSelectsCardMetadata(t *testing.T) {
+	source := strings.ToLower(readPhase4SourceForTest(t, "postgres_kanban_projection.go"))
+	functionIndex := strings.Index(source, "func listkanbanboardprojectioncardstx")
+	if functionIndex < 0 {
+		t.Fatalf("postgres kanban projection card list function not found")
+	}
+	functionSource := source[functionIndex:]
+	fromProjectedIndex := strings.Index(functionSource, "from projected")
+	if fromProjectedIndex < 0 {
+		t.Fatalf("postgres kanban projection card list does not select from projected CTE")
+	}
+	outerSelectSource := functionSource[:fromProjectedIndex]
+	outerSelectIndex := strings.LastIndex(outerSelectSource, "select")
+	if outerSelectIndex < 0 {
+		t.Fatalf("postgres kanban projection card list outer select not found")
+	}
+	outerSelect := outerSelectSource[outerSelectIndex:]
+	for _, required := range []string{
+		"due_date",
+		"priority",
+		"assignee_user_id",
+		"assignee_display_name",
+		"assignee_email",
+	} {
+		if !strings.Contains(outerSelect, required) {
+			t.Fatalf("postgres kanban projection card list outer select missing %s", required)
 		}
 	}
 }

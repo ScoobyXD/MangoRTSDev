@@ -72,12 +72,16 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 		ColumnID    string  `json:"column_id"`
 		NodeID      string  `json:"node_id"`
 		LogicGateID *string `json:"logic_gate_id"`
+		Priority    *int    `json:"priority"`
 	}
 	if err := json.NewDecoder(addCardRec.Body).Decode(&createdCard); err != nil {
 		t.Fatalf("decode created card: %v", err)
 	}
 	if createdCard.CardID == "" || createdCard.ColumnID != store.LogicGateWorkStatusPending || createdCard.NodeID != node.NodeID || createdCard.LogicGateID == nil || *createdCard.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("created card = %+v, want projection card for assigned node", createdCard)
+	}
+	if createdCard.Priority == nil || *createdCard.Priority != priority {
+		t.Fatalf("created card priority = %+v, want %d", createdCard.Priority, priority)
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
@@ -88,8 +92,9 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 	}
 	var listPayload struct {
 		Cards []struct {
-			CardID string `json:"card_id"`
-			NodeID string `json:"node_id"`
+			CardID   string `json:"card_id"`
+			NodeID   string `json:"node_id"`
+			Priority *int   `json:"priority"`
 		} `json:"cards"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
@@ -97,6 +102,9 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 	}
 	if len(listPayload.Cards) != 1 || listPayload.Cards[0].CardID != createdCard.CardID {
 		t.Fatalf("listed cards = %+v, want created projection card", listPayload.Cards)
+	}
+	if listPayload.Cards[0].Priority == nil || *listPayload.Cards[0].Priority != priority {
+		t.Fatalf("listed card priority = %+v, want %d", listPayload.Cards[0].Priority, priority)
 	}
 
 	moveBody, _ := json.Marshal(map[string]any{

@@ -113,6 +113,15 @@ export type KanbanCard = {
   updated_timestamp: string;
 };
 
+export type KanbanCardNodeMetadata = {
+  node_id: string;
+  due_date?: string | null;
+  priority?: number | null;
+  assignee_user_id?: string | null;
+  assignee_name?: string | null;
+  assignee_email?: string | null;
+};
+
 export type LogicGateArenaLogicGate = {
   company_id: string;
   logic_gate_id: string;
@@ -125,9 +134,27 @@ export type LogicGateArenaView = {
   board: KanbanBoard;
   columns: KanbanColumn[];
   cards: KanbanCard[];
+  nodes?: KanbanCardNodeMetadata[];
   cards_limit: number;
   projection_sequence?: number;
 };
+
+export function hydrateKanbanCardsFromNodes(cards: KanbanCard[], nodes: KanbanCardNodeMetadata[] = []): KanbanCard[] {
+  if (nodes.length === 0 || cards.length === 0) return cards;
+  const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
+  return cards.map((card) => {
+    const node = nodeByID.get(card.node_id);
+    if (!node) return card;
+    return {
+      ...card,
+      due_date: card.due_date ?? node.due_date ?? null,
+      priority: card.priority ?? node.priority ?? null,
+      assignee_user_id: card.assignee_user_id ?? node.assignee_user_id ?? null,
+      assignee_name: card.assignee_name ?? node.assignee_name ?? null,
+      assignee_email: card.assignee_email ?? node.assignee_email ?? null,
+    };
+  });
+}
 
 export type KanbanCardDragPayload = {
   cardID: string;
