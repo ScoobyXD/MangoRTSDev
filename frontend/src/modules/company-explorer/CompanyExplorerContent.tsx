@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type NodeRecord } from "../node-map/shared";
-import { LogicGateRecord as LogicGateApiRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
+import { toLogicGateCanvasRecord, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
 import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
@@ -47,9 +47,11 @@ import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
 import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
+import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
+import { listCompanyUserGroups, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import {
   buildDeleteConfirmationSummary,
   findProtectedSystemFolderInDeleteTargets,
@@ -73,6 +75,8 @@ import {
 const scopedRootCreationKeys = new Set<string>();
 const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set(["logic gates by function", "logic gates by person"]);
+type CompanyExplorerScopeView = "mine" | "teams" | "company";
+type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "raci_assignments">>;
 
 function normalizeExplorerFolderName(value: string): string {
   return value.trim().toLowerCase();
@@ -100,6 +104,118 @@ function hideMainExplorerRootFolders(rows: ExplorerTreeNode[]): ExplorerTreeNode
     filtered.push(row);
   }
   return filtered;
+}
+
+function cleanExplorerID(value: string | null | undefined): string {
+  return value?.trim() ?? "";
+}
+
+function logicGateOwnedByAnyUser(logicGate: ExplorerLogicGateRecord, userIDs: Set<string>): boolean {
+  if (userIDs.size === 0) return false;
+  return (logicGate.raci_assignments ?? []).some((assignment) => userIDs.has(cleanExplorerID(assignment.user_id)));
+}
+
+function teamMemberUserIDsForCurrentUser(members: CompanyUserGroupMember[], currentUserID: string): Set<string> {
+  const cleanCurrentUserID = currentUserID.trim();
+  const ownGroupIDs = new Set(
+    members
+      .filter((member) => cleanExplorerID(member.user_id) === cleanCurrentUserID)
+      .map((member) => cleanExplorerID(member.group_id))
+      .filter(Boolean),
+  );
+  const userIDs = new Set<string>();
+  if (cleanCurrentUserID) userIDs.add(cleanCurrentUserID);
+  for (const member of members) {
+    if (ownGroupIDs.has(cleanExplorerID(member.group_id))) {
+      const userID = cleanExplorerID(member.user_id);
+      if (userID) userIDs.add(userID);
+    }
+  }
+  return userIDs;
+}
+
+function addFolderAncestors(folderID: string, folderByID: Map<string, CompanyExplorerFolder>, target: Set<string>): void {
+  let currentID = folderID.trim();
+  const seen = new Set<string>();
+  while (currentID && !seen.has(currentID)) {
+    seen.add(currentID);
+    const folder = folderByID.get(currentID);
+    if (!folder) break;
+    target.add(folder.folder_id);
+    currentID = folder.parent_folder_id?.trim() ?? "";
+  }
+}
+
+function filterCompanyExplorerDataForScope(input: {
+  scopeView: CompanyExplorerScopeView;
+  currentUserID: string;
+  teamMemberUserIDs: Set<string>;
+  nodes: NodeRecord[];
+  logicGates: ExplorerLogicGateRecord[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+}): {
+  nodes: NodeRecord[];
+  logicGates: ExplorerLogicGateRecord[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+} {
+  if (input.scopeView === "company") {
+    return {
+      nodes: input.nodes,
+      logicGates: input.logicGates,
+      folders: input.folders,
+      folderItems: input.folderItems,
+    };
+  }
+
+  const ownerUserIDs = input.scopeView === "teams"
+    ? input.teamMemberUserIDs
+    : new Set([input.currentUserID.trim()].filter(Boolean));
+  if (ownerUserIDs.size === 0) {
+    return {
+      nodes: input.nodes,
+      logicGates: input.logicGates,
+      folders: input.folders,
+      folderItems: input.folderItems,
+    };
+  }
+
+  const visibleLogicGateIDs = new Set(
+    input.logicGates
+      .filter((logicGate) => logicGateOwnedByAnyUser(logicGate, ownerUserIDs))
+      .map((logicGate) => logicGate.logic_gate_id),
+  );
+  const visibleNodeIDs = new Set<string>();
+  for (const node of input.nodes) {
+    const assigneeID = cleanExplorerID(node.assignee_user_id);
+    if (assigneeID && ownerUserIDs.has(assigneeID)) {
+      visibleNodeIDs.add(node.node_id);
+      continue;
+    }
+    if ((node.logic_gate_ids ?? []).some((logicGateID) => visibleLogicGateIDs.has(cleanExplorerID(logicGateID)))) {
+      visibleNodeIDs.add(node.node_id);
+    }
+  }
+
+  const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
+  const visibleFolderIDs = new Set<string>();
+  const scopedFolderItems = input.folderItems.filter((item) => {
+    const visible = item.item_type === "node"
+      ? visibleNodeIDs.has(item.item_id)
+      : item.item_type === "logic_gate"
+        ? visibleLogicGateIDs.has(item.item_id)
+        : false;
+    if (visible) addFolderAncestors(item.folder_id, folderByID, visibleFolderIDs);
+    return visible;
+  });
+
+  return {
+    nodes: input.nodes.filter((node) => visibleNodeIDs.has(node.node_id)),
+    logicGates: input.logicGates.filter((logicGate) => visibleLogicGateIDs.has(logicGate.logic_gate_id)),
+    folders: input.folders.filter((folder) => visibleFolderIDs.has(folder.folder_id)),
+    folderItems: scopedFolderItems,
+  };
 }
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
@@ -190,6 +306,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const pendingExplorerSelectionIntentRef = useRef<SelectionIntent>("activate");
   const explorerContextSequenceRef = useRef(0);
   const pendingScrollAlignRef = useRef<"nearest" | "center">("nearest");
+  const [scopeView, setScopeView] = useState<CompanyExplorerScopeView>("mine");
+  const [currentUserID, setCurrentUserID] = useState("");
+  const [groupMembers, setGroupMembers] = useState<CompanyUserGroupMember[]>([]);
 
   const applyCompanyExplorerSnapshot = useCallback((snapshot: CompanyExplorerSnapshotPayload) => {
     dispatchExplorerStore({ type: "applySnapshot", snapshot });
@@ -268,6 +387,36 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
+  const scopeViewsEnabled = !hideTopControls && !scopedExplorerActive;
+  useEffect(() => {
+    if (!scopeViewsEnabled) return undefined;
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((current) => {
+        if (!cancelled) setCurrentUserID(current.user.user_id.trim());
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserID("");
+      });
+    void listCompanyUserGroups(companyID)
+      .then((payload) => {
+        if (!cancelled) setGroupMembers(payload.members ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setGroupMembers([]);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, scopeViewsEnabled]);
+  const teamMemberUserIDs = useMemo(() => teamMemberUserIDsForCurrentUser(groupMembers, currentUserID), [currentUserID, groupMembers]);
+  const scopedExplorerData = useMemo(() => filterCompanyExplorerDataForScope({
+    scopeView: scopeViewsEnabled ? scopeView : "company",
+    currentUserID,
+    teamMemberUserIDs,
+    nodes,
+    logicGates,
+    folders,
+    folderItems,
+  }), [currentUserID, folderItems, folders, groupMembers, logicGates, nodes, scopeView, scopeViewsEnabled, teamMemberUserIDs]);
   const scopedRootFolder = useMemo(() => (
     scopedKind && scopedRootName
       ? findCompanyExplorerRootFolderByName(folders, scopedKind, scopedRootName)
@@ -289,11 +438,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     selectedKanbanBoardLabel,
   } = useCompanyExplorerTreeModel({
     expanded: effectiveExpanded,
-    nodes,
-    logicGates,
+    nodes: scopedExplorerData.nodes,
+    logicGates: scopedExplorerData.logicGates,
     kanbanBoards,
-    folders,
-    folderItems,
+    folders: scopedExplorerData.folders,
+    folderItems: scopedExplorerData.folderItems,
     rootRowOrder,
     selectedTreeID,
     treeViewportHeight,
@@ -309,20 +458,20 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
-    for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
+    for (const folder of scopedExplorerData.folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
     const rows = buildCompanyExplorerTreeRows({
       expanded: expandedForSearch,
-      nodes,
-      logicGates,
+      nodes: scopedExplorerData.nodes,
+      logicGates: scopedExplorerData.logicGates,
       kanbanBoards,
-      folders,
-      folderItems,
+      folders: scopedExplorerData.folders,
+      folderItems: scopedExplorerData.folderItems,
       rootRowOrder,
     });
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(rows);
-  }, [folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder]);
+  }, [kanbanBoards, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
@@ -1571,6 +1720,36 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     fontWeight: 700,
     textAlign: "left",
   };
+  const scopeToggleStyle: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 4,
+    minWidth: 0,
+  };
+  const scopeButtonStyle = (active: boolean): React.CSSProperties => ({
+    minWidth: 0,
+    height: 28,
+    border: `1px solid ${active ? "rgba(71, 85, 105, 0.72)" : "rgba(148, 163, 184, 0.34)"}`,
+    borderRadius: 7,
+    background: active ? "rgba(71, 85, 105, 0.14)" : "rgba(255, 255, 255, 0.82)",
+    color: "#111827",
+    cursor: "pointer",
+    fontFamily: "var(--mango-font-family)",
+    fontSize: 11,
+    fontWeight: active ? 760 : 620,
+    letterSpacing: 0,
+    padding: "0 6px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  });
+  const scopeControls = scopeViewsEnabled ? (
+    <div data-frame-interactive="true" style={scopeToggleStyle} aria-label="Company Explorer view scope">
+      <button type="button" style={scopeButtonStyle(scopeView === "mine")} onClick={() => setScopeView("mine")}>My</button>
+      <button type="button" style={scopeButtonStyle(scopeView === "teams")} onClick={() => setScopeView("teams")}>Teams</button>
+      <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>Company</button>
+    </div>
+  ) : undefined;
 
   return (
     <div
@@ -1601,6 +1780,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         scrollbarTrack={scrollbarTrack}
         isDarkTheme={isDarkTheme}
         elevatedControls={elevatedExplorerControls}
+        topControlsAccessory={scopeControls}
         hideTopControls={hideTopControls}
         useParentScroll={useParentScroll}
         treeViewportRef={treeViewportRef}

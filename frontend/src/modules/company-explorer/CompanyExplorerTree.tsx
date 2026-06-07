@@ -25,6 +25,7 @@ type CompanyExplorerTreeProps = {
   scrollbarTrack: string;
   isDarkTheme: boolean;
   elevatedControls?: boolean;
+  topControlsAccessory?: React.ReactNode;
   hideTopControls: boolean;
   useParentScroll: boolean;
   treeViewportRef: React.RefObject<HTMLDivElement>;
@@ -96,6 +97,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   scrollbarTrack,
   isDarkTheme,
   elevatedControls = false,
+  topControlsAccessory,
   hideTopControls,
   useParentScroll,
   treeViewportRef,
@@ -296,6 +298,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
       {!hideTopControls && (
         <div style={topControlsStyle}>
           <div style={titleStyle}>Explorer</div>
+          {topControlsAccessory}
           <div data-frame-interactive="true" style={searchShellStyle}>
             <input
               aria-label="Search Explorer"

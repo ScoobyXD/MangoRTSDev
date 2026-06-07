@@ -73,7 +73,7 @@ import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
-import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
@@ -3353,6 +3353,7 @@ export function HomePage({
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
+  const showLocalEntityRail = !embedded;
   const layoutColumnWidths = isNarrow || isInboxMatrixView || isCustomMatrixView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
@@ -3364,8 +3365,12 @@ export function HomePage({
         : `${layoutColumnWidths[0]}px minmax(0, 1fr)`
       : hideNavigation
       ? isInboxMatrixView
-        ? getInboxMatrixGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
-        : getHomeGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
+        ? showLocalEntityRail
+          ? getInboxMatrixGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
+          : "minmax(0, 1fr)"
+        : showLocalEntityRail
+          ? getHomeGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
+          : `${layoutColumnWidths[1]}px ${HOME_COLUMN_RESIZER_WIDTH}px minmax(${layoutColumnWidths[2]}px, 1fr)`
       : isInboxMatrixView
         ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
         : getHomeGridTemplateColumns(layoutColumnWidths);
@@ -3486,43 +3491,45 @@ export function HomePage({
                   onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
                 />
               )}
-              {hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
-              <NodeInboxRail
-                loading={loadingNodes}
-                nodeByID={nodeByID}
-                logicGateByID={logicGateByID}
-                allRows={visibleNodeRows}
-                myNodeGroups={myNodeGroups}
-                otherNodes={otherAssignedNodes}
-                myLogicGateGroups={activeRaciRoleLogicGateGroups}
-                inboxRole={activeRaciInboxSection?.role ?? "other"}
-                selectedRowIDs={selectedNodeRowIDs}
-                selectedLogicGateRowIDs={selectedLogicGateRowIDs}
-                expandedRowIDs={nodeExpandedIDs}
-                search={nodeSearch}
-                busy={!!busy}
-                getNodeDragIDs={getNodeDragIDs}
-                getLogicGateDragIDs={getLogicGateDragIDs}
-                onSearchChange={setNodeSearch}
-                onToggleFolder={(rowID) => {
-                  setNodeExpandedIDs((previous) => {
-                    const next = new Set(previous);
-                    if (next.has(rowID)) next.delete(rowID);
-                    else next.add(rowID);
-                    return next;
-                  });
-                }}
-                onSelectRow={selectNodeRow}
-                onSelectNode={selectNodeMatrixCard}
-                onSelectLogicGate={selectLogicGateTreeID}
-                onOpenNode={openNodeEditorOverlay}
-                onOpenLogicGate={openLogicGateArena}
-                onOpenNodeBulkMenu={openNodeBulkEditMenu}
-                onRemoveLogicGateShortcut={removeShortcut}
-                onConvertMessages={convertMessagesToLogicGate}
-                onRequestDeleteLogicGate={requestDeleteLogicGateContext}
-                onCreateNode={() => { void createHomeNode(); }}
-              />
+              {showLocalEntityRail && hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
+              {showLocalEntityRail && (
+                <NodeInboxRail
+                  loading={loadingNodes}
+                  nodeByID={nodeByID}
+                  logicGateByID={logicGateByID}
+                  allRows={visibleNodeRows}
+                  myNodeGroups={myNodeGroups}
+                  otherNodes={otherAssignedNodes}
+                  myLogicGateGroups={activeRaciRoleLogicGateGroups}
+                  inboxRole={activeRaciInboxSection?.role ?? "other"}
+                  selectedRowIDs={selectedNodeRowIDs}
+                  selectedLogicGateRowIDs={selectedLogicGateRowIDs}
+                  expandedRowIDs={nodeExpandedIDs}
+                  search={nodeSearch}
+                  busy={!!busy}
+                  getNodeDragIDs={getNodeDragIDs}
+                  getLogicGateDragIDs={getLogicGateDragIDs}
+                  onSearchChange={setNodeSearch}
+                  onToggleFolder={(rowID) => {
+                    setNodeExpandedIDs((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(rowID)) next.delete(rowID);
+                      else next.add(rowID);
+                      return next;
+                    });
+                  }}
+                  onSelectRow={selectNodeRow}
+                  onSelectNode={selectNodeMatrixCard}
+                  onSelectLogicGate={selectLogicGateTreeID}
+                  onOpenNode={openNodeEditorOverlay}
+                  onOpenLogicGate={openLogicGateArena}
+                  onOpenNodeBulkMenu={openNodeBulkEditMenu}
+                  onRemoveLogicGateShortcut={removeShortcut}
+                  onConvertMessages={convertMessagesToLogicGate}
+                  onRequestDeleteLogicGate={requestDeleteLogicGateContext}
+                  onCreateNode={() => { void createHomeNode(); }}
+                />
+              )}
             </>
           ) : (
             <>
@@ -3600,38 +3607,40 @@ export function HomePage({
               setNextPageToken("");
             }}
           />
-          {!isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
-          <LogicGateRail
-            loading={loadingLogicGates}
-            logicGateByID={logicGateByID}
-            folders={logicGateFolders}
-            folderItems={logicGateFolderItems}
-            allRows={visibleLogicGateRows}
-            selectedRowIDs={selectedLogicGateRowIDs}
-            expandedRowIDs={logicGateExpandedIDs}
-            search={logicGateSearch}
-            myGroups={myLogicGateGroups}
-            busy={!!busy}
-            getLogicGateDragIDs={getLogicGateDragIDs}
-            shortcutLogicGateIDs={shortcutLogicGateIDs}
-            onSearchChange={setLogicGateSearch}
-            onToggleFolder={(rowID) => {
-              setLogicGateExpandedIDs((previous) => {
-                const next = new Set(previous);
-                if (next.has(rowID)) next.delete(rowID);
-                else next.add(rowID);
-                return next;
-              });
-            }}
-            onSelectRow={selectLogicGateRow}
-            onSelectShortcut={selectLogicGateShortcut}
-            onOpenLogicGate={openLogicGateArena}
-            onAddShortcuts={addShortcutsFromExplorerPayload}
-            onRemoveShortcut={removeShortcut}
-            onConvertMessages={convertMessagesToLogicGate}
-            onCreateLogicGate={(options) => { void createHomeLogicGate({ ...options, openArena: false }); }}
-            onRequestDeleteLogicGate={requestDeleteLogicGateContext}
-          />
+          {showLocalEntityRail && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
+          {showLocalEntityRail && (
+            <LogicGateRail
+              loading={loadingLogicGates}
+              logicGateByID={logicGateByID}
+              folders={logicGateFolders}
+              folderItems={logicGateFolderItems}
+              allRows={visibleLogicGateRows}
+              selectedRowIDs={selectedLogicGateRowIDs}
+              expandedRowIDs={logicGateExpandedIDs}
+              search={logicGateSearch}
+              myGroups={myLogicGateGroups}
+              busy={!!busy}
+              getLogicGateDragIDs={getLogicGateDragIDs}
+              shortcutLogicGateIDs={shortcutLogicGateIDs}
+              onSearchChange={setLogicGateSearch}
+              onToggleFolder={(rowID) => {
+                setLogicGateExpandedIDs((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(rowID)) next.delete(rowID);
+                  else next.add(rowID);
+                  return next;
+                });
+              }}
+              onSelectRow={selectLogicGateRow}
+              onSelectShortcut={selectLogicGateShortcut}
+              onOpenLogicGate={openLogicGateArena}
+              onAddShortcuts={addShortcutsFromExplorerPayload}
+              onRemoveShortcut={removeShortcut}
+              onConvertMessages={convertMessagesToLogicGate}
+              onCreateLogicGate={(options) => { void createHomeLogicGate({ ...options, openArena: false }); }}
+              onRequestDeleteLogicGate={requestDeleteLogicGateContext}
+            />
+          )}
           <HomeMailOverlays
             busy={busy}
             isArchiveMailbox={isArchiveMailbox}
