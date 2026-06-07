@@ -2980,7 +2980,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
             <input
               ref={folderTitleInputRef}
               value={editingFolder.draft}
-              onChange={(event) => setEditingFolder((current) => current?.folderID === folder.id ? { ...current, draft: event.currentTarget.value } : current)}
+              onChange={(event) => {
+                const nextDraft = event.currentTarget.value;
+                setEditingFolder((current) => current?.folderID === folder.id ? { ...current, draft: nextDraft } : current);
+              }}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
               onBlur={commitFolderTitleEdit}
