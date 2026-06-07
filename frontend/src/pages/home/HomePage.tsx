@@ -1602,6 +1602,10 @@ export function HomePage({
     setSelectedMessage(null);
     setMessageContextMenu(null);
   }, []);
+  useEffect(() => {
+    if (mailbox !== "archive") return;
+    selectMailbox("all");
+  }, [mailbox, selectMailbox]);
   const selectHomeView = useCallback((viewID: HomeViewID, nextMailbox: EmailMailbox = "primary") => {
     setActiveViewID(viewID);
     selectMailbox(nextMailbox);
@@ -1821,10 +1825,6 @@ export function HomePage({
   const openSentMailbox = useCallback(() => {
     setCompose(emptyCompose);
     selectMailbox("sent");
-  }, [selectMailbox]);
-  const openArchivedMailbox = useCallback(() => {
-    setCompose(emptyCompose);
-    selectMailbox("archive");
   }, [selectMailbox]);
   const openAllMailbox = useCallback(() => {
     setCompose(emptyCompose);
@@ -3586,7 +3586,6 @@ export function HomePage({
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
             onPrefetchMessages={() => { void prefetchNextMessagePage(); }}
             onOpenAllMailbox={openAllMailbox}
-            onOpenArchivedMailbox={openArchivedMailbox}
             onOpenContextMenu={openMessageContextMenu}
             onOpenNewCompose={openNewCompose}
             onOpenPendingMailbox={openPendingMailbox}
