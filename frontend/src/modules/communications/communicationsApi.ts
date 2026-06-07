@@ -59,6 +59,22 @@ export type EmailMessage = {
   local_replies?: EmailMessage[];
 };
 
+export type EmailThread = {
+  id: string;
+  subject?: string;
+  snippet?: string;
+  unread?: boolean;
+  starred?: boolean;
+  folders?: string[];
+  participants?: EmailAddress[];
+  message_ids?: string[];
+  draft_ids?: string[];
+  earliest_message_date?: number;
+  latest_message_received_date?: number;
+  latest_message_sent_date?: number;
+  latest_draft_or_message?: EmailMessage;
+};
+
 export type ListMessagesParams = {
   limit?: number;
   pageToken?: string;
@@ -389,6 +405,25 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
     if (stale && isEmailMessageDetailed(stale)) return stale;
     throw error;
   }
+}
+
+export async function getEmailThread(threadID: string, companyID?: string, sharedInboxID?: string): Promise<EmailThread> {
+  ensureCommunicationsCacheAuthScope();
+  const cleanThreadID = threadID.trim();
+  if (!cleanThreadID) throw new Error("email_thread_id_required");
+  const queryParams = new URLSearchParams();
+  if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
+  if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
+  const query = queryParams.toString();
+  const payload = await apiFetchJSON<{ thread: EmailThread }>(`/v1/communications/threads/${encodeURIComponent(cleanThreadID)}${query ? `?${query}` : ""}`);
+  return {
+    ...payload.thread,
+    participants: cloneEmailAddresses(payload.thread.participants),
+    folders: payload.thread.folders ? [...payload.thread.folders] : undefined,
+    message_ids: payload.thread.message_ids ? [...payload.thread.message_ids] : undefined,
+    draft_ids: payload.thread.draft_ids ? [...payload.thread.draft_ids] : undefined,
+    latest_draft_or_message: payload.thread.latest_draft_or_message ? cloneMessage(payload.thread.latest_draft_or_message) : undefined,
+  };
 }
 
 export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {

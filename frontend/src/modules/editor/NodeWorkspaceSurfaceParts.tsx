@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getEmailMessage, listEmailMessages, sendEmail, type EmailAddress, type EmailMessage } from "../communications/communicationsApi";
+import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMessage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -271,6 +271,11 @@ type TextHighlightRect = {
   height: number;
   active: boolean;
 };
+
+const EDITOR_SOURCE_HIGHLIGHT_BACKGROUND = "linear-gradient(135deg, rgba(254,255,102,0.72), rgba(250,232,28,0.58))";
+const EDITOR_SOURCE_HIGHLIGHT_ACTIVE_BACKGROUND = "linear-gradient(135deg, rgba(255,255,80,0.88), rgba(250,245,24,0.78))";
+const EDITOR_SOURCE_HIGHLIGHT_OUTLINE = "0 0 0 2px rgba(234,179,8,0.72), 0 0 18px rgba(250,255,0,0.34)";
+const EDITOR_SOURCE_HIGHLIGHT_SOFT_OUTLINE = "0 0 0 1px rgba(234,179,8,0.32)";
 
 type NodeContentChangeLabelLayout = {
   change: NodeContentChange;
@@ -943,8 +948,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
                 width: rect.width,
                 height: rect.height,
                 borderRadius: 6,
-                background: rect.active ? "linear-gradient(135deg, rgba(254, 240, 138, 0.76), rgba(253, 224, 71, 0.66))" : "linear-gradient(135deg, rgba(254, 240, 138, 0.54), rgba(253, 224, 71, 0.42))",
-                boxShadow: rect.active ? "0 0 0 1px rgba(202,138,4,0.56), 0 0 16px rgba(250,204,21,0.30)" : "none",
+                background: rect.active ? EDITOR_SOURCE_HIGHLIGHT_ACTIVE_BACKGROUND : EDITOR_SOURCE_HIGHLIGHT_BACKGROUND,
+                boxShadow: rect.active ? EDITOR_SOURCE_HIGHLIGHT_OUTLINE : "none",
               }}
             />
           ))}
@@ -2420,10 +2425,10 @@ function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighl
         key={range.id}
         style={{
           borderRadius: 4,
-          background: range.id === "active-email-chat-selection" ? "rgba(125,92,255,0.26)" : "rgba(250,204,21,0.36)",
+          background: range.id === "active-email-chat-selection" ? EDITOR_SOURCE_HIGHLIGHT_ACTIVE_BACKGROUND : EDITOR_SOURCE_HIGHLIGHT_BACKGROUND,
           boxShadow: range.id === "active-email-chat-selection"
-            ? "0 0 0 2px rgba(125,92,255,0.44), 0 0 0 5px rgba(125,92,255,0.12)"
-            : "0 0 0 1px rgba(234,179,8,0.26)",
+            ? EDITOR_SOURCE_HIGHLIGHT_OUTLINE
+            : EDITOR_SOURCE_HIGHLIGHT_SOFT_OUTLINE,
         }}
       >
         {text.slice(range.start, range.end)}
@@ -2494,6 +2499,28 @@ function emailBodyText(body: string): string {
 
 function emailMessageTimestamp(message: EmailMessage): number {
   return typeof message.date === "number" && Number.isFinite(message.date) ? message.date : 0;
+}
+
+function formatEmailRelativeTime(value: string | number | undefined): string {
+  if (value === undefined || value === "") return "";
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  const timestamp = date.getTime();
+  if (!Number.isFinite(timestamp)) return "";
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const minuteMs = 60_000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+  if (diffMs < minuteMs) return "just now";
+  if (diffMs < hourMs) {
+    const minutes = Math.max(1, Math.round(diffMs / minuteMs));
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  }
+  if (diffMs < dayMs) {
+    const hours = Math.max(1, Math.round(diffMs / hourMs));
+    return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  }
+  const days = Math.max(1, Math.round(diffMs / dayMs));
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 }
 
 function mergeEmailThreadMessages(primary: EmailMessage | null, fetchedMessages: EmailMessage[], sentReplies: EmailMessage[]): EmailMessage[] {
@@ -2574,20 +2601,41 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
       try {
-        const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+        const thread = await getEmailThread(threadID, companyID);
         if (cancelled) return;
-        const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
+        let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
+        if (ids.length === 0) {
+          const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+          ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
+        }
+        if (!ids.includes(payload.id)) ids.unshift(payload.id);
         const details = await Promise.all(ids.map(async (id) => {
           if (id === payload.id) return payload;
           try {
             return await getEmailMessage(id, companyID);
           } catch {
-            return (page.messages ?? []).find((item) => item.id === id) ?? null;
+            return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
           }
         }));
         if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
       } catch {
-        if (!cancelled) setThreadMessages([payload]);
+        try {
+          const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+          if (cancelled) return;
+          const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
+          if (!ids.includes(payload.id)) ids.unshift(payload.id);
+          const details = await Promise.all(ids.map(async (id) => {
+            if (id === payload.id) return payload;
+            try {
+              return await getEmailMessage(id, companyID);
+            } catch {
+              return (page.messages ?? []).find((item) => item.id === id) ?? null;
+            }
+          }));
+          if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
+        } catch {
+          if (!cancelled) setThreadMessages([payload]);
+        }
       }
     })()
       .catch((cause) => {
@@ -2774,6 +2822,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
               const isReplyTarget = replyTargetMessage?.id === threadMessage.id;
+              const relativeTime = formatEmailRelativeTime(threadMessage.date);
               return (
                 <div
                   key={threadMessage.id || `${index}`}
@@ -2789,7 +2838,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       {fromLine}
                     </div>
                     <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
-                      {formatTimestamp(threadMessage.date)}
+                      {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
                     </div>
                     <button
                       type="button"
@@ -2901,7 +2950,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           <div style={{ display: "grid", gap: 7, borderTop: `1px solid ${ruleColor}`, paddingTop: 8 }}>
             {replyTargetMessage && (
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
-                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}
+                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>

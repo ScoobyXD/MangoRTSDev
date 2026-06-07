@@ -26,6 +26,7 @@ type fakeNylasClient struct {
 	folders           []NylasFolder
 	messages          []NylasMessage
 	messagesByID      map[string]NylasMessage
+	thread            NylasThread
 	message           NylasMessage
 	sent              NylasSendMessageRequest
 	update            NylasMessageUpdate
@@ -79,6 +80,16 @@ func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasM
 		return NylasMessagePage{}, f.listErr
 	}
 	return NylasMessagePage{Messages: f.messages, NextPageToken: "next-token"}, nil
+}
+
+func (f *fakeNylasClient) GetThread(_ context.Context, _, threadID string) (NylasThread, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	thread := f.thread
+	if thread.ID == "" {
+		thread.ID = threadID
+	}
+	return thread, nil
 }
 
 func (f *fakeNylasClient) GetMessage(_ context.Context, _, messageID string) (NylasMessage, error) {
