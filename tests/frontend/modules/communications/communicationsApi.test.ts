@@ -264,14 +264,14 @@ test("communications stream helpers insert created messages by message date", ()
 
 test("archive mailbox filter matches messages outside inbox but not trash or sent", () => {
   assert.equal(emailMessageMatchesListFilters(message("archived", { folders: ["UNREAD", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), true);
-  assert.equal(emailMessageMatchesListFilters(message("starred-archived", { folders: ["CATEGORY_PERSONAL"], starred: true }), { mailbox: "archive" }), false);
+  assert.equal(emailMessageMatchesListFilters(message("starred-archived", { folders: ["CATEGORY_PERSONAL"], starred: true }), { mailbox: "archive" }), true);
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), false);
   assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT"] }), { mailbox: "archive" }), false);
 });
 
 test("primary mailbox filter matches real inbox labels, not archived Gmail category labels", () => {
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "primary" }), true);
-  assert.equal(emailMessageMatchesListFilters(message("starred-inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"], starred: true }), { mailbox: "primary" }), false);
+  assert.equal(emailMessageMatchesListFilters(message("starred-inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"], starred: true }), { mailbox: "primary" }), true);
   assert.equal(emailMessageMatchesListFilters(message("archived-category", { folders: ["CATEGORY_PERSONAL"] }), { mailbox: "primary" }), false);
   assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT", "INBOX"] }), { mailbox: "primary" }), false);
 });
@@ -281,13 +281,13 @@ test("starred mailbox filter only matches starred messages", () => {
   assert.equal(emailMessageMatchesListFilters(message("plain", { starred: false }), { mailbox: "starred" }), false);
 });
 
-test("star updates move inbox messages between cached mailbox buckets without changing folders", async () => {
+test("star updates keep inbox messages visible and add them to cached starred and all buckets", async () => {
   invalidateCommunicationsCache();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = input.toString();
     if (init?.method === "PUT") {
-      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: true }) });
+      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: false }) });
     }
     if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] })] });
     if (path.includes("mailbox=starred")) return jsonResponse({ messages: [] });
@@ -300,9 +300,9 @@ test("star updates move inbox messages between cached mailbox buckets without ch
     await listEmailMessages({ mailbox: "all", limit: 25 });
     await updateEmailMessage("msg-1", { starred: true });
 
-    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), []);
-    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
-    assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -315,7 +315,7 @@ test("unstar updates return cached inbox messages to primary and remove them fro
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = input.toString();
     if (init?.method === "PUT") {
-      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: false }) });
+      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: true }) });
     }
     if (path.includes("mailbox=primary")) return jsonResponse({ messages: [] });
     if (path.includes("mailbox=starred")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true })] });

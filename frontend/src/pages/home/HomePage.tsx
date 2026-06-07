@@ -177,7 +177,6 @@ type QueuedArchiveBatch = {
 
 type MailboxCountOverrideKey = Extract<EmailMailbox, "primary" | "starred">;
 type MailboxCountOverrides = Record<string, Partial<Record<MailboxCountOverrideKey, number>>>;
-const STARRED_MESSAGE_REMOVAL_DELAY_MS = 420;
 
 function mailCountKey(companyID: string, viewID: HomeViewID): string {
   return `${companyID.trim()}\x1f${sharedInboxIDForHomeView(viewID)}`;
@@ -325,7 +324,6 @@ export function HomePage({
   const pendingAutoArchiveMessageIDsRef = useRef<Set<string>>(new Set());
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const autoArchiveTimerIDsRef = useRef<Map<string, number>>(new Map());
-  const starredRemovalTimerIDsRef = useRef<Map<string, number>>(new Map());
   const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
   const archiveBatchFlushTimerRef = useRef<number | null>(null);
   const folderReloadTimerRef = useRef<number | null>(null);
@@ -486,20 +484,12 @@ export function HomePage({
   const cancelPendingStarredMessages = useCallback((messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    for (const id of ids) {
-      const timerID = starredRemovalTimerIDsRef.current.get(id);
-      if (timerID === undefined) continue;
-      window.clearTimeout(timerID);
-      starredRemovalTimerIDsRef.current.delete(id);
-    }
     removePendingStarredMessages(ids);
   }, [removePendingStarredMessages]);
   useEffect(() => {
     return () => {
       autoArchiveTimerIDsRef.current.forEach((timerID) => window.clearTimeout(timerID));
       autoArchiveTimerIDsRef.current.clear();
-      starredRemovalTimerIDsRef.current.forEach((timerID) => window.clearTimeout(timerID));
-      starredRemovalTimerIDsRef.current.clear();
       if (archiveBatchFlushTimerRef.current !== null) {
         window.clearTimeout(archiveBatchFlushTimerRef.current);
         archiveBatchFlushTimerRef.current = null;
@@ -1653,22 +1643,6 @@ export function HomePage({
       });
     }
   }, [currentMessageListParams]);
-  const moveStarredMessageToStarredTab = useCallback((messageID: string) => {
-    const cleanMessageID = messageID.trim();
-    const currentMailbox = mailboxRef.current;
-    if (!cleanMessageID || (currentMailbox !== "primary" && currentMailbox !== "archive")) return false;
-    cancelPendingAutoArchiveMessages([cleanMessageID]);
-    addPendingStarredMessages([cleanMessageID]);
-    if (!starredRemovalTimerIDsRef.current.has(cleanMessageID)) {
-      const timerID = window.setTimeout(() => {
-        starredRemovalTimerIDsRef.current.delete(cleanMessageID);
-        removePendingStarredMessages([cleanMessageID]);
-        removeMessagesFromVisibleMailList([cleanMessageID], { preserveScrollAnchor: true });
-      }, STARRED_MESSAGE_REMOVAL_DELAY_MS);
-      starredRemovalTimerIDsRef.current.set(cleanMessageID, timerID);
-    }
-    return true;
-  }, [addPendingStarredMessages, cancelPendingAutoArchiveMessages, removeMessagesFromVisibleMailList, removePendingStarredMessages]);
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
     if (!selectedMessage) return;
     const starredDelta = update.starred !== undefined && update.starred !== selectedMessage.starred
@@ -1678,7 +1652,11 @@ export function HomePage({
     setBusy("message");
     setError("");
     if (starredDelta !== 0) adjustStarredMailboxCount(countKey, starredDelta);
-    const movedToStarredTab = update.starred === true && moveStarredMessageToStarredTab(selectedMessage.id);
+    if (starredDelta !== 0) {
+      cancelPendingAutoArchiveMessages([selectedMessage.id]);
+      addPendingStarredMessages([selectedMessage.id]);
+      applyUpdatedMessageToCurrentView({ ...selectedMessage, starred: update.starred ?? selectedMessage.starred });
+    }
     try {
       const commandResult = await updateHomeMailMessageCommand({
         companyID,
@@ -1690,20 +1668,22 @@ export function HomePage({
       const updated = commandResult.message;
       if (update.unread === false) locallyReadMessageIDsRef.current.add(updated.id);
       if (update.unread === true) locallyReadMessageIDsRef.current.delete(updated.id);
-      const normalized = update.unread === undefined ? updated : { ...updated, unread: update.unread };
-      const routedToStarred = update.starred === true && (movedToStarredTab || moveStarredMessageToStarredTab(normalized.id));
-      if (!routedToStarred) {
-        applyUpdatedMessageToCurrentView(normalized);
-      }
+      const normalized = {
+        ...updated,
+        ...(update.unread !== undefined ? { unread: update.unread } : {}),
+        ...(update.starred !== undefined ? { starred: update.starred } : {}),
+      };
+      applyUpdatedMessageToCurrentView(normalized);
       if (starredDelta !== 0) void loadFolders();
     } catch (updateError) {
       if (starredDelta !== 0) adjustStarredMailboxCount(countKey, -starredDelta);
       setError(formatError(updateError, "Failed to update message"));
-      if (movedToStarredTab) {
+      if (starredDelta !== 0) {
         cancelPendingStarredMessages([selectedMessage.id]);
         scheduleMessageListRefresh(0);
       }
     } finally {
+      if (starredDelta !== 0) removePendingStarredMessages([selectedMessage.id]);
       setBusy("");
     }
   };
@@ -1715,10 +1695,9 @@ export function HomePage({
     const countKey = mailCountKey(companyID, activeViewIDRef.current);
     const starredDelta = nextStarred ? 1 : -1;
     adjustStarredMailboxCount(countKey, starredDelta);
-    const routedOptimistic = nextStarred && moveStarredMessageToStarredTab(messageID);
-    if (!routedOptimistic) {
-      applyUpdatedMessageToCurrentView(optimistic);
-    }
+    cancelPendingAutoArchiveMessages([messageID]);
+    addPendingStarredMessages([messageID]);
+    applyUpdatedMessageToCurrentView(optimistic);
     void updateHomeMailMessageCommand({
       companyID,
       sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
@@ -1728,10 +1707,7 @@ export function HomePage({
       .then((result) => {
         if (!result) return;
         const updated = { ...result.message, starred: nextStarred };
-        const routedToStarred = nextStarred && (routedOptimistic || moveStarredMessageToStarredTab(updated.id));
-        if (!routedToStarred) {
-          applyUpdatedMessageToCurrentView(updated);
-        }
+        applyUpdatedMessageToCurrentView(updated);
         void loadFolders();
       })
       .catch((starError) => {
@@ -1742,10 +1718,13 @@ export function HomePage({
           return;
         }
         setError(formatError(starError, "Failed to update message star"));
-        if (routedOptimistic) cancelPendingStarredMessages([messageID]);
+        cancelPendingStarredMessages([messageID]);
         scheduleMessageListRefresh();
+      })
+      .finally(() => {
+        removePendingStarredMessages([messageID]);
       });
-  }, [adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, cancelPendingStarredMessages, companyID, handleEmailAccessExpired, loadFolders, moveStarredMessageToStarredTab, scheduleMessageListRefresh]);
+  }, [addPendingStarredMessages, adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, cancelPendingAutoArchiveMessages, cancelPendingStarredMessages, companyID, handleEmailAccessExpired, loadFolders, removePendingStarredMessages, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);

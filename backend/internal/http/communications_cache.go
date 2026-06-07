@@ -420,9 +420,6 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 	}
 	switch strings.TrimSpace(strings.ToLower(query.Mailbox)) {
 	case "", "primary":
-		if message.Starred {
-			return false
-		}
 		if nylasMessageHasAnyFolder(message, []string{"sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"}) {
 			return false
 		}
@@ -434,9 +431,6 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 	case "starred":
 		return message.Starred
 	case "archive":
-		if message.Starred {
-			return false
-		}
 		if nylasMessageHasAnyFolder(message, []string{"trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"}) {
 			return false
 		}
