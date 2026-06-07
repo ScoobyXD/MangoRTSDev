@@ -299,6 +299,43 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 	})
 }
 
+func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/threads/"), "/")
+	if threadID == "" || strings.Contains(threadID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionView)
+	if !ok {
+		return
+	}
+	var thread NylasThread
+	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		thread, err = s.nylasClient.GetThread(ctx, connection.GrantID, threadID)
+		return err
+	})
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"thread": thread})
+}
+
 func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.Request) {
 	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/messages/"), "/")
 	parts := strings.Split(suffix, "/")

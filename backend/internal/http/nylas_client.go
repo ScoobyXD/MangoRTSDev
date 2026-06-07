@@ -131,6 +131,7 @@ type NylasClient interface {
 	DeleteGrant(ctx context.Context, grantID string) error
 	ListFolders(ctx context.Context, grantID string) ([]NylasFolder, error)
 	ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error)
+	GetThread(ctx context.Context, grantID, threadID string) (NylasThread, error)
 	GetMessage(ctx context.Context, grantID, messageID string) (NylasMessage, error)
 	UpdateMessage(ctx context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error)
 	DeleteMessage(ctx context.Context, grantID, messageID string) error
@@ -239,6 +240,22 @@ type NylasMessage struct {
 	FolderIDs      []string            `json:"folder_ids,omitempty"`
 	LogicGateIDs   []string            `json:"logic_gate_ids,omitempty"`
 	LogicGateCount int                 `json:"logic_gate_count,omitempty"`
+}
+
+type NylasThread struct {
+	ID                        string              `json:"id"`
+	Subject                   string              `json:"subject,omitempty"`
+	Snippet                   string              `json:"snippet,omitempty"`
+	Unread                    bool                `json:"unread"`
+	Starred                   bool                `json:"starred"`
+	Folders                   []string            `json:"folders,omitempty"`
+	Participants              []NylasEmailAddress `json:"participants,omitempty"`
+	MessageIDs                []string            `json:"message_ids,omitempty"`
+	DraftIDs                  []string            `json:"draft_ids,omitempty"`
+	EarliestMessageDate       int64               `json:"earliest_message_date,omitempty"`
+	LatestMessageReceivedDate int64               `json:"latest_message_received_date,omitempty"`
+	LatestMessageSentDate     int64               `json:"latest_message_sent_date,omitempty"`
+	LatestDraftOrMessage      *NylasMessage       `json:"latest_draft_or_message,omitempty"`
 }
 
 type NylasMessageQuery struct {
@@ -378,6 +395,16 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 		next = response.NextCursor
 	}
 	return NylasMessagePage{Messages: response.Data, NextPageToken: next}, nil
+}
+
+func (c *NylasRESTClient) GetThread(ctx context.Context, grantID, threadID string) (NylasThread, error) {
+	var response struct {
+		Data NylasThread `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "threads", threadID), nil, nil, &response, true); err != nil {
+		return NylasThread{}, err
+	}
+	return response.Data, nil
 }
 
 func (c *NylasRESTClient) GetMessage(ctx context.Context, grantID, messageID string) (NylasMessage, error) {
