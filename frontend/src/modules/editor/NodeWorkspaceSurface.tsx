@@ -962,7 +962,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setChatMessages((current) => [...current, nextMessage]);
-    setActiveChatMessageIDs((current) => ({ ...current, [blockID]: id }));
     setOpenChatBlockIDs((current) => {
       if (current.has(blockID)) return current;
       const next = new Set(current);
@@ -1838,7 +1837,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       style={{ position: "relative", width: 26, height: 24, borderRadius: 8, border: emailPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: emailPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
                     >
                       <MailIcon color={accent} />
-                      {blockEmails.length > 0 && <span aria-hidden="true" style={{ position: "absolute", right: -5, top: -5, minWidth: 14, height: 14, borderRadius: 999, background: accent, color: "#ffffff", display: "grid", placeItems: "center", fontSize: 8.5, fontWeight: 900, lineHeight: 1, boxShadow: "0 1px 4px rgba(15,23,42,0.18)" }}>{Math.min(blockEmails.length, 9)}</span>}
                     </button>
                     <button
                       type="button"
