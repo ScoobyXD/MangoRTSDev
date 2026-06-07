@@ -1247,9 +1247,8 @@ export function useEditorDocumentSurfaceHandlers({
       const pendingFontSize = pendingEditorFontSizeRef.current;
 
       if (inputEvent.inputType === "historyUndo" || inputEvent.inputType === "historyRedo") {
-        event.preventDefault();
         pendingNativeUndoSnapshotRef.current = null;
-        applyEditorUndoCommand(
+        const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
           inputEvent.inputType === "historyUndo" ? "undo" : "redo",
@@ -1257,6 +1256,7 @@ export function useEditorDocumentSurfaceHandlers({
           scheduleIndentGuideUpdate,
           onSelectionFontSizeChange,
         );
+        if (applied) event.preventDefault();
         return;
       }
 
@@ -1505,10 +1505,9 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (isEditorUndoShortcut(event) || isEditorRedoShortcut(event)) {
-        event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         pendingNativeUndoSnapshotRef.current = null;
-        applyEditorUndoCommand(
+        const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
           isEditorUndoShortcut(event) ? "undo" : "redo",
@@ -1516,6 +1515,7 @@ export function useEditorDocumentSurfaceHandlers({
           scheduleIndentGuideUpdate,
           onSelectionFontSizeChange,
         );
+        if (applied) event.preventDefault();
         return;
       }
 
