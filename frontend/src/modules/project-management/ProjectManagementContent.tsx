@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
@@ -310,21 +311,39 @@ function filterLogicGatesByPerspective(logicGates: LogicGateRecord[], perspectiv
 
 function readTimelinePayload(dataTransfer: DataTransfer): ProjectTimelinePayload | null {
   const raw = dataTransfer.getData(PROJECT_TIMELINE_ENTITY_MIME);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<ProjectTimelinePayload>;
-    const entityType = parsed.entityType === "logic_gate" ? "logic_gate" : parsed.entityType === "node" ? "node" : "";
-    const entityID = typeof parsed.entityID === "string" ? parsed.entityID.trim() : "";
-    const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
-    if (!entityType || !entityID || !label) return null;
-    return { entityType, entityID, label, color: typeof parsed.color === "string" ? parsed.color : undefined };
-  } catch {
-    return null;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<ProjectTimelinePayload>;
+      const entityType = parsed.entityType === "logic_gate" ? "logic_gate" : parsed.entityType === "node" ? "node" : "";
+      const entityID = typeof parsed.entityID === "string" ? parsed.entityID.trim() : "";
+      const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
+      if (!entityType || !entityID || !label) return null;
+      return { entityType, entityID, label, color: typeof parsed.color === "string" ? parsed.color : undefined };
+    } catch {
+      return null;
+    }
   }
+
+  const explorerPayload = readExplorerDragPayload(dataTransfer);
+  const droppedLabel = dataTransfer.getData("text/plain").trim();
+  if (explorerPayload?.kind === "node" && explorerPayload.itemID) {
+    return { entityType: "node", entityID: explorerPayload.itemID.trim(), label: droppedLabel || explorerPayload.itemID.trim(), color: "#0891b2" };
+  }
+  if (explorerPayload?.kind === "logic_gate" && explorerPayload.itemID) {
+    return { entityType: "logic_gate", entityID: explorerPayload.itemID.trim(), label: droppedLabel || explorerPayload.itemID.trim(), color: "#8b5cf6" };
+  }
+  if (explorerPayload?.kind === "batch" && (explorerPayload.itemType === "node" || explorerPayload.itemType === "logic_gate")) {
+    const first = explorerPayload.items?.find((item) => item.itemID.trim());
+    if (!first) return null;
+    const entityType = explorerPayload.itemType;
+    return { entityType, entityID: first.itemID.trim(), label: droppedLabel || first.itemID.trim(), color: entityType === "logic_gate" ? "#8b5cf6" : "#0891b2" };
+  }
+  return null;
 }
 
 function hasTimelinePayloadType(dataTransfer: DataTransfer): boolean {
-  return Array.from(dataTransfer.types).includes(PROJECT_TIMELINE_ENTITY_MIME);
+  const types = Array.from(dataTransfer.types);
+  return types.includes(PROJECT_TIMELINE_ENTITY_MIME) || types.includes(EXPLORER_DRAG_MIME);
 }
 
 function buildProjectExplorerRows(input: {
@@ -876,6 +895,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setTimelineRows((current) => current.filter((row) => !items.some((item) => item.item_id === row.item_id)));
     void Promise.allSettled(items.map((item) => deleteProjectManagementTimelineItem(companyID, item.item_id))).then(() => loadTimelineRows());
   }, [companyID, loadTimelineRows, visibleTimelineRows]);
+  const showLocalProjectExplorer = false;
 
   const startVerticalResize = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = pageRef.current?.getBoundingClientRect();
@@ -885,7 +905,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   };
 
   return (
-    <div ref={pageRef} style={pageStyle(verticalSplit)}>
+    <div ref={pageRef} style={pageStyle(showLocalProjectExplorer, verticalSplit)}>
       <section style={timelineSurfaceStyle}>
         <div style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
@@ -927,25 +947,29 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           onToggleGate={toggleTimelineGate}
         />
       </section>
-      <div role="separator" aria-orientation="horizontal" style={verticalResizerStyle} onPointerDown={startVerticalResize} />
-      <section style={bottomExplorerStyle}>
-        <ProjectEntityExplorerPanel
-          title="Company Explorer"
-          rootLabel={`${companyPerspectiveLabel(explorerPerspective, companyUsers, groups, currentUserID)} Company Explorer`}
-          rows={explorerRows}
-          expanded={explorerExpanded}
-          onSetExpanded={setExplorerExpanded}
-          perspective={explorerPerspective}
-          onPerspectiveChange={setExplorerPerspective}
-          companyUsers={companyUsers}
-          groups={groups}
-          groupMembers={groupMembers}
-          currentUserID={currentUserID}
-          count={filteredNodes.length + filteredLogicGates.length}
-          onNodeOpen={onNodeOpen}
-          onAddEntity={addExplorerEntityToTimeline}
-        />
-      </section>
+      {showLocalProjectExplorer && (
+        <>
+          <div role="separator" aria-orientation="horizontal" style={verticalResizerStyle} onPointerDown={startVerticalResize} />
+          <section style={bottomExplorerStyle}>
+            <ProjectEntityExplorerPanel
+              title="Company Explorer"
+              rootLabel={`${companyPerspectiveLabel(explorerPerspective, companyUsers, groups, currentUserID)} Company Explorer`}
+              rows={explorerRows}
+              expanded={explorerExpanded}
+              onSetExpanded={setExplorerExpanded}
+              perspective={explorerPerspective}
+              onPerspectiveChange={setExplorerPerspective}
+              companyUsers={companyUsers}
+              groups={groups}
+              groupMembers={groupMembers}
+              currentUserID={currentUserID}
+              count={filteredNodes.length + filteredLogicGates.length}
+              onNodeOpen={onNodeOpen}
+              onAddEntity={addExplorerEntityToTimeline}
+            />
+          </section>
+        </>
+      )}
       <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
     </div>
   );
@@ -1319,13 +1343,13 @@ function ProjectExplorerRow({
   );
 }
 
-function pageStyle(verticalSplit: number): React.CSSProperties {
+function pageStyle(showLocalProjectExplorer: boolean, verticalSplit: number): React.CSSProperties {
   return {
     width: "100%",
     height: "100%",
     minHeight: 0,
     display: "grid",
-    gridTemplateRows: `minmax(260px, ${verticalSplit}%) 8px minmax(220px, 1fr)`,
+    gridTemplateRows: showLocalProjectExplorer ? `minmax(260px, ${verticalSplit}%) 8px minmax(220px, 1fr)` : "minmax(0, 1fr)",
     gap: 0,
     padding: 12,
     borderRadius: 0,

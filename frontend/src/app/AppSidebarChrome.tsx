@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getActiveCompanyID } from "../auth/currentCompany";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
+import { HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
@@ -53,9 +53,6 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
 export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
-const SIDEBAR_EXPLORER_SEARCH_WIDGET_ID = "app-sidebar-explorer-search";
-const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-function";
-const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
 const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
@@ -69,12 +66,9 @@ const NODE_EDITOR_POPUP_NOTIFICATION_Z_INDEX = 160;
 const NODE_EDITOR_POPUP_Z_INDEX = 130;
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
-const SIDEBAR_LOGIC_GATE_ICON_COLOR = "#19f07a";
-const SIDEBAR_PERSON_ICON_COLOR = "#8b5cf6";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
 const SIDEBAR_MAP_ICON_COLOR = "#19a8ff";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
-const SIDEBAR_STATE_OPEN_BG = "rgba(15, 23, 42, 0.035)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_ACTIVE_BORDER = "rgba(148, 163, 184, 0.34)";
@@ -90,7 +84,7 @@ const SIDEBAR_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 
 const SIDEBAR_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
-type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
+type SidebarSectionID = "shared-triage";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
@@ -119,7 +113,6 @@ type AppSidebarProps = {
   activeHomeView: HomeSidebarView;
   pins: SidebarPin[];
   pinDropActive: boolean;
-  explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
@@ -239,7 +232,6 @@ export function AppSidebar({
   activeHomeView,
   pins,
   pinDropActive,
-  explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
   onPageSelect,
   onPinOpen,
@@ -254,10 +246,6 @@ export function AppSidebar({
   const companyID = getActiveCompanyID();
   const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
-  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", true);
-  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", true);
-  const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
-  const [explorerSearchOpen, setExplorerSearchOpen] = useState(false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -954,13 +942,6 @@ export function AppSidebar({
       </div>
 
       <section ref={keyViewsSectionRef} style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
-        <AppSidebarExplorerSearch
-          query={explorerSearchQuery}
-          open={explorerSearchOpen}
-          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-          onQueryChange={setExplorerSearchQuery}
-          onOpenChange={setExplorerSearchOpen}
-        />
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
@@ -1155,24 +1136,6 @@ export function AppSidebar({
       </section>
 
       <section style={appSidebarPrimaryPagesSectionStyle} aria-label="Primary pages">
-        <AppSidebarScopedExplorerSection
-          label="Logic Gates by Function"
-          open={logicGatesByFunctionOpen}
-          icon={<HeaderLogicGateArenaIcon color={SIDEBAR_LOGIC_GATE_ICON_COLOR} />}
-          widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
-          floating
-          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-          onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
-        />
-        <AppSidebarScopedExplorerSection
-          label="Logic Gates by Person"
-          open={logicGatesByPersonOpen}
-          icon={<HeaderPersonIcon color={SIDEBAR_PERSON_ICON_COLOR} />}
-          widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
-          floating
-          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-          onToggle={() => setLogicGatesByPersonOpen((open) => !open)}
-        />
         <AppSidebarButton
           label="Project Management"
           active={activePage === "project-management"}
@@ -1195,17 +1158,6 @@ export function AppSidebar({
         />
       </section>
 
-      <section style={appSidebarExplorerSectionStyle} aria-label="Explorer tree">
-        <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
-          <SidebarCompanyExplorerContent
-            accent={SIDEBAR_ACTIVE_TEXT}
-            widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
-            theme="light"
-            useParentScroll
-            selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-          />
-        </React.Suspense>
-      </section>
       {WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
           v{WORKTREE_VERSION}
@@ -1292,6 +1244,22 @@ export function AppSidebar({
           </button>
         </FrameRightClickMenu>
       )}
+    </aside>
+  );
+}
+
+export function AppCompanyExplorerRail({ selectionTargetFrameIDs }: { selectionTargetFrameIDs: string[] }): React.ReactElement {
+  return (
+    <aside className="company-explorer-scroll" data-app-company-explorer-rail="primary" style={appCompanyExplorerRailStyle}>
+      <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+        <SidebarCompanyExplorerContent
+          accent={SIDEBAR_ACTIVE_TEXT}
+          widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
+          theme="light"
+          useParentScroll
+          selectionTargetFrameIDs={selectionTargetFrameIDs}
+        />
+      </React.Suspense>
     </aside>
   );
 }
@@ -1406,151 +1374,6 @@ const SharedInboxAssignedEmailIcon: React.FC = () => (
     <path d="M4.45 10.55h7.1" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
   </svg>
 );
-
-function AppSidebarExplorerSearch({
-  query,
-  open,
-  selectionTargetFrameIDs,
-  onQueryChange,
-  onOpenChange,
-}: {
-  query: string;
-  open: boolean;
-  selectionTargetFrameIDs: string[];
-  onQueryChange: (query: string) => void;
-  onOpenChange: (open: boolean) => void;
-}): React.ReactElement {
-  const trimmedQuery = query.trim();
-  const dropdownOpen = open && trimmedQuery.length > 0;
-  return (
-    <div
-      style={appSidebarExplorerSearchBlockStyle}
-      onBlur={(event) => {
-        const currentTarget = event.currentTarget;
-        window.requestAnimationFrame(() => {
-          if (!currentTarget.contains(document.activeElement)) onOpenChange(false);
-        });
-      }}
-    >
-      <div data-frame-interactive="true" style={appSidebarExplorerSearchShellStyle(dropdownOpen)}>
-        <input
-          aria-label="Search Explorer"
-          value={query}
-          onFocus={() => {
-            if (trimmedQuery) onOpenChange(true);
-          }}
-          onChange={(event) => {
-            const nextQuery = event.target.value;
-            onQueryChange(nextQuery);
-            onOpenChange(nextQuery.trim().length > 0);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onQueryChange("");
-              onOpenChange(false);
-              event.currentTarget.blur();
-            }
-          }}
-          placeholder="Search Explorer"
-          style={appSidebarExplorerSearchInputStyle}
-        />
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={appSidebarExplorerSearchIconStyle}>
-          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </div>
-      {dropdownOpen && (
-        <div className="app-sidebar-elevated-dropdown company-explorer-scroll" style={appSidebarExplorerSearchDropdownStyle}>
-          <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerSearchFallbackStyle} />}>
-            <SidebarCompanyExplorerContent
-              accent={SIDEBAR_ACTIVE_TEXT}
-              widgetId={SIDEBAR_EXPLORER_SEARCH_WIDGET_ID}
-              theme="light"
-              hideTopControls
-              externalSearchQuery={query}
-              selectionTargetFrameIDs={selectionTargetFrameIDs}
-              onSearchResultSelect={() => onOpenChange(false)}
-            />
-          </React.Suspense>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AppSidebarScopedExplorerSection({
-  label,
-  open,
-  icon,
-  widgetId,
-  floating = false,
-  selectionTargetFrameIDs,
-  onToggle,
-}: {
-  label: string;
-  open: boolean;
-  icon: React.ReactNode;
-  widgetId: string;
-  floating?: boolean;
-  selectionTargetFrameIDs: string[];
-  onToggle: () => void;
-}): React.ReactElement {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const raised = floating && (hovered || focused);
-  return (
-    <div
-      style={appSidebarMiniExplorerBlockStyle(floating, raised)}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={(event) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-        setFocused(false);
-      }}
-    >
-      <div style={appSidebarMiniExplorerRowStyle(open, floating)}>
-        <button
-          type="button"
-          style={appSidebarMiniExplorerLabelButtonStyle(floating)}
-          onClick={onToggle}
-        >
-          <span style={appSidebarMiniExplorerIconStyle}>{icon}</span>
-          <span style={appSidebarTextStyle}>{label}</span>
-        </button>
-        <button
-          type="button"
-          title={open ? `Collapse ${label}` : `Expand ${label}`}
-          aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
-          style={floating ? appSidebarMiniExplorerDisclosureStyle : appSidebarSharedDisclosureStyle}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggle();
-          }}
-        >
-          <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.68)" />
-        </button>
-      </div>
-      {open && (
-        <div className={floating ? "app-sidebar-elevated-dropdown" : undefined} style={appSidebarMiniExplorerFrameStyle(floating)}>
-          <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
-            <SidebarCompanyExplorerContent
-              accent={SIDEBAR_ACTIVE_TEXT}
-              widgetId={widgetId}
-              theme="light"
-              hideTopControls
-              useParentScroll
-              scopedRootFolderKind="logic_gate"
-              scopedRootFolderName={label}
-              selectionTargetFrameIDs={selectionTargetFrameIDs}
-            />
-          </React.Suspense>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function nodeEditorPopupMaxSize(): { width: number; height: number } {
   if (typeof window === "undefined") return { width: 1180, height: 820 };
@@ -1904,6 +1727,12 @@ const appSidebarStyle: React.CSSProperties = {
   ["--company-explorer-hover-bg" as string]: SIDEBAR_STATE_HOVER_BG,
 };
 
+const appCompanyExplorerRailStyle: React.CSSProperties = {
+  ...appSidebarStyle,
+  display: "block",
+  padding: 0,
+};
+
 const appSidebarBrandStyle: React.CSSProperties = {
   flex: "0 0 auto",
   minHeight: 42,
@@ -1944,75 +1773,6 @@ function appSidebarNotificationPopoverOverlayStyle(top: number): React.CSSProper
     pointerEvents: "auto",
   };
 }
-
-const appSidebarExplorerSearchBlockStyle: React.CSSProperties = {
-  position: "relative",
-  zIndex: 40,
-  minWidth: 0,
-};
-
-function appSidebarExplorerSearchShellStyle(open: boolean): React.CSSProperties {
-  return {
-    position: "relative",
-    display: "block",
-    minWidth: 0,
-    height: 36,
-    border: `1px solid ${open ? "transparent" : "rgba(255, 255, 255, 0.78)"}`,
-    borderRadius: SIDEBAR_ELEVATED_RADIUS,
-    background: open
-      ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`
-      : "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
-    boxShadow: open
-      ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`
-      : "5px 5px 12px rgba(174, 174, 192, 0.22), -5px -5px 12px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease",
-  };
-}
-
-const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
-  boxSizing: "border-box",
-  border: "none",
-  borderRadius: SIDEBAR_ELEVATED_RADIUS,
-  background: "transparent",
-  color: SIDEBAR_ACTIVE_TEXT,
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 650,
-  padding: "0 32px 0 11px",
-  outline: "none",
-};
-
-const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
-  position: "absolute",
-  right: 10,
-  top: 11,
-  color: "rgba(15, 23, 42, 0.58)",
-  pointerEvents: "none",
-};
-
-const appSidebarExplorerSearchDropdownStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  top: "calc(100% + 7px)",
-  zIndex: 80,
-  height: "min(340px, calc(100vh - 150px))",
-  minHeight: 180,
-  minWidth: 0,
-  overflow: "hidden",
-  border: "1px solid transparent",
-  borderRadius: SIDEBAR_ELEVATED_RADIUS,
-  background: `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`,
-  boxShadow: `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}`,
-};
-
-const appSidebarExplorerSearchFallbackStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
-  background: "transparent",
-};
 
 const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
   flex: "0 0 auto",
@@ -2234,93 +1994,6 @@ function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React
   };
 }
 
-function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): React.CSSProperties {
-  return {
-    display: "grid",
-    gap: floating ? 0 : 3,
-    minWidth: 0,
-    margin: 0,
-    border: floating ? `1px solid ${raised ? "transparent" : SIDEBAR_SOFT_BORDER}` : undefined,
-    borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
-    background: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : SIDEBAR_NEUMORPHIC_SURFACE) : undefined,
-    boxShadow: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW) : undefined,
-    transform: floating && raised ? "translateY(-2px)" : "translateY(0)",
-    overflow: floating ? "hidden" : "visible",
-    transition: floating ? "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease" : undefined,
-  };
-}
-
-function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React.CSSProperties {
-  if (floating) {
-    return {
-      width: "100%",
-      minHeight: 44,
-      display: "grid",
-      gridTemplateColumns: "minmax(0, 1fr) 26px",
-      alignItems: "center",
-      border: "none",
-      borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
-      background: "transparent",
-      color: SIDEBAR_ACTIVE_TEXT,
-      minWidth: 0,
-      transition: "background 120ms ease",
-    };
-  }
-  return {
-    width: "100%",
-    minHeight: 31,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 22px",
-    alignItems: "center",
-    border: `1px solid ${open ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
-    borderRadius: 6,
-    background: open ? SIDEBAR_STATE_OPEN_BG : "transparent",
-    color: open ? SIDEBAR_ACTIVE_TEXT : "#334155",
-    minWidth: 0,
-  };
-}
-
-function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: floating ? 42 : 29,
-    display: "grid",
-    gridTemplateColumns: floating ? "17px minmax(0, 1fr)" : "18px minmax(0, 1fr)",
-    alignItems: "center",
-    gap: 6,
-    border: "none",
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    font: "inherit",
-    fontSize: floating ? 13 : 12,
-    fontWeight: floating ? 650 : 500,
-    lineHeight: 1.1,
-    letterSpacing: 0,
-    padding: floating ? "0 0 0 8px" : "0 0 0 8px",
-    textAlign: "left",
-  };
-}
-
-const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
-  width: 17,
-  height: 17,
-  display: "grid",
-  placeItems: "center",
-  color: "#334155",
-};
-
-function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    overflow: "visible",
-    border: floating ? "none" : "1px solid rgba(17, 17, 17, 0.22)",
-    borderTop: floating ? "none" : undefined,
-    borderRadius: floating ? 0 : 6,
-    background: floating ? "transparent" : "#ffffff",
-  };
-}
-
 function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, elevated = false, open = false): React.CSSProperties {
   if (elevated) {
     return {
@@ -2383,11 +2056,6 @@ const appSidebarSharedDisclosureStyle: React.CSSProperties = {
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
-};
-
-const appSidebarMiniExplorerDisclosureStyle: React.CSSProperties = {
-  ...appSidebarSharedDisclosureStyle,
-  width: 26,
 };
 
 const appSidebarSharedMetaStyle: React.CSSProperties = {
@@ -2567,18 +2235,6 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
   lineHeight: 1,
-};
-
-const appSidebarExplorerSectionStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  minWidth: 0,
-  display: "grid",
-  margin: "0 3px",
-  overflow: "visible",
-  borderRadius: SIDEBAR_ELEVATED_RADIUS,
-  border: `1px solid ${SIDEBAR_SOFT_BORDER}`,
-  background: SIDEBAR_NEUMORPHIC_SURFACE,
-  boxShadow: SIDEBAR_NEUMORPHIC_SHADOW,
 };
 
 const appSidebarExplorerFallbackStyle: React.CSSProperties = {
