@@ -917,8 +917,8 @@ export function HomeMailWorkspace({
                   role="button"
                   tabIndex={0}
                   style={isArchivableListView
-                    ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered, archiveProgressByMessageID[message.id] ?? 0, pendingStarred)
-                    : messageRowStyle(active, message.unread, hovered, pendingStarred)}
+                    ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered, archiveProgressByMessageID[message.id] ?? 0, false)
+                    : messageRowStyle(active, message.unread, hovered, false)}
                   draggable={draggable}
                   onPointerEnter={() => setHoveredMessageID(message.id)}
                   onPointerLeave={() => setHoveredMessageID((current) => current === message.id ? "" : current)}
@@ -953,7 +953,7 @@ export function HomeMailWorkspace({
                             aria-label={message.starred ? "Remove star" : "Star message"}
                             title={message.starred ? "Remove star" : "Star message"}
                             draggable={false}
-                            style={messageStarButtonStyle(starHighlighted, starHovered, pendingStarred)}
+                            style={messageStarButtonStyle(starHighlighted, starHovered, false)}
                             disabled={busy === "message" || pendingStarred}
                             onPointerEnter={() => setHoveredStarMessageID(message.id)}
                             onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
