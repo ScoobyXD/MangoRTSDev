@@ -718,7 +718,7 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&q=from%3Aops%40example.com&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions -is:starred from:ops@example.com is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions from:ops@example.com is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -754,7 +754,7 @@ func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=archive&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts -is:starred invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts invoice is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -875,18 +875,18 @@ func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	}
 }
 
-func TestCommunicationsCachePrimaryExcludesStarredInboxMessages(t *testing.T) {
+func TestCommunicationsCacheIncludesStarredMessagesInSourceMailboxes(t *testing.T) {
 	t.Parallel()
 
 	message := NylasMessage{ID: "message-1", Starred: true, Folders: []string{"INBOX", "CATEGORY_PERSONAL"}}
-	if nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "primary"}) {
-		t.Fatal("primary cache matcher included a starred inbox message")
+	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "primary"}) {
+		t.Fatal("primary cache matcher excluded a starred inbox message")
 	}
 	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "starred"}) {
 		t.Fatal("starred cache matcher excluded a starred inbox message")
 	}
-	if nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-2", Starred: true, Folders: []string{"CATEGORY_PERSONAL"}}, NylasMessageQuery{Mailbox: "archive"}) {
-		t.Fatal("archive cache matcher included a starred message")
+	if !nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-2", Starred: true, Folders: []string{"CATEGORY_PERSONAL"}}, NylasMessageQuery{Mailbox: "archive"}) {
+		t.Fatal("archive cache matcher excluded a starred archived message")
 	}
 }
 

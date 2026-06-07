@@ -432,8 +432,13 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     method: "PUT",
     body: JSON.stringify(update),
   });
-  applyEmailMessageToCachedPages(payload.message, update.starred !== undefined ? { prependIfMissing: true } : {});
-  return payload.message;
+  const message = cloneMessage({
+    ...payload.message,
+    ...(update.unread !== undefined ? { unread: update.unread } : {}),
+    ...(update.starred !== undefined ? { starred: update.starred } : {}),
+  });
+  applyEmailMessageToCachedPages(message, update.starred !== undefined ? { prependIfMissing: true } : {});
+  return message;
 }
 
 export async function archiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
@@ -1292,10 +1297,10 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 
   const mailbox = params.mailbox ?? "primary";
   if (mailbox === "primary") {
-    return message.starred || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+    return messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
   }
   if (mailbox === "archive") {
-    return message.starred || messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
+    return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
   }
   return !messageMatchesMailbox(message, mailbox);
 }
@@ -1654,13 +1659,11 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
-  if (message.starred) return false;
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
   return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }
 
 function messageIsArchived(message: EmailMessage): boolean {
-  if (message.starred) return false;
   if (messageHasAnyFolder(message, ["trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"])) return false;
   return !messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }

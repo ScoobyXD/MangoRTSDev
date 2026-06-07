@@ -1208,8 +1208,6 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			query.FolderID = ""
 			return query, nil
 		}
-		starred := false
-		query.Starred = &starred
 		return s.applySystemFolderMailbox(ctx, connection, query, "inbox")
 	case "sent":
 		if strings.TrimSpace(query.FolderID) != "" {
@@ -1237,8 +1235,6 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			query.FolderID = ""
 			return query, nil
 		}
-		starred := false
-		query.Starred = &starred
 		return s.applyRequiredSystemFolderMailbox(ctx, connection, query, "archive")
 	default:
 		return NylasMessageQuery{}, errInvalidCommunicationsMailbox
@@ -1289,11 +1285,11 @@ func gmailUserSearch(userQuery string, unread *bool) string {
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
-	return gmailSearch([]string{"in:inbox", "-category:social", "-category:promotions", "-is:starred"}, userQuery, unread)
+	return gmailSearch([]string{"in:inbox", "-category:social", "-category:promotions"}, userQuery, unread)
 }
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {
-	return gmailSearch([]string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts", "-is:starred"}, userQuery, unread)
+	return gmailSearch([]string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}, userQuery, unread)
 }
 
 func gmailSearch(base []string, userQuery string, unread *bool) string {
