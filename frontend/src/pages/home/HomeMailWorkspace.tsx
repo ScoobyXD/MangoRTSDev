@@ -59,7 +59,7 @@ import {
   unreadCountInlineStyle,
 } from "./homeStyles";
 
-type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred" | "archive">;
+type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred">;
 type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
 type ArchiveProgressByMessageID = Record<string, number>;
 
@@ -514,7 +514,6 @@ export function HomeMailWorkspace({
   onLoadMoreMessages,
   onPrefetchMessages,
   onOpenAllMailbox,
-  onOpenArchivedMailbox,
   onOpenContextMenu,
   onOpenNewCompose,
   onOpenPendingMailbox,
@@ -576,7 +575,6 @@ export function HomeMailWorkspace({
   onLoadMoreMessages: () => void;
   onPrefetchMessages: () => void;
   onOpenAllMailbox: () => void;
-  onOpenArchivedMailbox: () => void;
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
   onOpenNewCompose: () => void;
   onOpenPendingMailbox: () => void;
@@ -783,17 +781,6 @@ export function HomeMailWorkspace({
                 }}
               >
                 <MailboxActionContent label="Starred" count={mailboxCounts.starred} />
-              </button>
-              <button
-                className="mango-elevated-action"
-                type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "archive")}
-                title={mailboxCounts.archive === undefined ? "Archive" : `Archive (${formatMailboxCount(mailboxCounts.archive)})`}
-                onClick={() => {
-                  if (mailbox !== "archive") onOpenArchivedMailbox();
-                }}
-              >
-                <MailboxActionContent label="Archive" count={mailboxCounts.archive} />
               </button>
               <button
                 className="mango-elevated-action"

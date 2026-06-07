@@ -945,7 +945,7 @@ export function mailboxLabel(mailbox: EmailMailbox): string {
   return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
 }
 
-export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred" | "archive">, number>>;
+export type MailboxCountMap = Partial<Record<Extract<EmailMailbox, "primary" | "starred">, number>>;
 
 export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMap {
   const inboxFolder = findEmailFolder(folders, ["inbox"]);
@@ -955,7 +955,6 @@ export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMa
     // but folder metadata does not expose that exact filtered count.
     primary: emailFolderTotalCount(inboxFolder) ?? emailFolderTotalCount(primaryCategoryFolder),
     starred: emailFolderTotalCount(findEmailFolder(folders, ["starred", "flagged"])),
-    archive: emailFolderTotalCount(findEmailFolder(folders, ["archive", "archives", "archived"])),
   };
 }
 
