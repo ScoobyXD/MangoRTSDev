@@ -64,6 +64,7 @@ export type ListMessagesParams = {
   pageToken?: string;
   mailbox?: EmailMailbox;
   folderID?: string;
+  threadID?: string;
   companyID?: string;
   sharedInboxID?: string;
   q?: string;
@@ -1186,6 +1187,7 @@ function stripInboxFolders(folders: string[] | undefined): string[] | undefined 
 function shouldRemoveExistingMessageFromList(message: EmailMessage, params: ListMessagesParams): boolean {
   if (params.unread === true && !message.unread) return true;
   if (params.folderID && !messageHasFolder(message, params.folderID)) return true;
+  if (params.threadID?.trim() && message.thread_id !== params.threadID.trim()) return true;
   const query = params.q?.trim().toLowerCase() ?? "";
   if (query && !messageMatchesSearch(message, query)) return true;
 
@@ -1202,6 +1204,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 export function emailMessageMatchesListFilters(message: EmailMessage, params: ListMessagesParams): boolean {
   if (params.unread === true && !message.unread) return false;
   if (params.folderID && !messageHasFolder(message, params.folderID)) return false;
+  if (params.threadID?.trim() && message.thread_id !== params.threadID.trim()) return false;
   if (!messageMatchesMailbox(message, params.mailbox ?? "primary")) return false;
   const query = params.q?.trim().toLowerCase() ?? "";
   if (query && !messageMatchesSearch(message, query)) return false;
@@ -1214,6 +1217,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   if (params.pageToken) query.set("page_token", params.pageToken);
   if (params.mailbox) query.set("mailbox", params.mailbox);
   if (params.folderID) query.set("folder_id", params.folderID);
+  if (params.threadID?.trim()) query.set("thread_id", params.threadID.trim());
   if (params.companyID?.trim()) query.set("company_id", params.companyID.trim());
   if (params.sharedInboxID?.trim()) query.set("shared_inbox_id", params.sharedInboxID.trim());
   if (params.q?.trim()) query.set("q", params.q.trim());
@@ -1532,6 +1536,7 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
     pageToken: query.get("page_token") ?? undefined,
     mailbox: normalizeMailbox(query.get("mailbox") ?? undefined),
     folderID: query.get("folder_id") ?? undefined,
+    threadID: query.get("thread_id") ?? undefined,
     companyID: query.get("company_id") ?? undefined,
     sharedInboxID: query.get("shared_inbox_id") ?? undefined,
     q: query.get("q") ?? undefined,

@@ -245,6 +245,7 @@ type NylasMessageQuery struct {
 	Limit             int
 	PageToken         string
 	FolderID          string
+	ThreadID          string
 	Query             string
 	SearchQueryNative string
 	Mailbox           string
@@ -347,6 +348,9 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 	}
 	if strings.TrimSpace(query.FolderID) != "" {
 		values.Set("in", strings.TrimSpace(query.FolderID))
+	}
+	if strings.TrimSpace(query.ThreadID) != "" {
+		values.Set("thread_id", strings.TrimSpace(query.ThreadID))
 	}
 	if strings.TrimSpace(query.Query) != "" {
 		values.Set("q", strings.TrimSpace(query.Query))

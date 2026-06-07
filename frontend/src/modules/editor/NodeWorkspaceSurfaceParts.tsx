@@ -2330,9 +2330,90 @@ type EmailConversationPaneProps = {
 
 type EmailSelectionDraft = {
   quote: string;
+  startOffset: number;
+  endOffset: number;
   x: number;
   y: number;
 };
+
+type EmailLocalHighlight = {
+  id: string;
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+const EMAIL_LOCAL_HIGHLIGHTS_STORAGE_PREFIX = "node-editor-email-local-highlights-v1";
+
+function emailLocalHighlightsStorageKey(messageID: string): string {
+  return `${EMAIL_LOCAL_HIGHLIGHTS_STORAGE_PREFIX}:${messageID}`;
+}
+
+function readStoredEmailLocalHighlights(messageID: string): EmailLocalHighlight[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(emailLocalHighlightsStorageKey(messageID)) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item): EmailLocalHighlight | null => {
+        if (!item || typeof item !== "object") return null;
+        const quote = typeof item.quote === "string" ? item.quote : "";
+        const startOffset = Number(item.startOffset);
+        const endOffset = Number(item.endOffset);
+        const id = typeof item.id === "string" && item.id.trim() ? item.id : `${startOffset}:${endOffset}:${quote}`;
+        if (!quote || !Number.isFinite(startOffset) || !Number.isFinite(endOffset) || endOffset <= startOffset) return null;
+        return { id, quote, startOffset, endOffset };
+      })
+      .filter((item): item is EmailLocalHighlight => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function storeEmailLocalHighlights(messageID: string, highlights: EmailLocalHighlight[]) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(emailLocalHighlightsStorageKey(messageID), JSON.stringify(highlights.slice(-80)));
+}
+
+function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighlight[]): React.ReactNode[] {
+  if (!text || highlights.length === 0) return [text];
+  const ranges = highlights
+    .map((highlight) => {
+      let start = Math.max(0, Math.min(text.length, Math.round(highlight.startOffset)));
+      let end = Math.max(start, Math.min(text.length, Math.round(highlight.endOffset)));
+      if (!highlight.quote || end <= start || text.slice(start, end) !== highlight.quote) {
+        const found = text.indexOf(highlight.quote);
+        if (found < 0) return null;
+        start = found;
+        end = found + highlight.quote.length;
+      }
+      return { ...highlight, start, end };
+    })
+    .filter((range): range is EmailLocalHighlight & { start: number; end: number } => Boolean(range))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  if (ranges.length === 0) return [text];
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start < cursor || range.end <= range.start) continue;
+    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
+    nodes.push(
+      <span
+        key={range.id}
+        style={{
+          borderRadius: 4,
+          background: "rgba(250,204,21,0.36)",
+          boxShadow: "0 0 0 1px rgba(234,179,8,0.26)",
+        }}
+      >
+        {text.slice(range.start, range.end)}
+      </span>,
+    );
+    cursor = range.end;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
 
 function replySubject(subject: string): string {
   const clean = subject.trim() || "(no subject)";
@@ -2352,17 +2433,6 @@ function parseEmailAddressDraft(value: string): EmailAddress[] {
       return { email: part };
     })
     .filter((address) => address.email.includes("@"));
-}
-
-function messageTextSummary(message: EmailMessage): string {
-  const body = (message.body || message.snippet || "").trim();
-  if (!body) return "";
-  return body
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function emailBodyText(body: string): string {
@@ -2402,6 +2472,27 @@ function emailBodyText(body: string): string {
     .trim();
 }
 
+function emailMessageTimestamp(message: EmailMessage): number {
+  return typeof message.date === "number" && Number.isFinite(message.date) ? message.date : 0;
+}
+
+function mergeEmailThreadMessages(primary: EmailMessage | null, fetchedMessages: EmailMessage[], sentReplies: EmailMessage[]): EmailMessage[] {
+  const byID = new Map<string, EmailMessage>();
+  const append = (message: EmailMessage | null | undefined) => {
+    if (!message?.id) return;
+    const existing = byID.get(message.id);
+    byID.set(message.id, existing ? { ...existing, ...message } : message);
+  };
+  for (const threadMessage of fetchedMessages) append(threadMessage);
+  append(primary);
+  for (const reply of primary?.local_replies ?? []) append(reply);
+  for (const reply of sentReplies) append(reply);
+  return Array.from(byID.values()).sort((a, b) => (
+    emailMessageTimestamp(a) - emailMessageTimestamp(b)
+    || a.id.localeCompare(b.id)
+  ));
+}
+
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
   companyID,
@@ -2415,6 +2506,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   onSelectionNodeRequest,
 }) => {
   const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
   const [toDraft, setToDraft] = useState("");
   const [subjectDraft, setSubjectDraft] = useState("");
@@ -2426,26 +2518,50 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
+  const [emailHighlights, setEmailHighlights] = useState<EmailLocalHighlight[]>(() => readStoredEmailLocalHighlights(messageID));
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
     setMessage(null);
+    setThreadMessages([]);
     setSentReplies([]);
     setDraftAttachments([]);
     setPreviewAttachment(null);
     setSelectionDraft(null);
-    void getEmailMessage(messageID, companyID)
-      .then((payload) => {
+    setEmailHighlights(readStoredEmailLocalHighlights(messageID));
+    void (async () => {
+      const payload = await getEmailMessage(messageID, companyID);
+      if (cancelled) return;
+      setMessage(payload);
+      setThreadMessages([payload]);
+      setSentReplies(payload.local_replies ?? []);
+      setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
+      setSubjectDraft(replySubject(payload.subject));
+      setBodyDraft("");
+
+      const threadID = payload.thread_id?.trim();
+      if (!threadID) return;
+      try {
+        const page = await listEmailMessages({ companyID, mailbox: "all", limit: 30, threadID });
         if (cancelled) return;
-        setMessage(payload);
-        setSentReplies(payload.local_replies ?? []);
-        setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
-        setSubjectDraft(replySubject(payload.subject));
-        setBodyDraft("");
-      })
+        const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
+        const details = await Promise.all(ids.map(async (id) => {
+          if (id === payload.id) return payload;
+          try {
+            return await getEmailMessage(id, companyID);
+          } catch {
+            return (page.messages ?? []).find((item) => item.id === id) ?? null;
+          }
+        }));
+        if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
+      } catch {
+        if (!cancelled) setThreadMessages([payload]);
+      }
+    })()
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
       })
@@ -2460,31 +2576,57 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
   const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
+  const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
+  const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
     const root = bodyRef.current;
-    if (!root) return null;
+    const content = selectedEmailBodyRef.current;
+    if (!root || !content) return null;
     const selection = root.ownerDocument.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
     const range = selection.getRangeAt(0);
     const commonElement = range.commonAncestorContainer instanceof Element
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
-    if (!commonElement || !root.contains(commonElement)) return null;
-    const quote = range.toString().trim();
+    if (!commonElement || !content.contains(commonElement)) return null;
+    const rawQuote = range.toString();
+    const quote = rawQuote.trim();
     if (!quote) return null;
+    const leadingTrim = rawQuote.length - rawQuote.trimStart().length;
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(content);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const startOffset = Math.max(0, Math.min(selectedEmailBodyText.length, beforeRange.toString().length + leadingTrim));
+    const endOffset = Math.max(startOffset, Math.min(selectedEmailBodyText.length, startOffset + quote.length));
+    if (endOffset <= startOffset) return null;
     const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
     const selectionRect = rangeRects[rangeRects.length - 1] ?? range.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
     const x = Math.max(8, Math.min(selectionRect.right - rootRect.left + root.scrollLeft + 8, root.scrollWidth - 72));
     const y = Math.max(8, Math.min(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - 32) / 2), root.scrollHeight - 44));
-    return { quote, x, y };
-  }, [canUseEmailSelection]);
+    return { quote, startOffset, endOffset, x, y };
+  }, [canUseEmailSelection, selectedEmailBodyText]);
 
   const captureEmailSelection = useCallback(() => {
     window.setTimeout(() => setSelectionDraft(readEmailSelectionDraft()), 0);
   }, [readEmailSelectionDraft]);
+
+  const addEmailLocalHighlight = useCallback((draft: EmailSelectionDraft) => {
+    const highlight: EmailLocalHighlight = {
+      id: `${Date.now()}:${draft.startOffset}:${draft.endOffset}`,
+      quote: draft.quote,
+      startOffset: draft.startOffset,
+      endOffset: draft.endOffset,
+    };
+    setEmailHighlights((current) => {
+      if (current.some((item) => item.startOffset === highlight.startOffset && item.endOffset === highlight.endOffset && item.quote === highlight.quote)) return current;
+      const next = [...current, highlight].slice(-80);
+      storeEmailLocalHighlights(messageID, next);
+      return next;
+    });
+  }, [messageID]);
 
   const addEmailDraftAttachments = useCallback((files: FileList | File[]) => {
     if (!editable) return;
@@ -2557,141 +2699,161 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   return (
     <>
-    <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 8, padding: 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
-      <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
-        {loading && <div style={{ padding: 10, color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
-        {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
-        {message && (
-          <div style={{ display: "grid", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_SURFACE, padding: 8, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
-            <div style={{ minWidth: 0, overflowWrap: "anywhere", fontSize: 13, fontWeight: 900 }}>{message.subject || "(no subject)"}</div>
-            <div style={{ minWidth: 0, display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10.5, fontWeight: 750 }}>
-              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>From: {formatAddressList(message.from) || "Unknown sender"}</div>
-              <div>Received: {formatTimestamp(message.date)}</div>
-            </div>
-          </div>
-        )}
-      </div>
-      {message ? (
-        <div
-          ref={bodyRef}
-          className="editor-document-scroll"
-          onPointerDown={() => setSelectionDraft(null)}
-          onPointerUp={captureEmailSelection}
-          style={{
-            position: "relative",
-            minHeight: 0,
-            border: `1px solid ${strokeColor}`,
-            borderRadius: 12,
-            background: "#ffffff",
-            overflow: "auto",
-            color: "#111827",
-            padding: 14,
-            fontSize: 13.5,
-            lineHeight: 1.5,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-            boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)",
-            ["--editor-document-scroll-accent" as string]: accent,
-            ["--editor-document-scroll-track" as string]: "transparent",
-          }}
-        >
-          {emailBodyText(message.body || message.snippet || "") || "(empty email)"}
-          {canUseEmailSelection && selectionDraft && (
-            <div
-              role="toolbar"
-              aria-label="Email selection actions"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              style={{
-                position: "absolute",
-                left: selectionDraft.x,
-                top: selectionDraft.y,
-                zIndex: 4,
-                display: "grid",
-                gridTemplateColumns: "28px 28px",
-                gap: 5,
-                padding: 4,
-                border: "1px solid transparent",
-                borderRadius: 10,
-                background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              {onSelectionChatRequest && (
-                <button
-                  type="button"
-                  title="Chat about selection"
-                  aria-label="Chat about selection"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectionChatRequest(selectionDraft.quote);
-                    setSelectionDraft(null);
-                    bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
-                  }}
-                  style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
-                >
-                  <ChatIcon color={accent} />
-                </button>
-              )}
-              {onSelectionNodeRequest && (
-                <button
-                  type="button"
-                  title="Create node from selection"
-                  aria-label="Create node from selection"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectionNodeRequest(selectionDraft.quote);
-                    setSelectionDraft(null);
-                    bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
-                  }}
-                  style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
-                >
-                  <PlusIcon color={accent} />
-                </button>
-              )}
+      <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 8, padding: 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+        <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
+          {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
+          {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
+          {message && (
+            <div style={{ minWidth: 0, overflowWrap: "anywhere", padding: "0 4px", color: surfaceText, fontSize: 13.5, fontWeight: 900 }}>
+              {message.subject || "(no subject)"}
             </div>
           )}
         </div>
-      ) : (
-        <div aria-hidden="true" style={{ minHeight: 0 }} />
-      )}
-      {message && (
-        <div style={{ display: "grid", gap: 7, border: `1px solid ${ruleColor}`, borderRadius: 12, background: EDITOR_NEU_ACTIVE_SURFACE, padding: 8, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}>
-          {sentReplies.length > 0 && (
-            <div style={{ display: "grid", gap: 6 }}>
-              {sentReplies.map((reply) => (
-                <div key={reply.id} style={{ display: "grid", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.42) 52%, rgba(247,239,255,0.48))", padding: 7, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, minWidth: 0, fontSize: 10.5, fontWeight: 900 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: accent }}>Sent reply</span>
-                    <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)" }}>{formatTimestamp(reply.date)}</span>
+        {message ? (
+          <div
+            ref={bodyRef}
+            className="editor-document-scroll"
+            onPointerDown={() => setSelectionDraft(null)}
+            onPointerUp={captureEmailSelection}
+            style={{
+              position: "relative",
+              minHeight: 0,
+              border: `1px solid ${strokeColor}`,
+              borderRadius: 8,
+              background: "#ffffff",
+              overflow: "auto",
+              color: "#111827",
+              padding: "0 14px",
+              boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)",
+              ["--editor-document-scroll-accent" as string]: accent,
+              ["--editor-document-scroll-track" as string]: "transparent",
+            }}
+          >
+            {displayThreadMessages.map((threadMessage, index) => {
+              const isSelectedMessage = threadMessage.id === message.id;
+              const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
+              const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
+              const toLine = formatAddressList(threadMessage.to) || "Me";
+              return (
+                <div
+                  key={threadMessage.id || `${index}`}
+                  style={{
+                    display: "grid",
+                    gap: 5,
+                    padding: "14px 0 16px",
+                    borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "start", gap: 10 }}>
+                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
+                      {fromLine}
+                    </div>
+                    <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
+                      {formatTimestamp(threadMessage.date)}
+                    </div>
                   </div>
-                  <div style={{ display: "grid", gap: 2, color: "rgba(100,116,139,0.88)", fontSize: 10, fontWeight: 750 }}>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>From: {formatAddressList(reply.from) || "Me"}</div>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Send to: {formatAddressList(reply.to) || toDraft}</div>
+                  <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
+                    to {toLine}
                   </div>
-                  <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.38, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{messageTextSummary(reply) || reply.body || bodyDraft}</div>
+                  <div
+                    ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
+                    style={{
+                      marginTop: 7,
+                      color: "#111827",
+                      fontSize: 13.5,
+                      lineHeight: 1.5,
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {isSelectedMessage
+                      ? renderEmailTextWithHighlights(threadBody || "(empty email)", emailHighlights)
+                      : (threadBody || "(empty email)")}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
-            <span>To:</span>
-            <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
-            <span>Subject:</span>
-            <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              );
+            })}
+            {canUseEmailSelection && selectionDraft && (
+              <div
+                role="toolbar"
+                aria-label="Email selection actions"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                style={{
+                  position: "absolute",
+                  left: selectionDraft.x,
+                  top: selectionDraft.y,
+                  zIndex: 4,
+                  display: "grid",
+                  gridTemplateColumns: "28px 28px",
+                  gap: 5,
+                  padding: 4,
+                  border: "1px solid transparent",
+                  borderRadius: 10,
+                  background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+                  boxShadow: EDITOR_NEU_SHADOW,
+                }}
+              >
+                {onSelectionChatRequest && (
+                  <button
+                    type="button"
+                    title="Chat about selection"
+                    aria-label="Chat about selection"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      addEmailLocalHighlight(selectionDraft);
+                      onSelectionChatRequest(selectionDraft.quote);
+                      setSelectionDraft(null);
+                      bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
+                    }}
+                    style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                  >
+                    <ChatIcon color={accent} />
+                  </button>
+                )}
+                {onSelectionNodeRequest && (
+                  <button
+                    type="button"
+                    title="Create node from selection"
+                    aria-label="Create node from selection"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      addEmailLocalHighlight(selectionDraft);
+                      onSelectionNodeRequest(selectionDraft.quote);
+                      setSelectionDraft(null);
+                      bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
+                    }}
+                    style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                  >
+                    <PlusIcon color={accent} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-          {draftAttachments.length > 0 && (
-            <DraftAttachmentList
-              attachments={draftAttachments}
-              surfaceText={surfaceText}
-              strokeColor={strokeColor}
-              onRemove={removeEmailDraftAttachment}
-              onPreviewImage={setPreviewAttachment}
-            />
-          )}
-          <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+        ) : (
+          <div aria-hidden="true" style={{ minHeight: 0 }} />
+        )}
+        {message && (
+          <div style={{ display: "grid", gap: 7, borderTop: `1px solid ${ruleColor}`, paddingTop: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
+              <span>To:</span>
+              <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <span>Subject:</span>
+              <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+            </div>
+            {draftAttachments.length > 0 && (
+              <DraftAttachmentList
+                attachments={draftAttachments}
+                surfaceText={surfaceText}
+                strokeColor={strokeColor}
+                onRemove={removeEmailDraftAttachment}
+                onPreviewImage={setPreviewAttachment}
+              />
+            )}
+            <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
             <button
               type="button"
               aria-label="Add attachment"

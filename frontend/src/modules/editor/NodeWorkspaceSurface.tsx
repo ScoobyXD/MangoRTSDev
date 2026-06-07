@@ -67,17 +67,17 @@ import {
   type TextBlockState,
 } from "./NodeWorkspaceSurfaceShared";
 
-const DEFAULT_TEXT_CHAT_SPLIT_RATIO = 0.704;
-const TEXT_CHAT_SPLIT_MIN_RATIO = 0.18;
-const TEXT_CHAT_SPLIT_MAX_RATIO = 0.92;
-const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v2";
 const TEXT_TIMELINE_COLUMN_WIDTH_PX = 52;
 const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 48;
 const TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX = 8;
 const TEXT_CHAT_GRID_COLUMN_GAP_PX = 8;
 const TEXT_CHAT_HORIZONTAL_PADDING_PX = 28;
-const TEXT_CHAT_PANE_MIN_WIDTH_PX = 300;
-const TEXT_CHAT_PANE_MAX_WIDTH_PX = 980;
+const TEXT_SIDE_PANE_DEFAULT_WIDTH_PX = 360;
+const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
+const TEXT_SIDE_PANE_MAX_WIDTH_PX = 760;
+const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
+
+type TextSidePaneKind = "email" | "chat";
 
 function formatTextBlockMetadataTimestamp(value: string | number | undefined): string {
   if (value === undefined || value === "") return "";
@@ -88,24 +88,24 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
   return `${time} ${day}`;
 }
 
-function clampTextChatSplitRatio(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
-  return Math.max(TEXT_CHAT_SPLIT_MIN_RATIO, Math.min(TEXT_CHAT_SPLIT_MAX_RATIO, value));
+function clampTextSidePaneWidth(value: number): number {
+  if (!Number.isFinite(value)) return TEXT_SIDE_PANE_DEFAULT_WIDTH_PX;
+  return Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(TEXT_SIDE_PANE_MAX_WIDTH_PX, Math.round(value)));
 }
 
-function textChatSplitStorageKey(companyID: string, nodeID: string): string {
-  return `${TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX}:${companyID || "company"}:${nodeID || "node"}`;
+function textSidePaneWidthStorageKey(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind): string {
+  return `${TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX}:${companyID || "company"}:${nodeID || "node"}:${blockID}:${pane}`;
 }
 
-function readStoredTextChatSplitRatio(companyID: string, nodeID: string): number {
-  if (typeof localStorage === "undefined") return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
-  const parsed = Number.parseFloat(localStorage.getItem(textChatSplitStorageKey(companyID, nodeID)) ?? "");
-  return Number.isFinite(parsed) ? clampTextChatSplitRatio(parsed) : DEFAULT_TEXT_CHAT_SPLIT_RATIO;
+function readStoredTextSidePaneWidth(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind, fallback: number): number {
+  if (typeof localStorage === "undefined") return clampTextSidePaneWidth(fallback);
+  const parsed = Number.parseFloat(localStorage.getItem(textSidePaneWidthStorageKey(companyID, nodeID, blockID, pane)) ?? "");
+  return Number.isFinite(parsed) ? clampTextSidePaneWidth(parsed) : clampTextSidePaneWidth(fallback);
 }
 
-function storeTextChatSplitRatio(companyID: string, nodeID: string, ratio: number) {
+function storeTextSidePaneWidth(companyID: string, nodeID: string, blockID: string, pane: TextSidePaneKind, width: number) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(textChatSplitStorageKey(companyID, nodeID), String(clampTextChatSplitRatio(ratio)));
+  localStorage.setItem(textSidePaneWidthStorageKey(companyID, nodeID, blockID, pane), String(clampTextSidePaneWidth(width)));
 }
 
 function logicGateOptionLabel(logicGate: LogicGateRecord): string {
@@ -243,6 +243,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
+  const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
@@ -264,8 +265,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
-  const [textChatSplitRatio, setTextChatSplitRatio] = useState(() => readStoredTextChatSplitRatio(companyID, nodeID));
-  const textChatSplitRatioRef = useRef(textChatSplitRatio);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
@@ -292,17 +291,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return grouped;
   }, [attachedEmails]);
   const compact = width > 0 && width < 720;
-  const textChatResizableWidth = Math.max(
-    TEXT_CHAT_PANE_MIN_WIDTH_PX,
+  const textSidePaneAvailableWidth = Math.max(
+    TEXT_SIDE_PANE_MIN_WIDTH_PX,
     width
       - TEXT_CHAT_HORIZONTAL_PADDING_PX
       - TEXT_TIMELINE_COLUMN_WIDTH_PX
       - TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX
       - (TEXT_CHAT_GRID_COLUMN_GAP_PX * 3),
   );
-  const textChatPaneWidth = Math.max(
-    TEXT_CHAT_PANE_MIN_WIDTH_PX,
-    Math.min(TEXT_CHAT_PANE_MAX_WIDTH_PX, Math.round(textChatResizableWidth * (1 - textChatSplitRatio))),
+  const textSidePaneDefaultWidth = clampTextSidePaneWidth(
+    Math.min(TEXT_SIDE_PANE_DEFAULT_WIDTH_PX, Math.round(textSidePaneAvailableWidth * 0.36)),
   );
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
@@ -419,16 +417,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [canEdit]);
 
   useEffect(() => {
-    const nextRatio = readStoredTextChatSplitRatio(companyID, nodeID);
-    textChatSplitRatioRef.current = nextRatio;
-    setTextChatSplitRatio(nextRatio);
-  }, [companyID, nodeID]);
-
-  useEffect(() => {
-    textChatSplitRatioRef.current = textChatSplitRatio;
-  }, [textChatSplitRatio]);
-
-  useEffect(() => {
     const textBlocks = loadedTextBlockProjections.map((item) => {
       const content = parseEditorTextBlockContent(item.information);
       return {
@@ -470,6 +458,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
+    setSidePaneWidths((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setActiveChatMessageIDs((current) => {
       if (nodeChanged) return {};
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
@@ -1217,43 +1206,52 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID("");
   }, []);
 
-  const startTextChatSplitResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!canEdit) return;
+  const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number): number => {
+    const localWidth = sidePaneWidths[blockID]?.[pane];
+    if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth);
+    return readStoredTextSidePaneWidth(companyID, nodeID, blockID, pane, fallback);
+  }, [companyID, nodeID, sidePaneWidths]);
+
+  const startTextSidePaneResize = useCallback((blockID: string, pane: TextSidePaneKind, fallbackWidth: number, event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const previousColumn = event.currentTarget.previousElementSibling;
-    const nextColumn = event.currentTarget.nextElementSibling;
-    if (!(previousColumn instanceof HTMLElement) || !(nextColumn instanceof HTMLElement)) return;
-    const previousRect = previousColumn.getBoundingClientRect();
-    const nextRect = nextColumn.getBoundingClientRect();
-    const left = previousRect.left;
-    const widthPx = Math.max(1, nextRect.right - previousRect.left);
+    const paneElement = event.currentTarget.nextElementSibling;
+    if (!(paneElement instanceof HTMLElement)) return;
+    const paneRect = paneElement.getBoundingClientRect();
+    const startX = event.clientX;
+    const startWidth = paneRect.width > 0 ? paneRect.width : sidePaneWidthForBlock(blockID, pane, fallbackWidth);
     const ownerDocument = event.currentTarget.ownerDocument;
     const previousCursor = ownerDocument.body.style.cursor;
     ownerDocument.body.style.cursor = "col-resize";
+    let latestWidth = clampTextSidePaneWidth(startWidth);
 
-    const updateRatio = (clientX: number) => {
-      const nextRatio = clampTextChatSplitRatio((clientX - left) / widthPx);
-      textChatSplitRatioRef.current = nextRatio;
-      setTextChatSplitRatio(nextRatio);
+    const updateWidth = (clientX: number) => {
+      latestWidth = clampTextSidePaneWidth(startWidth + startX - clientX);
+      setSidePaneWidths((current) => ({
+        ...current,
+        [blockID]: {
+          ...current[blockID],
+          [pane]: latestWidth,
+        },
+      }));
     };
     const onPointerMove = (pointerEvent: PointerEvent) => {
       pointerEvent.preventDefault();
-      updateRatio(pointerEvent.clientX);
+      updateWidth(pointerEvent.clientX);
     };
     const finish = () => {
       ownerDocument.body.style.cursor = previousCursor;
       ownerDocument.removeEventListener("pointermove", onPointerMove);
       ownerDocument.removeEventListener("pointerup", finish);
       ownerDocument.removeEventListener("pointercancel", finish);
-      storeTextChatSplitRatio(companyID, nodeID, textChatSplitRatioRef.current);
+      storeTextSidePaneWidth(companyID, nodeID, blockID, pane, latestWidth);
     };
 
-    updateRatio(event.clientX);
+    updateWidth(event.clientX);
     ownerDocument.addEventListener("pointermove", onPointerMove);
     ownerDocument.addEventListener("pointerup", finish);
     ownerDocument.addEventListener("pointercancel", finish);
-  }, [canEdit, companyID, nodeID]);
+  }, [companyID, nodeID, sidePaneWidthForBlock]);
 
   useEffect(() => {
     const cleanInformationID = focusInformationID?.trim() ?? "";
@@ -1285,17 +1283,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks, canEdit, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
 
-  const renderTextChatSplitHandle = (enabled: boolean) => {
+  const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, fallbackWidth: number) => {
     if (compact) return null;
-    if (!canEdit) return <div aria-hidden="true" />;
-    if (!enabled) return <div aria-hidden="true" />;
     return (
       <div
         role="separator"
-        aria-label="Resize text and chat columns"
+        aria-label={`Resize ${pane} column`}
         aria-orientation="vertical"
         data-frame-interactive="true"
-        onPointerDown={startTextChatSplitResize}
+        onPointerDown={(event) => startTextSidePaneResize(blockID, pane, fallbackWidth, event)}
         style={{
           alignSelf: "stretch",
           minHeight: 40,
@@ -1623,18 +1619,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatPaneIsVisible = chatIsVisible;
           const sidePaneCount = (emailPaneIsVisible ? 1 : 0) + (chatPaneIsVisible ? 1 : 0);
           const stackedSidePanes = compact || (sidePaneCount > 1 && width > 0 && width < 1080);
-          const multiSidePaneWidth = Math.max(
-            TEXT_CHAT_PANE_MIN_WIDTH_PX,
-            Math.min(440, Math.round((textChatResizableWidth - TEXT_CHAT_PANE_MIN_WIDTH_PX) / 2)),
-          );
-          const localSidePaneWidth = sidePaneCount > 1 ? multiSidePaneWidth : textChatPaneWidth;
+          const sidePaneFallbackWidth = sidePaneCount > 1
+            ? clampTextSidePaneWidth(Math.min(420, Math.floor(Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, textSidePaneAvailableWidth - 360) / sidePaneCount)))
+            : textSidePaneDefaultWidth;
+          const emailPaneWidth = sidePaneWidthForBlock(block.id, "email", sidePaneFallbackWidth);
+          const chatPaneWidth = sidePaneWidthForBlock(block.id, "chat", sidePaneFallbackWidth);
           const blockCommunicationGridTemplateColumns = !stackedSidePanes && sidePaneCount > 0
             ? [
               "minmax(360px, 1fr)",
-              `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px`,
-              `minmax(${TEXT_CHAT_PANE_MIN_WIDTH_PX}px, ${localSidePaneWidth}px)`,
-              sidePaneCount > 1 ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
-              sidePaneCount > 1 ? `minmax(${TEXT_CHAT_PANE_MIN_WIDTH_PX}px, ${localSidePaneWidth}px)` : "",
+              emailPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
+              emailPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${emailPaneWidth}px)` : "",
+              chatPaneIsVisible ? `${TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX}px` : "",
+              chatPaneIsVisible ? `minmax(${TEXT_SIDE_PANE_MIN_WIDTH_PX}px, ${chatPaneWidth}px)` : "",
             ].filter(Boolean).join(" ")
             : "minmax(0, 1fr)";
           const textBlockIsFocused = focusedTextBlockID === block.id;
@@ -1824,7 +1820,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
                   />
                 </div>
-                {sidePaneCount > 0 && !stackedSidePanes && renderTextChatSplitHandle(sidePaneCount === 1)}
+                {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth)}
                 {emailPaneIsVisible && (
                   <div style={{ minWidth: 0, height: CHAT_PANE_DEFAULT_HEIGHT, gridColumn: stackedSidePanes ? "1 / -1" : undefined, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", boxShadow: EDITOR_NEU_SHADOW }}>
                     <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 900, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
@@ -1845,7 +1841,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     </div>
                   </div>
                 )}
-                {sidePaneCount > 1 && !stackedSidePanes && renderTextChatSplitHandle(false)}
+                {chatPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "chat", chatPaneWidth)}
                 {chatPaneIsVisible && (
                   <div style={{ minWidth: 0, gridColumn: stackedSidePanes ? "1 / -1" : undefined }}>
                   <ChatPane

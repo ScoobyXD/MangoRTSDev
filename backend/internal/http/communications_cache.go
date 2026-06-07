@@ -353,6 +353,7 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 		strconv.Itoa(query.Limit),
 		strings.TrimSpace(query.PageToken),
 		strings.TrimSpace(query.FolderID),
+		strings.TrimSpace(query.ThreadID),
 		strings.TrimSpace(query.Query),
 		strings.TrimSpace(query.SearchQueryNative),
 		strings.TrimSpace(query.Mailbox),
@@ -363,7 +364,7 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 
 func communicationsMessagePageQueryFromCacheKey(key string) (NylasMessageQuery, bool) {
 	parts := strings.Split(key, communicationsCacheKeySeparator)
-	if len(parts) != 9 || strings.TrimSpace(parts[0]) == "" {
+	if len(parts) != 10 || strings.TrimSpace(parts[0]) == "" {
 		return NylasMessageQuery{}, false
 	}
 	limit, _ := strconv.Atoi(parts[1])
@@ -371,17 +372,18 @@ func communicationsMessagePageQueryFromCacheKey(key string) (NylasMessageQuery, 
 		Limit:             limit,
 		PageToken:         strings.TrimSpace(parts[2]),
 		FolderID:          strings.TrimSpace(parts[3]),
-		Query:             strings.TrimSpace(parts[4]),
-		SearchQueryNative: strings.TrimSpace(parts[5]),
-		Mailbox:           strings.TrimSpace(parts[6]),
-	}
-	if parts[7] != "" {
-		if value, err := strconv.ParseBool(parts[7]); err == nil {
-			query.Unread = &value
-		}
+		ThreadID:          strings.TrimSpace(parts[4]),
+		Query:             strings.TrimSpace(parts[5]),
+		SearchQueryNative: strings.TrimSpace(parts[6]),
+		Mailbox:           strings.TrimSpace(parts[7]),
 	}
 	if parts[8] != "" {
 		if value, err := strconv.ParseBool(parts[8]); err == nil {
+			query.Unread = &value
+		}
+	}
+	if parts[9] != "" {
+		if value, err := strconv.ParseBool(parts[9]); err == nil {
 			query.Starred = &value
 		}
 	}
@@ -413,6 +415,9 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 		return false
 	}
 	if query.FolderID != "" && !nylasMessageHasFolder(message, query.FolderID) {
+		return false
+	}
+	if strings.TrimSpace(query.ThreadID) != "" && strings.TrimSpace(message.ThreadID) != strings.TrimSpace(query.ThreadID) {
 		return false
 	}
 	if query.Query != "" && !nylasMessageMatchesSearch(message, query.Query) {
