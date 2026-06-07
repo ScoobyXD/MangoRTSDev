@@ -115,7 +115,7 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
-test("mailbox count helper keeps the Inbox folder count for the primary tab", () => {
+test("mailbox count helper keeps visible Inbox and Starred counts", () => {
   const counts = mailboxCountsFromFolders([
     { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
     { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
@@ -123,7 +123,7 @@ test("mailbox count helper keeps the Inbox folder count for the primary tab", ()
     { id: "archive-folder", name: "Archive", attributes: ["\\Archive"], total_count: 9 },
   ]);
 
-  assert.deepEqual(counts, { primary: 30, starred: 4, archive: 9 });
+  assert.deepEqual(counts, { primary: 30, starred: 4 });
 });
 
 test("Home workspace panel ignores internal derived projection request events", () => {
