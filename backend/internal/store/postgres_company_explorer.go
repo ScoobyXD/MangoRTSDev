@@ -1758,19 +1758,9 @@ func scanCompanyExplorerNodeSummaryRows(rows *sql.Rows) ([]domain.Node, error) {
 
 	items := make([]domain.Node, 0)
 	for rows.Next() {
-		var item domain.Node
-		var dueDate sql.NullString
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.NodeID,
-			&item.Title,
-			&dueDate,
-			&item.CreatedTimestamp,
-		); err != nil {
+		item, err := scanNode(rows)
+		if err != nil {
 			return nil, err
-		}
-		if dueDate.Valid {
-			item.DueDate = &dueDate.String
 		}
 		items = append(items, item)
 	}
@@ -1779,10 +1769,11 @@ func scanCompanyExplorerNodeSummaryRows(rows *sql.Rows) ([]domain.Node, error) {
 
 func (r *PostgresRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
 	rows, err := r.db.QueryContext(context.Background(), `
-select company_id, node_id, title, due_date::text, created_timestamp
-from nodes
-where company_id=$1
-order by created_timestamp asc`, companyID)
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1
+order by n.created_timestamp asc, n.node_id::text asc`, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -1796,8 +1787,9 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID
 		return nil, ErrInvalid
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
-select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+select `+nodeSelectColumns+`
 from nodes n
+`+nodeStatusJoin+`
 where n.company_id=$1::uuid
   and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $2::uuid, $3)
 order by n.created_timestamp asc, n.node_id::text asc`, companyID, userID, EntityPermissionView)
@@ -1833,11 +1825,12 @@ with recursive folder_scope as (
   where item.company_id=$1
     and item.item_type='node'
 )
-select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+select `+nodeSelectColumns+`
 from nodes n
+`+nodeStatusJoin+`
 join visible_nodes visible on visible.node_id=n.node_id
 where n.company_id=$1
-order by n.created_timestamp asc`, companyID, folderID)
+order by n.created_timestamp asc, n.node_id::text asc`, companyID, folderID)
 	if err != nil {
 		return nil, err
 	}
@@ -1875,8 +1868,9 @@ with recursive folder_scope as (
   where item.company_id=$1::uuid
     and item.item_type='node'
 )
-select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+select `+nodeSelectColumns+`
 from nodes n
+`+nodeStatusJoin+`
 join folder_nodes visible on visible.node_id=n.node_id
 where n.company_id=$1::uuid
   and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $3::uuid, $4)
@@ -1915,7 +1909,11 @@ order by created_timestamp asc`, companyID)
 	if err != nil {
 		return nil, err
 	}
-	return scanCompanyExplorerLogicGateSummaryRows(rows)
+	items, err := scanCompanyExplorerLogicGateSummaryRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
@@ -1933,7 +1931,11 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, u
 	if err != nil {
 		return nil, err
 	}
-	return scanCompanyExplorerLogicGateSummaryRows(rows)
+	items, err := scanCompanyExplorerLogicGateSummaryRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
@@ -1970,7 +1972,11 @@ order by gate.created_timestamp asc`, companyID, folderID)
 	if err != nil {
 		return nil, err
 	}
-	return scanCompanyExplorerLogicGateSummaryRows(rows)
+	items, err := scanCompanyExplorerLogicGateSummaryRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
@@ -2013,7 +2019,11 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, f
 	if err != nil {
 		return nil, err
 	}
-	return scanCompanyExplorerLogicGateSummaryRows(rows)
+	items, err := scanCompanyExplorerLogicGateSummaryRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {

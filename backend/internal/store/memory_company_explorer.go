@@ -1138,7 +1138,14 @@ func companyExplorerNodeSummary(node domain.Node) domain.Node {
 		CompanyID:        node.CompanyID,
 		NodeID:           node.NodeID,
 		Title:            node.Title,
+		Status:           node.Status,
+		StatusColor:      node.StatusColor,
 		DueDate:          node.DueDate,
+		Priority:         node.Priority,
+		AssigneeUserID:   node.AssigneeUserID,
+		AssigneeName:     node.AssigneeName,
+		AssigneeEmail:    node.AssigneeEmail,
+		LogicGateIDs:     append([]string{}, node.LogicGateIDs...),
 		CreatedTimestamp: node.CreatedTimestamp,
 	}
 }
@@ -1158,7 +1165,7 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domai
 		if node.CompanyID != companyID {
 			continue
 		}
-		items = append(items, companyExplorerNodeSummary(node))
+		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
 	}
 	sortCompanyExplorerNodeSummaries(items)
 	return items, nil
@@ -1182,7 +1189,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummaries(companyID, userID s
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, companyExplorerNodeSummary(node))
+		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
 	}
 	sortCompanyExplorerNodeSummaries(items)
 	return items, nil
@@ -1208,7 +1215,7 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, 
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerNodeSummary(node))
+		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
 	}
 	sortCompanyExplorerNodeSummaries(items)
 	return items, nil
@@ -1243,7 +1250,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(comp
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerNodeSummary(node))
+		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
 	}
 	sortCompanyExplorerNodeSummaries(items)
 	return items, nil
@@ -1254,6 +1261,7 @@ func companyExplorerLogicGateSummary(gate domain.LogicGate) domain.LogicGate {
 		CompanyID:        gate.CompanyID,
 		LogicGateID:      gate.LogicGateID,
 		Header:           gate.Header,
+		RaciAssignments:  append([]domain.LogicGateRaciAssignment{}, gate.RaciAssignments...),
 		CreatedTimestamp: gate.CreatedTimestamp,
 	}
 }
@@ -1273,7 +1281,7 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]
 		if gate.CompanyID != companyID {
 			continue
 		}
-		items = append(items, companyExplorerLogicGateSummary(gate))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1297,7 +1305,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, use
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
 			continue
 		}
-		items = append(items, companyExplorerLogicGateSummary(gate))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1323,7 +1331,7 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(compan
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerLogicGateSummary(gate))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1358,7 +1366,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerLogicGateSummary(gate))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
