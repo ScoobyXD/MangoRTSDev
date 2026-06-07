@@ -1499,6 +1499,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           activeHomeView={homeViewID}
           pins={sidebarPins}
           pinDropActive={pinDropActive}
+          explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
           onHomeViewSelect={selectHomeSidebarView}
           onPageSelect={selectPrimaryPage}
           onPinOpen={openSidebarPin}

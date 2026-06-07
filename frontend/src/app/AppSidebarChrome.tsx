@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getActiveCompanyID } from "../auth/currentCompany";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
+import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
@@ -53,6 +53,8 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
 export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
+const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-function";
+const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
 const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
@@ -66,9 +68,12 @@ const NODE_EDITOR_POPUP_NOTIFICATION_Z_INDEX = 160;
 const NODE_EDITOR_POPUP_Z_INDEX = 130;
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
+const SIDEBAR_LOGIC_GATE_ICON_COLOR = "#19f07a";
+const SIDEBAR_PERSON_ICON_COLOR = "#8b5cf6";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
 const SIDEBAR_MAP_ICON_COLOR = "#19a8ff";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
+const SIDEBAR_STATE_OPEN_BG = "rgba(15, 23, 42, 0.035)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_ACTIVE_BORDER = "rgba(148, 163, 184, 0.34)";
@@ -84,7 +89,7 @@ const SIDEBAR_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 
 const SIDEBAR_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
-type SidebarSectionID = "shared-triage";
+type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
@@ -113,6 +118,7 @@ type AppSidebarProps = {
   activeHomeView: HomeSidebarView;
   pins: SidebarPin[];
   pinDropActive: boolean;
+  explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
@@ -232,6 +238,7 @@ export function AppSidebar({
   activeHomeView,
   pins,
   pinDropActive,
+  explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
   onPageSelect,
   onPinOpen,
@@ -246,6 +253,8 @@ export function AppSidebar({
   const companyID = getActiveCompanyID();
   const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
+  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", true);
+  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", true);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -1136,6 +1145,24 @@ export function AppSidebar({
       </section>
 
       <section style={appSidebarPrimaryPagesSectionStyle} aria-label="Primary pages">
+        <AppSidebarScopedExplorerSection
+          label="Logic Gates by Function"
+          open={logicGatesByFunctionOpen}
+          icon={<HeaderLogicGateArenaIcon color={SIDEBAR_LOGIC_GATE_ICON_COLOR} />}
+          widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
+          floating
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
+        />
+        <AppSidebarScopedExplorerSection
+          label="Logic Gates by Person"
+          open={logicGatesByPersonOpen}
+          icon={<HeaderPersonIcon color={SIDEBAR_PERSON_ICON_COLOR} />}
+          widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
+          floating
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          onToggle={() => setLogicGatesByPersonOpen((open) => !open)}
+        />
         <AppSidebarButton
           label="Project Management"
           active={activePage === "project-management"}
@@ -1374,6 +1401,79 @@ const SharedInboxAssignedEmailIcon: React.FC = () => (
     <path d="M4.45 10.55h7.1" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
   </svg>
 );
+
+function AppSidebarScopedExplorerSection({
+  label,
+  open,
+  icon,
+  widgetId,
+  floating = false,
+  selectionTargetFrameIDs,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  icon: React.ReactNode;
+  widgetId: string;
+  floating?: boolean;
+  selectionTargetFrameIDs: string[];
+  onToggle: () => void;
+}): React.ReactElement {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const raised = floating && (hovered || focused);
+  return (
+    <div
+      style={appSidebarMiniExplorerBlockStyle(floating, raised)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setFocused(false);
+      }}
+    >
+      <div style={appSidebarMiniExplorerRowStyle(open, floating)}>
+        <button
+          type="button"
+          style={appSidebarMiniExplorerLabelButtonStyle(floating)}
+          onClick={onToggle}
+        >
+          <span style={appSidebarMiniExplorerIconStyle}>{icon}</span>
+          <span style={appSidebarTextStyle}>{label}</span>
+        </button>
+        <button
+          type="button"
+          title={open ? `Collapse ${label}` : `Expand ${label}`}
+          aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
+          style={floating ? appSidebarMiniExplorerDisclosureStyle : appSidebarSharedDisclosureStyle}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.68)" />
+        </button>
+      </div>
+      {open && (
+        <div className={floating ? "app-sidebar-elevated-dropdown" : undefined} style={appSidebarMiniExplorerFrameStyle(floating)}>
+          <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+            <SidebarCompanyExplorerContent
+              accent={SIDEBAR_ACTIVE_TEXT}
+              widgetId={widgetId}
+              theme="light"
+              hideTopControls
+              useParentScroll
+              scopedRootFolderKind="logic_gate"
+              scopedRootFolderName={label}
+              selectionTargetFrameIDs={selectionTargetFrameIDs}
+            />
+          </React.Suspense>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function nodeEditorPopupMaxSize(): { width: number; height: number } {
   if (typeof window === "undefined") return { width: 1180, height: 820 };
@@ -1994,6 +2094,93 @@ function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React
   };
 }
 
+function appSidebarMiniExplorerBlockStyle(floating: boolean, raised = false): React.CSSProperties {
+  return {
+    display: "grid",
+    gap: floating ? 0 : 3,
+    minWidth: 0,
+    margin: 0,
+    border: floating ? `1px solid ${raised ? "transparent" : SIDEBAR_SOFT_BORDER}` : undefined,
+    borderRadius: floating ? SIDEBAR_ELEVATED_RADIUS : undefined,
+    background: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : SIDEBAR_NEUMORPHIC_SURFACE) : undefined,
+    boxShadow: floating ? (raised ? `${SIDEBAR_NEUMORPHIC_RAISED_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW) : undefined,
+    transform: floating && raised ? "translateY(-2px)" : "translateY(0)",
+    overflow: floating ? "hidden" : "visible",
+    transition: floating ? "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease" : undefined,
+  };
+}
+
+function appSidebarMiniExplorerRowStyle(open: boolean, floating: boolean): React.CSSProperties {
+  if (floating) {
+    return {
+      width: "100%",
+      minHeight: 44,
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 1fr) 26px",
+      alignItems: "center",
+      border: "none",
+      borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
+      background: "transparent",
+      color: SIDEBAR_ACTIVE_TEXT,
+      minWidth: 0,
+      transition: "background 120ms ease",
+    };
+  }
+  return {
+    width: "100%",
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    alignItems: "center",
+    border: `1px solid ${open ? SIDEBAR_STATE_OPEN_BORDER : "transparent"}`,
+    borderRadius: 6,
+    background: open ? SIDEBAR_STATE_OPEN_BG : "transparent",
+    color: open ? SIDEBAR_ACTIVE_TEXT : "#334155",
+    minWidth: 0,
+  };
+}
+
+function appSidebarMiniExplorerLabelButtonStyle(floating: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: floating ? 42 : 29,
+    display: "grid",
+    gridTemplateColumns: floating ? "17px minmax(0, 1fr)" : "18px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 6,
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: floating ? 13 : 12,
+    fontWeight: floating ? 650 : 500,
+    lineHeight: 1.1,
+    letterSpacing: 0,
+    padding: floating ? "0 0 0 8px" : "0 0 0 8px",
+    textAlign: "left",
+  };
+}
+
+const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
+  width: 17,
+  height: 17,
+  display: "grid",
+  placeItems: "center",
+  color: "#334155",
+};
+
+function appSidebarMiniExplorerFrameStyle(floating: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "visible",
+    border: floating ? "none" : "1px solid rgba(17, 17, 17, 0.22)",
+    borderTop: floating ? "none" : undefined,
+    borderRadius: floating ? 0 : 6,
+    background: floating ? "transparent" : "#ffffff",
+  };
+}
+
 function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, elevated = false, open = false): React.CSSProperties {
   if (elevated) {
     return {
@@ -2056,6 +2243,11 @@ const appSidebarSharedDisclosureStyle: React.CSSProperties = {
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
+};
+
+const appSidebarMiniExplorerDisclosureStyle: React.CSSProperties = {
+  ...appSidebarSharedDisclosureStyle,
+  width: 26,
 };
 
 const appSidebarSharedMetaStyle: React.CSSProperties = {
