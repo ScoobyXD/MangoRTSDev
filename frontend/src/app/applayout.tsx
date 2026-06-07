@@ -1173,6 +1173,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     onNavigate(role ? buildRacioRoute(role, nodeID) : buildNodeRoute(nodeID));
   }, [homeViewID, onNavigate]);
 
+  const openProjectManagementNodeOverlay = useCallback((nodeID: string) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    closeMenus();
+    setActiveDockTabID(null);
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup({ nodeID: cleanNodeID, nodeTitle: cleanNodeID, focusRequestID: Date.now() });
+  }, [closeMenus]);
+
   const closeHomeNodeRoute = useCallback(() => {
     if (!onNavigate) return;
     const role = (racioDeepLink as RacioDeepLinkRoute | null)?.role ?? racioRoleForViewID(homeViewID);
@@ -1562,7 +1571,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           </React.Suspense>
         ) : isProjectManagementView ? (
           <React.Suspense fallback={fullPageFallback}>
-            <LazyProjectManagementPage onNodeOpen={openHomeNodeRoute} />
+            <LazyProjectManagementPage onNodeOpen={openProjectManagementNodeOverlay} />
           </React.Suspense>
         ) : (
           <>
