@@ -99,6 +99,9 @@ type TimelineDisplayRow = {
   kind: "logic_gate" | "node";
   item: ProjectManagementTimelineRow;
   depth: number;
+  gateID?: string;
+  canExpand?: boolean;
+  expanded?: boolean;
 };
 
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
@@ -389,7 +392,7 @@ function upsertTimelineRows(current: ProjectManagementTimelineRow[], incoming: P
   return next;
 }
 
-function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: NodeRecord[]): TimelineDisplayRow[] {
+function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: NodeRecord[], expandedGateIDs: Set<string>): TimelineDisplayRow[] {
   const visibleGateIDs = new Set(rows.map(logicGateIDForTimelineRow).filter(Boolean));
   const nodesByGateID = new Map<string, NodeRecord[]>();
   const nestedNodeIDs = new Set<string>();
@@ -423,8 +426,19 @@ function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: N
   for (const row of rows) {
     if (row.resource_type === "logic_gate") {
       const gateID = logicGateIDForTimelineRow(row);
-      displayRows.push({ id: `gate:${row.item_id}`, kind: "logic_gate", item: row, depth: 0 });
-      for (const node of nodesByGateID.get(gateID) ?? []) {
+      const childNodes = (nodesByGateID.get(gateID) ?? []).filter((node) => nodeRowsByID.has(node.node_id));
+      const expanded = gateID ? expandedGateIDs.has(gateID) : false;
+      displayRows.push({
+        id: `gate:${row.item_id}`,
+        kind: "logic_gate",
+        item: row,
+        depth: 0,
+        gateID,
+        canExpand: childNodes.length > 0,
+        expanded,
+      });
+      if (!expanded) continue;
+      for (const node of childNodes) {
         const nodeRow = nodeRowsByID.get(node.node_id);
         if (!nodeRow) continue;
         displayRows.push({
@@ -469,6 +483,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [explorerPerspective, setExplorerPerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [explorerExpanded, setExplorerExpanded] = useState<Set<string>>(() => new Set());
+  const [timelineExpandedGateIDs, setTimelineExpandedGateIDs] = useState<Set<string>>(() => new Set());
   const [verticalSplit, setVerticalSplit] = useState(54);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
@@ -748,7 +763,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
   const visibleTimelineRows = useMemo(() => timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0])), [timelineRows, weekDays]);
-  const timelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes), [visibleTimelineRows, workspace.nodes]);
+  const timelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes, timelineExpandedGateIDs), [timelineExpandedGateIDs, visibleTimelineRows, workspace.nodes]);
   const explorerRows = useMemo(() => buildProjectExplorerRows({
     expanded: explorerExpanded,
     nodes: filteredNodes,
@@ -812,6 +827,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const addExplorerEntityToTimeline = useCallback((payload: ProjectTimelinePayload) => {
     void addTimelineItem(payload, defaultTimelineStartOffset);
   }, [addTimelineItem, defaultTimelineStartOffset]);
+
+  const toggleTimelineGate = useCallback((gateID: string) => {
+    setTimelineExpandedGateIDs((current) => {
+      const next = new Set(current);
+      if (next.has(gateID)) next.delete(gateID);
+      else next.add(gateID);
+      return next;
+    });
+  }, []);
 
   const removeTimelineItem = useCallback(async (item: ProjectManagementTimelineRow) => {
     setTimelineContextMenu(null);
@@ -900,6 +924,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           contextMenu={timelineContextMenu}
           onOpenContextMenu={setTimelineContextMenu}
           onStartBarInteraction={setBarInteraction}
+          onToggleGate={toggleTimelineGate}
         />
       </section>
       <div role="separator" aria-orientation="horizontal" style={verticalResizerStyle} onPointerDown={startVerticalResize} />
@@ -939,6 +964,7 @@ function TimelineChart({
   contextMenu,
   onOpenContextMenu,
   onStartBarInteraction,
+  onToggleGate,
 }: {
   accent: string;
   loading: boolean;
@@ -952,6 +978,7 @@ function TimelineChart({
   contextMenu: TimelineContextMenuState | null;
   onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
   onStartBarInteraction: (interaction: BarInteraction) => void;
+  onToggleGate: (gateID: string) => void;
 }) {
   const [dropOffset, setDropOffset] = useState<number | null>(null);
   const weekStartDate = weekDays[0];
@@ -1019,7 +1046,23 @@ function TimelineChart({
                   <ExplorerRowIcon kind={displayRow.kind === "logic_gate" ? "logic_gate" : "node"} />
                 </span>
                 <span style={timelineRowTitleStyle}>{item.display_title}</span>
-                {displayRow.kind === "node" ? <span style={timelineStatusStyle}>{item.status || "Node"}</span> : null}
+                {displayRow.kind === "node" ? <span style={timelineStatusStyle}>{item.status || "Node"}</span> : (
+                  displayRow.canExpand && displayRow.gateID ? (
+                    <button
+                      type="button"
+                      aria-label={`${displayRow.expanded ? "Collapse" : "Expand"} ${item.display_title}`}
+                      aria-expanded={displayRow.expanded}
+                      style={timelineGateDisclosureButtonStyle}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleGate(displayRow.gateID ?? "");
+                      }}
+                      onContextMenu={(event) => event.stopPropagation()}
+                    >
+                      <ExplorerDisclosureIcon open={Boolean(displayRow.expanded)} color="#059669" />
+                    </button>
+                  ) : <span aria-hidden="true" />
+                )}
               </div>
               {weekDays.map((day, dayIndex) => (
                 <div key={`${displayRow.id}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent, displayRow.kind)} />
@@ -1664,6 +1707,21 @@ function timelineTypeIconStyle(kind: "logic_gate" | "node"): React.CSSProperties
     boxSizing: "border-box",
   };
 }
+
+const timelineGateDisclosureButtonStyle: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  display: "inline-grid",
+  placeItems: "center",
+  justifySelf: "end",
+  padding: 0,
+  border: "1px solid rgba(16, 185, 129, 0.22)",
+  borderRadius: 6,
+  background: "rgba(255, 255, 255, 0.74)",
+  color: "#059669",
+  cursor: "pointer",
+  boxShadow: "1px 1px 4px rgba(15, 23, 42, 0.06), -1px -1px 4px rgba(255, 255, 255, 0.86)",
+};
 
 const timelineRowTitleStyle: React.CSSProperties = {
   minWidth: 0,
