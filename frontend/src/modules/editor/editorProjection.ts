@@ -28,6 +28,7 @@ export type EditorTextBlockChatMessage = {
   blockID: string;
   parentID?: string;
   selectionSource?: "text" | "email";
+  selectionMessageID?: string;
   selectionQuote?: string;
   selectionStart?: number;
   selectionEnd?: number;
@@ -115,6 +116,7 @@ export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
   parentID?: string;
   selectionSource?: "text" | "email";
+  selectionMessageID?: string;
   selectionQuote?: string;
   selectionStart?: number;
   selectionEnd?: number;
@@ -128,6 +130,7 @@ export function buildEditorTextBlockChatPayload(input: {
     block_id: input.blockID,
     parent_id: input.parentID ?? "",
     selection_source: input.selectionSource ?? "text",
+    selection_message_id: input.selectionMessageID?.trim() ?? "",
     selection_quote: input.selectionQuote?.trim() ?? "",
     selection_start: Number.isFinite(input.selectionStart) ? input.selectionStart : null,
     selection_end: Number.isFinite(input.selectionEnd) ? input.selectionEnd : null,
@@ -261,6 +264,7 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     blockID,
     parentID: parentID || undefined,
     selectionSource: stringValue(record, "selection_source") === "email" ? "email" : "text",
+    selectionMessageID: stringValue(record, "selection_message_id") || undefined,
     selectionQuote: stringValue(record, "selection_quote") || undefined,
     selectionStart: integerValue(record, "selection_start"),
     selectionEnd: integerValue(record, "selection_end"),
