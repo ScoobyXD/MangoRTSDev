@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import type React from "react";
 import { clamp, getNodeTitle, type NodeDirection, type NodePosition, type NodeRecord } from "./shared";
 import {
@@ -8,16 +8,6 @@ import {
 } from "./NodeMapControls";
 import { isLegalRelationshipSidePair } from "./relationshipProjection";
 import { buildNodeTitleCommentSegments, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
-import {
-  createContentEditableTitleUndoHistory,
-  handleContentEditableTitleBeforeInput,
-  handleContentEditableTitlePaste,
-  handleContentEditableTitleUndoRedoKeyDown,
-  recordContentEditableTitleInput,
-  resetContentEditableTitleUndoHistory,
-  writeContentEditableTitleSnapshot,
-} from "./contentEditableTitleHistory";
-import { snapshotEditorText, type EditorTextSnapshot } from "../editor/editorUndoHistory";
 
 type NodeMapNodeCardProps = {
   node: NodeRecord;
@@ -126,16 +116,8 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   const nodeTitle = getNodeTitle(node);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const titleElementRef = useRef<HTMLDivElement | null>(null);
-  const titleUndoHistoryRef = useRef(createContentEditableTitleUndoHistory());
-  const pendingTitleUndoSnapshotRef = useRef<EditorTextSnapshot | null>(null);
   const nodeInlineCommentDraft = inlineCommentDraft?.nodeID === node.node_id ? inlineCommentDraft : null;
   const titleSegments = useMemo(() => buildNodeTitleCommentSegments(nodeTitle, inlineCommentThreads), [inlineCommentThreads, nodeTitle]);
-
-  useEffect(() => {
-    if (!isEditingTitle || !canEdit) return;
-    resetContentEditableTitleUndoHistory(titleUndoHistoryRef.current, pendingTitleUndoSnapshotRef);
-    editingNodeTitleDraftRef.current = nodeTitle;
-  }, [canEdit, editingNodeTitleDraftRef, isEditingTitle, node.node_id, nodeTitle]);
 
   const readNodeTitleSelection = (): NodeInlineCommentDraft | null => {
     const cardElement = cardRef.current;
@@ -333,44 +315,14 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
             contentEditable
             suppressContentEditableWarning
             onPointerDown={(event) => event.stopPropagation()}
-            onBeforeInput={(event) => {
-              handleContentEditableTitleBeforeInput(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              );
-            }}
-            onPaste={(event) => {
-              handleContentEditableTitlePaste(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              );
-            }}
             onInput={(event) => {
-              recordContentEditableTitleInput(
-                titleUndoHistoryRef.current,
-                event.currentTarget,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-                (event.nativeEvent as InputEvent).inputType,
-              );
+              editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
             }}
             onBlur={() => {
               void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
               onSetEditingNodeTitleNodeID(null);
             }}
             onKeyDown={(event) => {
-              if (handleContentEditableTitleUndoRedoKeyDown(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              )) {
-                return;
-              }
               if (event.key === "Enter") {
                 event.preventDefault();
                 void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
@@ -378,13 +330,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
               }
               if (event.key === "Escape") {
                 event.preventDefault();
-                if (editingNodeTitleElementRef.current) {
-                  writeContentEditableTitleSnapshot(
-                    editingNodeTitleElementRef.current,
-                    snapshotEditorText(nodeTitle, nodeTitle.length, nodeTitle.length),
-                    editingNodeTitleDraftRef,
-                  );
-                }
+                if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
                 onSetEditingNodeTitleNodeID(null);
               }
             }}

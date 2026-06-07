@@ -19,7 +19,6 @@ import {
   serializeEditorDocumentHTML,
 } from "./richTextEditing";
 import {
-  classifyEditorInputType,
   recordEditorDocumentUndoChange,
   redoEditorDocument,
   snapshotEditorDocumentHTML,
@@ -1115,8 +1114,7 @@ export function useEditorDocumentSurfaceHandlers({
   mentionStrokeColor = "rgba(15,23,42,0.18)",
   mentionMenuPosition = "fixed",
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
-  const pendingDocumentUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
-  const pendingDocumentUndoKindRef = useRef<EditorDocumentChangeKind | null>(null);
+  const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
   const [activeMentionDraft, setActiveMentionDraft] = useState<RichTextMentionDraft | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -1249,9 +1247,7 @@ export function useEditorDocumentSurfaceHandlers({
       const pendingFontSize = pendingEditorFontSizeRef.current;
 
       if (inputEvent.inputType === "historyUndo" || inputEvent.inputType === "historyRedo") {
-        event.preventDefault();
-        pendingDocumentUndoSnapshotRef.current = null;
-        pendingDocumentUndoKindRef.current = null;
+        pendingNativeUndoSnapshotRef.current = null;
         const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
@@ -1260,7 +1256,7 @@ export function useEditorDocumentSurfaceHandlers({
           scheduleIndentGuideUpdate,
           onSelectionFontSizeChange,
         );
-        if (!applied) syncSelectionFontSize(root, onSelectionFontSizeChange);
+        if (applied) event.preventDefault();
         return;
       }
 
@@ -1320,8 +1316,7 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (inputEvent.inputType && inputEvent.inputType !== "insertCompositionText") {
-        pendingDocumentUndoSnapshotRef.current = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
-        pendingDocumentUndoKindRef.current = classifyEditorInputType(inputEvent.inputType);
+        pendingNativeUndoSnapshotRef.current = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
       }
     },
     onPaste(event) {
@@ -1406,11 +1401,9 @@ export function useEditorDocumentSurfaceHandlers({
       }
     },
     onInput(event) {
-      const undoBefore = pendingDocumentUndoSnapshotRef.current;
-      const undoKind = pendingDocumentUndoKindRef.current ?? "typing";
-      pendingDocumentUndoSnapshotRef.current = null;
-      pendingDocumentUndoKindRef.current = null;
-      recordEditorDocumentMutation(documentUndoHistoryRef.current, event.currentTarget, undoBefore, undoKind);
+      const undoBefore = pendingNativeUndoSnapshotRef.current;
+      pendingNativeUndoSnapshotRef.current = null;
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, event.currentTarget, undoBefore, "typing");
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
       refreshMentionDraft(event.currentTarget);
@@ -1512,10 +1505,8 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (isEditorUndoShortcut(event) || isEditorRedoShortcut(event)) {
-        event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        pendingDocumentUndoSnapshotRef.current = null;
-        pendingDocumentUndoKindRef.current = null;
+        pendingNativeUndoSnapshotRef.current = null;
         const applied = applyEditorUndoCommand(
           root,
           documentUndoHistoryRef.current,
@@ -1524,7 +1515,7 @@ export function useEditorDocumentSurfaceHandlers({
           scheduleIndentGuideUpdate,
           onSelectionFontSizeChange,
         );
-        if (!applied) syncSelectionFontSize(root, onSelectionFontSizeChange);
+        if (applied) event.preventDefault();
         return;
       }
 
@@ -1540,8 +1531,7 @@ export function useEditorDocumentSurfaceHandlers({
       )) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        pendingDocumentUndoSnapshotRef.current = null;
-        pendingDocumentUndoKindRef.current = null;
+        pendingNativeUndoSnapshotRef.current = null;
         clearEditorImageSelection(root);
         activeMentionRootRef.current = null;
         setActiveMentionDraft(null);

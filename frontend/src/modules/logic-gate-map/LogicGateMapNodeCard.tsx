@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type React from "react";
 import { getNodeTitle, type NodeDirection, type NodePosition, type NodeRecord } from "./shared";
 import {
@@ -7,16 +6,6 @@ import {
   resolveNodeMapPointerSelection,
 } from "../node-map/NodeMapControls";
 import { canStartRelationshipFromSide, isLegalRelationshipSidePair } from "./relationshipProjection";
-import {
-  createContentEditableTitleUndoHistory,
-  handleContentEditableTitleBeforeInput,
-  handleContentEditableTitlePaste,
-  handleContentEditableTitleUndoRedoKeyDown,
-  recordContentEditableTitleInput,
-  resetContentEditableTitleUndoHistory,
-  writeContentEditableTitleSnapshot,
-} from "../node-map/contentEditableTitleHistory";
-import { snapshotEditorText, type EditorTextSnapshot } from "../editor/editorUndoHistory";
 
 const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
   { direction: "left", style: { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" } },
@@ -120,20 +109,11 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const isSelected = selectedNodeIDs.has(node.node_id);
   const isPrimary = node.node_id === selectedNodeID;
   const isEditingTitle = editingNodeTitleNodeID === node.node_id;
-  const nodeTitle = getNodeTitle(node);
-  const titleUndoHistoryRef = useRef(createContentEditableTitleUndoHistory());
-  const pendingTitleUndoSnapshotRef = useRef<EditorTextSnapshot | null>(null);
   const gateFill = isSelected ? nodeCardSelectedBackground : nodeCardBackground;
   const gateStroke = isSelected ? selectionColor : nodeCardBorder;
   const gateShadow = isSelected
     ? "drop-shadow(0 0 4px rgba(100,116,139,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
     : "drop-shadow(0 4px 12px rgba(0,0,0,0.12))";
-
-  useEffect(() => {
-    if (!isEditingTitle || !canEdit) return;
-    resetContentEditableTitleUndoHistory(titleUndoHistoryRef.current, pendingTitleUndoSnapshotRef);
-    editingNodeTitleDraftRef.current = nodeTitle;
-  }, [canEdit, editingNodeTitleDraftRef, isEditingTitle, node.node_id, nodeTitle]);
 
   return (
     <div
@@ -262,44 +242,14 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
             contentEditable
             suppressContentEditableWarning
             onPointerDown={(event) => event.stopPropagation()}
-            onBeforeInput={(event) => {
-              handleContentEditableTitleBeforeInput(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              );
-            }}
-            onPaste={(event) => {
-              handleContentEditableTitlePaste(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              );
-            }}
             onInput={(event) => {
-              recordContentEditableTitleInput(
-                titleUndoHistoryRef.current,
-                event.currentTarget,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-                (event.nativeEvent as InputEvent).inputType,
-              );
+              editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
             }}
             onBlur={() => {
               void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
               onSetEditingNodeTitleNodeID(null);
             }}
             onKeyDown={(event) => {
-              if (handleContentEditableTitleUndoRedoKeyDown(
-                event,
-                titleUndoHistoryRef.current,
-                pendingTitleUndoSnapshotRef,
-                editingNodeTitleDraftRef,
-              )) {
-                return;
-              }
               if (event.key === "Enter") {
                 event.preventDefault();
                 void onUpdateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
@@ -307,13 +257,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               }
               if (event.key === "Escape") {
                 event.preventDefault();
-                if (editingNodeTitleElementRef.current) {
-                  writeContentEditableTitleSnapshot(
-                    editingNodeTitleElementRef.current,
-                    snapshotEditorText(nodeTitle, nodeTitle.length, nodeTitle.length),
-                    editingNodeTitleDraftRef,
-                  );
-                }
+                if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
                 onSetEditingNodeTitleNodeID(null);
               }
             }}
@@ -342,7 +286,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               outline: "none",
             }}
           >
-            {nodeTitle}
+            {getNodeTitle(node)}
           </div>
         ) : (
           <div
@@ -363,7 +307,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               fontFamily: "var(--mango-font-family)",
             }}
           >
-            {nodeTitle}
+            {getNodeTitle(node)}
           </div>
         )}
       </div>
