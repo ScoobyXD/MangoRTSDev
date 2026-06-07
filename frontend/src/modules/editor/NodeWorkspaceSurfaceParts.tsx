@@ -2593,7 +2593,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       setMessage(payload);
       setThreadMessages([payload]);
       setSentReplies(payload.local_replies ?? []);
-      setReplyTargetMessageID(payload.id);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
@@ -2648,15 +2647,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [companyID, messageID]);
 
   const recipients = parseEmailAddressDraft(toDraft);
-  const canSend = editable && !sending && Boolean(message) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
+  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
   const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
   const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
   const replyTargetMessage = useMemo(() => (
-    displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? message
-  ), [displayThreadMessages, message, replyTargetMessageID]);
+    replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
+  ), [displayThreadMessages, replyTargetMessageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -2834,9 +2833,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     padding: "14px 8px 16px",
                     borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
                     borderRadius: 10,
-                    background: isReplyTarget ? "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(254,255,102,0.18))" : "transparent",
-                    boxShadow: isReplyTarget ? "0 0 0 2px rgba(234,179,8,0.58), 0 0 18px rgba(250,255,0,0.24)" : undefined,
-                    transition: "background 140ms ease, box-shadow 140ms ease",
+                    background: "transparent",
+                    boxShadow: isReplyTarget ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)" : undefined,
+                    transition: "box-shadow 140ms ease",
                   }}
                 >
                   <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
@@ -2852,9 +2851,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       onClick={() => selectReplyTarget(threadMessage)}
                       style={{
                         minHeight: 22,
-                        border: isReplyTarget ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                        border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
                         borderRadius: 7,
-                        background: isReplyTarget ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                        background: EDITOR_NEU_SURFACE,
                         color: accent,
                         cursor: editable ? "pointer" : "default",
                         opacity: editable ? 1 : 0.46,
