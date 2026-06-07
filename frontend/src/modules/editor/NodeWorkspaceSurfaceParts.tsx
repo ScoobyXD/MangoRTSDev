@@ -2827,10 +2827,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 <div
                   key={threadMessage.id || `${index}`}
                   style={{
+                    position: "relative",
                     display: "grid",
                     gap: 5,
-                    padding: "14px 0 16px",
+                    margin: "0 -8px",
+                    padding: "14px 8px 16px",
                     borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
+                    borderRadius: 10,
+                    background: isReplyTarget ? "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(254,255,102,0.18))" : "transparent",
+                    boxShadow: isReplyTarget ? "0 0 0 2px rgba(234,179,8,0.58), 0 0 18px rgba(250,255,0,0.24)" : undefined,
+                    transition: "background 140ms ease, box-shadow 140ms ease",
                   }}
                 >
                   <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
