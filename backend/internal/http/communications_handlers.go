@@ -1104,7 +1104,7 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "shared_inbox_id" && key != "refresh" {
+		if key != "limit" && key != "page_token" && key != "folder_id" && key != "thread_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "shared_inbox_id" && key != "refresh" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -1125,6 +1125,7 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		Limit:         limit,
 		PageToken:     strings.TrimSpace(r.URL.Query().Get("page_token")),
 		FolderID:      strings.TrimSpace(r.URL.Query().Get("folder_id")),
+		ThreadID:      strings.TrimSpace(r.URL.Query().Get("thread_id")),
 		Query:         strings.TrimSpace(r.URL.Query().Get("q")),
 		Mailbox:       normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
 		CompanyID:     strings.TrimSpace(r.URL.Query().Get("company_id")),
