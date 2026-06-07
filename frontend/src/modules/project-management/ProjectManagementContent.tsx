@@ -34,6 +34,7 @@ import {
 } from "../perspectives/PerspectiveSelector.js";
 import {
   createProjectManagementTimelineItem,
+  deleteProjectManagementNode,
   deleteProjectManagementTimelineItem,
   fetchProjectManagementTimeline,
   updateProjectManagementTimelineItem,
@@ -79,8 +80,15 @@ type BarInteraction = {
   item: ProjectManagementTimelineRow;
   mode: "move" | "left" | "right";
   startX: number;
+  dayWidth: number;
   startOffset: number;
   durationDays: number;
+};
+
+type TimelineContextMenuState = {
+  item: ProjectManagementTimelineRow;
+  x: number;
+  y: number;
 };
 
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
@@ -94,8 +102,9 @@ const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
 };
 const WEEK_DAY_COUNT = 7;
 const TIMELINE_LABEL_W = 280;
-const TIMELINE_DAY_W = 142;
-const TIMELINE_ROW_H = 44;
+const TIMELINE_MIN_DAY_W = 96;
+const TIMELINE_HEADER_H = 38;
+const TIMELINE_ROW_H = 30;
 
 type WorkspaceEventEnvelope = {
   company_id?: string;
@@ -221,13 +230,28 @@ function normalizeTimelineRow(row: ProjectManagementTimelineRow): ProjectManagem
 function rowColor(row: ProjectManagementTimelineRow): string {
   const explicit = row.status_color?.trim();
   if (explicit) return explicit;
-  if (row.resource_type === "logic_gate") return "#8b5cf6";
   const status = row.status?.trim().toLowerCase() ?? "";
   if (status.includes("done") || status.includes("complete")) return "#22c55e";
   if (status.includes("progress")) return "#3b82f6";
   if (status.includes("verify")) return "#a855f7";
   if (status.includes("blocked")) return "#ef4444";
-  return "#06b6d4";
+  if (status.includes("pending") || status.includes("todo") || status.includes("to do") || status.includes("backlog") || status.includes("not started")) return "#d97706";
+  if (row.resource_type === "logic_gate") return "#8b5cf6";
+  return "#0891b2";
+}
+
+function nodeIDForTimelineRow(row: ProjectManagementTimelineRow): string {
+  return row.node_id?.trim() || (row.resource_type === "node" ? row.resource_id.trim() : "");
+}
+
+function readableTextColor(background: string): string {
+  const match = /^#?([0-9a-f]{6})$/i.exec(background.trim());
+  if (!match) return "#ffffff";
+  const hex = match[1];
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#111827" : "#ffffff";
 }
 
 function targetUserIDsForPerspective(input: {
@@ -365,6 +389,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
+  const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
 
   const loadWorkspacePanel = useCallback(async () => {
     const cleanCompanyID = companyID.trim();
@@ -592,7 +617,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   useEffect(() => {
     if (!barInteraction) return undefined;
     const onPointerMove = (event: PointerEvent) => {
-      const deltaDays = Math.round((event.clientX - barInteraction.startX) / TIMELINE_DAY_W);
+      const deltaDays = Math.round((event.clientX - barInteraction.startX) / Math.max(1, barInteraction.dayWidth));
       if (barInteraction.mode === "move") {
         setBarDraft({
           itemID: barInteraction.item.item_id,
@@ -627,6 +652,22 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       window.removeEventListener("pointerup", onPointerUp);
     };
   }, [barDraft, barInteraction, updateTimelineItem]);
+
+  useEffect(() => {
+    if (!timelineContextMenu) return undefined;
+    const close = () => setTimelineContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [timelineContextMenu]);
 
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, logicGatePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, logicGatePerspective, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, nodePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, nodePerspective, workspace.nodes]);
@@ -678,6 +719,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }, [addTimelineItem, defaultTimelineStartOffset]);
 
   const removeTimelineItem = useCallback(async (item: ProjectManagementTimelineRow) => {
+    setTimelineContextMenu(null);
     setTimelineRows((current) => current.filter((row) => row.item_id !== item.item_id));
     try {
       await deleteProjectManagementTimelineItem(companyID, item.item_id);
@@ -686,6 +728,29 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       void loadTimelineRows();
     }
   }, [companyID, loadTimelineRows]);
+
+  const deleteTimelineNode = useCallback(async (item: ProjectManagementTimelineRow) => {
+    if (item.resource_type !== "node") return;
+    const nodeID = nodeIDForTimelineRow(item);
+    if (!nodeID) return;
+    setTimelineContextMenu(null);
+    const previousWorkspace = workspace;
+    setTimelineRows((current) => current.filter((row) => nodeIDForTimelineRow(row) !== nodeID));
+    setWorkspace((current) => ({
+      ...current,
+      nodes: current.nodes.filter((node) => node.node_id !== nodeID),
+      nodeFolderItems: current.nodeFolderItems.filter((folderItem) => folderItem.item_type !== "node" || folderItem.item_id !== nodeID),
+    }));
+    try {
+      await deleteProjectManagementNode(companyID, nodeID);
+      scheduleWorkspacePanelReload();
+      void loadTimelineRows();
+    } catch (deleteError) {
+      setWorkspace(previousWorkspace);
+      setError(deleteError instanceof Error ? deleteError.message : "Node delete failed");
+      void loadTimelineRows();
+    }
+  }, [companyID, loadTimelineRows, scheduleWorkspacePanelReload, workspace]);
 
   const clearTimelinePerspective = useCallback(() => {
     const items = visibleTimelineRows.slice();
@@ -743,7 +808,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           draft={barDraft}
           onDropEntity={addTimelineItem}
           onRemoveItem={removeTimelineItem}
+          onDeleteNode={deleteTimelineNode}
           onNodeOpen={onNodeOpen}
+          contextMenu={timelineContextMenu}
+          onOpenContextMenu={setTimelineContextMenu}
           onStartBarInteraction={setBarInteraction}
         />
       </section>
@@ -797,7 +865,10 @@ function TimelineChart({
   draft,
   onDropEntity,
   onRemoveItem,
+  onDeleteNode,
   onNodeOpen,
+  contextMenu,
+  onOpenContextMenu,
   onStartBarInteraction,
 }: {
   accent: string;
@@ -807,22 +878,32 @@ function TimelineChart({
   draft: BarDraft | null;
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
+  onDeleteNode: (item: ProjectManagementTimelineRow) => void;
   onNodeOpen?: (nodeID: string) => void;
+  contextMenu: TimelineContextMenuState | null;
+  onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
   onStartBarInteraction: (interaction: BarInteraction) => void;
 }) {
   const [dropOffset, setDropOffset] = useState<number | null>(null);
-  const gridWidth = TIMELINE_LABEL_W + WEEK_DAY_COUNT * TIMELINE_DAY_W;
   const weekStartDate = weekDays[0];
   const bodyRowCount = loading ? 3 : Math.max(rows.length, 6);
+  const dayWidthForRect = (rect: DOMRect): number => Math.max(1, (rect.width - TIMELINE_LABEL_W) / WEEK_DAY_COUNT);
+  const dayWidthForPointerEvent = (event: React.PointerEvent<HTMLElement>): number => {
+    const grid = event.currentTarget.closest("[data-project-timeline-grid]");
+    const rect = grid?.getBoundingClientRect();
+    return rect ? dayWidthForRect(rect) : TIMELINE_MIN_DAY_W;
+  };
   const dropOffsetForEvent = (event: React.DragEvent<HTMLDivElement>): number => {
     const rect = event.currentTarget.getBoundingClientRect();
+    const dayWidth = dayWidthForRect(rect);
     const x = event.clientX - rect.left - TIMELINE_LABEL_W;
-    return clampInteger(Math.floor(x / TIMELINE_DAY_W), 0, WEEK_DAY_COUNT - 1);
+    return clampInteger(Math.floor(x / dayWidth), 0, WEEK_DAY_COUNT - 1);
   };
   return (
     <div className="kanban-board-scroll" style={timelineScrollStyle}>
       <div
-        style={{ ...timelineGridStyle(bodyRowCount), width: gridWidth }}
+        data-project-timeline-grid="true"
+        style={timelineGridStyle(bodyRowCount)}
         onDragOver={(event) => {
           if (!hasTimelinePayloadType(event.dataTransfer)) return;
           event.preventDefault();
@@ -867,13 +948,18 @@ function TimelineChart({
                 style={timelineBarStyle(item, rowIndex, startOffset, durationDays)}
                 title={item.display_title}
                 onDoubleClick={() => {
-                  const nodeID = item.node_id?.trim() || (item.resource_type === "node" ? item.resource_id : "");
+                  const nodeID = nodeIDForTimelineRow(item);
                   if (nodeID) onNodeOpen?.(nodeID);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenContextMenu({ item, x: event.clientX, y: event.clientY });
                 }}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
                   event.preventDefault();
-                  onStartBarInteraction({ item, mode: "move", startX: event.clientX, startOffset, durationDays });
+                  onStartBarInteraction({ item, mode: "move", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
                 }}
               >
                 <button
@@ -883,21 +969,10 @@ function TimelineChart({
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     event.preventDefault();
-                    onStartBarInteraction({ item, mode: "left", startX: event.clientX, startOffset, durationDays });
+                    onStartBarInteraction({ item, mode: "left", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
                   }}
                 />
                 <span style={timelineBarLabelStyle}>{item.display_title}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${item.display_title}`}
-                  style={removeBarButtonStyle}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveItem(item);
-                  }}
-                >
-                  x
-                </button>
                 <button
                   type="button"
                   aria-label={`Resize ${item.display_title} end`}
@@ -905,7 +980,7 @@ function TimelineChart({
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     event.preventDefault();
-                    onStartBarInteraction({ item, mode: "right", startX: event.clientX, startOffset, durationDays });
+                    onStartBarInteraction({ item, mode: "right", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
                   }}
                 />
               </div>
@@ -932,6 +1007,33 @@ function TimelineChart({
           </>
         )}
       </div>
+      {contextMenu ? (
+        <div
+          role="menu"
+          style={timelineContextMenuStyle(contextMenu.x, contextMenu.y)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            style={timelineContextMenuButtonStyle}
+            onClick={() => onRemoveItem(contextMenu.item)}
+          >
+            {contextMenu.item.resource_type === "node" ? "Remove node from timeline" : "Remove gate from timeline"}
+          </button>
+          {contextMenu.item.resource_type === "node" && nodeIDForTimelineRow(contextMenu.item) ? (
+            <button
+              type="button"
+              role="menuitem"
+              style={{ ...timelineContextMenuButtonStyle, color: "#b91c1c" }}
+              onClick={() => onDeleteNode(contextMenu.item)}
+            >
+              Delete node
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1261,8 +1363,11 @@ function timelineGridStyle(bodyRowCount: number): React.CSSProperties {
   return {
     position: "relative",
     display: "grid",
-    gridTemplateColumns: `${TIMELINE_LABEL_W}px repeat(${WEEK_DAY_COUNT}, ${TIMELINE_DAY_W}px)`,
-    gridTemplateRows: `${TIMELINE_ROW_H}px repeat(${Math.max(1, bodyRowCount)}, minmax(${TIMELINE_ROW_H}px, 1fr))`,
+    gridTemplateColumns: `${TIMELINE_LABEL_W}px repeat(${WEEK_DAY_COUNT}, minmax(${TIMELINE_MIN_DAY_W}px, 1fr))`,
+    gridTemplateRows: `${TIMELINE_HEADER_H}px repeat(${Math.max(1, bodyRowCount)}, ${TIMELINE_ROW_H}px)`,
+    alignContent: "start",
+    width: "100%",
+    minWidth: TIMELINE_LABEL_W + WEEK_DAY_COUNT * TIMELINE_MIN_DAY_W,
     minHeight: "100%",
   };
 }
@@ -1342,6 +1447,7 @@ function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, 
   const start = clampInteger(startOffset, 0, WEEK_DAY_COUNT - 1);
   const duration = clampInteger(durationDays, 1, WEEK_DAY_COUNT - start);
   const color = rowColor(item);
+  const textColor = readableTextColor(color);
   return {
     zIndex: 6,
     gridColumn: `${start + 2} / span ${duration}`,
@@ -1350,16 +1456,16 @@ function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, 
     minWidth: 0,
     height: 26,
     display: "grid",
-    gridTemplateColumns: "8px minmax(0, 1fr) 22px 8px",
+    gridTemplateColumns: "8px minmax(0, 1fr) 8px",
     alignItems: "center",
-    gap: 3,
-    margin: "0 8px",
-    padding: "0 5px",
-    border: `1px solid ${color}66`,
-    borderRadius: 7,
-    background: `linear-gradient(145deg, ${color}18, rgba(255, 255, 255, 0.94))`,
-    boxShadow: `0 7px 16px ${color}18, inset 1px 1px 0 rgba(255, 255, 255, 0.88)`,
-    color: "#111827",
+    gap: 5,
+    margin: "0 5px",
+    padding: "0 6px",
+    border: `1px solid ${color}`,
+    borderRadius: 8,
+    background: color,
+    boxShadow: `0 8px 18px ${color}33, inset 1px 1px 0 rgba(255, 255, 255, 0.30)`,
+    color: textColor,
     boxSizing: "border-box",
     cursor: "grab",
   };
@@ -1368,10 +1474,10 @@ function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, 
 function barHandleStyle(side: "left" | "right"): React.CSSProperties {
   return {
     width: 8,
-    height: 18,
+    height: 20,
     border: 0,
     borderRadius: 4,
-    background: "rgba(100, 116, 139, 0.34)",
+    background: "rgba(255, 255, 255, 0.54)",
     cursor: side === "left" ? "w-resize" : "e-resize",
     padding: 0,
   };
@@ -1386,19 +1492,37 @@ const timelineBarLabelStyle: React.CSSProperties = {
   fontWeight: 950,
 };
 
-const removeBarButtonStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(148, 163, 184, 0.20)",
+function timelineContextMenuStyle(x: number, y: number): React.CSSProperties {
+  return {
+    position: "fixed",
+    left: x,
+    top: y,
+    zIndex: 90,
+    minWidth: 190,
+    display: "grid",
+    gap: 2,
+    padding: 5,
+    border: "1px solid rgba(100, 116, 139, 0.24)",
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, 0.98)",
+    boxShadow: "0 14px 34px rgba(15, 23, 42, 0.18)",
+    boxSizing: "border-box",
+  };
+}
+
+const timelineContextMenuButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  width: "100%",
+  border: 0,
   borderRadius: 6,
-  background: "rgba(255, 255, 255, 0.86)",
-  color: "#64748b",
+  background: "transparent",
+  color: "#334155",
   cursor: "pointer",
-  fontSize: 10,
-  fontWeight: 950,
-  lineHeight: 1,
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 850,
+  textAlign: "left",
+  padding: "0 9px",
 };
 
 const timelineEmptyStyle: React.CSSProperties = {

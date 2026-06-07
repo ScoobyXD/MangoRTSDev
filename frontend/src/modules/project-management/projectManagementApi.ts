@@ -100,3 +100,11 @@ export async function deleteProjectManagementTimelineItem(companyID: string, ite
     method: "DELETE",
   });
 }
+
+export async function deleteProjectManagementNode(companyID: string, nodeID: string): Promise<{ status: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
