@@ -1268,7 +1268,6 @@ type ChatPaneProps = {
   editable: boolean;
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
-  emailCount?: number;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
@@ -1302,7 +1301,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   editable,
   messages,
   emailPane,
-  emailCount = 0,
   activeTab = "chat",
   selectionAnchor,
   draft,
@@ -1523,7 +1521,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               >
                 <ChatIcon color={activeTab === "chat" ? accent : "rgba(100,116,139,0.85)"} />
                 <span>Chat</span>
-                <span>{messages.length}</span>
               </button>
               <button
                 type="button"
@@ -1549,13 +1546,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               >
                 <MailIcon color={activeTab === "email" ? accent : "rgba(100,116,139,0.85)"} />
                 <span>Email</span>
-                <span>{emailCount}</span>
               </button>
             </>
           ) : (
             <>
               <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
-              <span>{messages.length}</span>
+              <span>Chat</span>
             </>
           )}
         </div>
@@ -2194,7 +2190,7 @@ export const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails
   <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: EDITOR_NEU_SURFACE, padding: 8, maxHeight: 260, overflowY: "auto", boxShadow: EDITOR_NEU_SHADOW }}>
     <div style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 800 }}>
       <MailIcon color={accent} />
-      <span>{emails.length}</span>
+      <span>Attached emails</span>
     </div>
     {emails.map((email) => (
       <button key={email.id} type="button" title={email.subject} onClick={() => onOpenEmail(email.messageID)} style={{ display: "grid", gap: 2, minWidth: 0, border: 0, borderTop: `1px solid ${strokeColor}`, padding: "7px 0 0", background: "transparent", textAlign: "left", cursor: "pointer" }}>
@@ -2591,21 +2587,7 @@ const AttachedEmailThreadCard: React.FC<{
           boxShadow: selected ? "0 9px 22px rgba(15,23,42,0.12), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 8px rgba(174,174,192,0.15), -2px -2px 8px rgba(255,255,255,0.76), inset 1px 1px 0 rgba(255,255,255,0.86)",
         }}
       >
-        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `${hasThreadChildren ? "22px " : ""}minmax(0, 1fr) auto auto`, alignItems: "center", gap: 7 }}>
-          {hasThreadChildren && (
-            <button
-              type="button"
-              title={collapsed ? "Expand email thread" : "Collapse email thread"}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onToggleCollapsed();
-              }}
-              style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
-            >
-              <TinyDisclosureIcon open={!collapsed} color={accent} />
-            </button>
-          )}
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
           <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
           <button
@@ -2622,6 +2604,20 @@ const AttachedEmailThreadCard: React.FC<{
             <ChatIcon color={accent} />
             Reply
           </button>
+          {hasThreadChildren && (
+            <button
+              type="button"
+              title={collapsed ? "Expand email thread" : "Collapse email thread"}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleCollapsed();
+              }}
+              style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+            >
+              <TinyDisclosureIcon open={!collapsed} color={accent} />
+            </button>
+          )}
         </div>
         <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 800 }}>
           {email.from || "Unknown sender"}
@@ -2722,6 +2718,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
+  const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
+  const folderMenuRef = useRef<HTMLDivElement | null>(null);
   const uniqueEmails = useMemo(() => uniqueAttachedEmailsByMessageID(emails), [emails]);
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
@@ -2747,6 +2745,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     }
     return groups;
   }, [normalizedLayout.emailFolderByID, orderedEmails]);
+  const closeFolderMenu = useCallback(() => setFolderMenu(null), []);
+  useCloseFloatingMenu(Boolean(folderMenu), folderMenuRef, closeFolderMenu);
 
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));
@@ -2773,6 +2773,54 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       folders: [...current.folders, { id: createAttachedEmailFolderID(), name: folderName, parentID: parentID || undefined, collapsed: false }],
     }));
   }, [editable, normalizedLayout.folders.length, updateLayout]);
+
+  const renameFolder = useCallback((folderID: string) => {
+    if (!editable) return;
+    const folder = normalizedLayout.folders.find((item) => item.id === folderID);
+    if (!folder) return;
+    const nextName = window.prompt("Folder name", folder.name)?.trim();
+    if (!nextName || nextName === folder.name) return;
+    updateLayout((current) => ({
+      ...current,
+      folders: current.folders.map((item) => item.id === folderID ? { ...item, name: nextName } : item),
+    }));
+  }, [editable, normalizedLayout.folders, updateLayout]);
+
+  const deleteFolder = useCallback((folderID: string) => {
+    if (!editable) return;
+    const folder = normalizedLayout.folders.find((item) => item.id === folderID);
+    if (!folder) return;
+    if (!window.confirm(`Delete "${folder.name}"? Emails stay attached.`)) return;
+    updateLayout((current) => {
+      const childFolders = new Map<string, AttachedEmailFolderLayout[]>();
+      for (const item of current.folders) {
+        const parentID = item.parentID ?? "";
+        const group = childFolders.get(parentID) ?? [];
+        group.push(item);
+        childFolders.set(parentID, group);
+      }
+      const removedFolderIDs = new Set<string>();
+      const stack = [folderID];
+      while (stack.length > 0) {
+        const currentID = stack.pop() ?? "";
+        if (!currentID || removedFolderIDs.has(currentID)) continue;
+        removedFolderIDs.add(currentID);
+        for (const child of childFolders.get(currentID) ?? []) stack.push(child.id);
+      }
+      const parentID = current.folders.find((item) => item.id === folderID)?.parentID ?? "";
+      const nextFolderByID = { ...current.emailFolderByID };
+      for (const [emailID, emailFolderID] of Object.entries(nextFolderByID)) {
+        if (!removedFolderIDs.has(emailFolderID)) continue;
+        if (parentID) nextFolderByID[emailID] = parentID;
+        else delete nextFolderByID[emailID];
+      }
+      return {
+        ...current,
+        folders: current.folders.filter((item) => !removedFolderIDs.has(item.id)),
+        emailFolderByID: nextFolderByID,
+      };
+    });
+  }, [editable, normalizedLayout.folders, updateLayout]);
 
   const moveEmail = useCallback((messageID: string, folderID: string, beforeMessageID = "") => {
     if (!editable || !messageID) return;
@@ -2804,14 +2852,6 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       return { ...current, collapsedThreadIDs: Array.from(collapsed) };
     });
   }, [updateLayout]);
-
-  const countFolderEmails = useCallback((folderID: string) => {
-    const visit = (id: string): number => {
-      const directCount = emailsByFolderID.get(id)?.length ?? 0;
-      return directCount + (childFoldersByParentID.get(id) ?? []).reduce((sum, folder) => sum + visit(folder.id), 0);
-    };
-    return visit(folderID);
-  }, [childFoldersByParentID, emailsByFolderID]);
 
   const renderEmailCards = (folderID: string) => (emailsByFolderID.get(folderID) ?? []).map((email) => (
     <AttachedEmailThreadCard
@@ -2852,7 +2892,6 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const renderFolder = (folder: AttachedEmailFolderLayout, depth = 0): React.ReactNode => {
     const childFolders = childFoldersByParentID.get(folder.id) ?? [];
     const directEmails = emailsByFolderID.get(folder.id) ?? [];
-    const totalEmailCount = countFolderEmails(folder.id);
     const hasContent = childFolders.length > 0 || directEmails.length > 0;
     const nested = depth > 0;
     return (
@@ -2882,14 +2921,15 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           padding: 8,
         }}
       >
-        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}>
-          {hasContent ? (
-            <button type="button" title={folder.collapsed ? "Expand folder" : "Collapse folder"} onClick={() => toggleFolder(folder.id)} style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_ACTIVE_SURFACE, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
-              <TinyDisclosureIcon open={!folder.collapsed} color={accent} />
-            </button>
-          ) : (
-            <span aria-hidden="true" style={{ width: 22, height: 22 }} />
-          )}
+        <div
+          onContextMenu={(event) => {
+            if (!editable) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setFolderMenu({ folderID: folder.id, x: event.clientX, y: event.clientY });
+          }}
+          style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}
+        >
           <FolderIcon color={accent} />
           <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}>{folder.name}</span>
           {editable && (
@@ -2897,7 +2937,11 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
               <FolderPlusIcon color={accent} />
             </button>
           )}
-          <span style={{ flex: "0 0 auto", minWidth: 22, height: 21, borderRadius: 999, background: "rgba(100,116,139,0.11)", color: "rgba(51,65,85,0.84)", display: "grid", placeItems: "center", fontSize: 9.5, fontWeight: 900 }}>{totalEmailCount}</span>
+          {hasContent && (
+            <button type="button" title={folder.collapsed ? "Expand folder" : "Collapse folder"} onClick={() => toggleFolder(folder.id)} style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_ACTIVE_SURFACE, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
+              <TinyDisclosureIcon open={!folder.collapsed} color={accent} />
+            </button>
+          )}
         </div>
         {!folder.collapsed && (
           <div style={{ minWidth: 0, display: "grid", gap: 8, marginLeft: 12, paddingLeft: 11, paddingBottom: 2, borderLeft: `2px solid ${ruleColor}` }}>
@@ -2916,7 +2960,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
 
   const renderUnfiledGroup = () => {
     const label = normalizedLayout.folders.length > 0 ? "Unfiled emails" : "Attached emails";
-    const unfiledCount = emailsByFolderID.get("")?.length ?? 0;
+    const unfiledEmails = emailsByFolderID.get("") ?? [];
     return (
       <div
         key="unfiled"
@@ -2938,11 +2982,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, padding: "4px 7px", color: surfaceText, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}>
           <MailIcon color={accent} />
           <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 950 }}>{label}</span>
-          <span style={{ flex: "0 0 auto", minWidth: 22, height: 21, borderRadius: 999, background: "rgba(100,116,139,0.11)", color: "rgba(51,65,85,0.84)", display: "grid", placeItems: "center", fontSize: 9.5, fontWeight: 900 }}>{unfiledCount}</span>
         </div>
         <div style={{ minWidth: 0, display: "grid", gap: 8, padding: "0 1px 1px" }}>
           {renderEmailCards("")}
-          {unfiledCount === 0 && (
+          {unfiledEmails.length === 0 && (
             <div style={{ minWidth: 0, minHeight: 34, display: "grid", placeItems: "center", border: `1px dashed ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, color: "rgba(100,116,139,0.68)", fontSize: 10.5, fontWeight: 850, background: "rgba(255,255,255,0.5)" }}>
               Drop emails here
             </div>
@@ -2962,8 +3005,54 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
             <FolderPlusIcon color={accent} />
           </button>
         )}
-        <EmailCountDropdown emails={uniqueEmails} accent={accent} surfaceText={surfaceText} compact onOpenEmail={onOpenEmail} />
       </div>
+      {folderMenu && (
+        <div
+          ref={folderMenuRef}
+          role="menu"
+          aria-label="Email folder actions"
+          onContextMenu={(event) => event.preventDefault()}
+          style={{
+            position: "fixed",
+            zIndex: 120,
+            top: folderMenu.y,
+            left: folderMenu.x,
+            minWidth: 132,
+            display: "grid",
+            gap: 4,
+            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            borderRadius: 11,
+            background: EDITOR_NEU_PANEL_BACKGROUND,
+            boxShadow: EDITOR_NEU_PANEL_SHADOW,
+            padding: 5,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const folderID = folderMenu.folderID;
+              closeFolderMenu();
+              renameFolder(folderID);
+            }}
+            style={{ minHeight: 28, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: surfaceText, cursor: "pointer", padding: "4px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const folderID = folderMenu.folderID;
+              closeFolderMenu();
+              deleteFolder(folderID);
+            }}
+            style={{ minHeight: 28, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "4px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
       <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "grid", alignContent: "start", gap: 10, padding: 9, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
         {uniqueEmails.length === 0 ? (
           <div style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: 14, color: surfaceText }}>
