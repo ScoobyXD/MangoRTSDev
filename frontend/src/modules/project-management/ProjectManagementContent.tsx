@@ -67,8 +67,7 @@ type WorkspacePanelState = {
 };
 
 type ResizeState =
-  | { kind: "vertical"; pageTop: number; pageHeight: number }
-  | { kind: "horizontal"; bottomLeft: number; bottomWidth: number };
+  { kind: "vertical"; pageTop: number; pageHeight: number };
 
 type BarDraft = {
   itemID: string;
@@ -89,6 +88,10 @@ type TimelineContextMenuState = {
   item: ProjectManagementTimelineRow;
   x: number;
   y: number;
+};
+
+type TimelineLoadOptions = {
+  showLoading?: boolean;
 };
 
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
@@ -310,28 +313,24 @@ function hasTimelinePayloadType(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes(PROJECT_TIMELINE_ENTITY_MIME);
 }
 
-function visibleRowsForKind(rows: ExplorerTreeNode[], kind: ProjectManagementEntityType): ExplorerTreeNode[] {
-  return rows.filter((row) => row.kind === "folder" || row.kind === kind);
-}
-
-function buildEntityRows(input: {
-  kind: ProjectManagementEntityType;
+function buildProjectExplorerRows(input: {
   expanded: Set<string>;
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
-  folders: CompanyExplorerFolder[];
-  folderItems: CompanyExplorerFolderItem[];
+  nodeFolders: CompanyExplorerFolder[];
+  nodeFolderItems: CompanyExplorerFolderItem[];
+  logicGateFolders: CompanyExplorerFolder[];
+  logicGateFolderItems: CompanyExplorerFolderItem[];
 }): ExplorerTreeNode[] {
-  const rows = buildCompanyExplorerTreeRows({
+  return buildCompanyExplorerTreeRows({
     expanded: input.expanded,
-    nodes: input.kind === "node" ? input.nodes : [],
-    logicGates: input.kind === "logic_gate" ? input.logicGates.map(toLogicGateCanvasRecord) : [],
+    nodes: input.nodes,
+    logicGates: input.logicGates.map(toLogicGateCanvasRecord),
     kanbanBoards: [],
-    folders: input.folders,
-    folderItems: input.folderItems,
+    folders: [...input.nodeFolders, ...input.logicGateFolders],
+    folderItems: [...input.nodeFolderItems, ...input.logicGateFolderItems],
     rootRowOrder: {},
   });
-  return visibleRowsForKind(rows, input.kind);
 }
 
 function rowOverlapsWeek(row: ProjectManagementTimelineRow, weekStartDate: Date): boolean {
@@ -347,12 +346,21 @@ function displayStartOffset(row: ProjectManagementTimelineRow, weekStartDate: Da
   return start ? daysBetween(start, weekStartDate) : 0;
 }
 
-function sortTimelineRows(rows: ProjectManagementTimelineRow[]): ProjectManagementTimelineRow[] {
-  return rows.slice().sort((left, right) => (
-    left.start_date.localeCompare(right.start_date) ||
-    (left.position ?? 0) - (right.position ?? 0) ||
+function compareTimelineRowsByPosition(left: ProjectManagementTimelineRow, right: ProjectManagementTimelineRow): number {
+  const leftPosition = Number.isFinite(Number(left.position)) ? Number(left.position) : 0;
+  const rightPosition = Number.isFinite(Number(right.position)) ? Number(right.position) : 0;
+  return leftPosition - rightPosition ||
+    (left.created_timestamp ?? "").localeCompare(right.created_timestamp ?? "") ||
     left.display_title.localeCompare(right.display_title, undefined, { numeric: true, sensitivity: "base" }) ||
-    left.item_id.localeCompare(right.item_id)
+    left.item_id.localeCompare(right.item_id);
+}
+
+function orderTimelineRows(rows: ProjectManagementTimelineRow[], previousRows: ProjectManagementTimelineRow[] = []): ProjectManagementTimelineRow[] {
+  if (previousRows.length === 0) return rows.slice().sort(compareTimelineRowsByPosition);
+  const previousIndexByID = new Map(previousRows.map((row, index) => [row.item_id, index]));
+  return rows.slice().sort((left, right) => (
+    (previousIndexByID.get(left.item_id) ?? Number.MAX_SAFE_INTEGER) - (previousIndexByID.get(right.item_id) ?? Number.MAX_SAFE_INTEGER) ||
+    compareTimelineRowsByPosition(left, right)
   ));
 }
 
@@ -365,9 +373,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 }) => {
   const companyID = getActiveCompanyID();
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const sequenceByUserRef = useRef(new Map<string, number>());
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
+  const timelineRowsRef = useRef<ProjectManagementTimelineRow[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
@@ -376,16 +384,12 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
-  const [logicGatePerspective, setLogicGatePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
-  const [nodePerspective, setNodePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
-  const [logicGateExpanded, setLogicGateExpanded] = useState<Set<string>>(() => new Set());
-  const [nodeExpanded, setNodeExpanded] = useState<Set<string>>(() => new Set());
+  const [explorerPerspective, setExplorerPerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
+  const [explorerExpanded, setExplorerExpanded] = useState<Set<string>>(() => new Set());
   const [verticalSplit, setVerticalSplit] = useState(54);
-  const [horizontalSplit, setHorizontalSplit] = useState(50);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
@@ -456,8 +460,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         setWorkspace(workspacePanelStateFromResponse(panel));
         const defaultPerspective = defaultUserPerspective(userID);
         setTimelinePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
-        setLogicGatePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
-        setNodePerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
+        setExplorerPerspective((currentValue) => currentValue.subjectID.trim() ? currentValue : defaultPerspective);
       })
       .catch((loadError) => {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load project management data");
@@ -489,20 +492,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }, []);
 
   useEffect(() => {
-    setLogicGateExpanded((current) => {
+    setExplorerExpanded((current) => {
       const next = new Set(current);
+      for (const folder of workspace.nodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
       for (const folder of workspace.logicGateFolders) next.add(`workspace-folder-${folder.folder_id}`);
       return next;
     });
-  }, [workspace.logicGateFolders]);
+  }, [workspace.logicGateFolders, workspace.nodeFolders]);
 
   useEffect(() => {
-    setNodeExpanded((current) => {
-      const next = new Set(current);
-      for (const folder of workspace.nodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
-      return next;
-    });
-  }, [workspace.nodeFolders]);
+    timelineRowsRef.current = timelineRows;
+  }, [timelineRows]);
 
   const weekDays = useMemo(() => Array.from({ length: WEEK_DAY_COUNT }, (_, index) => addDays(weekAnchor, index)), [weekAnchor]);
   const timelineTargetUserIDs = useMemo(() => targetUserIDsForPerspective({
@@ -514,13 +514,14 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const timelineTargetKey = timelineTargetUserIDs.join("|");
   const timelineWriteUserID = writeUserIDForPerspective(timelineTargetUserIDs, currentUserID);
 
-  const loadTimelineRows = useCallback(async () => {
+  const loadTimelineRows = useCallback(async (options: TimelineLoadOptions = {}) => {
+    const showLoading = options.showLoading === true;
     if (!companyID || timelineTargetUserIDs.length === 0) {
       setTimelineRows([]);
       setTimelineLoading(false);
       return;
     }
-    setTimelineLoading(true);
+    if (showLoading) setTimelineLoading(true);
     setError("");
     const settled = await Promise.allSettled(timelineTargetUserIDs.map((userID) => fetchProjectManagementTimeline(companyID, userID)));
     const rows: ProjectManagementTimelineRow[] = [];
@@ -534,7 +535,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         failureCount += 1;
       }
     });
-    setTimelineRows(sortTimelineRows(rows));
+    setTimelineRows((current) => orderTimelineRows(rows, current.length > 0 ? current : timelineRowsRef.current));
     if (failureCount > 0 && rows.length === 0) {
       setError("Failed to load project management timeline");
     }
@@ -542,7 +543,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }, [companyID, timelineTargetUserIDs]);
 
   useEffect(() => {
-    void loadTimelineRows();
+    void loadTimelineRows({ showLoading: true });
   }, [loadTimelineRows]);
 
   useEffect(() => {
@@ -575,13 +576,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   useEffect(() => {
     if (!resizeState) return undefined;
     const onPointerMove = (event: PointerEvent) => {
-      if (resizeState.kind === "vertical") {
-        const pct = ((event.clientY - resizeState.pageTop) / resizeState.pageHeight) * 100;
-        setVerticalSplit(clampInteger(pct, 36, 70));
-      } else {
-        const pct = ((event.clientX - resizeState.bottomLeft) / resizeState.bottomWidth) * 100;
-        setHorizontalSplit(clampInteger(pct, 34, 66));
-      }
+      const pct = ((event.clientY - resizeState.pageTop) / resizeState.pageHeight) * 100;
+      setVerticalSplit(clampInteger(pct, 36, 70));
     };
     const onPointerUp = () => setResizeState(null);
     window.addEventListener("pointermove", onPointerMove);
@@ -596,7 +592,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     const nextStartDate = isoDate(addDays(weekDays[0], clampInteger(startOffset, 0, WEEK_DAY_COUNT - 1)));
     const nextDuration = clampInteger(durationDays, 1, WEEK_DAY_COUNT);
     const optimistic = normalizeTimelineRow({ ...item, start_date: nextStartDate, end_date: endDate(nextStartDate, nextDuration), duration_days: nextDuration });
-    setTimelineRows((current) => sortTimelineRows(current.map((row) => row.item_id === item.item_id ? optimistic : row)));
+    setTimelineRows((current) => current.map((row) => row.item_id === item.item_id ? optimistic : row));
     try {
       const result = await updateProjectManagementTimelineItem({
         companyID,
@@ -606,7 +602,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         position: item.position ?? 0,
       });
       if (result.item) {
-        setTimelineRows((current) => sortTimelineRows(current.map((row) => row.item_id === item.item_id ? normalizeTimelineRow(result.item!) : row)));
+        setTimelineRows((current) => current.map((row) => row.item_id === item.item_id ? normalizeTimelineRow(result.item!) : row));
       }
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Failed to update timeline item");
@@ -669,25 +665,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     };
   }, [timelineContextMenu]);
 
-  const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, logicGatePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, logicGatePerspective, workspace.logicGates]);
-  const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, nodePerspective, groupMembers, currentUserID), [currentUserID, groupMembers, nodePerspective, workspace.nodes]);
-  const visibleTimelineRows = useMemo(() => sortTimelineRows(timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0]))), [timelineRows, weekDays]);
-  const logicGateRows = useMemo(() => buildEntityRows({
-    kind: "logic_gate",
-    expanded: logicGateExpanded,
-    nodes: [],
-    logicGates: filteredLogicGates,
-    folders: workspace.logicGateFolders,
-    folderItems: workspace.logicGateFolderItems,
-  }), [filteredLogicGates, logicGateExpanded, workspace.logicGateFolderItems, workspace.logicGateFolders]);
-  const nodeRows = useMemo(() => buildEntityRows({
-    kind: "node",
-    expanded: nodeExpanded,
+  const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
+  const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
+  const visibleTimelineRows = useMemo(() => timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0])), [timelineRows, weekDays]);
+  const explorerRows = useMemo(() => buildProjectExplorerRows({
+    expanded: explorerExpanded,
     nodes: filteredNodes,
-    logicGates: [],
-    folders: workspace.nodeFolders,
-    folderItems: workspace.nodeFolderItems,
-  }), [filteredNodes, nodeExpanded, workspace.nodeFolderItems, workspace.nodeFolders]);
+    logicGates: filteredLogicGates,
+    nodeFolders: workspace.nodeFolders,
+    nodeFolderItems: workspace.nodeFolderItems,
+    logicGateFolders: workspace.logicGateFolders,
+    logicGateFolderItems: workspace.logicGateFolderItems,
+  }), [explorerExpanded, filteredLogicGates, filteredNodes, workspace.logicGateFolderItems, workspace.logicGateFolders, workspace.nodeFolderItems, workspace.nodeFolders]);
   const defaultTimelineStartOffset = useMemo(() => clampInteger(daysBetween(new Date(), weekDays[0]), 0, WEEK_DAY_COUNT - 1), [weekDays]);
 
   const addTimelineItem = useCallback(async (payload: ProjectTimelinePayload, startOffset: number) => {
@@ -705,11 +694,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         position: visibleTimelineRows.length,
       });
       if (result.item) {
-        setTimelineRows((current) => sortTimelineRows([...current.filter((row) => row.item_id !== result.item!.item_id), normalizeTimelineRow(result.item!)]));
+        setTimelineRows((current) => [...current.filter((row) => row.item_id !== result.item!.item_id), normalizeTimelineRow(result.item!)]);
       } else {
         void loadTimelineRows();
       }
-      setNotice(`${payload.label} scheduled`);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to add timeline item");
     }
@@ -765,13 +753,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setResizeState({ kind: "vertical", pageTop: rect.top, pageHeight: rect.height });
   };
 
-  const startHorizontalResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = bottomRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    event.preventDefault();
-    setResizeState({ kind: "horizontal", bottomLeft: rect.left, bottomWidth: rect.width });
-  };
-
   return (
     <div ref={pageRef} style={pageStyle(verticalSplit)}>
       <section style={timelineSurfaceStyle}>
@@ -798,7 +779,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
         <div style={timelineMessageSlotStyle}>
           {error && <div style={errorStyle}>{error}</div>}
-          {!error && notice && <div style={noticeStyle}>{notice}</div>}
         </div>
         <TimelineChart
           accent={accent}
@@ -816,38 +796,20 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         />
       </section>
       <div role="separator" aria-orientation="horizontal" style={verticalResizerStyle} onPointerDown={startVerticalResize} />
-      <section ref={bottomRef} style={bottomGridStyle(horizontalSplit)}>
+      <section style={bottomExplorerStyle}>
         <ProjectEntityExplorerPanel
-          title="Logic Gates"
-          rootLabel={`${companyPerspectiveLabel(logicGatePerspective, companyUsers, groups, currentUserID)} Logic Gates`}
-          kind="logic_gate"
-          rows={logicGateRows}
-          expanded={logicGateExpanded}
-          onSetExpanded={setLogicGateExpanded}
-          perspective={logicGatePerspective}
-          onPerspectiveChange={setLogicGatePerspective}
+          title="Company Explorer"
+          rootLabel={`${companyPerspectiveLabel(explorerPerspective, companyUsers, groups, currentUserID)} Company Explorer`}
+          rows={explorerRows}
+          expanded={explorerExpanded}
+          onSetExpanded={setExplorerExpanded}
+          perspective={explorerPerspective}
+          onPerspectiveChange={setExplorerPerspective}
           companyUsers={companyUsers}
           groups={groups}
           groupMembers={groupMembers}
           currentUserID={currentUserID}
-          count={filteredLogicGates.length}
-          onAddEntity={addExplorerEntityToTimeline}
-        />
-        <div role="separator" aria-orientation="vertical" style={horizontalResizerStyle} onPointerDown={startHorizontalResize} />
-        <ProjectEntityExplorerPanel
-          title="Nodes"
-          rootLabel={`${companyPerspectiveLabel(nodePerspective, companyUsers, groups, currentUserID)} Nodes`}
-          kind="node"
-          rows={nodeRows}
-          expanded={nodeExpanded}
-          onSetExpanded={setNodeExpanded}
-          perspective={nodePerspective}
-          onPerspectiveChange={setNodePerspective}
-          companyUsers={companyUsers}
-          groups={groups}
-          groupMembers={groupMembers}
-          currentUserID={currentUserID}
-          count={filteredNodes.length}
+          count={filteredNodes.length + filteredLogicGates.length}
           onNodeOpen={onNodeOpen}
           onAddEntity={addExplorerEntityToTimeline}
         />
@@ -1041,7 +1003,6 @@ function TimelineChart({
 function ProjectEntityExplorerPanel({
   title,
   rootLabel,
-  kind,
   rows,
   expanded,
   onSetExpanded,
@@ -1057,7 +1018,6 @@ function ProjectEntityExplorerPanel({
 }: {
   title: string;
   rootLabel: string;
-  kind: ProjectManagementEntityType;
   rows: ExplorerTreeNode[];
   expanded: Set<string>;
   onSetExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -1104,9 +1064,9 @@ function ProjectEntityExplorerPanel({
           <span style={treeLabelStyle}>{rootLabel}</span>
         </button>
         {rootOpen && rows.map((row) => (
-          <ProjectExplorerRow key={row.id} row={row} kind={kind} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} onAddEntity={onAddEntity} />
+          <ProjectExplorerRow key={row.id} row={row} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} onAddEntity={onAddEntity} />
         ))}
-        {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No {kind === "logic_gate" ? "logic gates" : "nodes"}</div>}
+        {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No nodes or logic gates</div>}
       </div>
     </div>
   );
@@ -1114,26 +1074,25 @@ function ProjectEntityExplorerPanel({
 
 function ProjectExplorerRow({
   row,
-  kind,
   expanded,
   onToggle,
   onNodeOpen,
   onAddEntity,
 }: {
   row: ExplorerTreeNode;
-  kind: ProjectManagementEntityType;
   expanded: Set<string>;
   onToggle: (rowID: string) => void;
   onNodeOpen?: (nodeID: string) => void;
   onAddEntity?: (payload: ProjectTimelinePayload) => void;
 }) {
   const isFolder = row.kind === "folder";
-  const entityID = kind === "logic_gate" ? row.logicGateID : row.nodeID;
-  const color = kind === "logic_gate" ? "#8b5cf6" : "#06b6d4";
+  const entityType: ProjectManagementEntityType | null = row.kind === "logic_gate" ? "logic_gate" : row.kind === "node" ? "node" : null;
+  const entityID = entityType === "logic_gate" ? row.logicGateID : entityType === "node" ? row.nodeID : "";
+  const color = entityType === "logic_gate" ? "#8b5cf6" : entityType === "node" ? "#0891b2" : "#64748b";
   const depth = Math.max(0, row.depth + 1);
-  const draggable = !isFolder && !!entityID;
-  const payload: ProjectTimelinePayload | null = draggable && entityID ? {
-    entityType: kind,
+  const draggable = !!entityType && !!entityID;
+  const payload: ProjectTimelinePayload | null = entityType && entityID ? {
+    entityType,
     entityID,
     label: row.label,
     color,
@@ -1152,7 +1111,7 @@ function ProjectExplorerRow({
       draggable={draggable}
       onDragStart={startDrag}
       onDoubleClick={() => {
-        if (kind === "node" && entityID) onNodeOpen?.(entityID);
+        if (entityType === "node" && entityID) onNodeOpen?.(entityID);
       }}
       style={treeRowWrapStyle(depth, draggable)}
     >
@@ -1228,21 +1187,10 @@ const verticalResizerStyle: React.CSSProperties = {
   background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.34), transparent)",
 };
 
-function bottomGridStyle(horizontalSplit: number): React.CSSProperties {
-  return {
-    minHeight: 0,
-    display: "grid",
-    gridTemplateColumns: `minmax(260px, ${horizontalSplit}%) 8px minmax(260px, 1fr)`,
-    gap: 0,
-    overflow: "hidden",
-  };
-}
-
-const horizontalResizerStyle: React.CSSProperties = {
-  cursor: "col-resize",
-  borderRadius: 999,
-  margin: "34px 2px",
-  background: "linear-gradient(180deg, transparent, rgba(100, 116, 139, 0.32), transparent)",
+const bottomExplorerStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  overflow: "hidden",
 };
 
 const surfaceHeaderStyle: React.CSSProperties = {
@@ -1330,19 +1278,6 @@ const errorStyle: React.CSSProperties = {
   borderRadius: 8,
   background: "rgba(254, 242, 242, 0.82)",
   color: "#991b1b",
-  fontSize: 11,
-  fontWeight: 800,
-};
-
-const noticeStyle: React.CSSProperties = {
-  minHeight: 28,
-  display: "flex",
-  alignItems: "center",
-  padding: "0 10px",
-  border: "1px solid rgba(34, 197, 94, 0.24)",
-  borderRadius: 8,
-  background: "rgba(240, 253, 244, 0.82)",
-  color: "#166534",
   fontSize: 11,
   fontWeight: 800,
 };
