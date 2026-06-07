@@ -1,4 +1,5 @@
 import type { CompanyExplorerFolderKind, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { LogicGateRaciRole } from "../logic-gate-map/shared.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,
@@ -25,6 +26,10 @@ export type ExplorerTreeNode = {
   scopeLevel: number;
   position: number;
   createdTimestamp: string;
+  hasChildren?: boolean;
+  parentLogicGateID?: string;
+  raciRole?: LogicGateRaciRole | "other";
+  syntheticKind?: "raci_folder" | "logic_gate_children";
 };
 
 export type ExplorerDragPayload = ExplorerDropPayload;

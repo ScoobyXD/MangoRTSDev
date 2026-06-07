@@ -63,6 +63,8 @@ type CompanyExplorerTreeProps = {
   getKanbanDragItemsForRow: (row: ExplorerTreeNode) => ExplorerEntityDragItem[];
   getExplorerItemRowsForPayload: (payload: ExplorerDragPayload | null) => ExplorerTreeNode[];
   getReorderRowsForTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode) => ExplorerTreeNode[];
+  canDropExplorerPayloadOnRow: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode) => boolean;
+  dropExplorerPayloadOnRow: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode) => Promise<boolean>;
   canPlaceExplorerFolderAtTarget: (source: ExplorerTreeNode | undefined, target: ExplorerTreeNode) => boolean;
   canPlaceExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode) => boolean;
   reorderExplorerRows: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
@@ -135,6 +137,8 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   getKanbanDragItemsForRow,
   getExplorerItemRowsForPayload,
   getReorderRowsForTarget,
+  canDropExplorerPayloadOnRow,
+  dropExplorerPayloadOnRow,
   canPlaceExplorerFolderAtTarget,
   canPlaceExplorerItemsAtTarget,
   reorderExplorerRows,
@@ -368,6 +372,8 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
           getKanbanDragItemsForRow={getKanbanDragItemsForRow}
           getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
           getReorderRowsForTarget={getReorderRowsForTarget}
+          canDropExplorerPayloadOnRow={canDropExplorerPayloadOnRow}
+          dropExplorerPayloadOnRow={dropExplorerPayloadOnRow}
           canPlaceExplorerFolderAtTarget={canPlaceExplorerFolderAtTarget}
           canPlaceExplorerItemsAtTarget={canPlaceExplorerItemsAtTarget}
           reorderExplorerRows={reorderExplorerRows}

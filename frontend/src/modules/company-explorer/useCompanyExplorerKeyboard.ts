@@ -36,7 +36,7 @@ export function useCompanyExplorerKeyboard({
     }
     const activeTreeRows = treeRowsRef.current;
     const result = resolveExplorerKeyboardNavigation({
-      rows: activeTreeRows.map((row) => ({ id: row.id, kind: row.kind })),
+      rows: activeTreeRows.map((row) => ({ id: row.id, kind: row.hasChildren ? "folder" : row.kind })),
       selectedTreeID: selectedTreeIDRef.current,
       expandedIDs: expandedRef.current,
       key: event.key,
