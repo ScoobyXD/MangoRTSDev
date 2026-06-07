@@ -1275,18 +1275,44 @@ export function AppSidebar({
   );
 }
 
-export function AppCompanyExplorerRail({ selectionTargetFrameIDs }: { selectionTargetFrameIDs: string[] }): React.ReactElement {
+export function AppCompanyExplorerRail({
+  collapsed,
+  selectionTargetFrameIDs,
+  onToggleCollapsed,
+}: {
+  collapsed: boolean;
+  selectionTargetFrameIDs: string[];
+  onToggleCollapsed: () => void;
+}): React.ReactElement {
   return (
-    <aside className="company-explorer-scroll" data-app-company-explorer-rail="primary" style={appCompanyExplorerRailStyle}>
-      <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
-        <SidebarCompanyExplorerContent
-          accent={SIDEBAR_ACTIVE_TEXT}
-          widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
-          theme="light"
-          useParentScroll
-          selectionTargetFrameIDs={selectionTargetFrameIDs}
-        />
-      </React.Suspense>
+    <aside
+      className={collapsed ? undefined : "company-explorer-scroll"}
+      data-app-company-explorer-rail="primary"
+      data-app-company-explorer-collapsed={collapsed ? "true" : undefined}
+      style={appCompanyExplorerRailStyle(collapsed)}
+    >
+      <button
+        type="button"
+        aria-label={collapsed ? "Expand Company Explorer" : "Collapse Company Explorer"}
+        title={collapsed ? "Expand Company Explorer" : "Collapse Company Explorer"}
+        data-frame-interactive="true"
+        data-app-company-explorer-collapse-toggle="primary"
+        style={appCompanyExplorerCollapseToggleStyle(collapsed)}
+        onClick={onToggleCollapsed}
+      >
+        {collapsed ? "‹" : "›"}
+      </button>
+      {!collapsed && (
+        <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+          <SidebarCompanyExplorerContent
+            accent={SIDEBAR_ACTIVE_TEXT}
+            widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
+            theme="light"
+            useParentScroll
+            selectionTargetFrameIDs={selectionTargetFrameIDs}
+          />
+        </React.Suspense>
+      )}
     </aside>
   );
 }
@@ -1827,11 +1853,47 @@ const appSidebarStyle: React.CSSProperties = {
   ["--company-explorer-hover-bg" as string]: SIDEBAR_STATE_HOVER_BG,
 };
 
-const appCompanyExplorerRailStyle: React.CSSProperties = {
-  ...appSidebarStyle,
-  display: "block",
-  padding: 0,
-};
+function appCompanyExplorerRailStyle(collapsed: boolean): React.CSSProperties {
+  return {
+    ...appSidebarStyle,
+    position: "relative",
+    display: "block",
+    minWidth: 0,
+    padding: 0,
+    overflow: "visible",
+    background: collapsed ? "transparent" : appSidebarStyle.background,
+    border: collapsed ? "none" : appSidebarStyle.border,
+    boxShadow: collapsed ? "none" : appSidebarStyle.boxShadow,
+  };
+}
+
+function appCompanyExplorerCollapseToggleStyle(collapsed: boolean): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: 0,
+    top: "50%",
+    zIndex: 30,
+    width: 24,
+    height: 76,
+    display: "grid",
+    placeItems: "center",
+    transform: "translateY(-50%)",
+    border: "1px solid rgba(100, 116, 139, 0.34)",
+    borderLeft: "1px solid rgba(255, 255, 255, 0.82)",
+    borderRadius: "8px 0 0 8px",
+    background: "#ffffff",
+    color: "#111827",
+    boxShadow: collapsed
+      ? "5px 5px 12px rgba(174, 174, 192, 0.24), -3px -3px 9px rgba(255, 255, 255, 0.82)"
+      : "4px 4px 10px rgba(174, 174, 192, 0.22), -3px -3px 8px rgba(255, 255, 255, 0.84)",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 24,
+    fontWeight: 800,
+    lineHeight: 1,
+    padding: 0,
+  };
+}
 
 const appSidebarBrandStyle: React.CSSProperties = {
   flex: "0 0 auto",

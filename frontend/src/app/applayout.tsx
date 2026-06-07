@@ -65,10 +65,12 @@ const APP_SIDEBAR_MAX_W = 420;
 const APP_EXPLORER_RAIL_W = 340;
 const APP_EXPLORER_RAIL_MIN_W = 260;
 const APP_EXPLORER_RAIL_MAX_W = 480;
+const APP_EXPLORER_RAIL_COLLAPSED_W = 28;
 const APP_RESIZE_HANDLE_W = 10;
 const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
 const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const EXPLORER_RAIL_WIDTH_KEY = "mangorts.app-company-explorer-width.v1";
+const EXPLORER_RAIL_COLLAPSED_KEY = "mangorts.app-company-explorer-collapsed.v1";
 const SHOW_LEGACY_HEADER = false;
 
 type PrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management";
@@ -237,6 +239,20 @@ function saveExplorerRailWidth(width: number): void {
   } catch {}
 }
 
+function readExplorerRailCollapsed(): boolean {
+  try {
+    return localStorage.getItem(EXPLORER_RAIL_COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveExplorerRailCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(EXPLORER_RAIL_COLLAPSED_KEY, collapsed ? "true" : "false");
+  } catch {}
+}
+
 function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
   const payload = readExplorerDragPayload(dataTransfer);
   if (!payload) return [];
@@ -317,12 +333,12 @@ type AppProps = {
   overrideContent?: React.ReactNode;
 };
 
-function appBodyStyle(sidebarWidth: number, explorerRailWidth: number): React.CSSProperties {
+function appBodyStyle(sidebarWidth: number, explorerResizeHandleWidth: number, explorerRailWidth: number): React.CSSProperties {
   return {
     height: "100vh",
     minHeight: 0,
     display: "grid",
-    gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr) ${APP_RESIZE_HANDLE_W}px ${explorerRailWidth}px`,
+    gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr) ${explorerResizeHandleWidth}px ${explorerRailWidth}px`,
     gap: 0,
     padding: `${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
     alignItems: "stretch",
@@ -376,6 +392,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   });
   const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
   const [appExplorerRailWidth, setAppExplorerRailWidth] = useState(readExplorerRailWidth);
+  const [appExplorerRailCollapsed, setAppExplorerRailCollapsed] = useState(readExplorerRailCollapsed);
   const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(() => nodePopupFromRoute(deepLink));
@@ -431,6 +448,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const frames = activeTab?.frames ?? [];
   const activePrimaryPage = activeTab ? pageForTab(activeTab) : null;
   const sidebarExplorerSelectionTargetFrameIDs = useMemo(() => getSidebarExplorerSelectionTargetFrameIDs(activeTab), [activeTab]);
+  const effectiveExplorerRailWidth = appExplorerRailCollapsed ? APP_EXPLORER_RAIL_COLLAPSED_W : appExplorerRailWidth;
+  const explorerResizeHandleWidth = appExplorerRailCollapsed ? 0 : APP_RESIZE_HANDLE_W;
   const textSelectionNodeCreateTargetFrameIDs = useMemo(() => (
     Array.from(new Set([
       SIDEBAR_EXPLORER_WIDGET_ID,
@@ -573,6 +592,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
   useEffect(() => { saveExplorerRailWidth(appExplorerRailWidth); }, [appExplorerRailWidth]);
+  useEffect(() => { saveExplorerRailCollapsed(appExplorerRailCollapsed); }, [appExplorerRailCollapsed]);
   useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
   useEffect(() => {
     setTaskbarData((previous) => {
@@ -617,7 +637,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     lastSnapshotRef.current = snapshot;
   }, [buildSnapshot]);
 
-  const canvasW = Math.max(1, viewSize.w - appSidebarWidth - appExplorerRailWidth - APP_RESIZE_HANDLE_W * 2 - PAGE_EDGE_GAP * 2);
+  const canvasW = Math.max(1, viewSize.w - appSidebarWidth - effectiveExplorerRailWidth - APP_RESIZE_HANDLE_W - explorerResizeHandleWidth - PAGE_EDGE_GAP * 2);
   const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
   const taskbarLeftInset = PAGE_EDGE_GAP + appSidebarWidth + APP_RESIZE_HANDLE_W;
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
@@ -1492,7 +1512,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       </header>
       )}
 
-      <div data-app-shell-body="true" style={appBodyStyle(appSidebarWidth, appExplorerRailWidth)}>
+      <div data-app-shell-body="true" style={appBodyStyle(appSidebarWidth, explorerResizeHandleWidth, effectiveExplorerRailWidth)}>
         <AppSidebar
           accountChrome={accountChrome}
           activePage={activePrimaryPage}
@@ -1741,19 +1761,25 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         )}
       </FrameCanvas>
       )}
-        <button
-          type="button"
-          data-app-company-explorer-resize-handle="primary"
-          aria-label="Resize company explorer"
-          style={appResizeHandleStyle}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            appExplorerRailResizeRef.current = { startX: event.clientX, startWidth: appExplorerRailWidth };
-            document.body.style.cursor = "col-resize";
-            document.body.style.userSelect = "none";
-          }}
+        {!appExplorerRailCollapsed && (
+          <button
+            type="button"
+            data-app-company-explorer-resize-handle="primary"
+            aria-label="Resize company explorer"
+            style={appResizeHandleStyle}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              appExplorerRailResizeRef.current = { startX: event.clientX, startWidth: appExplorerRailWidth };
+              document.body.style.cursor = "col-resize";
+              document.body.style.userSelect = "none";
+            }}
+          />
+        )}
+        <AppCompanyExplorerRail
+          collapsed={appExplorerRailCollapsed}
+          selectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
+          onToggleCollapsed={() => setAppExplorerRailCollapsed((collapsed) => !collapsed)}
         />
-        <AppCompanyExplorerRail selectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs} />
       </div>
 
       <AppTaskbar
