@@ -340,7 +340,11 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
           </button>
         ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
-        <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
+        <ExplorerRowIcon
+          kind={row.kind}
+          systemKey={row.systemKey}
+          mangoDefaultFolder={row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder")}
+        />
         {renaming?.treeID === row.id ? (
           <input
             ref={renameInputRef}

@@ -265,6 +265,109 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	}
 }
 
+func TestCompanyExplorerSnapshotCarriesRaciAndLogicGateMembership(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-raci-snapshot"
+	repo.EnsureCompany(companyID, "RACI Snapshot Company")
+
+	responsibleSubject := "raci-snapshot-responsible"
+	responsible, err := repo.UpsertAuthUser(responsibleSubject, "responsible-snapshot@example.com", "Responsible Snapshot")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(responsibleSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "RACI Snapshot Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.AddLogicGateRaciAssignments(store.LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsible.UserID,
+		}},
+		ActorUserID:    responsible.UserID,
+		IdempotencyKey: "company-explorer-raci-snapshot",
+	}); err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+	}
+	priority := 3
+	created, err := repo.CreateRacioMatrixNode(store.RacioMatrixNodeCreateInput{
+		CompanyID:      companyID,
+		Title:          "RACI Snapshot Node",
+		LogicGateID:    logicGate.LogicGateID,
+		ActorUserID:    responsible.UserID,
+		IdempotencyKey: "company-explorer-raci-node",
+		AssigneePolicy: store.LogicGateAssignmentAssigneePolicyFirstResponsible,
+		MutationOrigin: "matrix",
+		Priority:       &priority,
+		PrioritySet:    true,
+	})
+	if err != nil {
+		t.Fatalf("CreateRacioMatrixNode: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET company explorer workspace snapshot status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		Nodes      []domain.Node      `json:"nodes"`
+		LogicGates []domain.LogicGate `json:"logic_gates"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+
+	var snapshotGate *domain.LogicGate
+	for i := range payload.LogicGates {
+		if payload.LogicGates[i].LogicGateID == logicGate.LogicGateID {
+			snapshotGate = &payload.LogicGates[i]
+			break
+		}
+	}
+	if snapshotGate == nil {
+		t.Fatalf("snapshot logic gates = %+v, missing %s", payload.LogicGates, logicGate.LogicGateID)
+	}
+	if len(snapshotGate.RaciAssignments) != 1 ||
+		snapshotGate.RaciAssignments[0].Role != domain.LogicGateRaciRoleResponsible ||
+		snapshotGate.RaciAssignments[0].UserID != responsible.UserID {
+		t.Fatalf("snapshot gate raci_assignments = %+v, want responsible assignment", snapshotGate.RaciAssignments)
+	}
+
+	var snapshotNode *domain.Node
+	for i := range payload.Nodes {
+		if payload.Nodes[i].NodeID == created.Node.NodeID {
+			snapshotNode = &payload.Nodes[i]
+			break
+		}
+	}
+	if snapshotNode == nil {
+		t.Fatalf("snapshot nodes = %+v, missing %s", payload.Nodes, created.Node.NodeID)
+	}
+	if !stringSliceContains(snapshotNode.LogicGateIDs, logicGate.LogicGateID) {
+		t.Fatalf("snapshot node logic_gate_ids = %+v, want %s", snapshotNode.LogicGateIDs, logicGate.LogicGateID)
+	}
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCompanyExplorerFolderGETDoesNotSeedDefaults(t *testing.T) {
 	t.Parallel()
 
