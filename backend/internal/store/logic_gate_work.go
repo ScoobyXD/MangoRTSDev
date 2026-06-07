@@ -216,6 +216,11 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 		NodeTitle:        node.Title,
 		IsIssue:          assignment.IsIssue,
 		Position:         assignment.Position,
+		DueDate:          cloneStringPointer(node.DueDate),
+		Priority:         cloneIntPointer(node.Priority),
+		AssigneeUserID:   cloneStringPointer(node.AssigneeUserID),
+		AssigneeName:     cloneStringPointer(node.AssigneeName),
+		AssigneeEmail:    cloneStringPointer(node.AssigneeEmail),
 		CreatedTimestamp: assignment.CreatedTimestamp,
 		UpdatedTimestamp: assignment.UpdatedTimestamp,
 	}

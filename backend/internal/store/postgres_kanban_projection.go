@@ -256,6 +256,12 @@ select
   description_snapshot,
   is_issue,
   position,
+  due_date,
+  priority,
+  assignee_user_id,
+  assignee_display_name,
+  assignee_email,
+  projection_updated_timestamp,
   assignment_created_timestamp,
   projection_updated_timestamp
 from projected

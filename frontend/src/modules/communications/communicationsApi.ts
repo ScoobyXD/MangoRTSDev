@@ -1193,7 +1193,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 
   const mailbox = params.mailbox ?? "primary";
   if (mailbox === "primary") {
-    return messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+    return message.starred || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
   }
   if (mailbox === "archive") {
     return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
@@ -1554,6 +1554,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
+  if (message.starred) return false;
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
   return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }

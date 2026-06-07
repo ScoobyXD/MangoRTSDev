@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, resolveKanbanGroupDropAssignment, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, resolveKanbanGroupDropAssignment, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -116,6 +116,27 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
     }),
   ]);
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
+});
+
+test("hydrates missing card priority from arena node metadata", () => {
+  const hydrated = hydrateKanbanCardsFromNodes([
+    card({ card_id: "task", node_id: "node-task", priority: null }),
+  ], [
+    {
+      node_id: "node-task",
+      priority: 2,
+      due_date: "2026-06-07",
+      assignee_user_id: "user-1",
+      assignee_name: "Alex",
+      assignee_email: "alex@example.com",
+    },
+  ]);
+
+  assert.equal(hydrated[0].priority, 2);
+  assert.equal(hydrated[0].due_date, "2026-06-07");
+  assert.equal(hydrated[0].assignee_user_id, "user-1");
+  assert.equal(hydrated[0].assignee_name, "Alex");
+  assert.equal(hydrated[0].assignee_email, "alex@example.com");
 });
 
 test("node status reconciliation detects when a visible card missed its move event", () => {
