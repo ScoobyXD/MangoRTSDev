@@ -397,7 +397,7 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     method: "PUT",
     body: JSON.stringify(update),
   });
-  applyEmailMessageToCachedPages(payload.message);
+  applyEmailMessageToCachedPages(payload.message, update.starred !== undefined ? { prependIfMissing: true } : {});
   return payload.message;
 }
 
@@ -1260,7 +1260,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
     return message.starred || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
   }
   if (mailbox === "archive") {
-    return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
+    return message.starred || messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
   }
   return !messageMatchesMailbox(message, mailbox);
 }
@@ -1625,6 +1625,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
 }
 
 function messageIsArchived(message: EmailMessage): boolean {
+  if (message.starred) return false;
   if (messageHasAnyFolder(message, ["trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"])) return false;
   return !messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }

@@ -743,7 +743,7 @@ func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=archive&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts -is:starred invoice is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
 	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
@@ -826,7 +826,7 @@ func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	}
 }
 
-func TestCommunicationsStarMessageRemovesGmailInboxLabel(t *testing.T) {
+func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -859,8 +859,8 @@ func TestCommunicationsStarMessageRemovesGmailInboxLabel(t *testing.T) {
 	if nylas.update.Starred == nil || !*nylas.update.Starred {
 		t.Fatalf("starred update = %v, want true", nylas.update.Starred)
 	}
-	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123"; got != want {
-		t.Fatalf("folders = %q, want %q", got, want)
+	if nylas.update.Folders != nil {
+		t.Fatalf("folders update = %v, want nil so starring preserves mailbox folders", nylas.update.Folders)
 	}
 }
 
@@ -873,6 +873,9 @@ func TestCommunicationsCachePrimaryExcludesStarredInboxMessages(t *testing.T) {
 	}
 	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "starred"}) {
 		t.Fatal("starred cache matcher excluded a starred inbox message")
+	}
+	if nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-2", Starred: true, Folders: []string{"CATEGORY_PERSONAL"}}, NylasMessageQuery{Mailbox: "archive"}) {
+		t.Fatal("archive cache matcher included a starred message")
 	}
 }
 

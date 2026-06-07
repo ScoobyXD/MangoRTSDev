@@ -439,6 +439,9 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 	case "starred":
 		return message.Starred
 	case "archive":
+		if message.Starred {
+			return false
+		}
 		if nylasMessageHasAnyFolder(message, []string{"trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"}) {
 			return false
 		}
