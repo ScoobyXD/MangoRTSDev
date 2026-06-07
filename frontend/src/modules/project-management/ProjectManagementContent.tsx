@@ -7,7 +7,7 @@ import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
+import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket.js";
 import {
   companyExplorerRealtimeScope,
@@ -94,6 +94,13 @@ type TimelineLoadOptions = {
   showLoading?: boolean;
 };
 
+type TimelineDisplayRow = {
+  id: string;
+  kind: "logic_gate" | "node";
+  item: ProjectManagementTimelineRow;
+  depth: number;
+};
+
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
@@ -107,7 +114,7 @@ const WEEK_DAY_COUNT = 7;
 const TIMELINE_LABEL_W = 280;
 const TIMELINE_MIN_DAY_W = 96;
 const TIMELINE_HEADER_H = 38;
-const TIMELINE_ROW_H = 30;
+const TIMELINE_ROW_H = 45;
 
 type WorkspaceEventEnvelope = {
   company_id?: string;
@@ -247,6 +254,10 @@ function nodeIDForTimelineRow(row: ProjectManagementTimelineRow): string {
   return row.node_id?.trim() || (row.resource_type === "node" ? row.resource_id.trim() : "");
 }
 
+function logicGateIDForTimelineRow(row: ProjectManagementTimelineRow): string {
+  return row.logic_gate_id?.trim() || (row.resource_type === "logic_gate" ? row.resource_id.trim() : "");
+}
+
 function readableTextColor(background: string): string {
   const match = /^#?([0-9a-f]{6})$/i.exec(background.trim());
   if (!match) return "#ffffff";
@@ -362,6 +373,75 @@ function orderTimelineRows(rows: ProjectManagementTimelineRow[], previousRows: P
     (previousIndexByID.get(left.item_id) ?? Number.MAX_SAFE_INTEGER) - (previousIndexByID.get(right.item_id) ?? Number.MAX_SAFE_INTEGER) ||
     compareTimelineRowsByPosition(left, right)
   ));
+}
+
+function timelineRowsSameResource(left: ProjectManagementTimelineRow, right: ProjectManagementTimelineRow): boolean {
+  return left.user_id === right.user_id && left.resource_type === right.resource_type && left.resource_id === right.resource_id;
+}
+
+function upsertTimelineRows(current: ProjectManagementTimelineRow[], incoming: ProjectManagementTimelineRow[]): ProjectManagementTimelineRow[] {
+  const next = current.slice();
+  for (const row of incoming) {
+    const index = next.findIndex((candidate) => candidate.item_id === row.item_id || timelineRowsSameResource(candidate, row));
+    if (index >= 0) next[index] = row;
+    else next.push(row);
+  }
+  return next;
+}
+
+function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: NodeRecord[]): TimelineDisplayRow[] {
+  const visibleGateIDs = new Set(rows.map(logicGateIDForTimelineRow).filter(Boolean));
+  const nodesByGateID = new Map<string, NodeRecord[]>();
+  const nestedNodeIDs = new Set<string>();
+  for (const node of nodes) {
+    const nodeID = node.node_id.trim();
+    if (!nodeID) continue;
+    for (const gateID of node.logic_gate_ids ?? []) {
+      const cleanGateID = gateID.trim();
+      if (!cleanGateID || !visibleGateIDs.has(cleanGateID)) continue;
+      const bucket = nodesByGateID.get(cleanGateID) ?? [];
+      bucket.push(node);
+      nodesByGateID.set(cleanGateID, bucket);
+      nestedNodeIDs.add(nodeID);
+    }
+  }
+  for (const bucket of nodesByGateID.values()) {
+    bucket.sort((left, right) => (
+      (getNodeTitle(left) || left.node_id).localeCompare(getNodeTitle(right) || right.node_id, undefined, { numeric: true, sensitivity: "base" }) ||
+      left.node_id.localeCompare(right.node_id)
+    ));
+  }
+
+  const nodeRowsByID = new Map<string, ProjectManagementTimelineRow>();
+  for (const row of rows) {
+    if (row.resource_type !== "node") continue;
+    const nodeID = nodeIDForTimelineRow(row);
+    if (nodeID && !nodeRowsByID.has(nodeID)) nodeRowsByID.set(nodeID, row);
+  }
+
+  const displayRows: TimelineDisplayRow[] = [];
+  for (const row of rows) {
+    if (row.resource_type === "logic_gate") {
+      const gateID = logicGateIDForTimelineRow(row);
+      displayRows.push({ id: `gate:${row.item_id}`, kind: "logic_gate", item: row, depth: 0 });
+      for (const node of nodesByGateID.get(gateID) ?? []) {
+        const nodeRow = nodeRowsByID.get(node.node_id);
+        if (!nodeRow) continue;
+        displayRows.push({
+          id: `${row.item_id}:node:${node.node_id}`,
+          kind: "node",
+          item: nodeRow,
+          depth: 1,
+        });
+      }
+      continue;
+    }
+
+    const nodeID = nodeIDForTimelineRow(row);
+    if (nodeID && nestedNodeIDs.has(nodeID)) continue;
+    displayRows.push({ id: `node:${row.item_id}`, kind: "node", item: row, depth: 0 });
+  }
+  return displayRows;
 }
 
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({
@@ -668,6 +748,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
   const visibleTimelineRows = useMemo(() => timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0])), [timelineRows, weekDays]);
+  const timelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes), [visibleTimelineRows, workspace.nodes]);
   const explorerRows = useMemo(() => buildProjectExplorerRows({
     expanded: explorerExpanded,
     nodes: filteredNodes,
@@ -693,15 +774,41 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         durationDays,
         position: visibleTimelineRows.length,
       });
-      if (result.item) {
-        setTimelineRows((current) => [...current.filter((row) => row.item_id !== result.item!.item_id), normalizeTimelineRow(result.item!)]);
+      const createdRows: ProjectManagementTimelineRow[] = [];
+      if (result.item) createdRows.push(normalizeTimelineRow(result.item));
+
+      if (payload.entityType === "logic_gate") {
+        const childNodes = workspace.nodes
+          .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim() === payload.entityID))
+          .sort((left, right) => (
+            (getNodeTitle(left) || left.node_id).localeCompare(getNodeTitle(right) || right.node_id, undefined, { numeric: true, sensitivity: "base" }) ||
+            left.node_id.localeCompare(right.node_id)
+          ));
+        const settled = await Promise.allSettled(childNodes.map((node, index) => createProjectManagementTimelineItem({
+          companyID,
+          userID: timelineWriteUserID,
+          entityType: "node",
+          entityID: node.node_id,
+          startDate,
+          durationDays,
+          position: visibleTimelineRows.length + index + 1,
+        })));
+        for (const childResult of settled) {
+          if (childResult.status === "fulfilled" && childResult.value.item) {
+            createdRows.push(normalizeTimelineRow(childResult.value.item));
+          }
+        }
+      }
+
+      if (createdRows.length > 0) {
+        setTimelineRows((current) => upsertTimelineRows(current, createdRows));
       } else {
         void loadTimelineRows();
       }
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to add timeline item");
     }
-  }, [companyID, loadTimelineRows, timelineWriteUserID, visibleTimelineRows.length, weekDays]);
+  }, [companyID, loadTimelineRows, timelineWriteUserID, visibleTimelineRows.length, weekDays, workspace.nodes]);
   const addExplorerEntityToTimeline = useCallback((payload: ProjectTimelinePayload) => {
     void addTimelineItem(payload, defaultTimelineStartOffset);
   }, [addTimelineItem, defaultTimelineStartOffset]);
@@ -784,7 +891,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           accent={accent}
           loading={loading || timelineLoading}
           weekDays={weekDays}
-          rows={visibleTimelineRows}
+          rows={timelineDisplayRows}
           draft={barDraft}
           onDropEntity={addTimelineItem}
           onRemoveItem={removeTimelineItem}
@@ -836,7 +943,7 @@ function TimelineChart({
   accent: string;
   loading: boolean;
   weekDays: Date[];
-  rows: ProjectManagementTimelineRow[];
+  rows: TimelineDisplayRow[];
   draft: BarDraft | null;
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
@@ -889,63 +996,83 @@ function TimelineChart({
         ))}
         {loading ? (
           <div style={{ ...timelineEmptyStyle, gridColumn: `1 / span ${WEEK_DAY_COUNT + 1}` }}>Loading</div>
-        ) : rows.length > 0 ? rows.map((item, rowIndex) => {
+        ) : rows.length > 0 ? rows.map((displayRow, rowIndex) => {
+          const item = displayRow.item;
           const actualStartOffset = displayStartOffset(item, weekStartDate);
           const baseStart = clampInteger(actualStartOffset, 0, WEEK_DAY_COUNT - 1);
           const baseDuration = clampInteger(Math.min(item.duration_days, WEEK_DAY_COUNT - baseStart), 1, WEEK_DAY_COUNT - baseStart);
           const activeDraft = draft?.itemID === item.item_id ? draft : null;
           const startOffset = activeDraft?.startOffset ?? baseStart;
           const durationDays = activeDraft?.durationDays ?? baseDuration;
+          const canInteractWithBar = displayRow.kind === "node";
           return (
-            <React.Fragment key={item.item_id}>
-              <div style={timelineRowLabelStyle(rowIndex)}>
-                <span style={entityTypePillStyle(rowColor(item))}>{item.resource_type === "logic_gate" ? "Gate" : "Node"}</span>
-                <span style={timelineRowTitleStyle}>{item.display_title}</span>
-                <span style={timelineStatusStyle}>{item.status || (item.resource_type === "logic_gate" ? "Logic Gate" : "Node")}</span>
-              </div>
-              {weekDays.map((day, dayIndex) => (
-                <div key={`${item.item_id}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent)} />
-              ))}
+            <React.Fragment key={displayRow.id}>
               <div
-                style={timelineBarStyle(item, rowIndex, startOffset, durationDays)}
-                title={item.display_title}
-                onDoubleClick={() => {
-                  const nodeID = nodeIDForTimelineRow(item);
-                  if (nodeID) onNodeOpen?.(nodeID);
-                }}
+                style={timelineRowLabelStyle(rowIndex, displayRow.depth, displayRow.kind)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   onOpenContextMenu({ item, x: event.clientX, y: event.clientY });
                 }}
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  onStartBarInteraction({ item, mode: "move", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
-                }}
               >
-                <button
-                  type="button"
-                  aria-label={`Resize ${item.display_title} start`}
-                  style={barHandleStyle("left")}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                    onStartBarInteraction({ item, mode: "left", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
-                  }}
-                />
-                <span style={timelineBarLabelStyle}>{item.display_title}</span>
-                <button
-                  type="button"
-                  aria-label={`Resize ${item.display_title} end`}
-                  style={barHandleStyle("right")}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                    onStartBarInteraction({ item, mode: "right", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
-                  }}
-                />
+                <span style={timelineTypeIconStyle(displayRow.kind)}>
+                  <ExplorerRowIcon kind={displayRow.kind === "logic_gate" ? "logic_gate" : "node"} />
+                </span>
+                <span style={timelineRowTitleStyle}>{item.display_title}</span>
+                {displayRow.kind === "node" ? <span style={timelineStatusStyle}>{item.status || "Node"}</span> : null}
               </div>
+              {weekDays.map((day, dayIndex) => (
+                <div key={`${displayRow.id}:${isoDate(day)}`} style={timelineCellStyle(rowIndex, dayIndex === dropOffset, accent, displayRow.kind)} />
+              ))}
+              {displayRow.kind === "node" ? (
+                <div
+                  style={timelineBarStyle(item, rowIndex, startOffset, durationDays, canInteractWithBar)}
+                  title={item.display_title}
+                  onDoubleClick={() => {
+                    const nodeID = nodeIDForTimelineRow(item);
+                    if (nodeID) onNodeOpen?.(nodeID);
+                  }}
+                  onContextMenu={(event) => {
+                    if (!canInteractWithBar) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onOpenContextMenu({ item, x: event.clientX, y: event.clientY });
+                  }}
+                  onPointerDown={(event) => {
+                    if (!canInteractWithBar || event.button !== 0) return;
+                    event.preventDefault();
+                    onStartBarInteraction({ item, mode: "move", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-label={`Resize ${item.display_title} start`}
+                    disabled={!canInteractWithBar}
+                    tabIndex={canInteractWithBar ? 0 : -1}
+                    style={barHandleStyle("left", canInteractWithBar)}
+                    onPointerDown={(event) => {
+                      if (!canInteractWithBar) return;
+                      event.stopPropagation();
+                      event.preventDefault();
+                      onStartBarInteraction({ item, mode: "left", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
+                    }}
+                  />
+                  <span style={timelineBarLabelStyle}>{item.display_title}</span>
+                  <button
+                    type="button"
+                    aria-label={`Resize ${item.display_title} end`}
+                    disabled={!canInteractWithBar}
+                    tabIndex={canInteractWithBar ? 0 : -1}
+                    style={barHandleStyle("right", canInteractWithBar)}
+                    onPointerDown={(event) => {
+                      if (!canInteractWithBar) return;
+                      event.stopPropagation();
+                      event.preventDefault();
+                      onStartBarInteraction({ item, mode: "right", startX: event.clientX, dayWidth: dayWidthForPointerEvent(event), startOffset, durationDays });
+                    }}
+                  />
+                </div>
+              ) : null}
             </React.Fragment>
           );
         }) : (
@@ -1348,7 +1475,7 @@ const timelineHeaderDayStyle: React.CSSProperties = {
   fontWeight: 950,
 };
 
-function timelineRowLabelStyle(rowIndex: number): React.CSSProperties {
+function timelineRowLabelStyle(rowIndex: number, depth = 0, kind: "logic_gate" | "node" = "node"): React.CSSProperties {
   return {
     position: "sticky",
     left: 0,
@@ -1357,28 +1484,30 @@ function timelineRowLabelStyle(rowIndex: number): React.CSSProperties {
     gridRow: rowIndex + 2,
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: "48px minmax(0, 1fr) auto",
+    gridTemplateColumns: "22px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 7,
-    padding: "0 10px",
+    padding: `0 10px 0 ${10 + depth * 22}px`,
     borderRight: "1px solid rgba(148, 163, 184, 0.18)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.13)",
-    background: rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.96)" : "rgba(248, 250, 252, 0.96)",
+    background: kind === "logic_gate"
+      ? "linear-gradient(90deg, rgba(236, 253, 245, 0.98), rgba(255, 255, 255, 0.96))"
+      : rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.96)" : "rgba(248, 250, 252, 0.96)",
     boxSizing: "border-box",
   };
 }
 
-function timelineCellStyle(rowIndex: number, active: boolean, accent: string): React.CSSProperties {
+function timelineCellStyle(rowIndex: number, active: boolean, accent: string, kind: "logic_gate" | "node" = "node"): React.CSSProperties {
   return {
     gridRow: rowIndex + 2,
     borderRight: "1px solid rgba(148, 163, 184, 0.13)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.13)",
-    background: active ? `${accent}10` : rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.48)" : "rgba(248, 250, 252, 0.62)",
+    background: active ? `${accent}10` : kind === "logic_gate" ? "rgba(236, 253, 245, 0.52)" : rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.48)" : "rgba(248, 250, 252, 0.62)",
     boxSizing: "border-box",
   };
 }
 
-function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, startOffset: number, durationDays: number): React.CSSProperties {
+function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, startOffset: number, durationDays: number, interactive = true): React.CSSProperties {
   const start = clampInteger(startOffset, 0, WEEK_DAY_COUNT - 1);
   const duration = clampInteger(durationDays, 1, WEEK_DAY_COUNT - start);
   const color = rowColor(item);
@@ -1389,12 +1518,12 @@ function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, 
     gridRow: rowIndex + 2,
     alignSelf: "center",
     minWidth: 0,
-    height: 26,
+    height: 36,
     display: "grid",
     gridTemplateColumns: "8px minmax(0, 1fr) 8px",
     alignItems: "center",
     gap: 5,
-    margin: "0 5px",
+    margin: "0 6px",
     padding: "0 6px",
     border: `1px solid ${color}`,
     borderRadius: 8,
@@ -1402,19 +1531,21 @@ function timelineBarStyle(item: ProjectManagementTimelineRow, rowIndex: number, 
     boxShadow: `0 8px 18px ${color}33, inset 1px 1px 0 rgba(255, 255, 255, 0.30)`,
     color: textColor,
     boxSizing: "border-box",
-    cursor: "grab",
+    cursor: interactive ? "grab" : "default",
+    opacity: interactive ? 1 : 0.82,
   };
 }
 
-function barHandleStyle(side: "left" | "right"): React.CSSProperties {
+function barHandleStyle(side: "left" | "right", interactive = true): React.CSSProperties {
   return {
     width: 8,
-    height: 20,
+    height: 28,
     border: 0,
     borderRadius: 4,
     background: "rgba(255, 255, 255, 0.54)",
-    cursor: side === "left" ? "w-resize" : "e-resize",
+    cursor: interactive ? side === "left" ? "w-resize" : "e-resize" : "default",
     padding: 0,
+    opacity: interactive ? 1 : 0.55,
   };
 }
 
@@ -1521,20 +1652,16 @@ const timelineEmptyOverlayStyle: React.CSSProperties = {
   boxShadow: "4px 4px 12px rgba(174, 174, 192, 0.12), -4px -4px 12px rgba(255, 255, 255, 0.8)",
 };
 
-function entityTypePillStyle(color: string): React.CSSProperties {
+function timelineTypeIconStyle(kind: "logic_gate" | "node"): React.CSSProperties {
   return {
-    minWidth: 0,
-    height: 20,
+    width: 22,
+    height: 22,
     display: "inline-grid",
     placeItems: "center",
-    border: `1px solid ${color}66`,
+    border: kind === "logic_gate" ? "1px solid rgba(25, 240, 122, 0.34)" : "1px solid rgba(14, 165, 233, 0.24)",
     borderRadius: 6,
-    background: `${color}12`,
-    color,
-    fontSize: 9,
-    fontWeight: 950,
-    textTransform: "uppercase",
-    letterSpacing: 0,
+    background: kind === "logic_gate" ? "rgba(236, 253, 245, 0.86)" : "rgba(240, 249, 255, 0.78)",
+    boxSizing: "border-box",
   };
 }
 
