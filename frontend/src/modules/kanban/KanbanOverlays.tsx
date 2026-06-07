@@ -198,13 +198,13 @@ export function KanbanNodeEditorOverlay({
           height: 24,
           border: "1px solid transparent",
           borderRadius: 8,
-          background: `${KANBAN_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
-          color: "#0f172a",
+          background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
+          color: "#ffffff",
           fontSize: 16,
           fontWeight: 600,
           lineHeight: "20px",
           cursor: "pointer",
-          boxShadow: KANBAN_SHADOW,
+          boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
         }}
       >
         X

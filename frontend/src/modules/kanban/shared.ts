@@ -24,6 +24,57 @@ export const KANBAN_LOGIC_GATE_VERIFY_COLOR = "#19a8ff";
 export const KANBAN_LOGIC_GATE_DONE_COLOR = "#19c879";
 export const KANBAN_ISSUE_CARD_COLOR = "#7c6ee6";
 
+export const KANBAN_NODE_PRIORITY_STYLE_OPTIONS = [
+  {
+    value: "1",
+    label: "1\u00A0\u00A0URGENT(<1hr)",
+    color: "#7f1d1d",
+    borderColor: "rgba(220, 38, 38, 0.42)",
+    surface: "linear-gradient(135deg, rgba(254, 226, 226, 0.96), rgba(254, 249, 195, 0.76))",
+    glow: "rgba(220, 38, 38, 0.12)",
+  },
+  {
+    value: "2",
+    label: "2\u00A0\u00A0By end of day",
+    color: "#7c2d12",
+    borderColor: "rgba(234, 88, 12, 0.38)",
+    surface: "linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 240, 138, 0.68))",
+    glow: "rgba(234, 88, 12, 0.11)",
+  },
+  {
+    value: "3",
+    label: "3\u00A0\u00A0Tomorrow",
+    color: "#064e3b",
+    borderColor: "rgba(5, 150, 105, 0.38)",
+    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(207, 250, 254, 0.70))",
+    glow: "rgba(5, 150, 105, 0.11)",
+  },
+  {
+    value: "4",
+    label: "4\u00A0\u00A0Sprint (1 week)",
+    color: "#312e81",
+    borderColor: "rgba(79, 70, 229, 0.34)",
+    surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(221, 214, 254, 0.70))",
+    glow: "rgba(79, 70, 229, 0.10)",
+  },
+  {
+    value: "5",
+    label: "5\u00A0\u00A0Later (low priority)",
+    color: "#4c1d95",
+    borderColor: "rgba(124, 58, 237, 0.30)",
+    surface: "linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(233, 213, 255, 0.62))",
+    glow: "rgba(124, 58, 237, 0.10)",
+  },
+  {
+    value: "0",
+    label: "Unassigned to a Logic Gate",
+    color: "#64748b",
+    borderColor: "rgba(100, 116, 139, 0.28)",
+    surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.76))",
+    glow: "rgba(15, 23, 42, 0.08)",
+  },
+] as const;
+
 const KANBAN_COLUMN_ITEM_COLOR_SET = new Set([
   "#334155",
   "#475569",

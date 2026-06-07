@@ -167,6 +167,7 @@ function applyStoredLogicGateColumnLayouts(companyID: string, boardID: string, c
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
 
@@ -220,6 +221,13 @@ type KanbanPriorityMenuState = {
   columnID: string;
   mode: "create" | "drop";
   items: ExplorerEntityDragItem[];
+};
+
+type KanbanArenaCellContextMenuState = {
+  x: number;
+  y: number;
+  columnKey: string;
+  rowKey: string;
 };
 
 function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "board_id">, fallbackBoardID: string): string {
@@ -283,6 +291,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
   const [priorityMenu, setPriorityMenu] = useState<KanbanPriorityMenuState | null>(null);
+  const [arenaCellContextMenu, setArenaCellContextMenu] = useState<KanbanArenaCellContextMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID, { allowHorizontalOverflow: arenaMode }));
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
@@ -1646,6 +1655,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (uniqueCardIDs.length === 0) return;
     setCardContextMenu(null);
     setColumnContextMenu(null);
+    setArenaCellContextMenu(null);
     setDeleteCardConfirmation({ cardIDs: uniqueCardIDs });
   }, [cards]);
 
@@ -1659,12 +1669,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (uniqueNodeIDs.length === 0) return;
     setCardContextMenu(null);
     setColumnContextMenu(null);
+    setArenaCellContextMenu(null);
     setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs });
   }, [cards]);
 
   const requestNodeRename = useCallback((card: KanbanCard) => {
     setCardContextMenu(null);
     setColumnContextMenu(null);
+    setArenaCellContextMenu(null);
     cancelRenameNodeOnBlurRef.current = false;
     setRenameNodeDraft({ cardID: card.card_id, nodeID: card.node_id, title: card.node_title });
   }, []);
@@ -1722,6 +1734,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !ids.has(cardID))));
     setSelectionAnchorCardID((current) => (ids.has(current) ? "" : current));
     setCardContextMenu(null);
+    setArenaCellContextMenu(null);
     setError("");
     try {
       await deleteKanbanCardsCommand({ context: kanbanCommandContext, cards, cardIDs: Array.from(ids) });
@@ -1740,6 +1753,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !removedCardIDs.has(cardID))));
     setSelectionAnchorCardID((current) => (removedCardIDs.has(current) ? "" : current));
     setCardContextMenu(null);
+    setArenaCellContextMenu(null);
     setError("");
     try {
       await Promise.all(Array.from(ids).map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?company_id=${encodeURIComponent(companyID)}`, {
@@ -1762,6 +1776,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const previousCards = cards;
     setCards((current) => current.map((item) => (item.card_id === card.card_id ? { ...item, is_issue: isIssue } : item)));
     setCardContextMenu(null);
+    setArenaCellContextMenu(null);
     setError("");
     try {
       const saved = await toggleKanbanCardIssueCommand({ context: kanbanCommandContext, card, isIssue });
@@ -1869,6 +1884,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const createNodeInArenaGroupCell = useCallback((columnGroupKey: string, rowGroupKey: string) => {
     setError("");
+    setArenaCellContextMenu(null);
     const assignment = resolveKanbanGroupDropAssignment({
       columns: columnsRef.current,
       xGroupBy: arenaXGroupBy,
@@ -1889,6 +1905,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const requestAddEntitiesToColumn = useCallback((columnID: string, items: ExplorerEntityDragItem[], anchor?: { x: number; y: number }) => {
     setError("");
+    setArenaCellContextMenu(null);
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
     if (!logicGateID) {
       void addEntitiesToColumn(columnID, items);
@@ -1906,6 +1923,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const requestCreateNodeInColumn = useCallback((columnID: string, anchor?: { x: number; y: number }) => {
     setError("");
+    setArenaCellContextMenu(null);
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
     if (!logicGateID) {
       setError("Select a Logic Gate board first");
@@ -2034,6 +2052,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setHighlightedEntity({ nodeID: card.node_id });
           publishKanbanSelectionToLinkedFrames(companyID, frameID, card.node_id, card.node_title, [card.node_id]);
           setColumnContextMenu(null);
+          setArenaCellContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
         onSetRenameTitleDraft={(title) => setRenameNodeDraft((current) => (current && current.cardID === card.card_id ? { ...current, title } : current))}
@@ -2057,6 +2076,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           }
           setCardContextMenu(null);
           setColumnContextMenu(null);
+          setArenaCellContextMenu(null);
           event.dataTransfer.effectAllowed = "copyMove";
           event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: dragCardIDs[0], cardIDs: dragCardIDs, sourceColumnID: card.column_id }));
           setCardNodeCopyDragData(event.dataTransfer, dragCardIDs);
@@ -2179,6 +2199,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const contextCardSelectionIDs = contextCard
     ? (selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])
     : [];
+  const selectedCardsByID = useMemo(() => new Map(cards.map((card) => [card.card_id, card])), [cards]);
+  const arenaCellContextSelectionIDs = arenaCellContextMenu
+    ? Array.from(selectedCardIDs).filter((cardID) => selectedCardsByID.has(cardID))
+    : [];
+  const arenaCellContextCard = arenaCellContextMenu && arenaCellContextSelectionIDs.length > 0
+    ? selectedCardsByID.get(arenaCellContextSelectionIDs.includes(selectionAnchorCardID) ? selectionAnchorCardID : arenaCellContextSelectionIDs[0]) ?? null
+    : null;
 
   const selectArenaYGroupBy = useCallback((field: KanbanGroupField) => {
     setArenaYGroupBy(field);
@@ -2250,7 +2277,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
-        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} /> : (
+        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} onCellContextMenu={(columnKey, rowKey, event) => {
+          setCardContextMenu(null);
+          setColumnContextMenu(null);
+          setPriorityMenu(null);
+          setArenaCellContextMenu({ x: event.clientX, y: event.clientY, columnKey, rowKey });
+        }} /> : (
         <div style={{ display: "grid", alignItems: "start", gap: useBacklogBottomLayout ? 12 : 0, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: useBacklogBottomLayout ? 0 : 16 }}>
             {mainBoardColumns.map((column) => renderColumnView(column))}
@@ -2313,6 +2345,46 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
       />
+      {arenaCellContextMenu && (
+        <FrameRightClickMenu x={arenaCellContextMenu.x} y={arenaCellContextMenu.y} onClose={() => setArenaCellContextMenu(null)}>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              const menu = arenaCellContextMenu;
+              setArenaCellContextMenu(null);
+              createNodeInArenaGroupCell(menu.columnKey, menu.rowKey);
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Create new node
+          </button>
+          {arenaCellContextCard && (
+            <>
+              <button
+                type="button"
+                style={contextMenuButtonStyle}
+                onClick={() => {
+                  requestAppSidebarPin({ kind: "node", id: arenaCellContextCard.node_id, label: arenaCellContextCard.node_title });
+                  setArenaCellContextMenu(null);
+                }}
+                {...contextMenuHoverHandlers}
+              >
+                Pin Node
+              </button>
+              <button type="button" style={contextMenuButtonStyle} onClick={() => requestNodeRename(arenaCellContextCard)} {...contextMenuHoverHandlers}>
+                Rename node
+              </button>
+              <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => requestNodeDeleteFromCards(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
+                {arenaCellContextSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
+              </button>
+              <button type="button" style={contextMenuButtonStyle} onClick={() => requestCardDelete(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
+                {arenaCellContextSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
+              </button>
+            </>
+          )}
+        </FrameRightClickMenu>
+      )}
       {priorityMenu && (
         <FrameRightClickMenu x={priorityMenu.x} y={priorityMenu.y} onClose={() => setPriorityMenu(null)}>
           {KANBAN_NODE_PRIORITY_OPTIONS.map((option) => (
