@@ -252,6 +252,7 @@ const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const RECENT_PRIMARY_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const LOCAL_EMAIL_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-replies-v1";
 const LOCAL_EMAIL_THREAD_REPLIES_STORAGE_PREFIX = "mangorts:communications-local-thread-replies-v1";
+const RECENT_STARRED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communications-shared-inboxes-updated";
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
@@ -260,6 +261,7 @@ const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
 const recentArchivedMessages = new Map<string, CacheEntry<EmailMessage>>();
 const recentPrimaryMessages = new Map<string, CacheEntry<EmailMessage>>();
+const recentStarredMessages = new Map<string, CacheEntry<EmailMessage>>();
 let statusInflight: Promise<CommunicationsStatus> | null = null;
 const foldersInflight = new Map<string, Promise<EmailFolder[]>>();
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
@@ -437,19 +439,27 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     ...(update.unread !== undefined ? { unread: update.unread } : {}),
     ...(update.starred !== undefined ? { starred: update.starred } : {}),
   });
+  if (update.starred === true) rememberRecentlyStarredMessage(message);
+  if (update.starred === false) recentStarredMessages.delete(message.id.trim());
   applyEmailMessageToCachedPages(message, update.starred !== undefined ? { prependIfMissing: true } : {});
   return message;
 }
 
 export async function archiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
   const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const cached = findCachedEmailMessage(messageID);
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive${query}`, {
     method: "POST",
   });
-  const message = archivedEmailMessageForLocalLists(payload.message);
+  const message = archivedEmailMessageForLocalLists({
+    ...(cached ?? {}),
+    ...payload.message,
+    starred: cached?.starred ?? payload.message.starred,
+  });
   recentPrimaryMessages.delete(message.id.trim());
   rememberRecentlyArchivedMessage(message);
-  applyEmailMessageToCachedPages(message);
+  if (message.starred) rememberRecentlyStarredMessage(message);
+  applyEmailMessageToCachedPages(message, { prependIfMissing: true });
   return message;
 }
 
@@ -887,6 +897,7 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
   if (full) {
     recentArchivedMessages.clear();
     recentPrimaryMessages.clear();
+    recentStarredMessages.clear();
     communicationsReadCache.clear();
     communicationsReadInflight.clear();
   }
@@ -1043,7 +1054,8 @@ function markCachedMessageArchived(messageID: string): void {
   }
   const archived = archivedEmailMessageForLocalLists(cached);
   rememberRecentlyArchivedMessage(archived);
-  applyEmailMessageToCachedPages(archived);
+  if (archived.starred) rememberRecentlyStarredMessage(archived);
+  applyEmailMessageToCachedPages(archived, { prependIfMissing: true });
 }
 
 function findCachedEmailMessage(messageID: string): EmailMessage | null {
@@ -1109,6 +1121,25 @@ function applyLocalMessageOverlaysToPage(page: MessagePage, params: ListMessages
     };
   }
 
+  if (mailbox === "starred") {
+    const messages = page.messages.map((message) => recentStarredMessages.get(message.id)?.value ?? cloneMessage(message));
+    const withRecent = prependRecentMessages(messages, recentStarredMessages, params);
+    return {
+      ...page,
+      messages: withRecent,
+    };
+  }
+
+  if (mailbox === "all") {
+    let messages = page.messages.map((message) => recentArchivedMessages.get(message.id)?.value ?? recentStarredMessages.get(message.id)?.value ?? cloneMessage(message));
+    messages = prependRecentMessages(messages, recentArchivedMessages, params);
+    messages = prependRecentMessages(messages, recentStarredMessages, params);
+    return {
+      ...page,
+      messages,
+    };
+  }
+
   if (mailbox !== "archive") return page;
   const messages = page.messages.map(cloneMessage);
   const withRecent = prependRecentMessages(messages, recentArchivedMessages, params);
@@ -1147,6 +1178,12 @@ function rememberRecentlyArchivedMessage(message: EmailMessage): void {
   recentArchivedMessages.set(cleanMessageID, { value: archivedEmailMessageForLocalLists(message), fetchedAt: Date.now() });
 }
 
+function rememberRecentlyStarredMessage(message: EmailMessage): void {
+  const cleanMessageID = message.id.trim();
+  if (!cleanMessageID || !message.starred) return;
+  recentStarredMessages.set(cleanMessageID, { value: cloneMessage(message), fetchedAt: Date.now() });
+}
+
 function pruneRecentMessages(): void {
   const now = Date.now();
   for (const [messageID, entry] of recentArchivedMessages.entries()) {
@@ -1154,6 +1191,9 @@ function pruneRecentMessages(): void {
   }
   for (const [messageID, entry] of recentPrimaryMessages.entries()) {
     if (now - entry.fetchedAt > RECENT_PRIMARY_MESSAGE_TTL_MS) recentPrimaryMessages.delete(messageID);
+  }
+  for (const [messageID, entry] of recentStarredMessages.entries()) {
+    if (now - entry.fetchedAt > RECENT_STARRED_MESSAGE_TTL_MS) recentStarredMessages.delete(messageID);
   }
 }
 
@@ -1297,7 +1337,7 @@ function shouldRemoveExistingMessageFromList(message: EmailMessage, params: List
 
   const mailbox = params.mailbox ?? "primary";
   if (mailbox === "primary") {
-    return messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+    return messageIsArchived(message) || messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
   }
   if (mailbox === "archive") {
     return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
@@ -1660,12 +1700,17 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
-  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
+  return !messageHasFolderMetadata(message) || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }
 
 function messageIsArchived(message: EmailMessage): boolean {
+  if (!messageHasFolderMetadata(message)) return false;
   if (messageHasAnyFolder(message, ["trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"])) return false;
   return !messageHasAnyFolder(message, ["inbox", "\\inbox"]);
+}
+
+function messageHasFolderMetadata(message: EmailMessage): boolean {
+  return Array.isArray(message.folders) || Array.isArray(message.folder_ids);
 }
 
 function messageMatchesSearch(message: EmailMessage, query: string): boolean {

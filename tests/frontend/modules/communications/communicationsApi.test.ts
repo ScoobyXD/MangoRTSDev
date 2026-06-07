@@ -296,8 +296,6 @@ test("star updates keep inbox messages visible and add them to cached starred an
   };
   try {
     await listEmailMessages({ mailbox: "primary", limit: 25 });
-    await listEmailMessages({ mailbox: "starred", limit: 25 });
-    await listEmailMessages({ mailbox: "all", limit: 25 });
     await updateEmailMessage("msg-1", { starred: true });
 
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
@@ -331,6 +329,34 @@ test("unstar updates return cached inbox messages to primary and remove them fro
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
     assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => item.id), []);
     assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", false]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("archive updates add messages to archive and all overlays even before those tabs are cached", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    if (path.includes("/archive")) {
+      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: true }) });
+    }
+    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true })] });
+    if (path.includes("mailbox=archive")) return jsonResponse({ messages: [] });
+    if (path.includes("mailbox=all")) return jsonResponse({ messages: [] });
+    if (path.includes("mailbox=starred")) return jsonResponse({ messages: [] });
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    await listEmailMessages({ mailbox: "primary", limit: 25 });
+    await archiveEmailMessage("msg-1");
+
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), []);
+    assert.deepEqual((await listEmailMessages({ mailbox: "archive", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
