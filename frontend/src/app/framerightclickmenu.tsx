@@ -10,10 +10,11 @@ export interface FrameRightClickMenuProps {
   width?: React.CSSProperties["width"];
   minWidth?: React.CSSProperties["minWidth"];
   maxWidth?: React.CSSProperties["maxWidth"];
+  overflow?: React.CSSProperties["overflow"];
 }
 
 // Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
-const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, width, minWidth = 190, maxWidth }) => {
+const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, width, minWidth = 190, maxWidth, overflow = "hidden" }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
@@ -59,7 +60,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
         width,
         minWidth,
         maxWidth,
-        overflow: "hidden",
+        overflow,
       }}
     >
       {children}
