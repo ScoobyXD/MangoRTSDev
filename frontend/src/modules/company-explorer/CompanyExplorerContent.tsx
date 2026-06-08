@@ -52,7 +52,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { listCompanyUserGroups, type CompanyUserGroupMember } from "../communications/communicationsApi";
-import { moveLogicGateAssignment } from "../kanban/kanbanApi";
+import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { listMyLogicGates, listRacioMatrixProjectionRows } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
@@ -1524,13 +1524,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       dispatchExplorerStore({ type: "upsertNode", node });
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       if (targetLogicGateID) {
-        const assignment = await moveLogicGateAssignment({
+        const assignment = await assignNodeToLogicGateStatus({
           apiBase,
           companyID,
           logicGateID: targetLogicGateID,
           nodeID: node.node_id,
           mutationOrigin: "matrix",
-          assigneePolicy: "first_responsible",
         });
         dispatchExplorerStore({ type: "replaceNode", node: assignment.node });
         upsertNodeRelationshipGraphNode(apiBase, companyID, assignment.node);
