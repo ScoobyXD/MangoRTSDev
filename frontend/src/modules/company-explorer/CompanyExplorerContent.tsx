@@ -51,9 +51,9 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
-import { listCompanyUserGroups, type CompanyUserGroupMember } from "../communications/communicationsApi";
+import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
-import { listMyLogicGates, listRacioMatrixProjectionRows } from "../work-items/workItemReadApi";
+import { listMyLogicGates, listRacioMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
   findProtectedSystemFolderInDeleteTargets,
@@ -78,9 +78,12 @@ const scopedRootCreationKeys = new Set<string>();
 const raciVisualRootCreationKeys = new Set<string>();
 const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set(["logic gates by function", "logic gates by person"]);
-type CompanyExplorerScopeView = "mine" | "teams" | "company";
+type CompanyExplorerScopeView = "mine" | "team" | "company";
 type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "raci_assignments">>;
 type CompanyExplorerRaciFolderRole = LogicGateRaciRole | "other";
+type RaciProjectionCacheEntry = { rows: RacioMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
+type ExplorerUserSummary = { userID: string; label: string; email?: string };
+type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[] };
 
 const RACI_FOLDER_ROWS = [
   { role: "responsible", label: "Responsible" },
@@ -170,6 +173,54 @@ function cleanExplorerID(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
 
+function companyExplorerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
+  return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID.trim() || "Unknown user";
+}
+
+function companyExplorerGroupLabel(group: Pick<CompanyUserGroup, "group_id" | "name"> | null | undefined, fallbackGroupID: string): string {
+  return group?.name?.trim() || fallbackGroupID.trim() || "Team";
+}
+
+function compareExplorerLabels(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function uniqueCleanIDs(values: string[]): string[] {
+  return Array.from(new Set(values.map(cleanExplorerID).filter(Boolean)));
+}
+
+function explorerUserSummaryForID(userID: string, usersByID: Map<string, CompanyUser>, members: CompanyUserGroupMember[]): ExplorerUserSummary {
+  const cleanUserID = cleanExplorerID(userID);
+  const user = usersByID.get(cleanUserID);
+  const member = members.find((item) => cleanExplorerID(item.user_id) === cleanUserID);
+  return {
+    userID: cleanUserID,
+    label: companyExplorerUserLabel(user ?? null, member?.user_display_name?.trim() || member?.user_email?.trim() || cleanUserID),
+    email: user?.email?.trim() || member?.user_email?.trim() || undefined,
+  };
+}
+
+function sortExplorerUsers(users: ExplorerUserSummary[]): ExplorerUserSummary[] {
+  return [...users].sort((left, right) => (
+    compareExplorerLabels(left.label, right.label)
+    || compareExplorerLabels(left.email ?? "", right.email ?? "")
+    || left.userID.localeCompare(right.userID)
+  ));
+}
+
+function projectedLogicGateRecordForUser(logicGate: WorkItemLogicGateInboxItem, userID: string, companyID: string): ExplorerLogicGateRecord {
+  const cleanUserID = cleanExplorerID(userID);
+  const record = toLogicGateCanvasRecord(logicGate) as ExplorerLogicGateRecord;
+  record.raci_assignments = (logicGate.roles ?? []).filter(isLogicGateRaciRole).map((role) => ({
+    company_id: companyID,
+    logic_gate_id: logicGate.logic_gate_id,
+    role,
+    user_id: cleanUserID,
+    created_timestamp: logicGate.created_timestamp ?? "",
+  }));
+  return record;
+}
+
 function logicGateOwnedByAnyUser(logicGate: ExplorerLogicGateRecord, userIDs: Set<string>): boolean {
   if (userIDs.size === 0) return false;
   return (logicGate.raci_assignments ?? []).some((assignment) => userIDs.has(cleanExplorerID(assignment.user_id)));
@@ -229,7 +280,7 @@ function filterCompanyExplorerDataForScope(input: {
     };
   }
 
-  const ownerUserIDs = input.scopeView === "teams"
+  const ownerUserIDs = input.scopeView === "team"
     ? input.teamMemberUserIDs
     : new Set([input.currentUserID.trim()].filter(Boolean));
   if (ownerUserIDs.size === 0) {
@@ -317,7 +368,7 @@ function raciVisualNodeTreeID(role: CompanyExplorerRaciFolderRole, folderID: str
 }
 
 function isProtectedRaciRoleRow(row: ExplorerTreeNode | null | undefined): boolean {
-  return row?.syntheticKind === "raci_folder";
+  return row?.syntheticKind === "raci_folder" || row?.syntheticKind === "default_scope_folder";
 }
 
 function isLogicGateRaciRole(value: CompanyExplorerRaciFolderRole | string | undefined): value is LogicGateRaciRole {
@@ -436,6 +487,52 @@ function materializeRaciProjectionExplorerData(input: {
   };
 }
 
+function fallbackRaciExplorerDataForUser(userID: string, nodes: NodeRecord[], logicGates: ExplorerLogicGateRecord[]): { nodes: NodeRecord[]; logicGates: ExplorerLogicGateRecord[] } {
+  const ownerUserIDs = new Set([cleanExplorerID(userID)].filter(Boolean));
+  if (ownerUserIDs.size === 0) return { nodes: [], logicGates: [] };
+  const visibleLogicGateIDs = new Set(
+    logicGates
+      .filter((logicGate) => logicGateOwnedByAnyUser(logicGate, ownerUserIDs))
+      .map((logicGate) => logicGate.logic_gate_id),
+  );
+  const visibleNodeIDs = new Set<string>();
+  for (const node of nodes) {
+    if (ownerUserIDs.has(cleanExplorerID(node.assignee_user_id))) {
+      visibleNodeIDs.add(node.node_id);
+      continue;
+    }
+    if ((node.logic_gate_ids ?? []).some((logicGateID) => visibleLogicGateIDs.has(cleanExplorerID(logicGateID)))) {
+      visibleNodeIDs.add(node.node_id);
+    }
+  }
+  return {
+    nodes: nodes.filter((node) => visibleNodeIDs.has(node.node_id)),
+    logicGates: logicGates.filter((logicGate) => visibleLogicGateIDs.has(logicGate.logic_gate_id)),
+  };
+}
+
+function raciExplorerDataForUser(input: {
+  companyID: string;
+  userID: string;
+  projectionByUserID: Record<string, RaciProjectionCacheEntry>;
+  fallbackNodes: NodeRecord[];
+  fallbackLogicGates: ExplorerLogicGateRecord[];
+}): { nodes: NodeRecord[]; logicGates: ExplorerLogicGateRecord[] } {
+  const userID = cleanExplorerID(input.userID);
+  const cached = input.projectionByUserID[userID];
+  if (cached?.loaded) {
+    return materializeRaciProjectionExplorerData({
+      companyID: input.companyID,
+      currentUserID: userID,
+      projectionRows: cached.rows,
+      projectedLogicGates: cached.logicGates,
+      fallbackNodes: input.fallbackNodes,
+      fallbackLogicGates: input.fallbackLogicGates,
+    });
+  }
+  return fallbackRaciExplorerDataForUser(userID, input.fallbackNodes, input.fallbackLogicGates);
+}
+
 function buildRaciCompanyExplorerRows(input: {
   expanded: Set<string>;
   nodes: NodeRecord[];
@@ -445,8 +542,15 @@ function buildRaciCompanyExplorerRows(input: {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
+  treeIDPrefix?: string;
+  depthOffset?: number;
 }): ExplorerTreeNode[] {
   const rows: ExplorerTreeNode[] = [];
+  const treeIDPrefix = input.treeIDPrefix?.trim() ?? "";
+  const depthOffset = input.depthOffset ?? 0;
+  const prefixTreeID = (treeID: string): string => treeIDPrefix ? `${treeIDPrefix}:${treeID}` : treeID;
+  const rowDepth = (depth: number): number => depth + depthOffset;
+  const isExpanded = (treeID: string): boolean => input.expanded.has(treeID) || input.expanded.has("*");
   const nodeByID = new Map<string, NodeRecord>();
   for (const node of input.folderNodes) nodeByID.set(node.node_id, node);
   for (const node of input.nodes) nodeByID.set(node.node_id, node);
@@ -545,7 +649,7 @@ function buildRaciCompanyExplorerRows(input: {
     createdTimestamp: string,
   ) => {
     const placed = placementForRole(role);
-    const rowID = raciVisualLogicGateTreeID(role, folderID, logicGate.logic_gate_id);
+    const rowID = prefixTreeID(raciVisualLogicGateTreeID(role, folderID, logicGate.logic_gate_id));
     const nestedNodes = [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])]
       .filter((node) => !placed.nodeIDs.has(node.node_id))
       .sort((a, b) => (
@@ -556,27 +660,27 @@ function buildRaciCompanyExplorerRows(input: {
     rows.push({
       id: rowID,
       label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
-      depth,
+      depth: rowDepth(depth),
       kind: "logic_gate",
       logicGateID: logicGate.logic_gate_id,
       folderID,
       folderKind,
-      scopeLevel: depth,
+      scopeLevel: rowDepth(depth),
       position,
       createdTimestamp,
       hasChildren: nestedNodes.length > 0,
       raciRole: role,
       syntheticKind: "logic_gate_children",
     });
-    if (!input.expanded.has(rowID)) return;
+    if (!isExpanded(rowID)) return;
     for (const [nodeIndex, node] of nestedNodes.entries()) {
       rows.push({
-        id: raciNodeTreeID(role, logicGate.logic_gate_id, node.node_id),
+        id: prefixTreeID(raciNodeTreeID(role, logicGate.logic_gate_id, node.node_id)),
         label: getNodeRecordTitle(node) || node.node_id,
-        depth: depth + 1,
+        depth: rowDepth(depth + 1),
         kind: "node",
         nodeID: node.node_id,
-        scopeLevel: depth + 1,
+        scopeLevel: rowDepth(depth + 1),
         position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
         createdTimestamp: node.created_timestamp,
         parentLogicGateID: logicGate.logic_gate_id,
@@ -628,23 +732,23 @@ function buildRaciCompanyExplorerRows(input: {
     for (const entry of branchRows) {
       if (entry.kind === "folder") {
         const folder = entry.folder;
-        const rowID = `workspace-folder-${folder.folder_id}`;
+        const rowID = prefixTreeID(`workspace-folder-${folder.folder_id}`);
         rows.push({
           id: rowID,
           label: folder.name,
-          depth,
+          depth: rowDepth(depth),
           kind: "folder",
           folderID: folder.folder_id,
           parentFolderID: folder.parent_folder_id ?? "",
           folderKind: folder.folder_kind as CompanyExplorerFolderKind,
-          scopeLevel: depth,
+          scopeLevel: rowDepth(depth),
           position: folder.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: folder.created_timestamp,
           hasChildren: visualFolderHasChildren(folder.folder_id),
           raciRole: role,
           syntheticKind: "logic_gate_children",
         });
-        if (input.expanded.has(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1);
+        if (isExpanded(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1);
         continue;
       }
       const item = entry.item;
@@ -656,14 +760,14 @@ function buildRaciCompanyExplorerRows(input: {
         const node = nodeByID.get(item.item_id);
         if (!node) continue;
         rows.push({
-          id: raciVisualNodeTreeID(role, parentFolderID, node.node_id),
+          id: prefixTreeID(raciVisualNodeTreeID(role, parentFolderID, node.node_id)),
           label: getNodeRecordTitle(node) || node.node_id,
-          depth,
+          depth: rowDepth(depth),
           kind: "node",
           nodeID: node.node_id,
           folderID: parentFolderID,
           folderKind: parentFolderKind as CompanyExplorerFolderKind,
-          scopeLevel: depth,
+          scopeLevel: rowDepth(depth),
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
           raciRole: role,
@@ -674,7 +778,7 @@ function buildRaciCompanyExplorerRows(input: {
   };
 
   for (const [folderIndex, folder] of RACI_FOLDER_ROWS.entries()) {
-    const folderID = raciFolderTreeID(folder.role);
+    const folderID = prefixTreeID(raciFolderTreeID(folder.role));
     const visualRootFolder = roleRootByRole.get(folder.role);
     const visualRootFolderID = visualRootFolder?.folder_id ?? "";
     const visualRootHasChildren = visualRootFolderID ? visualFolderHasChildren(visualRootFolderID) : false;
@@ -695,45 +799,45 @@ function buildRaciCompanyExplorerRows(input: {
     rows.push({
       id: folderID,
       label: folder.label,
-      depth: 0,
+      depth: rowDepth(0),
       kind: "folder",
       folderID: visualRootFolderID || undefined,
       parentFolderID: "",
       folderKind: "logic_gate",
-      scopeLevel: 0,
+      scopeLevel: rowDepth(0),
       position: (folderIndex + 1) * TREE_ROW_POSITION_STEP,
       createdTimestamp: visualRootFolder?.created_timestamp ?? "",
       hasChildren: visualRootHasChildren || logicGateRows.length > 0 || noLogicGateNodes.length > 0,
       raciRole: folder.role,
       syntheticKind: "raci_folder",
     });
-    if (!input.expanded.has(folderID)) continue;
+    if (!isExpanded(folderID)) continue;
 
     if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 1);
 
     if (noLogicGateNodes.length > 0) {
       rows.push({
-        id: noLogicGateRowID,
+        id: prefixTreeID(noLogicGateRowID),
         label: "No Logic Gate",
-        depth: 1,
+        depth: rowDepth(1),
         kind: "folder",
         folderKind: "node",
-        scopeLevel: 1,
+        scopeLevel: rowDepth(1),
         position: TREE_ROW_POSITION_STEP,
         createdTimestamp: "",
         hasChildren: noLogicGateNodes.length > 0,
         raciRole: folder.role,
         syntheticKind: "logic_gate_children",
       });
-      if (input.expanded.has(noLogicGateRowID)) {
+      if (isExpanded(prefixTreeID(noLogicGateRowID))) {
         for (const [nodeIndex, node] of noLogicGateNodes.entries()) {
           rows.push({
-            id: raciNoLogicGateNodeTreeID(folder.role, node.node_id),
+            id: prefixTreeID(raciNoLogicGateNodeTreeID(folder.role, node.node_id)),
             label: getNodeRecordTitle(node) || node.node_id,
-            depth: 2,
+            depth: rowDepth(2),
             kind: "node",
             nodeID: node.node_id,
-            scopeLevel: 2,
+            scopeLevel: rowDepth(2),
             position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
             createdTimestamp: node.created_timestamp,
             raciRole: folder.role,
@@ -745,7 +849,7 @@ function buildRaciCompanyExplorerRows(input: {
 
     const logicGatePositionOffset = noLogicGateNodes.length > 0 ? 1 : 0;
     for (const [logicGateIndex, logicGate] of logicGateRows.entries()) {
-      const logicGateRowID = raciLogicGateTreeID(folder.role, logicGate.logic_gate_id);
+      const logicGateRowID = prefixTreeID(raciLogicGateTreeID(folder.role, logicGate.logic_gate_id));
       const nestedNodes = [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])].filter((node) => !placed.nodeIDs.has(node.node_id)).sort((a, b) => (
         getNodeRecordTitle(a).localeCompare(getNodeRecordTitle(b))
         || a.created_timestamp.localeCompare(b.created_timestamp)
@@ -754,28 +858,28 @@ function buildRaciCompanyExplorerRows(input: {
       rows.push({
         id: logicGateRowID,
         label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
-        depth: 1,
+        depth: rowDepth(1),
         kind: "logic_gate",
         logicGateID: logicGate.logic_gate_id,
         folderID: visualRootFolderID || undefined,
         folderKind: visualRootFolderID ? "logic_gate" : undefined,
-        scopeLevel: 1,
+        scopeLevel: rowDepth(1),
         position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
         hasChildren: nestedNodes.length > 0,
         raciRole: folder.role,
         syntheticKind: "logic_gate_children",
       });
-      if (!input.expanded.has(logicGateRowID)) continue;
+      if (!isExpanded(logicGateRowID)) continue;
 
       for (const [nodeIndex, node] of nestedNodes.entries()) {
         rows.push({
-          id: raciNodeTreeID(folder.role, logicGate.logic_gate_id, node.node_id),
+          id: prefixTreeID(raciNodeTreeID(folder.role, logicGate.logic_gate_id, node.node_id)),
           label: getNodeRecordTitle(node) || node.node_id,
-          depth: 2,
+          depth: rowDepth(2),
           kind: "node",
           nodeID: node.node_id,
-          scopeLevel: 2,
+          scopeLevel: rowDepth(2),
           position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
           createdTimestamp: node.created_timestamp,
           parentLogicGateID: logicGate.logic_gate_id,
@@ -786,6 +890,145 @@ function buildRaciCompanyExplorerRows(input: {
     }
   }
   return rows;
+}
+
+function teamUserFolderTreeID(userID: string): string {
+  return `team-user-${cleanExplorerID(userID)}`;
+}
+
+function companyGroupFolderTreeID(groupID: string): string {
+  return `company-group-${cleanExplorerID(groupID)}`;
+}
+
+function companyGroupUserFolderTreeID(groupID: string, userID: string): string {
+  return `company-group-${cleanExplorerID(groupID)}-user-${cleanExplorerID(userID)}`;
+}
+
+function buildTeamRaciExplorerRows(input: {
+  expanded: Set<string>;
+  companyID: string;
+  users: ExplorerUserSummary[];
+  projectionByUserID: Record<string, RaciProjectionCacheEntry>;
+  fallbackNodes: NodeRecord[];
+  fallbackLogicGates: ExplorerLogicGateRecord[];
+}): ExplorerTreeNode[] {
+  const rows: ExplorerTreeNode[] = [];
+  for (const [userIndex, user] of input.users.entries()) {
+    const userRowID = teamUserFolderTreeID(user.userID);
+    const userData = raciExplorerDataForUser({
+      companyID: input.companyID,
+      userID: user.userID,
+      projectionByUserID: input.projectionByUserID,
+      fallbackNodes: input.fallbackNodes,
+      fallbackLogicGates: input.fallbackLogicGates,
+    });
+    rows.push({
+      id: userRowID,
+      label: user.label,
+      depth: 0,
+      kind: "folder",
+      folderKind: "logic_gate",
+      scopeLevel: 0,
+      position: (userIndex + 1) * TREE_ROW_POSITION_STEP,
+      createdTimestamp: "",
+      hasChildren: true,
+      syntheticKind: "default_scope_folder",
+    });
+    if (!input.expanded.has(userRowID) && !input.expanded.has("*")) continue;
+    rows.push(...buildRaciCompanyExplorerRows({
+      expanded: input.expanded,
+      nodes: userData.nodes,
+      logicGates: userData.logicGates,
+      folderNodes: [],
+      folderLogicGates: [],
+      folders: [],
+      folderItems: [],
+      currentUserID: user.userID,
+      treeIDPrefix: userRowID,
+      depthOffset: 1,
+    }));
+  }
+  return rows;
+}
+
+function buildCompanyRaciExplorerRows(input: {
+  expanded: Set<string>;
+  companyID: string;
+  groups: ExplorerGroupSummary[];
+  projectionByUserID: Record<string, RaciProjectionCacheEntry>;
+  fallbackNodes: NodeRecord[];
+  fallbackLogicGates: ExplorerLogicGateRecord[];
+  historyRows?: ExplorerTreeNode[];
+}): ExplorerTreeNode[] {
+  const rows: ExplorerTreeNode[] = [];
+  for (const [groupIndex, group] of input.groups.entries()) {
+    const groupRowID = companyGroupFolderTreeID(group.groupID);
+    rows.push({
+      id: groupRowID,
+      label: group.label,
+      depth: 0,
+      kind: "folder",
+      folderKind: "logic_gate",
+      scopeLevel: 0,
+      position: (groupIndex + 1) * TREE_ROW_POSITION_STEP,
+      createdTimestamp: "",
+      hasChildren: group.users.length > 0,
+      syntheticKind: "default_scope_folder",
+    });
+    if (!input.expanded.has(groupRowID) && !input.expanded.has("*")) continue;
+    for (const [userIndex, user] of group.users.entries()) {
+      const userRowID = companyGroupUserFolderTreeID(group.groupID, user.userID);
+      const userData = raciExplorerDataForUser({
+        companyID: input.companyID,
+        userID: user.userID,
+        projectionByUserID: input.projectionByUserID,
+        fallbackNodes: input.fallbackNodes,
+        fallbackLogicGates: input.fallbackLogicGates,
+      });
+      rows.push({
+        id: userRowID,
+        label: user.label,
+        depth: 1,
+        kind: "folder",
+        folderKind: "logic_gate",
+        scopeLevel: 1,
+        position: (userIndex + 1) * TREE_ROW_POSITION_STEP,
+        createdTimestamp: "",
+        hasChildren: true,
+        syntheticKind: "default_scope_folder",
+      });
+      if (!input.expanded.has(userRowID) && !input.expanded.has("*")) continue;
+      rows.push(...buildRaciCompanyExplorerRows({
+        expanded: input.expanded,
+        nodes: userData.nodes,
+        logicGates: userData.logicGates,
+        folderNodes: [],
+        folderLogicGates: [],
+        folders: [],
+        folderItems: [],
+        currentUserID: user.userID,
+        treeIDPrefix: userRowID,
+        depthOffset: 2,
+      }));
+    }
+  }
+  if (input.historyRows?.length) rows.push(...input.historyRows);
+  return rows;
+}
+
+function extractSystemFolderBranch(rows: ExplorerTreeNode[], systemKey: CompanyExplorerSystemFolderKey, position: number): ExplorerTreeNode[] {
+  const rootIndex = rows.findIndex((row) => row.kind === "folder" && row.systemKey === systemKey);
+  if (rootIndex < 0) return [];
+  const root = rows[rootIndex];
+  const rootDepth = root.depth;
+  const branch: ExplorerTreeNode[] = [{ ...root, depth: 0, scopeLevel: 0, position }];
+  for (let index = rootIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.depth <= rootDepth) break;
+    const depth = Math.max(1, row.depth - rootDepth);
+    branch.push({ ...row, depth, scopeLevel: depth });
+  }
+  return branch;
 }
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
@@ -878,11 +1121,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const pendingScrollAlignRef = useRef<"nearest" | "center">("nearest");
   const [scopeView, setScopeView] = useState<CompanyExplorerScopeView>("mine");
   const [currentUserID, setCurrentUserID] = useState("");
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [companyGroups, setCompanyGroups] = useState<CompanyUserGroup[]>([]);
   const [groupMembers, setGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [raciProjectionRows, setRaciProjectionRows] = useState<RacioMatrixProjectionRow[]>([]);
   const [raciProjectionLogicGates, setRaciProjectionLogicGates] = useState<ExplorerLogicGateRecord[]>([]);
   const [raciProjectionLoaded, setRaciProjectionLoaded] = useState(false);
+  const [raciProjectionByUserID, setRaciProjectionByUserID] = useState<Record<string, RaciProjectionCacheEntry>>({});
   const raciProjectionRequestIDRef = useRef(0);
+  const raciMultiProjectionRequestIDRef = useRef(0);
   const requestRaciExplorerProjectionRefreshRef = useRef<() => void>(() => undefined);
 
   const applyCompanyExplorerSnapshot = useCallback((snapshot: CompanyExplorerSnapshotPayload) => {
@@ -977,16 +1224,60 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       .catch(() => {
         if (!cancelled) setCurrentUserID("");
       });
-    void listCompanyUserGroups(companyID)
-      .then((payload) => {
-        if (!cancelled) setGroupMembers(payload.members ?? []);
+    void Promise.all([
+      listCompanyUsers(companyID),
+      listCompanyUserGroups(companyID),
+    ])
+      .then(([users, payload]) => {
+        if (cancelled) return;
+        setCompanyUsers(users ?? []);
+        setCompanyGroups(payload.groups ?? []);
+        setGroupMembers(payload.members ?? []);
       })
       .catch(() => {
-        if (!cancelled) setGroupMembers([]);
+        if (!cancelled) {
+          setCompanyUsers([]);
+          setCompanyGroups([]);
+          setGroupMembers([]);
+        }
       });
     return () => { cancelled = true; };
   }, [companyID, scopeViewsEnabled]);
   const teamMemberUserIDs = useMemo(() => teamMemberUserIDsForCurrentUser(groupMembers, currentUserID), [currentUserID, groupMembers]);
+  const companyUserByID = useMemo(() => new Map(companyUsers.map((user) => [cleanExplorerID(user.user_id), user])), [companyUsers]);
+  const teamUsers = useMemo(() => (
+    sortExplorerUsers(Array.from(teamMemberUserIDs).map((userID) => explorerUserSummaryForID(userID, companyUserByID, groupMembers)))
+  ), [companyUserByID, groupMembers, teamMemberUserIDs]);
+  const companyGroupSections = useMemo<ExplorerGroupSummary[]>(() => {
+    const membersByGroupID = new Map<string, CompanyUserGroupMember[]>();
+    for (const member of groupMembers) {
+      const groupID = cleanExplorerID(member.group_id);
+      if (!groupID) continue;
+      const bucket = membersByGroupID.get(groupID) ?? [];
+      bucket.push(member);
+      membersByGroupID.set(groupID, bucket);
+    }
+    return [...companyGroups]
+      .sort((left, right) => (
+        compareExplorerLabels(companyExplorerGroupLabel(left, left.group_id), companyExplorerGroupLabel(right, right.group_id))
+        || left.group_id.localeCompare(right.group_id)
+      ))
+      .map((group) => {
+        const groupID = cleanExplorerID(group.group_id);
+        const userIDs = uniqueCleanIDs((membersByGroupID.get(groupID) ?? []).map((member) => member.user_id));
+        return {
+          groupID,
+          label: companyExplorerGroupLabel(group, groupID),
+          users: sortExplorerUsers(userIDs.map((userID) => explorerUserSummaryForID(userID, companyUserByID, groupMembers))),
+        };
+      })
+      .filter((group) => group.groupID);
+  }, [companyGroups, companyUserByID, groupMembers]);
+  const raciScopeTargetUserIDs = useMemo(() => {
+    if (!scopeViewsEnabled || scopeView === "mine") return [];
+    if (scopeView === "team") return teamUsers.map((user) => user.userID);
+    return uniqueCleanIDs(companyGroupSections.flatMap((group) => group.users.map((user) => user.userID)));
+  }, [companyGroupSections, scopeView, scopeViewsEnabled, teamUsers]);
   const scopedExplorerData = useMemo(() => filterCompanyExplorerDataForScope({
     scopeView: scopeViewsEnabled ? scopeView : "company",
     currentUserID,
@@ -997,27 +1288,60 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     folderItems,
   }), [currentUserID, folderItems, folders, groupMembers, logicGates, nodes, scopeView, scopeViewsEnabled, teamMemberUserIDs]);
   const raciExplorerActive = scopeViewsEnabled && scopeView === "mine" && currentUserID.trim().length > 0;
+  const fetchRaciProjectionForUser = useCallback(async (targetUserID: string): Promise<RaciProjectionCacheEntry> => {
+    const cleanUserID = cleanExplorerID(targetUserID);
+    const [projection, projectedLogicGates] = await Promise.all([
+      listRacioMatrixProjectionRows({ apiBase, companyID, targetUserID: cleanUserID, limit: RACI_PROJECTION_LIMIT }),
+      listMyLogicGates({ apiBase, companyID, targetUserID: cleanUserID, limit: RACI_PROJECTION_LIMIT }),
+    ]);
+    return {
+      rows: projection.rows ?? [],
+      logicGates: (projectedLogicGates.logic_gates ?? []).map((logicGate) => projectedLogicGateRecordForUser(logicGate, cleanUserID, companyID)),
+      loaded: true,
+    };
+  }, [apiBase, companyID]);
   const refreshRaciExplorerProjection = useCallback(async () => {
     const targetUserID = currentUserID.trim();
     if (!raciExplorerActive || !companyID || !targetUserID) return;
     const requestID = raciProjectionRequestIDRef.current + 1;
     raciProjectionRequestIDRef.current = requestID;
     try {
-      const [projection, projectedLogicGates] = await Promise.all([
-        listRacioMatrixProjectionRows({ apiBase, companyID, targetUserID, limit: RACI_PROJECTION_LIMIT }),
-        listMyLogicGates({ apiBase, companyID, targetUserID, limit: RACI_PROJECTION_LIMIT }),
-      ]);
+      const projection = await fetchRaciProjectionForUser(targetUserID);
       if (raciProjectionRequestIDRef.current !== requestID) return;
-      setRaciProjectionRows(projection.rows ?? []);
-      setRaciProjectionLogicGates((projectedLogicGates.logic_gates ?? []).map((logicGate) => toLogicGateCanvasRecord(logicGate) as ExplorerLogicGateRecord));
+      setRaciProjectionRows(projection.rows);
+      setRaciProjectionLogicGates(projection.logicGates);
       setRaciProjectionLoaded(true);
     } catch (err) {
       if (raciProjectionRequestIDRef.current !== requestID) return;
       setRaciProjectionLoaded(false);
       setError(err instanceof Error ? err.message : "failed_to_load_raci_explorer_projection");
     }
-  }, [apiBase, companyID, currentUserID, raciExplorerActive]);
-  requestRaciExplorerProjectionRefreshRef.current = () => { void refreshRaciExplorerProjection(); };
+  }, [companyID, currentUserID, fetchRaciProjectionForUser, raciExplorerActive]);
+  const refreshScopedRaciExplorerProjections = useCallback(async () => {
+    if (!scopeViewsEnabled || scopeView === "mine" || raciScopeTargetUserIDs.length === 0) {
+      raciMultiProjectionRequestIDRef.current += 1;
+      setRaciProjectionByUserID({});
+      return;
+    }
+    const requestID = raciMultiProjectionRequestIDRef.current + 1;
+    raciMultiProjectionRequestIDRef.current = requestID;
+    const results = await Promise.allSettled(raciScopeTargetUserIDs.map(async (targetUserID) => {
+      const projection = await fetchRaciProjectionForUser(targetUserID);
+      return [cleanExplorerID(targetUserID), projection] as const;
+    }));
+    if (raciMultiProjectionRequestIDRef.current !== requestID) return;
+    const next: Record<string, RaciProjectionCacheEntry> = {};
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      const [userID, projection] = result.value;
+      if (userID) next[userID] = projection;
+    }
+    setRaciProjectionByUserID(next);
+  }, [fetchRaciProjectionForUser, raciScopeTargetUserIDs, scopeView, scopeViewsEnabled]);
+  requestRaciExplorerProjectionRefreshRef.current = () => {
+    if (raciExplorerActive) void refreshRaciExplorerProjection();
+    else if (scopeViewsEnabled && scopeView !== "mine") void refreshScopedRaciExplorerProjections();
+  };
   useEffect(() => {
     if (!raciExplorerActive) {
       raciProjectionRequestIDRef.current += 1;
@@ -1029,6 +1353,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     void refreshRaciExplorerProjection();
     return undefined;
   }, [raciExplorerActive, refreshRaciExplorerProjection]);
+  useEffect(() => {
+    if (!scopeViewsEnabled || scopeView === "mine" || raciScopeTargetUserIDs.length === 0) {
+      raciMultiProjectionRequestIDRef.current += 1;
+      setRaciProjectionByUserID({});
+      return undefined;
+    }
+    let cancelled = false;
+    void refreshScopedRaciExplorerProjections().catch(() => {
+      if (!cancelled) setRaciProjectionByUserID({});
+    });
+    return () => { cancelled = true; };
+  }, [raciScopeTargetUserIDs, refreshScopedRaciExplorerProjections, scopeView, scopeViewsEnabled]);
   useEffect(() => {
     if (!raciExplorerActive) return;
     setExpanded((previous) => {
@@ -1088,6 +1424,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     treeScrollTop,
   });
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
+  const teamCompanyExplorerActive = scopeViewsEnabled && scopeView !== "mine" && !scopedExplorerActive;
+  const companyHistoryRows = useMemo(() => (
+    extractSystemFolderBranch(fullTreeRows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP)
+  ), [companyGroupSections.length, fullTreeRows]);
   const baseTreeRows = useMemo(() => (
     raciExplorerActive
       ? buildRaciCompanyExplorerRows({
@@ -1100,10 +1440,29 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           folderItems,
           currentUserID,
         })
+      : teamCompanyExplorerActive && scopeView === "team"
+        ? buildTeamRaciExplorerRows({
+            expanded: effectiveExpanded,
+            companyID,
+            users: teamUsers,
+            projectionByUserID: raciProjectionByUserID,
+            fallbackNodes: nodes,
+            fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+          })
+      : teamCompanyExplorerActive && scopeView === "company"
+        ? buildCompanyRaciExplorerRows({
+            expanded: effectiveExpanded,
+            companyID,
+            groups: companyGroupSections,
+            projectionByUserID: raciProjectionByUserID,
+            fallbackNodes: nodes,
+            fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+            historyRows: companyHistoryRows,
+          })
       : scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(fullTreeRows)
-  ), [currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, nodes, raciExplorerActive, raciExplorerData, scopedExplorerActive, scopedRootFolder]);
+  ), [companyGroupSections, companyHistoryRows, companyID, currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
@@ -1139,10 +1498,31 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         currentUserID,
       });
     }
+    if (teamCompanyExplorerActive && scopeView === "team") {
+      return buildTeamRaciExplorerRows({
+        expanded: new Set(["*"]),
+        companyID,
+        users: teamUsers,
+        projectionByUserID: raciProjectionByUserID,
+        fallbackNodes: nodes,
+        fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+      });
+    }
+    if (teamCompanyExplorerActive && scopeView === "company") {
+      return buildCompanyRaciExplorerRows({
+        expanded: new Set(["*"]),
+        companyID,
+        groups: companyGroupSections,
+        projectionByUserID: raciProjectionByUserID,
+        fallbackNodes: nodes,
+        fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+        historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
+      });
+    }
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(rows);
-  }, [currentUserID, folderItems, folders, kanbanBoards, logicGates, nodes, raciExplorerActive, raciExplorerData, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder]);
+  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
@@ -2535,8 +2915,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   });
   const scopeControls = scopeViewsEnabled ? (
     <div data-frame-interactive="true" style={scopeToggleStyle} aria-label="Company Explorer view scope">
-      <button type="button" style={scopeButtonStyle(scopeView === "mine")} onClick={() => setScopeView("mine")}>My</button>
-      <button type="button" style={scopeButtonStyle(scopeView === "teams")} onClick={() => setScopeView("teams")}>Teams</button>
+      <button type="button" style={scopeButtonStyle(scopeView === "mine")} onClick={() => setScopeView("mine")}>Me</button>
+      <button type="button" style={scopeButtonStyle(scopeView === "team")} onClick={() => setScopeView("team")}>Team</button>
       <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>Company</button>
     </div>
   ) : undefined;

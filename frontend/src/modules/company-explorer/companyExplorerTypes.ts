@@ -29,7 +29,7 @@ export type ExplorerTreeNode = {
   hasChildren?: boolean;
   parentLogicGateID?: string;
   raciRole?: LogicGateRaciRole | "other";
-  syntheticKind?: "raci_folder" | "logic_gate_children";
+  syntheticKind?: "raci_folder" | "logic_gate_children" | "default_scope_folder";
 };
 
 export type ExplorerDragPayload = ExplorerDropPayload;
