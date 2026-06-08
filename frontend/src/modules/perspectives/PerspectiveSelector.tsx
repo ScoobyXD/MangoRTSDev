@@ -175,8 +175,8 @@ export function CompanyPerspectiveSelector({
     <div ref={rootRef} style={selectorRootStyle(compact)}>
       <div style={selectorLabelStyle}>{label}</div>
       <div style={scopeToggleStyle}>
-        <button type="button" style={scopeButtonStyle(normalized.scope === "mine")} onClick={chooseMine}>My</button>
-        <button type="button" style={scopeButtonStyle(normalized.scope === "team")} onClick={chooseTeam}>Teams</button>
+        <button type="button" style={scopeButtonStyle(normalized.scope === "mine")} onClick={chooseMine}>Me</button>
+        <button type="button" style={scopeButtonStyle(normalized.scope === "team")} onClick={chooseTeam}>Team</button>
         <button type="button" style={scopeButtonStyle(normalized.scope === "company")} onClick={chooseCompany}>Company</button>
       </div>
       <button
