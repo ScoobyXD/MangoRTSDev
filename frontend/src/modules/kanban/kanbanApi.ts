@@ -1,4 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
+import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
@@ -181,6 +182,7 @@ export type RacioMatrixProjectionRow = {
   assignee_user_id?: string;
   assignee_display_name?: string;
   assignee_email?: string;
+  accounts?: Account[];
   resource_created_timestamp: string;
   updated_timestamp: string;
 };

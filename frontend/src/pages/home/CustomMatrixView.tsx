@@ -187,6 +187,7 @@ export function CustomMatrixView({
   nodes,
   logicGateByID,
   companyUsers,
+  accountFilter,
   onOpenNode,
   onOpenLogicGate,
 }: {
@@ -194,6 +195,7 @@ export function CustomMatrixView({
   nodes: NodeRecord[];
   logicGateByID: Map<string, LogicGateRecord>;
   companyUsers: CompanyUser[];
+  accountFilter?: React.ReactNode;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
 }) {
@@ -236,6 +238,7 @@ export function CustomMatrixView({
             <div style={customMatrixMetaStyle}>{placedCount} node{placedCount === 1 ? "" : "s"} across company data{loading ? " - Loading" : ""}</div>
           </div>
           <div style={customMatrixControlsStyle}>
+            {accountFilter}
             <AxisSelect label="Y-axis" value={yAxis} onChange={setYAxis} />
             <AxisSelect label="X-axis" value={xAxis} onChange={setXAxis} />
           </div>

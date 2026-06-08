@@ -82,6 +82,21 @@ export function createProjectManagementFrames(): FrameDataModel[] {
   ];
 }
 
+export function createAccountManagerFrames(): FrameDataModel[] {
+  return [
+    {
+      id: createFrameId(),
+      kind: "account-manager",
+      x: 1,
+      y: 1,
+      w: 42,
+      h: 30,
+      title: "Account Manager",
+      ...WHITE_FRAME,
+    },
+  ];
+}
+
 export function createHomeViewFrames(): FrameDataModel[] {
   const homeID = createFrameId();
 

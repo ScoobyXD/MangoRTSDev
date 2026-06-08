@@ -29,6 +29,7 @@ func cloneRacioMatrixProjectionRow(row RacioMatrixProjectionRow) RacioMatrixProj
 	out.AssigneeUserID = cloneStringPointer(row.AssigneeUserID)
 	out.AssigneeDisplayName = cloneStringPointer(row.AssigneeDisplayName)
 	out.AssigneeEmail = cloneStringPointer(row.AssigneeEmail)
+	out.Accounts = cloneAccountSnapshots(row.Accounts)
 	return out
 }
 

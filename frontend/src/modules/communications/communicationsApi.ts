@@ -1656,6 +1656,7 @@ function cloneNodes(nodes: NodeRecord[]): NodeRecord[] {
   return nodes.map((node) => ({
     ...node,
     logic_gate_ids: node.logic_gate_ids ? [...node.logic_gate_ids] : undefined,
+    accounts: node.accounts ? node.accounts.map((account) => ({ ...account })) : undefined,
   }));
 }
 

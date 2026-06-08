@@ -133,6 +133,7 @@ func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 	node.DefaultAccess = defaultResourceAccessOrEdit(node.DefaultAccess)
 	node = r.withDerivedNodeStatusLocked(node)
 	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
+	node.Accounts = r.accountSnapshotsForNodeLocked(node.CompanyID, node.NodeID)
 	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
 		return node
 	}
@@ -476,6 +477,11 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, nodeID))
+	for assignmentKey, assignment := range r.nodeAccountAssignments {
+		if assignment.CompanyID == companyID && assignment.NodeID == nodeID {
+			delete(r.nodeAccountAssignments, assignmentKey)
+		}
+	}
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID && permission.EntityType == EntityTypeNode && permission.EntityID == nodeID {
 			delete(r.entityPermissions, permissionKey)

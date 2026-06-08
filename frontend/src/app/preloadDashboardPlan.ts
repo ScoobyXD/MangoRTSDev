@@ -6,8 +6,9 @@ export const DEFAULT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "edito
 export const LOGIC_GATE_ARENA_MODULE_KINDS = ["editor", "kanban"];
 export const HOME_MODULE_KINDS = ["home"];
 export const PROJECT_MANAGEMENT_MODULE_KINDS = ["project-management"];
+export const ACCOUNT_MANAGER_MODULE_KINDS = ["account-manager"];
 
-export type DashboardRouteSurface = "home" | "logic-gate-arena" | "project-management";
+export type DashboardRouteSurface = "home" | "logic-gate-arena" | "project-management" | "account-manager";
 
 export type DashboardPreloadPlan = {
   moduleKinds: string[];
@@ -36,6 +37,9 @@ export function planLikelyDashboardPreload(activeTab: ({ page?: ViewTab["page"];
   }
   if (activeTab.page === "project-management") {
     return { moduleKinds: PROJECT_MANAGEMENT_MODULE_KINDS, routeSurfaces: ["project-management"] };
+  }
+  if (activeTab.page === "account-manager") {
+    return { moduleKinds: ACCOUNT_MANAGER_MODULE_KINDS, routeSurfaces: ["account-manager"] };
   }
   const moduleKinds = uniqueKinds(activeTab.frames);
   return {

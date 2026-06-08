@@ -52,6 +52,7 @@ func scanKanbanCard(row interface {
 	var assigneeUserID sql.NullString
 	var assigneeName sql.NullString
 	var assigneeEmail sql.NullString
+	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.BoardID,
@@ -71,6 +72,7 @@ func scanKanbanCard(row interface {
 		&item.ProjectionUpdatedTimestamp,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
+		&accountsJSON,
 	)
 	if dueDate.Valid {
 		item.DueDate = &dueDate.String
@@ -88,6 +90,7 @@ func scanKanbanCard(row interface {
 	if assigneeEmail.Valid {
 		item.AssigneeEmail = &assigneeEmail.String
 	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err
 }
 

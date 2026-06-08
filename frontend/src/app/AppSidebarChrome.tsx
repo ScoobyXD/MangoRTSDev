@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getActiveCompanyID } from "../auth/currentCompany";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
@@ -71,6 +71,7 @@ const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_LOGIC_GATE_ICON_COLOR = "#19f07a";
 const SIDEBAR_PERSON_ICON_COLOR = "#8b5cf6";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
+const SIDEBAR_ACCOUNT_ICON_COLOR = "#14b8a6";
 const SIDEBAR_MAP_ICON_COLOR = "#19a8ff";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
 const SIDEBAR_STATE_OPEN_BG = "rgba(15, 23, 42, 0.035)";
@@ -110,7 +111,7 @@ const APP_SIDEBAR_RACI_VIEWS = RACI_INBOX_SECTIONS.map((section) => ({
   surface: NotificationSurface;
 }>;
 
-type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management";
+type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1172,6 +1173,16 @@ export function AppSidebar({
           onFocus={preloadProjectManagementSurface}
           onPointerDown={preloadProjectManagementSurface}
           onClick={() => onPageSelect("project-management")}
+        />
+        <AppSidebarButton
+          label="Account Manager"
+          active={activePage === "account-manager"}
+          icon={<HeaderAccountManagerIcon color={SIDEBAR_ACCOUNT_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadAccountManagerSurface}
+          onFocus={preloadAccountManagerSurface}
+          onPointerDown={preloadAccountManagerSurface}
+          onClick={() => onPageSelect("account-manager")}
         />
         <AppSidebarButton
           label="Map"

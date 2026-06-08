@@ -243,6 +243,7 @@ func (r *MemoryRepo) syncProjectManagementTimelineProjectionForItemLocked(compan
 		row.AssigneeUserID = cloneStringPointer(node.AssigneeUserID)
 		row.AssigneeDisplayName = cloneStringPointer(node.AssigneeName)
 		row.AssigneeEmail = cloneStringPointer(node.AssigneeEmail)
+		row.Accounts = cloneAccountSnapshots(node.Accounts)
 		row.ResourceCreatedTimestamp = node.CreatedTimestamp
 	case EntityTypeLogicGate:
 		logicGate, ok := r.logicGates[key(item.CompanyID, item.EntityID)]

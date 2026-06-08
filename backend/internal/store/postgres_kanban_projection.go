@@ -69,7 +69,8 @@ projection.assignee_user_id::text as assignee_user_id,
 (select u.email from users u where u.user_id = projection.assignee_user_id) as assignee_email,
 projection.projection_updated_timestamp as projection_updated_timestamp,
 projection.assignment_created_timestamp as assignment_created_timestamp,
-projection.projection_updated_timestamp as projection_updated_timestamp`
+projection.projection_updated_timestamp as projection_updated_timestamp,
+projection.accounts::text as accounts_json`
 
 func syncKanbanBoardProjectionForNodeTx(ctx context.Context, db kanbanBoardProjectionDB, companyID, nodeID string) error {
 	companyID = cleanUUIDText(companyID)
@@ -97,7 +98,8 @@ with target_assignment as (
     assignment.created_timestamp as assignment_created_timestamp,
     assignment.updated_timestamp as assignment_updated_timestamp,
     assignment.compatibility_board_id,
-    assignment.compatibility_card_id
+    assignment.compatibility_card_id,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
   from node_logic_gate_assignments assignment
   join nodes node_row
     on node_row.company_id = assignment.company_id
@@ -105,6 +107,11 @@ with target_assignment as (
   join logic_gates logic_gate
     on logic_gate.company_id = assignment.company_id
    and logic_gate.logic_gate_id = assignment.logic_gate_id
+  left join lateral (
+    ` + postgresAccountSnapshotSQL + `
+    where node_account.company_id=assignment.company_id
+      and node_account.node_id=assignment.node_id
+  ) account_snapshot on true
   where assignment.company_id = $1::uuid
     and assignment.node_id = $2::uuid
 ),
@@ -137,6 +144,7 @@ insert into kanban_board_projection (
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  accounts,
   projection_updated_timestamp
 )
 select
@@ -158,6 +166,7 @@ select
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  accounts,
   now()
 from target_assignment
 on conflict (company_id, logic_gate_id, node_id)
@@ -177,6 +186,7 @@ do update set
   assignment_updated_timestamp = excluded.assignment_updated_timestamp,
   compatibility_board_id = excluded.compatibility_board_id,
   compatibility_card_id = excluded.compatibility_card_id,
+  accounts = excluded.accounts,
   projection_updated_timestamp = now()`, companyID, nodeID)
 	return err
 }
@@ -263,7 +273,8 @@ select
   assignee_email,
   projection_updated_timestamp,
   assignment_created_timestamp,
-  projection_updated_timestamp
+  projection_updated_timestamp,
+  accounts_json
 from projected
 where ($3 = '' or column_id=$3 or source_column_id=$3)
   and ($4 = 0 or position > $4)
@@ -307,7 +318,8 @@ projection.node_updated_timestamp,
 projection.assignment_id::text,
 projection.assignment_created_timestamp,
 projection.assignment_updated_timestamp,
-projection.projection_updated_timestamp`
+projection.projection_updated_timestamp,
+projection.accounts::text as accounts_json`
 
 func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (KanbanBoardProjectionRow, error) {
 	var item KanbanBoardProjectionRow
@@ -317,6 +329,7 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 	var assigneeUserID sql.NullString
 	var assigneeDisplayName sql.NullString
 	var assigneeEmail sql.NullString
+	var accountsJSON sql.NullString
 	var status string
 	err := row.Scan(
 		&item.CompanyID,
@@ -341,6 +354,7 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		&item.AssignmentCreatedTimestamp,
 		&item.AssignmentUpdatedTimestamp,
 		&item.ProjectionUpdatedTimestamp,
+		&accountsJSON,
 	)
 	if err != nil {
 		return KanbanBoardProjectionRow{}, err
@@ -368,6 +382,7 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 	if assigneeEmail.Valid {
 		item.AssigneeEmail = &assigneeEmail.String
 	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, nil
 }
 
@@ -409,7 +424,8 @@ select
   assignment_id,
   assignment_created_timestamp,
   assignment_updated_timestamp,
-  projection_updated_timestamp
+  projection_updated_timestamp,
+  accounts_json
 from projected
 where ($3 = '' or column_id=$3 or source_column_id=$3)
   and ($4 = 0 or position > $4)
@@ -513,6 +529,7 @@ inserted as (
     assignment_updated_timestamp,
     compatibility_board_id,
     compatibility_card_id,
+    accounts,
     projection_updated_timestamp
   )
   select
@@ -534,6 +551,7 @@ inserted as (
     assignment.updated_timestamp,
     assignment.compatibility_board_id,
     assignment.compatibility_card_id,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb),
     now()
   from node_logic_gate_assignments assignment
   join nodes node_row
@@ -542,6 +560,11 @@ inserted as (
   join logic_gates logic_gate
     on logic_gate.company_id = assignment.company_id
    and logic_gate.logic_gate_id = assignment.logic_gate_id
+  left join lateral (
+    ` + postgresAccountSnapshotSQL + `
+    where node_account.company_id=assignment.company_id
+      and node_account.node_id=assignment.node_id
+  ) account_snapshot on true
   where assignment.company_id=$1::uuid
     and assignment.logic_gate_id=$2::uuid
   returning 1

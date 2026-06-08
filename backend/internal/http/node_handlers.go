@@ -153,6 +153,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "accounts" {
+		s.handleNodeAccounts(w, r, nodeID)
+		return
+	}
+
 	if len(parts) == 1 {
 		if r.Method == http.MethodPut {
 			var fields map[string]json.RawMessage

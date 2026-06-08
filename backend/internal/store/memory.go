@@ -15,6 +15,9 @@ type MemoryRepo struct {
 	nodeContentChangeSeen     map[string]time.Time
 	nodeProjectionSeen        map[string]memoryNodeProjectionSeen
 	nodeRels                  map[string][]domain.NodeRelationship
+	accounts                  map[string]domain.Account
+	accountFolders            map[string]domain.AccountFolder
+	nodeAccountAssignments    map[string]domain.NodeAccountAssignment
 	logicGates                map[string]domain.LogicGate
 	logicGateInfo             map[string][]domain.LogicGateInformation
 	logicGateText             map[string]map[string]domain.LogicGateProjection
@@ -66,6 +69,9 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeContentChangeSeen:     map[string]time.Time{},
 		nodeProjectionSeen:        map[string]memoryNodeProjectionSeen{},
 		nodeRels:                  map[string][]domain.NodeRelationship{},
+		accounts:                  map[string]domain.Account{},
+		accountFolders:            map[string]domain.AccountFolder{},
+		nodeAccountAssignments:    map[string]domain.NodeAccountAssignment{},
 		logicGates:                map[string]domain.LogicGate{},
 		logicGateInfo:             map[string][]domain.LogicGateInformation{},
 		logicGateText:             map[string]map[string]domain.LogicGateProjection{},

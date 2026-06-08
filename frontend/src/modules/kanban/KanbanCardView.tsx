@@ -71,6 +71,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
+  const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
 
   return (
     <article
@@ -169,6 +170,28 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       {description && (
         <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {description}
+        </div>
+      )}
+      {accounts.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+          {accounts.map((account) => (
+            <span key={account.account_id} title={account.name || account.account_id} style={{
+              maxWidth: "100%",
+              border: `1px solid ${hexToRgba(color, 0.22)}`,
+              borderRadius: 7,
+              background: `linear-gradient(135deg, rgba(255,255,255,0.92), ${hexToRgba(color, 0.10)})`,
+              color: isIssue ? "#334155" : subtext,
+              fontSize: 9.5,
+              fontWeight: 820,
+              lineHeight: 1.2,
+              padding: "2px 6px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}>
+              {account.name || account.account_id}
+            </span>
+          ))}
         </div>
       )}
     </article>

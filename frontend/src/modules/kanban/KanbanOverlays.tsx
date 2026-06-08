@@ -2,6 +2,8 @@ import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
+import { AccountFilterControl } from "../accounts/AccountFilterControl";
+import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
@@ -41,6 +43,7 @@ export function KanbanContextMenus({
   onCloseCardMenu,
   onCreateNodeInColumn,
   onToggleCardIssue,
+  onAssignAccounts,
   onRenameNode,
   onRequestNodeDeleteFromCards,
   onRequestCardDelete,
@@ -55,6 +58,7 @@ export function KanbanContextMenus({
   onCloseCardMenu: () => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
+  onAssignAccounts: (card: KanbanCard) => void;
   onRenameNode: (card: KanbanCard) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
   onRequestCardDelete: (cardIDs: string[]) => void;
@@ -86,6 +90,9 @@ export function KanbanContextMenus({
           >
             Pin Node
           </button>
+          <button type="button" style={contextMenuButtonStyle} onClick={() => onAssignAccounts(contextCard)} {...contextMenuHoverHandlers}>
+            Assign accounts
+          </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
             Rename node
           </button>
@@ -98,6 +105,45 @@ export function KanbanContextMenus({
         </FrameRightClickMenu>
       )}
     </>
+  );
+}
+
+export function KanbanAccountAssignmentModal({
+  title,
+  accounts,
+  selectedAccountIDs,
+  busy,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  accounts: Account[];
+  selectedAccountIDs: string[];
+  busy: boolean;
+  onChange: (accountIDs: string[]) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={modalPanelStyle}>
+        <div style={{ fontSize: 12, fontWeight: 760, color: "#111111", overflowWrap: "anywhere" }}>
+          Accounts for {title}
+        </div>
+        <AccountFilterControl
+          accounts={accounts}
+          selectedAccountIDs={selectedAccountIDs}
+          onChange={onChange}
+          label="Accounts"
+          placeholder="Search accounts"
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button className="mango-elevated-action" type="button" disabled={busy} onClick={onSave} style={yesButtonStyle}>{busy ? "Saving" : "Save"}</button>
+          <button className="mango-elevated-action" type="button" disabled={busy} onClick={onCancel} style={noButtonStyle}>Cancel</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
