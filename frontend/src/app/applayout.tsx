@@ -85,6 +85,7 @@ type ExplorerEntityActivatedDetail = {
   informationID?: string;
   suppressLegacyWorkspaceStream?: boolean;
   suppressWorkspaceStream?: boolean;
+  suppressNavigation?: boolean;
 };
 type NodeEditorPopupState = {
   nodeID: string;
@@ -1375,7 +1376,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           focusInformationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
           focusRequestID: Date.now(),
         });
-        if (onNavigate) onNavigate(buildNodeRoute(id));
+        if (onNavigate && detail.suppressNavigation !== true) onNavigate(buildNodeRoute(id));
       }
     };
     window.addEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);

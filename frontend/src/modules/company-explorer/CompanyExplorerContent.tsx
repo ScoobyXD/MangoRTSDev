@@ -1498,10 +1498,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, []);
 
-  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string) => {
+  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => {
     setError("");
     const targetLogicGateID = logicGateID?.trim() ?? "";
     const targetLogicGateTreeID = logicGateTreeID?.trim() ?? "";
+    const targetPriority = typeof priority === "number" && Number.isInteger(priority) && priority >= 1 && priority <= 5 ? priority : undefined;
+    if (targetLogicGateID && targetPriority === undefined) {
+      setError("Priority is required");
+      return;
+    }
     try {
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
@@ -1530,6 +1535,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           logicGateID: targetLogicGateID,
           nodeID: node.node_id,
           mutationOrigin: "matrix",
+          priority: targetPriority,
         });
         dispatchExplorerStore({ type: "replaceNode", node: assignment.node });
         upsertNodeRelationshipGraphNode(apiBase, companyID, assignment.node);
@@ -1874,6 +1880,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       id: cleanID,
       label: row.label,
       selectedTreeID: row.id,
+      suppressNavigation: kind === "node",
       changedAt: Date.now(),
     });
   }, [companyID, scope]);
@@ -2620,8 +2627,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           void createFolder(folderKind, parentFolderID, position);
           setExplorerContextMenu(null);
         }}
-        onCreateNode={(parentFolderID, position, logicGateID, logicGateTreeID) => {
-          void createNodeAtFolder(parentFolderID, position, logicGateID, logicGateTreeID);
+        onCreateNode={(parentFolderID, position, logicGateID, logicGateTreeID, priority) => {
+          void createNodeAtFolder(parentFolderID, position, logicGateID, logicGateTreeID, priority);
           setExplorerContextMenu(null);
         }}
         onCreateLogicGate={(parentFolderID, position, raciRole) => {
