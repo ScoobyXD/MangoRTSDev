@@ -1,10 +1,10 @@
 import React from "react";
-import type { EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
-import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
-import type { ComposeState, HomeViewID, MessageSelectionModifiers, MyLogicGateGroup } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, logicGateTitle, mailboxLabel, nodeTitle } from "./homeUtils";
+import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
+import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, logicGateHasRaciRole, logicGateTitle, mailboxLabel, nodeTitle } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
   accountEmailStyle,
@@ -147,13 +147,30 @@ type MailNodeTarget =
   | { kind: "logic_gate"; logicGateID: string; label: string }
   | { kind: "node"; logicGateID: string; nodeID: string; label: string };
 
-type MailLogicGateNodeGroup = {
-  key: string;
+type MailNodeExplorerScopeView = "me" | "team" | "company";
+
+type MailNodeExplorerUserSummary = {
+  userID: string;
   label: string;
-  logicGates: Array<{
-    logicGate: LogicGateRecord;
-    nodes: NodeRecord[];
-  }>;
+  email?: string;
+};
+
+type MailNodeExplorerGroupSummary = {
+  groupID: string;
+  label: string;
+  users: MailNodeExplorerUserSummary[];
+};
+
+type MailNodeExplorerTreeRow = {
+  id: string;
+  label: string;
+  depth: number;
+  kind: "folder" | "logic_gate" | "node";
+  hasChildren?: boolean;
+  logicGateID?: string;
+  nodeID?: string;
+  parentLogicGateID?: string;
+  systemFolder?: boolean;
 };
 
 export type HomeMailNoticeAction = {
@@ -161,13 +178,15 @@ export type HomeMailNoticeAction = {
   onClick: () => void;
 };
 
-type MailLogicGateNodeItem = {
-  logicGate: LogicGateRecord;
-  nodes: NodeRecord[];
-};
-
-const MAIL_NODE_MENU_WIDTH = 284;
+const MAIL_NODE_MENU_WIDTH = 356;
 const MAIL_NODE_PRIORITY_MENU_WIDTH = 190;
+const MAIL_NODE_RACI_FOLDERS: ReadonlyArray<{ role: LogicGateRaciRole | "other"; label: string }> = [
+  { role: "responsible", label: "Responsible" },
+  { role: "accountable", label: "Accountable" },
+  { role: "consulted", label: "Consulted" },
+  { role: "informed", label: "Informed" },
+  { role: "other", label: "Others" },
+];
 const MAIL_NODE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 1, label: "1  Urgent (<1 hour)" },
   { value: 2, label: "2  By end of day" },
@@ -180,12 +199,12 @@ const mailNodeMenuStyle: React.CSSProperties = {
   position: "fixed",
   width: MAIL_NODE_MENU_WIDTH,
   maxHeight: "min(520px, calc(100vh - 28px))",
-  overflow: "auto",
+  overflow: "hidden",
   zIndex: 50,
-  padding: 8,
+  padding: 0,
   borderRadius: 8,
-  border: "1px solid rgba(148, 163, 184, 0.42)",
-  background: "rgba(248, 250, 252, 0.98)",
+  border: "1px solid rgba(225, 229, 238, 0.96)",
+  background: "linear-gradient(180deg, rgba(249, 250, 252, 0.98) 0%, rgba(242, 244, 248, 0.97) 100%)",
   boxShadow: "10px 14px 34px rgba(15, 23, 42, 0.18), -4px -4px 18px rgba(255, 255, 255, 0.92)",
 };
 
@@ -193,73 +212,121 @@ const mailNodePriorityMenuStyle: React.CSSProperties = {
   ...mailNodeMenuStyle,
   width: MAIL_NODE_PRIORITY_MENU_WIDTH,
   maxHeight: "none",
+  overflow: "visible",
+  padding: 8,
 };
 
-const mailNodeMenuGroupStyle: React.CSSProperties = {
+const mailNodeExplorerHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gap: 2,
+  gap: 8,
+  padding: "9px 9px 10px",
+  borderBottom: "1px solid rgba(226, 232, 240, 0.78)",
+  background: "linear-gradient(180deg, rgba(248, 250, 252, 0.94) 0%, rgba(242, 244, 248, 0.76) 100%)",
+  backdropFilter: "blur(14px) saturate(1.08)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.08)",
 };
 
-const mailNodeFolderButtonStyle = (open: boolean, depth = 0): React.CSSProperties => ({
-  width: "100%",
-  minHeight: 32,
-  display: "grid",
-  gridTemplateColumns: "12px 18px minmax(0, 1fr)",
+const mailNodeExplorerTitleStyle: React.CSSProperties = {
+  minHeight: 30,
+  display: "flex",
   alignItems: "center",
-  gap: 6,
-  border: "1px solid transparent",
-  borderRadius: 6,
-  background: open ? "rgba(255, 151, 8, 0.08)" : "transparent",
-  color: "#0f172a",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 850,
-  padding: `6px 8px 6px ${8 + depth * 16}px`,
-  textAlign: "left",
-  cursor: "pointer",
+  padding: "0 10px",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.9) 100%)",
+  color: "#111111",
+  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.2), -5px -5px 12px rgba(255, 255, 255, 0.82), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+  fontSize: 11.5,
+  fontWeight: 760,
   letterSpacing: 0,
-});
+};
 
-const mailNodeDisclosureStyle = (open: boolean): React.CSSProperties => ({
-  width: 12,
-  height: 12,
+const mailNodeScopeTabsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 5,
+};
+
+const mailNodeScopeTabStyle = (active: boolean): React.CSSProperties => ({
+  minWidth: 0,
+  height: 30,
   display: "grid",
   placeItems: "center",
-  color: "#475569",
-  transform: open ? "rotate(90deg)" : "rotate(0deg)",
-  transition: "transform 120ms ease",
-  fontSize: 11,
-  fontWeight: 900,
-  lineHeight: 1,
-});
-
-const mailNodeMenuGateButtonStyle = (selected: boolean, depth = 0, hasChildren = false, open = false): React.CSSProperties => ({
-  width: "100%",
-  minHeight: 32,
-  display: "grid",
-  gridTemplateColumns: hasChildren ? "12px 18px minmax(0, 1fr)" : "18px minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 8,
-  border: `1px solid ${selected ? "rgba(8, 145, 178, 0.46)" : "transparent"}`,
-  borderRadius: 6,
-  background: selected ? "rgba(8, 145, 178, 0.08)" : "transparent",
-  color: "#0f172a",
+  border: `1px solid ${active ? "rgba(100, 116, 139, 0.76)" : "rgba(226, 232, 240, 0.94)"}`,
+  borderRadius: 7,
+  background: active
+    ? "linear-gradient(145deg, rgba(226, 232, 240, 0.96) 0%, rgba(241, 245, 249, 0.92) 100%)"
+    : "linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.88) 100%)",
+  color: "#111827",
+  boxShadow: active ? "inset 1px 1px 2px rgba(148, 163, 184, 0.2)" : "2px 2px 7px rgba(174, 174, 192, 0.16), -2px -2px 7px rgba(255, 255, 255, 0.7)",
   font: "inherit",
-  fontSize: 12,
-  fontWeight: 800,
-  padding: `6px 8px 6px ${8 + depth * 16}px`,
-  textAlign: "left",
-  cursor: "pointer",
+  fontSize: 11.5,
+  fontWeight: 760,
   letterSpacing: 0,
-  boxShadow: open && !selected ? "inset 0 0 0 1px rgba(148, 163, 184, 0.18)" : undefined,
+  cursor: active ? "default" : "pointer",
 });
 
-const mailNodeMenuNodeButtonStyle = (selected: boolean, depth = 0): React.CSSProperties => ({
-  ...mailNodeMenuGateButtonStyle(selected, depth),
-  minHeight: 28,
+const mailNodeSearchShellStyle: React.CSSProperties = {
+  position: "relative",
+  display: "block",
+  minWidth: 0,
+  height: 32,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
+  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+};
+
+const mailNodeSearchInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  boxSizing: "border-box",
+  border: "none",
+  borderRadius: 9,
+  background: "transparent",
+  color: "#111827",
   fontSize: 11,
-  fontWeight: 700,
-  color: "#334155",
+  fontWeight: 560,
+  padding: "0 30px 0 10px",
+  outline: "none",
+};
+
+const mailNodeSearchIconStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 9,
+  top: 9,
+  color: "#475569",
+  pointerEvents: "none",
+};
+
+const mailNodeRowsStyle: React.CSSProperties = {
+  maxHeight: "min(375px, calc(100vh - 170px))",
+  overflowY: "auto",
+  overflowX: "hidden",
+  scrollbarGutter: "stable",
+};
+
+const mailNodeExplorerRowStyle = (row: MailNodeExplorerTreeRow, selected: boolean, disabled: boolean): React.CSSProperties => ({
+  width: "100%",
+  minHeight: row.kind === "node" ? 28 : 31,
+  display: "grid",
+  gridTemplateColumns: "15px 18px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  border: "none",
+  borderBottom: "1px solid rgba(226, 232, 240, 0.72)",
+  background: selected
+    ? "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.64) 46%, rgba(247, 240, 255, 0.72))"
+    : "transparent",
+  color: disabled ? "rgba(51, 65, 85, 0.48)" : "#1f2937",
+  font: "inherit",
+  fontSize: row.kind === "node" ? 11.5 : 12,
+  fontWeight: row.kind === "folder" ? 760 : row.kind === "logic_gate" ? 760 : 620,
+  padding: `3px 8px 3px ${10 + row.depth * 17}px`,
+  textAlign: "left",
+  cursor: disabled ? "default" : "pointer",
+  letterSpacing: 0,
+  opacity: disabled ? 0.72 : 1,
 });
 
 const mailNodeMenuLabelStyle: React.CSSProperties = {
@@ -269,11 +336,39 @@ const mailNodeMenuLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const mailNodeDisclosureSlotStyle: React.CSSProperties = {
+  width: 15,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  color: "#475569",
+};
+
 const mailNodeEmptyStyle: React.CSSProperties = {
   padding: "10px 8px",
   color: "rgba(15, 23, 42, 0.58)",
   fontSize: 11,
   fontWeight: 700,
+};
+
+const mailNodePriorityButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 30,
+  display: "grid",
+  gridTemplateColumns: "24px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid transparent",
+  borderRadius: 6,
+  background: "transparent",
+  color: "#0f172a",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 760,
+  padding: "6px 8px",
+  textAlign: "left",
+  cursor: "pointer",
+  letterSpacing: 0,
 };
 
 function isSameMailNodeTarget(left: MailNodeTarget | null, right: MailNodeTarget): boolean {
@@ -301,53 +396,430 @@ function mailNodePriorityMenuPosition(mainLeft: number, mainTop: number): { left
   return mailNodeMenuPosition(left, mainTop, MAIL_NODE_PRIORITY_MENU_WIDTH);
 }
 
-function buildMailLogicGateNodeGroups(myGroups: MyLogicGateGroup[], nodes: NodeRecord[]): MailLogicGateNodeGroup[] {
+function cleanMailNodeID(value: string | null | undefined): string {
+  return value?.trim() ?? "";
+}
+
+function compareMailNodeLabels(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function mailNodeCompanyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
+  return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID.trim() || "Unknown user";
+}
+
+function mailNodeCompanyGroupLabel(group: Pick<CompanyUserGroup, "group_id" | "name"> | null | undefined, fallbackGroupID: string): string {
+  return group?.name?.trim() || fallbackGroupID.trim() || "Team";
+}
+
+function mailNodeUserSummaryForID(userID: string, usersByID: Map<string, CompanyUser>, members: CompanyUserGroupMember[]): MailNodeExplorerUserSummary {
+  const cleanUserID = cleanMailNodeID(userID);
+  const user = usersByID.get(cleanUserID);
+  const member = members.find((item) => cleanMailNodeID(item.user_id) === cleanUserID);
+  return {
+    userID: cleanUserID,
+    label: mailNodeCompanyUserLabel(user ?? null, member?.user_display_name?.trim() || member?.user_email?.trim() || cleanUserID),
+    email: user?.email?.trim() || member?.user_email?.trim() || undefined,
+  };
+}
+
+function sortMailNodeUsers(users: MailNodeExplorerUserSummary[]): MailNodeExplorerUserSummary[] {
+  return [...users].sort((left, right) => (
+    compareMailNodeLabels(left.label, right.label)
+    || compareMailNodeLabels(left.email ?? "", right.email ?? "")
+    || left.userID.localeCompare(right.userID)
+  ));
+}
+
+function sortMailNodeLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
+  return [...logicGates].sort((left, right) => (
+    compareMailNodeLabels(logicGateTitle(left), logicGateTitle(right))
+    || (left.created_timestamp ?? "").localeCompare(right.created_timestamp ?? "")
+    || left.logic_gate_id.localeCompare(right.logic_gate_id)
+  ));
+}
+
+function sortMailNodeRecords(nodes: NodeRecord[]): NodeRecord[] {
+  return [...nodes].sort((left, right) => (
+    compareMailNodeLabels(nodeTitle(left), nodeTitle(right))
+    || (left.created_timestamp ?? "").localeCompare(right.created_timestamp ?? "")
+    || left.node_id.localeCompare(right.node_id)
+  ));
+}
+
+function mailNodeTeamMemberUserIDs(members: CompanyUserGroupMember[], currentUserID: string): Set<string> {
+  const cleanCurrentUserID = cleanMailNodeID(currentUserID);
+  const ownGroupIDs = new Set(
+    members
+      .filter((member) => cleanMailNodeID(member.user_id) === cleanCurrentUserID)
+      .map((member) => cleanMailNodeID(member.group_id))
+      .filter(Boolean),
+  );
+  const userIDs = new Set<string>();
+  if (cleanCurrentUserID) userIDs.add(cleanCurrentUserID);
+  for (const member of members) {
+    if (!ownGroupIDs.has(cleanMailNodeID(member.group_id))) continue;
+    const userID = cleanMailNodeID(member.user_id);
+    if (userID) userIDs.add(userID);
+  }
+  return userIDs;
+}
+
+function mailNodeUsersByGroup(input: {
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+}): MailNodeExplorerGroupSummary[] {
+  const usersByID = new Map(input.companyUsers.map((user) => [cleanMailNodeID(user.user_id), user]));
+  const membersByGroupID = new Map<string, CompanyUserGroupMember[]>();
+  for (const member of input.companyUserGroupMembers) {
+    const groupID = cleanMailNodeID(member.group_id);
+    if (!groupID) continue;
+    const bucket = membersByGroupID.get(groupID) ?? [];
+    bucket.push(member);
+    membersByGroupID.set(groupID, bucket);
+  }
+  return [...input.companyUserGroups]
+    .sort((left, right) => (
+      compareMailNodeLabels(mailNodeCompanyGroupLabel(left, left.group_id), mailNodeCompanyGroupLabel(right, right.group_id))
+      || left.group_id.localeCompare(right.group_id)
+    ))
+    .map((group) => {
+      const userIDs = Array.from(new Set((membersByGroupID.get(cleanMailNodeID(group.group_id)) ?? [])
+        .map((member) => cleanMailNodeID(member.user_id))
+        .filter(Boolean)));
+      return {
+        groupID: cleanMailNodeID(group.group_id),
+        label: mailNodeCompanyGroupLabel(group, group.group_id),
+        users: sortMailNodeUsers(userIDs.map((userID) => mailNodeUserSummaryForID(userID, usersByID, input.companyUserGroupMembers))),
+      };
+    });
+}
+
+function mailNodeTargetForRow(row: MailNodeExplorerTreeRow): MailNodeTarget | null {
+  if (row.kind === "logic_gate" && row.logicGateID) {
+    return { kind: "logic_gate", logicGateID: row.logicGateID, label: row.label };
+  }
+  if (row.kind === "node" && row.nodeID && row.parentLogicGateID) {
+    return { kind: "node", logicGateID: row.parentLogicGateID, nodeID: row.nodeID, label: row.label };
+  }
+  return null;
+}
+
+function mailNodeRowIsOpen(expanded: Set<string>, rowID: string): boolean {
+  return expanded.has("*") || expanded.has(rowID);
+}
+
+function isMailNodeRaciRole(role: LogicGateRaciRole | "other"): role is LogicGateRaciRole {
+  return role === "responsible" || role === "accountable" || role === "consulted" || role === "informed";
+}
+
+function buildMailNodeRaciRows(input: {
+  prefix: string;
+  depth: number;
+  expanded: Set<string>;
+  userID: string;
+  logicGates: LogicGateRecord[];
+  nodes: NodeRecord[];
+}): MailNodeExplorerTreeRow[] {
+  const rows: MailNodeExplorerTreeRow[] = [];
+  const cleanUserID = cleanMailNodeID(input.userID);
   const nodesByLogicGateID = new Map<string, NodeRecord[]>();
-  for (const node of nodes) {
+  const nodesWithoutLogicGate: NodeRecord[] = [];
+  for (const node of input.nodes) {
+    const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
+    if (logicGateIDs.length === 0) {
+      if (!cleanUserID || cleanMailNodeID(node.assignee_user_id) === cleanUserID) nodesWithoutLogicGate.push(node);
+      continue;
+    }
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const bucket = nodesByLogicGateID.get(logicGateID) ?? [];
       bucket.push(node);
       nodesByLogicGateID.set(logicGateID, bucket);
     }
   }
-  return myGroups
-    .map((group) => ({
-      key: group.key,
+  for (const folder of MAIL_NODE_RACI_FOLDERS) {
+    const roleRowID = `${input.prefix}:raci:${folder.role}`;
+    let roleLogicGates: LogicGateRecord[] = [];
+    if (isMailNodeRaciRole(folder.role)) {
+      const role = folder.role;
+      roleLogicGates = sortMailNodeLogicGates(input.logicGates.filter((logicGate) => logicGateHasRaciRole(logicGate, role, cleanUserID)));
+    }
+    const otherNodes = folder.role === "other" ? sortMailNodeRecords(nodesWithoutLogicGate) : [];
+    rows.push({
+      id: roleRowID,
+      label: folder.label,
+      depth: input.depth,
+      kind: "folder",
+      hasChildren: roleLogicGates.length > 0 || folder.role === "other",
+      systemFolder: true,
+    });
+    if (!mailNodeRowIsOpen(input.expanded, roleRowID)) continue;
+    for (const logicGate of roleLogicGates) {
+      const logicGateRowID = `${roleRowID}:logic-gate:${logicGate.logic_gate_id}`;
+      const gateNodes = sortMailNodeRecords(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? []);
+      rows.push({
+        id: logicGateRowID,
+        label: logicGateTitle(logicGate),
+        depth: input.depth + 1,
+        kind: "logic_gate",
+        logicGateID: logicGate.logic_gate_id,
+        hasChildren: gateNodes.length > 0,
+      });
+      if (!mailNodeRowIsOpen(input.expanded, logicGateRowID)) continue;
+      for (const node of gateNodes) {
+        rows.push({
+          id: `${logicGateRowID}:node:${node.node_id}`,
+          label: nodeTitle(node),
+          depth: input.depth + 2,
+          kind: "node",
+          nodeID: node.node_id,
+          parentLogicGateID: logicGate.logic_gate_id,
+          hasChildren: false,
+        });
+      }
+    }
+    if (folder.role === "other") {
+      const noLogicGateRowID = `${roleRowID}:no-logic-gate`;
+      rows.push({
+        id: noLogicGateRowID,
+        label: "No Logic Gate",
+        depth: input.depth + 1,
+        kind: "folder",
+        hasChildren: otherNodes.length > 0,
+        systemFolder: false,
+      });
+      if (mailNodeRowIsOpen(input.expanded, noLogicGateRowID)) {
+        for (const node of otherNodes) {
+          rows.push({
+            id: `${noLogicGateRowID}:node:${node.node_id}`,
+            label: nodeTitle(node),
+            depth: input.depth + 2,
+            kind: "node",
+            nodeID: node.node_id,
+            hasChildren: false,
+          });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+function buildMailNodeTeamRows(input: {
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  expanded: Set<string>;
+  logicGates: LogicGateRecord[];
+  nodes: NodeRecord[];
+}): MailNodeExplorerTreeRow[] {
+  const usersByID = new Map(input.companyUsers.map((user) => [cleanMailNodeID(user.user_id), user]));
+  const teamUserIDs = Array.from(mailNodeTeamMemberUserIDs(input.companyUserGroupMembers, input.currentUserID));
+  const teamUsers = sortMailNodeUsers(teamUserIDs.map((userID) => mailNodeUserSummaryForID(userID, usersByID, input.companyUserGroupMembers)));
+  const rows: MailNodeExplorerTreeRow[] = [];
+  for (const user of teamUsers) {
+    const userRowID = `team:user:${user.userID}`;
+    rows.push({
+      id: userRowID,
+      label: user.label,
+      depth: 0,
+      kind: "folder",
+      hasChildren: true,
+      systemFolder: true,
+    });
+    if (mailNodeRowIsOpen(input.expanded, userRowID)) {
+      rows.push(...buildMailNodeRaciRows({
+        prefix: userRowID,
+        depth: 1,
+        expanded: input.expanded,
+        userID: user.userID,
+        logicGates: input.logicGates,
+        nodes: input.nodes,
+      }));
+    }
+  }
+  return rows;
+}
+
+function buildMailNodeCompanyRows(input: {
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  expanded: Set<string>;
+  logicGates: LogicGateRecord[];
+  nodes: NodeRecord[];
+}): MailNodeExplorerTreeRow[] {
+  const groups = mailNodeUsersByGroup(input);
+  const rows: MailNodeExplorerTreeRow[] = [];
+  for (const group of groups) {
+    const groupRowID = `company:group:${group.groupID}`;
+    rows.push({
+      id: groupRowID,
       label: group.label,
-      logicGates: group.logicGates.map((logicGate): MailLogicGateNodeItem => ({
-        logicGate,
-        nodes: [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])]
-          .sort((a, b) => nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" }) || a.node_id.localeCompare(b.node_id)),
-      })),
-    }))
-    .filter((group) => group.logicGates.length > 0);
+      depth: 0,
+      kind: "folder",
+      hasChildren: group.users.length > 0,
+      systemFolder: true,
+    });
+    if (!mailNodeRowIsOpen(input.expanded, groupRowID)) continue;
+    for (const user of group.users) {
+      const userRowID = `${groupRowID}:user:${user.userID}`;
+      rows.push({
+        id: userRowID,
+        label: user.label,
+        depth: 1,
+        kind: "folder",
+        hasChildren: true,
+        systemFolder: true,
+      });
+      if (mailNodeRowIsOpen(input.expanded, userRowID)) {
+        rows.push(...buildMailNodeRaciRows({
+          prefix: userRowID,
+          depth: 2,
+          expanded: input.expanded,
+          userID: user.userID,
+          logicGates: input.logicGates,
+          nodes: input.nodes,
+        }));
+      }
+    }
+  }
+  return rows;
+}
+
+function buildMailNodeExplorerRows(input: {
+  scopeView: MailNodeExplorerScopeView;
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  expanded: Set<string>;
+  logicGates: LogicGateRecord[];
+  nodes: NodeRecord[];
+}): MailNodeExplorerTreeRow[] {
+  if (input.scopeView === "team") return buildMailNodeTeamRows(input);
+  if (input.scopeView === "company") return buildMailNodeCompanyRows(input);
+  return buildMailNodeRaciRows({
+    prefix: "me",
+    depth: 0,
+    expanded: input.expanded,
+    userID: input.currentUserID,
+    logicGates: input.logicGates,
+    nodes: input.nodes,
+  });
+}
+
+function buildMailNodeDefaultExpanded(input: {
+  scopeView: MailNodeExplorerScopeView;
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  logicGates: LogicGateRecord[];
+}): Set<string> {
+  const expanded = new Set<string>();
+  if (input.scopeView === "me") {
+    for (const folder of MAIL_NODE_RACI_FOLDERS) {
+      const roleRowID = `me:raci:${folder.role}`;
+      expanded.add(roleRowID);
+      if (folder.role === "other") {
+        expanded.add(`${roleRowID}:no-logic-gate`);
+        continue;
+      }
+      for (const logicGate of input.logicGates) {
+        if (logicGateHasRaciRole(logicGate, folder.role, input.currentUserID)) {
+          expanded.add(`${roleRowID}:logic-gate:${logicGate.logic_gate_id}`);
+        }
+      }
+    }
+    return expanded;
+  }
+  if (input.scopeView === "team") {
+    const usersByID = new Map(input.companyUsers.map((user) => [cleanMailNodeID(user.user_id), user]));
+    const teamUserIDs = Array.from(mailNodeTeamMemberUserIDs(input.companyUserGroupMembers, input.currentUserID));
+    for (const user of sortMailNodeUsers(teamUserIDs.map((userID) => mailNodeUserSummaryForID(userID, usersByID, input.companyUserGroupMembers)))) {
+      expanded.add(`team:user:${user.userID}`);
+    }
+    return expanded;
+  }
+  for (const group of mailNodeUsersByGroup(input)) expanded.add(`company:group:${group.groupID}`);
+  return expanded;
+}
+
+function filterMailNodeExplorerRowsForSearch(rows: MailNodeExplorerTreeRow[], rawQuery: string): MailNodeExplorerTreeRow[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return rows;
+  const included = new Set<string>();
+  const includeDescendants = (startIndex: number) => {
+    const parent = rows[startIndex];
+    included.add(parent.id);
+    for (let index = startIndex + 1; index < rows.length; index += 1) {
+      if (rows[index].depth <= parent.depth) break;
+      included.add(rows[index].id);
+    }
+  };
+  const includeAncestors = (startIndex: number) => {
+    let depth = rows[startIndex].depth;
+    for (let index = startIndex - 1; index >= 0 && depth > 0; index -= 1) {
+      const row = rows[index];
+      if (row.depth >= depth) continue;
+      included.add(row.id);
+      depth = row.depth;
+    }
+  };
+  rows.forEach((row, index) => {
+    const text = [row.label, row.logicGateID, row.nodeID, row.parentLogicGateID].join(" ").toLowerCase();
+    if (!text.includes(query)) return;
+    included.add(row.id);
+    includeAncestors(index);
+    if (row.kind === "folder") includeDescendants(index);
+  });
+  return rows.filter((row) => included.has(row.id));
 }
 
 function MailNodeAttachmentMenu({
   menu,
-  groups,
+  currentUserID,
+  companyUsers,
+  companyUserGroups,
+  companyUserGroupMembers,
+  logicGates,
+  nodes,
   selectedTarget,
   onClose,
   onSelectTarget,
   onPickPriority,
 }: {
   menu: MailNodeMenuState;
-  groups: MailLogicGateNodeGroup[];
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  logicGates: LogicGateRecord[];
+  nodes: NodeRecord[];
   selectedTarget: MailNodeTarget | null;
   onClose: () => void;
-  onSelectTarget: (target: MailNodeTarget) => void;
+  onSelectTarget: (target: MailNodeTarget | null) => void;
   onPickPriority: (target: MailNodeTarget, priority: number) => void;
 }) {
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const priorityRef = React.useRef<HTMLDivElement | null>(null);
-  const [rootOpen, setRootOpen] = React.useState(true);
-  const [openGroupKeys, setOpenGroupKeys] = React.useState<Set<string>>(new Set());
-  const [openLogicGateIDs, setOpenLogicGateIDs] = React.useState<Set<string>>(new Set());
+  const [scopeView, setScopeView] = React.useState<MailNodeExplorerScopeView>("me");
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
+  const [explorerSearchQuery, setExplorerSearchQuery] = React.useState("");
   React.useEffect(() => {
-    setRootOpen(true);
-    setOpenGroupKeys(new Set(groups.map((group) => group.key)));
-    setOpenLogicGateIDs(new Set(groups.flatMap((group) => group.logicGates.map((item) => item.logicGate.logic_gate_id))));
-  }, [groups, menu.messageID]);
+    setScopeView("me");
+    setExplorerSearchQuery("");
+    setExpanded(buildMailNodeDefaultExpanded({
+      scopeView: "me",
+      currentUserID,
+      companyUsers,
+      companyUserGroups,
+      companyUserGroupMembers,
+      logicGates,
+    }));
+  }, [companyUserGroupMembers, companyUserGroups, companyUsers, currentUserID, logicGates, menu.messageID]);
   React.useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as globalThis.Node | null;
@@ -367,88 +839,124 @@ function MailNodeAttachmentMenu({
 
   const mainPosition = mailNodeMenuPosition(menu.x, menu.y, MAIL_NODE_MENU_WIDTH);
   const priorityPosition = mailNodePriorityMenuPosition(mainPosition.left, mainPosition.top);
-  const toggleGroup = (groupKey: string) => {
-    setOpenGroupKeys((current) => {
+  const buildInput = React.useMemo(() => ({
+    scopeView,
+    currentUserID,
+    companyUsers,
+    companyUserGroups,
+    companyUserGroupMembers,
+    logicGates,
+    nodes,
+  }), [companyUserGroupMembers, companyUserGroups, companyUsers, currentUserID, logicGates, nodes, scopeView]);
+  const treeRows = React.useMemo(() => buildMailNodeExplorerRows({ ...buildInput, expanded }), [buildInput, expanded]);
+  const searchRows = React.useMemo(() => buildMailNodeExplorerRows({ ...buildInput, expanded: new Set(["*"]) }), [buildInput]);
+  const visibleRows = React.useMemo(() => (
+    explorerSearchQuery.trim()
+      ? filterMailNodeExplorerRowsForSearch(searchRows, explorerSearchQuery)
+      : treeRows
+  ), [explorerSearchQuery, searchRows, treeRows]);
+  const toggleRow = (rowID: string) => {
+    setExpanded((current) => {
       const next = new Set(current);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
+      if (next.has(rowID)) next.delete(rowID);
+      else next.add(rowID);
       return next;
     });
   };
-  const toggleLogicGate = (logicGateID: string) => {
-    setOpenLogicGateIDs((current) => {
-      const next = new Set(current);
-      if (next.has(logicGateID)) next.delete(logicGateID);
-      else next.add(logicGateID);
-      return next;
-    });
+  const selectScopeView = (nextScopeView: MailNodeExplorerScopeView) => {
+    setScopeView(nextScopeView);
+    setExplorerSearchQuery("");
+    onSelectTarget(null);
+    setExpanded(buildMailNodeDefaultExpanded({
+      scopeView: nextScopeView,
+      currentUserID,
+      companyUsers,
+      companyUserGroups,
+      companyUserGroupMembers,
+      logicGates,
+    }));
+  };
+  const selectRow = (row: MailNodeExplorerTreeRow) => {
+    if (row.kind === "folder") {
+      if (row.hasChildren) toggleRow(row.id);
+      return;
+    }
+    const target = mailNodeTargetForRow(row);
+    if (target) onSelectTarget(target);
   };
   return (
     <>
       <div ref={menuRef} style={{ ...mailNodeMenuStyle, left: mainPosition.left, top: mainPosition.top }}>
-        {groups.length === 0 ? (
-          <div style={mailNodeEmptyStyle}>No My Logic Gates</div>
-        ) : (
-          <div style={mailNodeMenuGroupStyle}>
-            <button type="button" style={mailNodeFolderButtonStyle(rootOpen)} onClick={() => setRootOpen((open) => !open)}>
-              <span aria-hidden="true" style={mailNodeDisclosureStyle(rootOpen)}>&gt;</span>
-              <ExplorerRowIcon kind="folder" />
-              <span style={mailNodeMenuLabelStyle}>My Logic Gates</span>
-            </button>
-            {rootOpen && groups.map((group) => {
-              const groupOpen = openGroupKeys.has(group.key);
-              return (
-                <div key={group.key} style={mailNodeMenuGroupStyle}>
-                  <button type="button" style={mailNodeFolderButtonStyle(groupOpen, 1)} onClick={() => toggleGroup(group.key)}>
-                    <span aria-hidden="true" style={mailNodeDisclosureStyle(groupOpen)}>&gt;</span>
-                    <ExplorerRowIcon kind="folder" />
-                    <span style={mailNodeMenuLabelStyle}>{group.label}</span>
-                  </button>
-                  {groupOpen && group.logicGates.map(({ logicGate, nodes: gateNodes }) => {
-                    const gateOpen = openLogicGateIDs.has(logicGate.logic_gate_id);
-                    const gateTarget: MailNodeTarget = { kind: "logic_gate", logicGateID: logicGate.logic_gate_id, label: logicGateTitle(logicGate) };
-                    return (
-                      <div key={logicGate.logic_gate_id} style={mailNodeMenuGroupStyle}>
-                        <button
-                          type="button"
-                          style={mailNodeMenuGateButtonStyle(isSameMailNodeTarget(selectedTarget, gateTarget), 2, true, gateOpen)}
-                          onClick={() => onSelectTarget(gateTarget)}
-                        >
-                          <span
-                            aria-hidden="true"
-                            style={mailNodeDisclosureStyle(gateOpen)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleLogicGate(logicGate.logic_gate_id);
-                            }}
-                          >
-                            &gt;
-                          </span>
-                          <ExplorerRowIcon kind="logic_gate" />
-                          <span style={mailNodeMenuLabelStyle}>{gateTarget.label}</span>
-                        </button>
-                        {gateOpen && gateNodes.map((node) => {
-                          const nodeTarget: MailNodeTarget = { kind: "node", logicGateID: logicGate.logic_gate_id, nodeID: node.node_id, label: nodeTitle(node) };
-                          return (
-                            <button
-                              key={`${logicGate.logic_gate_id}:${node.node_id}`}
-                              type="button"
-                              style={mailNodeMenuNodeButtonStyle(isSameMailNodeTarget(selectedTarget, nodeTarget), 3)}
-                              onClick={() => onSelectTarget(nodeTarget)}
-                            >
-                              <ExplorerRowIcon kind="node" />
-                              <span style={mailNodeMenuLabelStyle}>{nodeTarget.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+        <div style={mailNodeExplorerHeaderStyle}>
+          <div style={mailNodeExplorerTitleStyle}>Explorer</div>
+          <div style={mailNodeScopeTabsStyle}>
+            {(["me", "team", "company"] as const).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                aria-pressed={scopeView === scope}
+                style={mailNodeScopeTabStyle(scopeView === scope)}
+                onClick={() => selectScopeView(scope)}
+              >
+                {scope === "me" ? "Me" : scope === "team" ? "Team" : "Company"}
+              </button>
+            ))}
           </div>
-        )}
+          <label style={mailNodeSearchShellStyle}>
+            <input
+              aria-label="Search Explorer"
+              placeholder="Search Explorer"
+              value={explorerSearchQuery}
+              onChange={(event) => setExplorerSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setExplorerSearchQuery("");
+                }
+              }}
+              style={mailNodeSearchInputStyle}
+            />
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={mailNodeSearchIconStyle}>
+              <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </label>
+        </div>
+        <div style={mailNodeRowsStyle}>
+          {visibleRows.length === 0 ? (
+            <div style={mailNodeEmptyStyle}>{explorerSearchQuery.trim() ? "No matches" : "No Logic Gates"}</div>
+          ) : visibleRows.map((row) => {
+            const rowTarget = mailNodeTargetForRow(row);
+            const selected = rowTarget ? isSameMailNodeTarget(selectedTarget, rowTarget) : false;
+            const rowOpen = mailNodeRowIsOpen(expanded, row.id);
+            const disabled = row.kind === "node" && !row.parentLogicGateID;
+            return (
+              <button
+                key={row.id}
+                type="button"
+                aria-expanded={row.hasChildren ? rowOpen : undefined}
+                disabled={disabled}
+                style={mailNodeExplorerRowStyle(row, selected, disabled)}
+                title={disabled ? "This node is not inside a Logic Gate" : row.label}
+                onClick={() => selectRow(row)}
+              >
+                <span
+                  aria-hidden="true"
+                  style={mailNodeDisclosureSlotStyle}
+                  onClick={(event) => {
+                    if (!row.hasChildren) return;
+                    event.stopPropagation();
+                    toggleRow(row.id);
+                  }}
+                >
+                  {row.hasChildren ? <ExplorerDisclosureIcon open={rowOpen} color="#475569" /> : null}
+                </span>
+                <ExplorerRowIcon kind={row.kind} mangoDefaultFolder={row.kind === "folder" && row.systemFolder} />
+                <span style={mailNodeMenuLabelStyle}>{row.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       {selectedTarget && (
         <div ref={priorityRef} style={{ ...mailNodePriorityMenuStyle, left: priorityPosition.left, top: priorityPosition.top }}>
@@ -456,7 +964,7 @@ function MailNodeAttachmentMenu({
             <button
               key={option.value}
               type="button"
-              style={mailNodeMenuGateButtonStyle(false)}
+              style={mailNodePriorityButtonStyle}
               onClick={() => onPickPriority(selectedTarget, option.value)}
             >
               <span style={{ width: 18, textAlign: "center" }}>{option.value}</span>
@@ -488,7 +996,11 @@ export function HomeMailWorkspace({
   mailboxCounts,
   messageListRef,
   messages,
-  myLogicGateGroups,
+  currentUserID,
+  companyUsers,
+  companyUserGroups,
+  companyUserGroupMembers,
+  logicGates,
   nodes,
   notice,
   noticeAction,
@@ -549,7 +1061,11 @@ export function HomeMailWorkspace({
   mailboxCounts: TriageMailboxCounts;
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
-  myLogicGateGroups: MyLogicGateGroup[];
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  logicGates: LogicGateRecord[];
   nodes: NodeRecord[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
@@ -602,7 +1118,6 @@ export function HomeMailWorkspace({
   const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
   const archiveVisualFrameRef = React.useRef<number | null>(null);
   const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
-  const mailNodeGroups = React.useMemo(() => buildMailLogicGateNodeGroups(myLogicGateGroups, nodes), [myLogicGateGroups, nodes]);
 
   const closeNodeMenu = React.useCallback(() => {
     setNodeMenu(null);
@@ -1024,7 +1539,12 @@ export function HomeMailWorkspace({
       {nodeMenu && (
         <MailNodeAttachmentMenu
           menu={nodeMenu}
-          groups={mailNodeGroups}
+          currentUserID={currentUserID}
+          companyUsers={companyUsers}
+          companyUserGroups={companyUserGroups}
+          companyUserGroupMembers={companyUserGroupMembers}
+          logicGates={logicGates}
+          nodes={nodes}
           selectedTarget={nodeMenuTarget}
           onClose={closeNodeMenu}
           onSelectTarget={setNodeMenuTarget}
