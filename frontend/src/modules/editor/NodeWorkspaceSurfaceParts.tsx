@@ -2341,6 +2341,7 @@ type AttachedEmailOrganizerPaneProps = {
   ruleColor: string;
   selectedMessageID?: string;
   onSelectMessage?: (messageID: string) => void;
+  onClearSelectedMessage?: () => void;
   onError: (message: string) => void;
 };
 
@@ -2561,71 +2562,105 @@ const AttachedEmailThreadCard: React.FC<{
         event.dataTransfer.dropEffect = "move";
       }}
       onDrop={onDropOnEmail}
-      style={{ minWidth: 0, display: "grid", gap: collapsed ? 0 : 7 }}
+      style={{ minWidth: 0, display: "grid", gap: selected || collapsed ? 0 : 7 }}
     >
       <div
-        role="button"
-        tabIndex={0}
-        title={email.subject}
-        onClick={onSelect}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          onSelect();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") onSelect();
-        }}
         style={{
           minWidth: 0,
-          display: "grid",
-          gap: 5,
+          overflow: "hidden",
           border: selected ? "1px solid transparent" : `1px solid ${strokeColor}`,
           borderRadius: 10,
           background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
           color: surfaceText,
-          cursor: draggable ? "grab" : "pointer",
-          padding: "9px 10px",
           boxShadow: selected ? "0 9px 22px rgba(15,23,42,0.12), 0 0 14px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 8px rgba(174,174,192,0.15), -2px -2px 8px rgba(255,255,255,0.76), inset 1px 1px 0 rgba(255,255,255,0.86)",
         }}
       >
-        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
-          <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
-          <button
-            type="button"
-            disabled={!editable}
-            title="Reply"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (editable) onReply(email.messageID);
-            }}
-            style={replyButtonStyle(editable)}
-          >
-            <ChatIcon color={accent} />
-            Reply
-          </button>
-          {hasThreadChildren && (
+        <div
+          role="button"
+          tabIndex={0}
+          title={selected ? "Collapse email" : email.subject}
+          onClick={onSelect}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            onSelect();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onSelect();
+          }}
+          style={{
+            minWidth: 0,
+            display: "grid",
+            gap: 5,
+            color: surfaceText,
+            cursor: selected ? "pointer" : draggable ? "grab" : "pointer",
+            padding: selected ? "9px 10px 6px" : "9px 10px",
+          }}
+        >
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
             <button
               type="button"
-              title={collapsed ? "Expand email thread" : "Collapse email thread"}
+              disabled={!editable}
+              title="Reply"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onToggleCollapsed();
+                if (editable) onReply(email.messageID);
               }}
-              style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+              style={replyButtonStyle(editable)}
             >
-              <TinyDisclosureIcon open={!collapsed} color={accent} />
+              <ChatIcon color={accent} />
+              Reply
             </button>
-          )}
+            {hasThreadChildren && (
+              <button
+                type="button"
+                title={collapsed ? "Expand email thread" : "Collapse email thread"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onToggleCollapsed();
+                }}
+                style={{ width: 22, height: 22, border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+              >
+                <TinyDisclosureIcon open={!collapsed} color={accent} />
+              </button>
+            )}
+          </div>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 800 }}>
+            {email.from || "Unknown sender"}
+          </div>
+          {email.snippet && <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.72)", fontSize: 10.5, fontWeight: 650 }}>{email.snippet}</div>}
         </div>
-        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 800 }}>
-          {email.from || "Unknown sender"}
-        </div>
-        {email.snippet && <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.72)", fontSize: 10.5, fontWeight: 650 }}>{email.snippet}</div>}
+        {selected && (
+          <div
+            className="mango-email-inline-detail"
+            style={{
+              minWidth: 0,
+              height: "clamp(360px, 68vh, 720px)",
+              display: "grid",
+              overflow: "hidden",
+              padding: "0 10px 10px",
+              boxSizing: "border-box",
+            }}
+          >
+            <EmailConversationPane
+              messageID={email.messageID}
+              companyID={companyID}
+              editable={editable}
+              accent={accent}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              ruleColor={ruleColor}
+              initialReplyTargetMessageID={replyTargetMessageID}
+              inlineExpansion
+              onError={onError}
+            />
+          </div>
+        )}
       </div>
-      {!collapsed && (loading || loadError || hasThreadChildren) && (
+      {!selected && !collapsed && (loading || loadError || hasThreadChildren) && (
         <div style={{ minWidth: 0, display: "grid", gap: 6, marginLeft: 22, paddingLeft: 10, borderLeft: `2px solid ${ruleColor}` }}>
           {loading && <div style={{ color: accent, fontSize: 10.5, fontWeight: 850, padding: "2px 0" }}>Loading thread</div>}
           {loadError && <div style={{ color: "#991b1b", fontSize: 10.5, fontWeight: 800 }}>{loadError}</div>}
@@ -2667,39 +2702,11 @@ const AttachedEmailThreadCard: React.FC<{
           })}
         </div>
       )}
-      {selected && (
-        <div
-          className="mango-email-inline-detail"
-          style={{
-            minWidth: 0,
-            height: "clamp(360px, 68vh, 720px)",
-            display: "grid",
-            marginLeft: hasThreadChildren ? 22 : 0,
-            border: "1px solid transparent",
-            borderRadius: 12,
-            background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-            boxShadow: "0 12px 28px rgba(15,23,42,0.12), 0 0 18px rgba(6,182,212,0.14), inset 1px 1px 0 rgba(255,255,255,0.84)",
-            padding: 8,
-          }}
-        >
-          <EmailConversationPane
-            messageID={email.messageID}
-            companyID={companyID}
-            editable={editable}
-            accent={accent}
-            surfaceText={surfaceText}
-            strokeColor={strokeColor}
-            ruleColor={ruleColor}
-            initialReplyTargetMessageID={replyTargetMessageID}
-            onError={onError}
-          />
-        </div>
-      )}
     </div>
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, onSelectMessage, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, onSelectMessage, onClearSelectedMessage, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -2896,6 +2903,22 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     onSelectMessage?.(cleanMessageID);
   }, [onSelectMessage]);
 
+  const clearSelectedMessage = useCallback(() => {
+    setLocalSelectedMessageID("");
+    setReplyComposer(null);
+    onClearSelectedMessage?.();
+  }, [onClearSelectedMessage]);
+
+  const toggleSelectedMessage = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID) return;
+    if (activeSelectedMessageID === cleanMessageID) {
+      clearSelectedMessage();
+      return;
+    }
+    selectMessage(cleanMessageID);
+  }, [activeSelectedMessageID, clearSelectedMessage, selectMessage]);
+
   const renderEmailCards = (folderID: string) => (emailsByFolderID.get(folderID) ?? []).map((email) => (
     <AttachedEmailThreadCard
       key={email.messageID}
@@ -2911,7 +2934,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       draggable={editable}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
       onToggleCollapsed={() => toggleThread(email.messageID)}
-      onSelect={() => selectMessage(email.messageID)}
+      onSelect={() => toggleSelectedMessage(email.messageID)}
       onReply={(targetMessageID) => {
         selectMessage(email.messageID);
         setReplyComposer({ rootMessageID: email.messageID, targetMessageID });
@@ -3160,6 +3183,7 @@ type EmailConversationPaneProps = {
   ruleColor: string;
   activeSelection?: EmailActiveSelection | null;
   initialReplyTargetMessageID?: string;
+  inlineExpansion?: boolean;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (quote: string) => void;
@@ -3384,6 +3408,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   ruleColor,
   activeSelection,
   initialReplyTargetMessageID,
+  inlineExpansion = false,
   onError,
   onSelectionChatRequest,
   onSelectionNodeRequest,
@@ -3645,18 +3670,22 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
   }, []);
 
+  const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
+
   return (
     <>
-      <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 8, padding: 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
-        <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
-          {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
-          {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
-          {message && (
-            <div style={{ minWidth: 0, overflowWrap: "anywhere", padding: "0 4px", color: surfaceText, fontSize: 13.5, fontWeight: 900 }}>
-              {message.subject || "(no subject)"}
-            </div>
-          )}
-        </div>
+      <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto", gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+        {showConversationHeader && (
+          <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
+            {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
+            {error && <div style={{ border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.86)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 850 }}>{error}</div>}
+            {!inlineExpansion && message && (
+              <div style={{ minWidth: 0, overflowWrap: "anywhere", padding: "0 4px", color: surfaceText, fontSize: 13.5, fontWeight: 900 }}>
+                {message.subject || "(no subject)"}
+              </div>
+            )}
+          </div>
+        )}
         {message ? (
           <div
             ref={bodyRef}
@@ -3666,13 +3695,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             style={{
               position: "relative",
               minHeight: 0,
-              border: `1px solid ${strokeColor}`,
-              borderRadius: 8,
+              border: inlineExpansion ? 0 : `1px solid ${strokeColor}`,
+              borderRadius: inlineExpansion ? 0 : 8,
               background: "#ffffff",
               overflow: "auto",
               color: "#111827",
-              padding: "0 14px",
-              boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)",
+              padding: inlineExpansion ? "0 10px" : "0 14px",
+              boxShadow: inlineExpansion ? "none" : "inset 1px 1px 0 rgba(255,255,255,0.86)",
               ["--editor-document-scroll-accent" as string]: accent,
               ["--editor-document-scroll-track" as string]: "transparent",
             }}
@@ -3741,8 +3770,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       style={{
                         width: "100%",
                         height: bodyFrameHeights[threadMessage.id || `${index}`] ?? 420,
-                        border: `1px solid ${strokeColor}`,
-                        borderRadius: 8,
+                        border: inlineExpansion ? 0 : `1px solid ${strokeColor}`,
+                        borderRadius: inlineExpansion ? 0 : 8,
                         background: "#ffffff",
                         boxSizing: "border-box",
                       }}

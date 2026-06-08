@@ -1255,6 +1255,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID("");
   }, []);
 
+  const clearBlockEmail = useCallback((blockID: string) => {
+    const cleanBlockID = blockID.trim();
+    if (!cleanBlockID) return;
+    setSelectedEmailIDsByBlock((current) => {
+      if (!current[cleanBlockID]) return current;
+      const next = { ...current };
+      delete next[cleanBlockID];
+      return next;
+    });
+  }, []);
+
   const openAttachedEmailFromHeader = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return;
@@ -1732,6 +1743,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               ruleColor={ruleColor}
               selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
               onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
+              onClearSelectedMessage={() => clearBlockEmail(block.id)}
               onError={onError}
             />
           );
