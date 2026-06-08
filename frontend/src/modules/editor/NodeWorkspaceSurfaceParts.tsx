@@ -3668,16 +3668,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const updateBodyFrameHeight = useCallback((messageIDForFrame: string, iframe: HTMLIFrameElement) => {
     try {
-      const documentHeight = Math.max(
-        iframe.contentDocument?.body?.scrollHeight ?? 0,
-        iframe.contentDocument?.documentElement?.scrollHeight ?? 0,
-      );
-      const nextHeight = Math.min(1400, Math.max(190, documentHeight + 4));
+      const bodyHeight = iframe.contentDocument?.body?.scrollHeight ?? 0;
+      const documentHeight = iframe.contentDocument?.documentElement?.scrollHeight ?? 0;
+      const measuredHeight = inlineExpansion ? bodyHeight : Math.max(bodyHeight, documentHeight);
+      const nextHeight = Math.min(1400, Math.max(inlineExpansion ? 44 : 190, measuredHeight + (inlineExpansion ? 2 : 4)));
       setBodyFrameHeights((current) => current[messageIDForFrame] === nextHeight ? current : { ...current, [messageIDForFrame]: nextHeight });
     } catch {
-      setBodyFrameHeights((current) => current[messageIDForFrame] ? current : { ...current, [messageIDForFrame]: 420 });
+      setBodyFrameHeights((current) => current[messageIDForFrame] ? current : { ...current, [messageIDForFrame]: inlineExpansion ? 64 : 420 });
     }
-  }, []);
+  }, [inlineExpansion]);
 
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
 
@@ -3729,9 +3728,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   style={{
                     position: "relative",
                     display: "grid",
-                    gap: 5,
+                    gap: inlineExpansion ? 3 : 5,
                     margin: "0 -8px",
-                    padding: hideInlineMessageChrome ? "2px 8px 16px" : "14px 8px 16px",
+                    padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "8px 8px 9px" : "14px 8px 16px",
                     borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
                     borderRadius: 10,
                     background: "transparent",
@@ -3779,11 +3778,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     <iframe
                       title={`Email body ${index + 1}`}
                       sandbox="allow-same-origin"
-                      srcDoc={messageDocument(threadMessage.body || threadMessage.snippet || "")}
+                      srcDoc={messageDocument(threadMessage.body || threadMessage.snippet || "", inlineExpansion)}
                       onLoad={(event) => updateBodyFrameHeight(threadMessage.id || `${index}`, event.currentTarget)}
                       style={{
                         width: "100%",
-                        height: bodyFrameHeights[threadMessage.id || `${index}`] ?? 420,
+                        height: bodyFrameHeights[threadMessage.id || `${index}`] ?? (inlineExpansion ? 64 : 420),
                         border: inlineExpansion ? 0 : `1px solid ${strokeColor}`,
                         borderRadius: inlineExpansion ? 0 : 8,
                         background: "#ffffff",
@@ -4515,10 +4514,11 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, c
     </div>
   );
 };
-function messageDocument(body: string): string {
+function messageDocument(body: string, compact = false): string {
   const value = body.trim();
   const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}</style></head><body>${content}</body></html>`;
+  const padding = compact ? "6px 0 2px" : "14px";
+  return `<!doctype html><html><head><meta charset="utf-8"><style>html{margin:0;padding:0}body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:${padding};overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0}p{margin-top:0}</style></head><body>${content}</body></html>`;
 }
 
 function escapeHTML(value: string): string {
