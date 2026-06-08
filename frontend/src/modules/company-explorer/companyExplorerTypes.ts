@@ -62,6 +62,9 @@ export type CompanyExplorerContextMenuState = {
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;
   createPosition: number;
+  createNodeLogicGateID: string;
+  createNodeLogicGateTreeID: string;
+  createLogicGateRaciRole: LogicGateRaciRole | "";
   canCreateBothFolderTypes: boolean;
   canCreateFolder: boolean;
   canCreateNode: boolean;

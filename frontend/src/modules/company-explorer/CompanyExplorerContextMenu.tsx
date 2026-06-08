@@ -15,8 +15,8 @@ type CompanyExplorerContextMenuProps = {
   buttonStyle: React.CSSProperties;
   onClose: () => void;
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => void;
-  onCreateNode: (parentFolderID: string, position?: number) => void;
-  onCreateLogicGate: (parentFolderID: string, position?: number) => void;
+  onCreateNode: (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string) => void;
+  onCreateLogicGate: (parentFolderID: string, position?: number, raciRole?: string) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
   onPinTarget: (target: ExplorerPinTarget) => void;
   onShareFolder: (target: CompanyExplorerShareTarget) => void;
@@ -52,12 +52,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
             </button>
           )}
           {menu.canCreateNode && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID)}>
               Create Node
             </button>
           )}
           {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole)}>
               Create Logic Gate
             </button>
           )}
@@ -70,12 +70,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
             </button>
           )}
           {menu.canCreateNode && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID)}>
               Create Node
             </button>
           )}
           {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole)}>
               Create Logic Gate
             </button>
           )}
