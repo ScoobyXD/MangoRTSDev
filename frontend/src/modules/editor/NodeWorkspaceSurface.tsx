@@ -34,7 +34,6 @@ import {
   ChatPane,
   DeleteTextBlockConfirmationModal,
   EmailCountDropdown,
-  EmailDetailModal,
   EmailPickerModal,
   NodeTextBlockEditor,
   TextBlockActionsMenu,
@@ -326,7 +325,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
-  const [selectedEmailID, setSelectedEmailID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
   const [logicGateOptions, setLogicGateOptions] = useState<LogicGateRecord[]>([]);
@@ -1257,6 +1255,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID("");
   }, []);
 
+  const openAttachedEmailFromHeader = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID) return;
+    const focusedBlockStillExists = blocks.some((block) => block.id === focusedTextBlockID);
+    const targetBlockID = focusedBlockStillExists ? focusedTextBlockID : blocks[0]?.id ?? "";
+    if (!targetBlockID) {
+      onError("Create a text box to show attached email.");
+      return;
+    }
+    openBlockEmail(targetBlockID, cleanMessageID);
+  }, [blocks, focusedTextBlockID, onError, openBlockEmail]);
+
   const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
     if (localWidth !== undefined) return clampTextSidePaneWidth(localWidth, maxWidth);
@@ -1527,7 +1537,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             accent={accent}
             surfaceText={surfaceText}
             align="left"
-            onOpenEmail={setSelectedEmailID}
+            onOpenEmail={openAttachedEmailFromHeader}
           />
           {canEdit && (
             <button
@@ -1720,10 +1730,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               surfaceText={surfaceText}
               strokeColor={strokeColor}
               ruleColor={ruleColor}
-              onOpenEmail={(messageID) => {
-                openBlockEmail(block.id, messageID);
-                setSelectedEmailID(messageID);
-              }}
+              selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
+              onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
               onError={onError}
             />
           );
@@ -1959,19 +1967,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           strokeColor={strokeColor}
           onClose={() => setEmailPickerTargetBlockID(null)}
           onAttach={(message) => { void attachEmail(messageAttachmentPayload(message), emailPickerTargetBlockID ?? ""); }}
-        />
-      )}
-      {selectedEmailID && (
-        <EmailDetailModal
-          messageID={selectedEmailID}
-          companyID={companyID}
-          editable={canEdit}
-          accent={accent}
-          surfaceText={surfaceText}
-          panelBackground={panelBackground}
-          strokeColor={strokeColor}
-          onError={onError}
-          onClose={() => setSelectedEmailID("")}
         />
       )}
       {canEdit && deleteTextBlockConfirmation && (
