@@ -3553,7 +3553,11 @@ export function HomePage({
             mailboxCounts={mailboxCounts}
             messageListRef={messageListRef}
             messages={messages}
-            myLogicGateGroups={myLogicGateGroups}
+            currentUserID={currentUserID}
+            companyUsers={companyUsers}
+            companyUserGroups={companyUserGroups}
+            companyUserGroupMembers={companyUserGroupMembers}
+            logicGates={logicGates}
             nodes={nodes}
             notice={notice}
             noticeAction={mailNoticeAction}
