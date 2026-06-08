@@ -83,6 +83,8 @@ import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listCompanyUsers } from "../communications/communicationsApi";
+import { useCompanyAccounts } from "../accounts/AccountFilterControl";
+import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
 import {
   createEditorCollaborationClientID,
   editorCollaborationLabel,
@@ -229,6 +231,16 @@ function findCompanyUserByAssigneeDraft(users: CompanyUser[], draft: string): Co
   }) ?? null;
 }
 
+function mergeAccountLists(primary: Account[], secondary: Account[]): Account[] {
+  const byID = new Map<string, Account>();
+  for (const account of [...primary, ...secondary]) {
+    const accountID = account.account_id.trim();
+    if (!accountID || byID.has(accountID)) continue;
+    byID.set(accountID, { ...account, account_id: accountID });
+  }
+  return Array.from(byID.values());
+}
+
 function isNodeWorkspaceHeaderInformationType(type: string): boolean {
   return type === EDITOR_TEXT_BLOCK_TYPE || type === EDITOR_TEXT_BLOCK_CHAT_TYPE || type === EDITOR_ATTACHED_EMAIL_TYPE;
 }
@@ -263,6 +275,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
   const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
+  const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
   const [logicGateRaciAssignments, setLogicGateRaciAssignments] = useState<LogicGateRaciAssignment[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
@@ -318,6 +331,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const nodeContentChangesRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
+  const { accounts: companyAccounts } = useCompanyAccounts(companyID, linkedEntityKind === "node" && hasLinkedDocument);
+  const nodeAccountOptions = useMemo(() => mergeAccountLists(companyAccounts, nodeAccounts), [companyAccounts, nodeAccounts]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -1036,10 +1051,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
     setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
     setNodeLogicGateIDs(result.node.logic_gate_ids ?? []);
+    setNodeAccounts(result.node.accounts ?? nodeAccounts);
     syncNodeAssignee(result.node.assignee_user_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodePriorityDraft, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodePriorityDraft, syncNodeAssignee]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedEntityCanEdit) return;
@@ -1054,6 +1070,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor(updated.status_color ?? "");
       setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
+      setNodeAccounts(updated.accounts ?? nodeAccounts);
       syncNodeAssignee(updated.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
@@ -1061,7 +1078,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, requestJSON, syncNodeAssignee]);
 
   const commitNodePriorityDraft = useCallback((draft: string) => {
     const raw = draft.trim();
@@ -1108,6 +1125,39 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     void updateNodePresetPatch({ assignee_user_id: value });
   }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
+  const commitNodeAccountIDs = useCallback((accountIDs: string[]) => {
+    if (!linkedEntityCanEdit) return;
+    if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
+    const cleanAccountIDs = Array.from(new Set(accountIDs.map((id) => id.trim()).filter(Boolean)));
+    const accountByID = new Map(nodeAccountOptions.map((account) => [account.account_id, account]));
+    const previousAccounts = nodeAccounts;
+    const optimisticAccounts = cleanAccountIDs.map((accountID) => accountByID.get(accountID) ?? {
+      company_id: companyID,
+      account_id: accountID,
+      name: accountID,
+      created_timestamp: "",
+    });
+    setNodeAccounts(optimisticAccounts);
+    setError("");
+    void setNodeAccountAssignments({
+      companyID,
+      nodeID: linkedNodeID,
+      accountIDs: cleanAccountIDs,
+    }).then((result) => {
+      const savedAccounts = (result.node?.accounts ?? optimisticAccounts).map((account) => ({ ...account }));
+      setNodeAccounts(savedAccounts);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      const currentNode = getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes.find((node) => node.node_id === linkedNodeID);
+      if (currentNode) {
+        upsertNodeRelationshipGraphNode(apiBase, companyID, { ...currentNode, accounts: savedAccounts });
+      }
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    }).catch((err) => {
+      setNodeAccounts(previousAccounts);
+      setError(err instanceof Error ? err.message : "failed_to_update_node_accounts");
+    });
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccountOptions, nodeAccounts]);
+
   const commitNodeStatus = useCallback((statusKey: string, statusLabel: string, statusColor: string) => {
     if (!linkedEntityCanEdit) return;
     if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
@@ -1138,6 +1188,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
       setNodeLogicGateIDs(result.node.logic_gate_ids ?? nodeLogicGateIDs);
+      setNodeAccounts(result.node.accounts ?? nodeAccounts);
       syncNodeAssignee(result.node.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
@@ -1145,7 +1196,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_update_node_status");
     });
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeLogicGateIDs, nodePriorityDraft, syncNodeAssignee, updateNodePresetPatch]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, syncNodeAssignee, updateNodePresetPatch]);
 
   const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
@@ -1632,6 +1683,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor(node.status_color ?? "");
       setNodePriorityDraft(node.priority == null ? "" : String(node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(node.due_date));
+      setNodeAccounts(node.accounts ?? []);
       syncNodeAssignee(node.assignee_user_id);
     };
     syncTitleFromGraph();
@@ -1680,6 +1732,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
+      setNodeAccounts([]);
       syncNodeAssignee("");
       setLogicGateRaciAssignments([]);
       documentDraftRef.current = "";
@@ -1706,6 +1759,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeContentChanges([]);
     setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
+    setNodeAccounts([]);
     (async () => {
       try {
         setError("");
@@ -1724,6 +1778,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
           setNodeLogicGateIDs([]);
+          setNodeAccounts([]);
           syncNodeAssignee("");
           setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
           setNodeWorkspaceProjections([]);
@@ -1773,6 +1828,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
+        setNodeAccounts(details.node.accounts ?? []);
         syncNodeAssignee(details.node.assignee_user_id);
         setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
@@ -1957,6 +2013,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               priorityDraft: nodePriorityDraft,
               priorityRequirementError: nodePriorityRequirementError,
               assigneeDraft: nodeAssigneeDraft,
+              accounts: nodeAccounts,
+              accountOptions: nodeAccountOptions,
               dueDateDraft: nodeDueDateDraft,
             } : null}
             logicGateRaciFields={linkedEntityKind === "logic_gate" ? {
@@ -1977,6 +2035,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodePriorityDraft={commitNodePriorityDraft}
             onSetNodeAssigneeDraft={setNodeAssigneeDraft}
             onCommitNodeAssigneeDraft={commitNodeAssigneeDraft}
+            onCommitNodeAccountIDs={commitNodeAccountIDs}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
             onAddLogicGateRaciUser={addLogicGateRaciUser}
