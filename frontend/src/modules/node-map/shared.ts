@@ -1,5 +1,6 @@
 import React from "react";
 import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
+import type { Account } from "../accounts/accountsApi.js";
 
 // Reusable line-divider style for panel sections in node-map side UI.
 export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
@@ -26,6 +27,7 @@ export type NodeRecord = ResourceAccessFields & {
   assignee_name?: string | null;
   assignee_email?: string | null;
   logic_gate_ids?: string[];
+  accounts?: Account[];
   created_timestamp: string;
 };
 

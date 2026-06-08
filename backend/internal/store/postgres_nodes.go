@@ -35,9 +35,10 @@ n.assignee_user_id::text,
 nullif(assignee.display_name, '') as assignee_name,
 nullif(assignee.email, '') as assignee_email,
 n.created_timestamp,
-coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json`
+coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json,
+coalesce(account_snapshot.accounts_json, '[]')::text as accounts_json`
 
-const nodeStatusJoin = `
+const nodeStatusJoinBase = `
 left join lateral (
   select assignment.*
   from node_logic_gate_assignments assignment
@@ -60,6 +61,8 @@ left join lateral (
       and assignment.node_id = n.node_id
   ) gate
 ) node_logic_gates on true`
+
+var nodeStatusJoin = nodeStatusJoinBase + "\n" + postgresAccountSnapshotsForNodeLateralSQL("n")
 
 const postgresNodeMapWindowCTE = `
 with recursive folder_scope as (
@@ -122,6 +125,7 @@ func scanNode(row interface {
 	var assigneeName sql.NullString
 	var assigneeEmail sql.NullString
 	var logicGateIDsJSON sql.NullString
+	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.NodeID,
@@ -135,6 +139,7 @@ func scanNode(row interface {
 		&assigneeEmail,
 		&item.CreatedTimestamp,
 		&logicGateIDsJSON,
+		&accountsJSON,
 	)
 	if status.Valid {
 		item.Status = &status.String
@@ -164,6 +169,7 @@ func scanNode(row interface {
 			item.LogicGateIDs = cleanStringList(ids)
 		}
 	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err
 }
 
@@ -322,6 +328,7 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context
 	}
 	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}
+	item.Accounts = []domain.Account{}
 	if syncProjection {
 		if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, companyID, item.NodeID); err != nil {
 			return domain.Node{}, err

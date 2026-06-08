@@ -29,6 +29,14 @@ export const HeaderProjectManagementIcon: React.FC<{ color?: string }> = ({ colo
   </svg>
 );
 
+export const HeaderAccountManagerIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <rect x="2.2" y="4.1" width="5.5" height="9.1" rx="1.1" fill="none" stroke={color} strokeWidth="1.25" />
+    <rect x="8.3" y="2.2" width="5.5" height="11" rx="1.1" fill="none" stroke={color} strokeWidth="1.25" />
+    <path d="M3.9 6.5h2.1M3.9 8.6h2.1M3.9 10.7h2.1M10.1 5h2.1M10.1 7.1h2.1M10.1 9.2h2.1M10.1 11.3h2.1" fill="none" stroke={color} strokeWidth="1.05" strokeLinecap="round" />
+  </svg>
+);
+
 export const HeaderLogicGateArenaIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />

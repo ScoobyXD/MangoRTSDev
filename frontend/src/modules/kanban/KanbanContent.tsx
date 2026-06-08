@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
+import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import { listCompanyUsers } from "../communications/communicationsApi";
@@ -40,7 +42,7 @@ import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls, type ArenaGroupMe
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
 import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
-import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
+import { KanbanAccountAssignmentModal, KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
 import {
   applyKanbanProjectionEnvelope,
   beginKanbanProjectionFallback,
@@ -230,6 +232,13 @@ type KanbanArenaCellContextMenuState = {
   rowKey: string;
 };
 
+type KanbanAccountAssignmentState = {
+  cardID: string;
+  nodeID: string;
+  nodeTitle: string;
+  accountIDs: string[];
+};
+
 function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "board_id">, fallbackBoardID: string): string {
   return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
 }
@@ -260,6 +269,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [activeLogicGateLabel, setActiveLogicGateLabel] = useState(() => initialArenaLogicGateID ? humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate") : "");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [contentSearchQuery, setContentSearchQuery] = useState("");
+  const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
   const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
   const [arenaGroupMenuOpen, setArenaGroupMenuOpen] = useState<ArenaGroupMenuID | null>(null);
   const [arenaXGroupBy, setArenaXGroupBy] = useState<KanbanGroupField>("status");
@@ -297,6 +307,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
+  const [accountAssignmentModal, setAccountAssignmentModal] = useState<KanbanAccountAssignmentState | null>(null);
+  const [accountAssignmentBusy, setAccountAssignmentBusy] = useState(false);
   const [kanbanProjectionSnapshotBoardID, setKanbanProjectionSnapshotBoardID] = useState("");
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
@@ -321,6 +333,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const arenaViewLoadKeyRef = useRef("");
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const { accounts: companyAccounts } = useCompanyAccounts(companyID);
 
   const usesLocalColumnLayout = useCallback((targetBoardID: string): boolean => {
     const cleanBoardID = targetBoardID.trim();
@@ -383,6 +396,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     })();
     return () => { cancelled = true; };
   }, [companyID]);
+
+  useEffect(() => {
+    setKanbanAccountFilterIDs((current) => current.filter((accountID) => companyAccounts.some((account) => account.account_id === accountID)));
+  }, [companyAccounts]);
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : KANBAN_PANEL_BACKGROUND;
@@ -579,12 +596,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         assignee_user_id: card.assignee_user_id ?? existing?.assignee_user_id ?? null,
         assignee_name: card.assignee_name ?? existing?.assignee_name ?? null,
         assignee_email: card.assignee_email ?? existing?.assignee_email ?? null,
+        accounts: card.accounts ?? existing?.accounts ?? [],
       });
     }
     return nodeByID;
   }, [apiBase, cards, columns, companyID, nodeGraphRevision]);
   const normalizedContentSearchQuery = contentSearchQuery.trim().toLowerCase();
-  const searchedCards = useMemo(() => {
+  const contentMatchedCards = useMemo(() => {
     if (!normalizedContentSearchQuery) return cards;
     const columnTitleByID = new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()]));
     const matchingColumnIDs = new Set(orderedColumns
@@ -605,6 +623,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         card.assignee_user_id ?? "",
         card.assignee_name ?? "",
         card.assignee_email ?? "",
+        ...(card.accounts ?? []).flatMap((account) => [account.name, account.account_id]),
         columnTitleByID.get(card.column_id) ?? "",
         node?.title ?? "",
         node?.status ?? "",
@@ -614,10 +633,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         node?.assignee_user_id ?? "",
         node?.assignee_name ?? "",
         node?.assignee_email ?? "",
+        ...(node?.accounts ?? []).flatMap((account) => [account.name, account.account_id]),
       ];
       return fields.some((field) => field.trim().toLowerCase().includes(normalizedContentSearchQuery));
     });
   }, [arenaNodeByID, cards, normalizedContentSearchQuery, orderedColumns]);
+  const searchedCards = useMemo(() => (
+    kanbanAccountFilterIDs.length > 0
+      ? contentMatchedCards.filter((card) => entityMatchesAccountFilter(card.accounts?.length ? card : arenaNodeByID.get(card.node_id), kanbanAccountFilterIDs))
+      : contentMatchedCards
+  ), [arenaNodeByID, contentMatchedCards, kanbanAccountFilterIDs]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(searchedCards), [searchedCards]);
   const arenaGroupedBoard = useMemo(() => buildKanbanGroupedBoardLayout({
     columns: orderedColumns,
@@ -2207,6 +2232,57 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     ? selectedCardsByID.get(arenaCellContextSelectionIDs.includes(selectionAnchorCardID) ? selectionAnchorCardID : arenaCellContextSelectionIDs[0]) ?? null
     : null;
 
+  const openAccountAssignment = useCallback((card: KanbanCard) => {
+    const node = arenaNodeByID.get(card.node_id);
+    setCardContextMenu(null);
+    setArenaCellContextMenu(null);
+    setAccountAssignmentModal({
+      cardID: card.card_id,
+      nodeID: card.node_id,
+      nodeTitle: card.node_title,
+      accountIDs: (card.accounts?.length ? card.accounts : node?.accounts ?? []).map((account) => account.account_id),
+    });
+  }, [arenaNodeByID]);
+
+  const saveAccountAssignment = useCallback(async () => {
+    const modal = accountAssignmentModal;
+    if (!modal || accountAssignmentBusy) return;
+    const accountIDs = Array.from(new Set(modal.accountIDs.map((id) => id.trim()).filter(Boolean)));
+    const nextAccounts = companyAccounts.filter((account) => accountIDs.includes(account.account_id));
+    const previousCards = cardsRef.current;
+    const previousNode = arenaNodeByID.get(modal.nodeID);
+    setAccountAssignmentBusy(true);
+    applyCards((current) => current.map((card) => (
+      card.node_id === modal.nodeID ? { ...card, accounts: nextAccounts } : card
+    )));
+    if (previousNode) {
+      upsertNodeRelationshipGraphNode(apiBase, companyID, { ...previousNode, accounts: nextAccounts });
+    }
+    try {
+      const result = await setNodeAccountAssignments({
+        companyID,
+        nodeID: modal.nodeID,
+        accountIDs,
+      });
+      const savedNode = result.node as NodeRecord | undefined;
+      const savedAccounts = savedNode?.accounts ?? nextAccounts;
+      applyCards((current) => current.map((card) => (
+        card.node_id === modal.nodeID ? { ...card, accounts: savedAccounts } : card
+      )));
+      if (savedNode?.node_id) {
+        upsertNodeRelationshipGraphNode(apiBase, companyID, savedNode);
+        invalidateNodeRecordStoreCaches(apiBase, companyID, savedNode.node_id);
+      }
+      setAccountAssignmentModal(null);
+    } catch (assignmentError) {
+      applyCards(previousCards);
+      if (previousNode) upsertNodeRelationshipGraphNode(apiBase, companyID, previousNode);
+      setError(assignmentError instanceof Error ? assignmentError.message : "Account assignment failed");
+    } finally {
+      setAccountAssignmentBusy(false);
+    }
+  }, [accountAssignmentBusy, accountAssignmentModal, apiBase, applyCards, arenaNodeByID, companyAccounts, companyID]);
+
   const selectArenaYGroupBy = useCallback((field: KanbanGroupField) => {
     setArenaYGroupBy(field);
     setArenaYSortDirection(getDefaultKanbanYAxisSortDirection(field));
@@ -2276,6 +2352,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+        <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+          <AccountFilterControl
+            accounts={companyAccounts}
+            selectedAccountIDs={kanbanAccountFilterIDs}
+            onChange={setKanbanAccountFilterIDs}
+            label="Accounts"
+            placeholder="Filter accounts"
+            compact
+            style={{ maxWidth: "min(420px, 100%)" }}
+          />
+        </div>
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} onCellContextMenu={(columnKey, rowKey, event) => {
           setCardContextMenu(null);
@@ -2341,6 +2428,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           requestCreateNodeInColumn(columnID, anchor);
         }}
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
+        onAssignAccounts={openAccountAssignment}
         onRenameNode={requestNodeRename}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
@@ -2374,6 +2462,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               </button>
               <button type="button" style={contextMenuButtonStyle} onClick={() => requestNodeRename(arenaCellContextCard)} {...contextMenuHoverHandlers}>
                 Rename node
+              </button>
+              <button type="button" style={contextMenuButtonStyle} onClick={() => openAccountAssignment(arenaCellContextCard)} {...contextMenuHoverHandlers}>
+                Assign accounts
               </button>
               <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => requestNodeDeleteFromCards(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
                 {arenaCellContextSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
@@ -2420,6 +2511,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           allowHorizontalOverflow={arenaMode}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
+        />
+      )}
+      {accountAssignmentModal && (
+        <KanbanAccountAssignmentModal
+          title={accountAssignmentModal.nodeTitle}
+          accounts={companyAccounts}
+          selectedAccountIDs={accountAssignmentModal.accountIDs}
+          busy={accountAssignmentBusy}
+          onChange={(accountIDs) => setAccountAssignmentModal((current) => current ? { ...current, accountIDs } : current)}
+          onSave={() => void saveAccountAssignment()}
+          onCancel={() => setAccountAssignmentModal(null)}
         />
       )}
       <KanbanDeleteConfirmations

@@ -313,6 +313,7 @@ function materializeProjectionNode(row: RacioMatrixProjectionRow, previous: Node
     assignee_user_id: row.assignee_user_id ?? null,
     assignee_name: row.assignee_display_name ?? null,
     assignee_email: row.assignee_email ?? null,
+    accounts: (row.accounts ?? previous?.accounts ?? []).map((account) => ({ ...account })),
     logic_gate_ids: logicGateID ? [logicGateID] : [],
     created_timestamp: row.resource_created_timestamp || previous?.created_timestamp || "",
     effective_access_level: previous?.effective_access_level ?? "edit",

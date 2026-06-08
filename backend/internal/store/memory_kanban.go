@@ -131,6 +131,7 @@ func (r *MemoryRepo) withKanbanCardProjectionFieldsLocked(card domain.KanbanCard
 		card.AssigneeUserID = cloneStringPointer(node.AssigneeUserID)
 		card.AssigneeName = cloneStringPointer(node.AssigneeName)
 		card.AssigneeEmail = cloneStringPointer(node.AssigneeEmail)
+		card.Accounts = r.accountSnapshotsForNodeLocked(card.CompanyID, card.NodeID)
 		if card.AssigneeUserID != nil {
 			if user, ok := r.users[*card.AssigneeUserID]; ok {
 				if strings.TrimSpace(user.DisplayName) != "" {
@@ -167,6 +168,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 		AssigneeUserID:             cloneStringPointer(card.AssigneeUserID),
 		AssigneeDisplayName:        cloneStringPointer(card.AssigneeName),
 		AssigneeEmail:              cloneStringPointer(card.AssigneeEmail),
+		Accounts:                   cloneAccountSnapshots(card.Accounts),
 		CreatedTimestamp:           card.CreatedTimestamp,
 		UpdatedTimestamp:           card.ProjectionUpdatedTimestamp,
 		BoardID:                    card.BoardID,

@@ -284,6 +284,7 @@ function asNodeRecord(candidate: unknown): NodeRecord | null {
     priority: typeof value.priority === "number" || value.priority === null ? value.priority : undefined,
     assignee_user_id: typeof value.assignee_user_id === "string" || value.assignee_user_id === null ? value.assignee_user_id : undefined,
     logic_gate_ids: Array.isArray(value.logic_gate_ids) ? value.logic_gate_ids.filter((item): item is string => typeof item === "string") : undefined,
+    accounts: Array.isArray(value.accounts) ? value.accounts.filter((item) => item && typeof item === "object" && typeof item.account_id === "string" && typeof item.name === "string") : undefined,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
   };
 }

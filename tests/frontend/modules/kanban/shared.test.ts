@@ -252,6 +252,7 @@ test("default Y-axis grouping sort puts urgent priority first and due dates earl
   assert.equal(getDefaultKanbanYAxisSortDirection("due_date"), "asc");
   assert.equal(getDefaultKanbanYAxisSortDirection("status"), "asc");
   assert.equal(getDefaultKanbanYAxisSortDirection("person"), "asc");
+  assert.equal(getDefaultKanbanYAxisSortDirection("account"), "asc");
 });
 
 test("grouped board layout keeps no due date after real due dates", () => {
@@ -275,6 +276,32 @@ test("grouped board layout keeps no due date after real due dates", () => {
   });
 
   assert.deepEqual(layout.rows.map((row) => row.label), ["2026-05-09", "2026-06-01", "No due date"]);
+});
+
+test("grouped board layout duplicates cards across account buckets", () => {
+  const columns = [column({ column_id: "todo", title: "Todo", position: 1000 })];
+  const cards = [
+    card({
+      card_id: "shared",
+      node_id: "node-shared",
+      accounts: [
+        { company_id: "c", account_id: "costco", name: "Costco", created_timestamp: "2026-06-01T00:00:00.000Z" },
+        { company_id: "c", account_id: "tj-maxx", name: "TJ Maxx", created_timestamp: "2026-06-01T00:00:00.000Z" },
+      ],
+    }),
+    card({ card_id: "none", node_id: "node-none", position: 2000 }),
+  ];
+  const layout = buildKanbanGroupedBoardLayout({
+    columns,
+    cards,
+    xGroupBy: "status",
+    yGroupBy: "account",
+    nodeByID: new Map(),
+    userByID: new Map(),
+  });
+
+  assert.deepEqual(layout.rows.map((row) => row.label), ["Costco", "TJ Maxx", "No account"]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["shared"], ["shared"], ["none"]]);
 });
 
 test("grouped board drop assignment resolves status and person cell properties", () => {
@@ -488,5 +515,5 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
 test("kanban visual contract preserves column title casing and frame-header clearance", () => {
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
-  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date"]);
+  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date", "account"]);
 });

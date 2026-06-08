@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
+import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl.js";
+import { entityMatchesAccountFilter } from "../accounts/accountsApi.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
@@ -477,6 +479,14 @@ function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: N
   return displayRows;
 }
 
+function timelineRowMatchesAccountFilter(row: ProjectManagementTimelineRow, selectedAccountIDs: string[], nodeByID: Map<string, NodeRecord>): boolean {
+  if (selectedAccountIDs.length === 0) return true;
+  if (entityMatchesAccountFilter(row, selectedAccountIDs)) return true;
+  if (row.resource_type !== "node") return false;
+  const nodeID = nodeIDForTimelineRow(row);
+  return entityMatchesAccountFilter(nodeByID.get(nodeID), selectedAccountIDs);
+}
+
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({
   accent,
   widgetId,
@@ -501,6 +511,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
   const [explorerPerspective, setExplorerPerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
+  const [timelineAccountFilterIDs, setTimelineAccountFilterIDs] = useState<string[]>([]);
   const [explorerExpanded, setExplorerExpanded] = useState<Set<string>>(() => new Set());
   const [timelineExpandedGateIDs, setTimelineExpandedGateIDs] = useState<Set<string>>(() => new Set());
   const [verticalSplit, setVerticalSplit] = useState(54);
@@ -508,6 +519,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
+  const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
 
   const loadWorkspacePanel = useCallback(async () => {
     const cleanCompanyID = companyID.trim();
@@ -617,6 +629,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   useEffect(() => {
     timelineRowsRef.current = timelineRows;
   }, [timelineRows]);
+
+  useEffect(() => {
+    setTimelineAccountFilterIDs((current) => current.filter((accountID) => timelineAccounts.some((account) => account.account_id === accountID)));
+  }, [timelineAccounts]);
 
   const weekDays = useMemo(() => Array.from({ length: WEEK_DAY_COUNT }, (_, index) => addDays(weekAnchor, index)), [weekAnchor]);
   const timelineTargetUserIDs = useMemo(() => targetUserIDsForPerspective({
@@ -781,7 +797,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
-  const visibleTimelineRows = useMemo(() => timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0])), [timelineRows, weekDays]);
+  const workspaceNodeByID = useMemo(() => new Map(workspace.nodes.map((node) => [node.node_id, node])), [workspace.nodes]);
+  const visibleTimelineRows = useMemo(() => {
+    const weekRows = timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0]));
+    if (timelineAccountFilterIDs.length === 0) return weekRows;
+    const matchingNodeRows = weekRows.filter((row) => row.resource_type === "node" && timelineRowMatchesAccountFilter(row, timelineAccountFilterIDs, workspaceNodeByID));
+    const matchingGateIDs = new Set(matchingNodeRows.map(logicGateIDForTimelineRow).filter(Boolean));
+    return weekRows.filter((row) => (
+      row.resource_type === "node"
+        ? matchingNodeRows.some((nodeRow) => nodeRow.item_id === row.item_id)
+        : matchingGateIDs.has(logicGateIDForTimelineRow(row)) || timelineRowMatchesAccountFilter(row, timelineAccountFilterIDs, workspaceNodeByID)
+    ));
+  }, [timelineAccountFilterIDs, timelineRows, weekDays, workspaceNodeByID]);
   const timelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes, timelineExpandedGateIDs), [timelineExpandedGateIDs, visibleTimelineRows, workspace.nodes]);
   const explorerRows = useMemo(() => buildProjectExplorerRows({
     expanded: explorerExpanded,
@@ -920,6 +947,14 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             value={timelinePerspective}
             onChange={setTimelinePerspective}
             label="Timeline"
+          />
+          <AccountFilterControl
+            accounts={timelineAccounts}
+            selectedAccountIDs={timelineAccountFilterIDs}
+            onChange={setTimelineAccountFilterIDs}
+            label="Accounts"
+            placeholder="Filter accounts"
+            compact
           />
           <div style={weekControlsStyle}>
             <button type="button" aria-label="Previous week" style={iconButtonStyle} onClick={() => setWeekAnchor((current) => addDays(current, -WEEK_DAY_COUNT))}>{"<"}</button>
@@ -1390,7 +1425,7 @@ const bottomExplorerStyle: React.CSSProperties = {
 const surfaceHeaderStyle: React.CSSProperties = {
   minHeight: 38,
   display: "grid",
-  gridTemplateColumns: "minmax(190px, 1fr) minmax(340px, auto) auto",
+  gridTemplateColumns: "minmax(170px, 1fr) minmax(300px, auto) minmax(260px, 0.75fr) auto",
   alignItems: "center",
   gap: 12,
 };

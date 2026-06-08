@@ -27,6 +27,7 @@ var (
 
 type Repository interface {
 	IdentityRepository
+	AccountRepository
 	CommunicationsRepository
 	WorkGraphRepository
 	LogicGateRepository
@@ -43,6 +44,19 @@ type Repository interface {
 	NotificationRepository
 	DomainEventRepository
 	EventRepository
+}
+
+type AccountRepository interface {
+	ListAccounts(companyID string) ([]domain.Account, error)
+	CreateAccount(input AccountInput) (AccountMutationResult, error)
+	UpdateAccount(input AccountInput) (AccountMutationResult, error)
+	DeleteAccount(companyID, accountID, actorUserID string) (AccountMutationResult, error)
+	ListAccountFolders(companyID string) ([]domain.AccountFolder, error)
+	CreateAccountFolder(input AccountFolderInput) (domain.AccountFolder, error)
+	UpdateAccountFolder(input AccountFolderInput) (domain.AccountFolder, error)
+	DeleteAccountFolder(companyID, folderID string) error
+	SetNodeAccountAssignments(input NodeAccountAssignmentUpdateInput) (NodeAccountAssignmentUpdateResult, error)
+	ListNodeAccountAssignments(companyID, nodeID string) ([]domain.NodeAccountAssignment, error)
 }
 
 type IdentityRepository interface {
@@ -399,6 +413,7 @@ type ProjectionRow struct {
 	AssignmentCreatedTimestamp time.Time `json:"assignment_created_timestamp,omitempty"`
 	AssignmentUpdatedTimestamp time.Time `json:"assignment_updated_timestamp,omitempty"`
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
+	Accounts                   []domain.Account `json:"accounts,omitempty"`
 }
 
 type RacioMatrixProjectionRow = ProjectionRow
@@ -474,6 +489,47 @@ type ProjectManagementTimelineMutationResult struct {
 	DeletedItemID    string                                  `json:"deleted_item_id,omitempty"`
 	UserID           string                                  `json:"user_id,omitempty"`
 	ProjectionDeltas []ProjectionDelta                       `json:"-"`
+}
+
+type AccountInput struct {
+	CompanyID    string
+	AccountID    string
+	Name         string
+	FolderID     *string
+	FolderIDSet  bool
+	Position     int
+	PositionSet  bool
+	ActorUserID  string
+}
+
+type AccountMutationResult struct {
+	Account           *domain.Account   `json:"account,omitempty"`
+	DeletedAccountID  string            `json:"deleted_account_id,omitempty"`
+	ProjectionDeltas  []ProjectionDelta `json:"-"`
+}
+
+type AccountFolderInput struct {
+	CompanyID         string
+	FolderID          string
+	ParentFolderID    *string
+	ParentFolderIDSet bool
+	Name              string
+	Position          int
+	PositionSet       bool
+}
+
+type NodeAccountAssignmentUpdateInput struct {
+	CompanyID   string
+	NodeID      string
+	AccountIDs  []string
+	ActorUserID string
+}
+
+type NodeAccountAssignmentUpdateResult struct {
+	Node              domain.Node                    `json:"node"`
+	Assignments       []domain.NodeAccountAssignment `json:"assignments"`
+	ProjectionDeltas  []ProjectionDelta              `json:"-"`
+	Events            []domain.DomainEvent           `json:"-"`
 }
 
 type ProjectionDelta struct {

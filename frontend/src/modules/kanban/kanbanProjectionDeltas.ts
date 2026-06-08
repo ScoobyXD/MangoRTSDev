@@ -1,4 +1,5 @@
 import type { KanbanCard } from "./shared.js";
+import type { Account } from "../accounts/accountsApi.js";
 
 export type KanbanProjectionDeltaOperation = "upsert" | "delete" | "patch";
 
@@ -32,6 +33,7 @@ export type KanbanBoardProjectionRow = {
   assignment_created_timestamp?: string;
   updated_timestamp?: string;
   projection_updated_timestamp?: string;
+  accounts?: Account[] | null;
 };
 
 export type KanbanProjectionDelta = {
@@ -117,6 +119,31 @@ function cleanOptionalNumber(value: unknown): number | null | undefined {
   return value;
 }
 
+function cleanAccounts(value: unknown): Account[] | undefined {
+  if (value === null) return [];
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const accounts: Account[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Partial<Account>;
+    const accountID = cleanString(candidate.account_id);
+    if (!accountID || seen.has(accountID)) continue;
+    seen.add(accountID);
+    accounts.push({
+      ...candidate,
+      company_id: cleanString(candidate.company_id),
+      account_id: accountID,
+      name: cleanString(candidate.name) || accountID,
+      folder_id: Object.prototype.hasOwnProperty.call(candidate, "folder_id") ? cleanOptionalString(candidate.folder_id) : undefined,
+      position: typeof candidate.position === "number" && Number.isFinite(candidate.position) ? candidate.position : undefined,
+      created_timestamp: cleanString(candidate.created_timestamp),
+      updated_timestamp: cleanString(candidate.updated_timestamp) || undefined,
+    });
+  }
+  return accounts;
+}
+
 function parseVersionTimestamp(value: unknown): number {
   if (typeof value !== "string" || value.trim() === "") return 0;
   const parsed = Date.parse(value);
@@ -187,6 +214,7 @@ export function kanbanCardFromProjectionRow(row: KanbanBoardProjectionRow): Kanb
     assignee_user_id: cleanOptionalString(row.assignee_user_id),
     assignee_name: cleanOptionalString(row.assignee_name) ?? cleanOptionalString(row.assignee_display_name),
     assignee_email: cleanOptionalString(row.assignee_email),
+    accounts: cleanAccounts(row.accounts) ?? [],
     projection_updated_timestamp: projectionUpdated || undefined,
     created_timestamp: cleanString(row.created_timestamp) || cleanString(row.assignment_created_timestamp) || updated,
     updated_timestamp: updated || cleanString(row.created_timestamp) || "",
@@ -211,6 +239,7 @@ function applyPatchToCard(card: KanbanCard, patch: Partial<KanbanBoardProjection
     patched.assignee_name = cleanOptionalString(patch.assignee_name) ?? cleanOptionalString(patch.assignee_display_name);
   }
   if (Object.prototype.hasOwnProperty.call(patch, "assignee_email")) patched.assignee_email = cleanOptionalString(patch.assignee_email);
+  if (Object.prototype.hasOwnProperty.call(patch, "accounts")) patched.accounts = cleanAccounts(patch.accounts) ?? [];
   const projectionUpdated = cleanString(patch.projection_updated_timestamp) || cleanString(delta.projected_timestamp) || cleanString(envelope.projected_timestamp);
   if (projectionUpdated) patched.projection_updated_timestamp = projectionUpdated;
   const updated = cleanString(patch.updated_timestamp) || projectionUpdated;

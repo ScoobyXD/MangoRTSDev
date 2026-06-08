@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAuthConfig } from "../../auth/cognitoAuth";
+import { AccountFilterControl, useCompanyAccounts } from "../../modules/accounts/AccountFilterControl";
+import { entityMatchesAccountFilter } from "../../modules/accounts/accountsApi";
 import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
 import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -283,6 +285,7 @@ export function HomePage({
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [racioViewerListEntries, setRacioViewerListEntries] = useState<RacioMatrixViewerListEntry[]>([]);
   const [racioMatrixTargetUserID, setRacioMatrixTargetUserID] = useState("");
+  const [matrixAccountFilterIDs, setMatrixAccountFilterIDs] = useState<string[]>([]);
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
@@ -355,6 +358,7 @@ export function HomePage({
   const hideNavigationRef = useRef(hideNavigation);
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
   const isCustomMatrixView = isCustomMatrixViewID(activeViewID);
+  const { accounts: matrixAccounts } = useCompanyAccounts(companyID, isInboxMatrixView || isCustomMatrixView);
   const isNarrow = isInboxMatrixView
     ? viewportWidth < 980
     : isCustomMatrixView
@@ -365,6 +369,9 @@ export function HomePage({
   useEffect(() => {
     setRacioMatrixTargetUserID(currentUserID);
   }, [companyID, currentUserID]);
+  useEffect(() => {
+    setMatrixAccountFilterIDs((current) => current.filter((accountID) => matrixAccounts.some((account) => account.account_id === accountID)));
+  }, [matrixAccounts]);
   useEffect(() => {
     setRacioViewerListEntries(readRacioViewerListEntries(companyID, currentUserID));
   }, [companyID, currentUserID]);
@@ -2093,6 +2100,21 @@ export function HomePage({
   const logicGateByIDRef = useRef(logicGateByID);
   logicGateByIDRef.current = logicGateByID;
   const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
+  const matrixFilteredNodes = useMemo(() => (
+    (isInboxMatrixView || isCustomMatrixView) && matrixAccountFilterIDs.length > 0
+      ? nodes.filter((node) => entityMatchesAccountFilter(node, matrixAccountFilterIDs))
+      : nodes
+  ), [isCustomMatrixView, isInboxMatrixView, matrixAccountFilterIDs, nodes]);
+  const matrixAccountFilterControl = useMemo(() => (
+    <AccountFilterControl
+      accounts={matrixAccounts}
+      selectedAccountIDs={matrixAccountFilterIDs}
+      onChange={setMatrixAccountFilterIDs}
+      label="Accounts"
+      placeholder="Filter accounts"
+      compact
+    />
+  ), [matrixAccountFilterIDs, matrixAccounts]);
   const workspacePanelUserID = isInboxMatrixView ? activeRacioMatrixUserID : currentUserID;
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
@@ -2618,6 +2640,7 @@ export function HomePage({
           assignee_name: row.assignee_display_name ?? null,
           assignee_email: row.assignee_email ?? null,
           logic_gate_ids: row.logic_gate_id?.trim() ? [row.logic_gate_id.trim()] : [],
+          accounts: row.accounts ?? previousNode?.accounts ?? [],
           created_timestamp: row.resource_created_timestamp || previousNode?.created_timestamp || new Date().toISOString(),
           effective_access_level: previousNode?.effective_access_level ?? "edit",
           can_view: previousNode?.can_view ?? true,
@@ -3450,9 +3473,10 @@ export function HomePage({
           {isCustomMatrixView ? (
             <CustomMatrixView
               loading={loadingNodes || loadingLogicGates}
-              nodes={nodes}
+              nodes={matrixFilteredNodes}
               logicGateByID={logicGateByID}
               companyUsers={companyUsers}
+              accountFilter={matrixAccountFilterControl}
               onOpenNode={openNodeEditorOverlay}
               onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
             />
@@ -3462,7 +3486,7 @@ export function HomePage({
                 <RaciRoleInboxMatrix
                   section={activeRaciInboxSection}
                   loading={loadingNodes}
-                  nodes={nodes}
+                  nodes={matrixFilteredNodes}
                   nodeByID={nodeByID}
                   nodeRelationships={nodeRelationships}
                   logicGateByID={logicGateByID}
@@ -3470,6 +3494,7 @@ export function HomePage({
                   nodeFolderItems={nodeFolderItems}
                   currentUserID={activeRacioMatrixUserID}
                   viewerSelector={racioMatrixViewerSelector}
+                  accountFilter={matrixAccountFilterControl}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}

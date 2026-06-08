@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const postgresRacioNodeProjectionCTE = `
+var postgresRacioNodeProjectionCTE = `
 with node_row as (
   select
     n.company_id,
@@ -34,7 +34,8 @@ with node_row as (
     nullif(assignee.display_name, '') as assignee_display_name,
     nullif(assignee.email, '') as assignee_email,
     n.created_timestamp as resource_created_timestamp,
-    assignment.logic_gate_id
+    assignment.logic_gate_id,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
   from nodes n
   left join lateral (
     select assignment.*
@@ -49,6 +50,7 @@ with node_row as (
    and assignee_membership.user_id = n.assignee_user_id
   left join users assignee
     on assignee.user_id = assignee_membership.user_id
+  ` + postgresAccountSnapshotsForNodeLateralSQL("n") + `
   where n.company_id=$1::uuid
     and n.node_id=$2::uuid
 ), projected as (
@@ -66,7 +68,8 @@ with node_row as (
     node_row.assignee_user_id,
     node_row.assignee_display_name,
     node_row.assignee_email,
-    node_row.resource_created_timestamp
+    node_row.resource_created_timestamp,
+    node_row.accounts
   from node_row
   join logic_gate_raci_assignments raci
     on raci.company_id=node_row.company_id
@@ -90,7 +93,8 @@ with node_row as (
     node_row.assignee_user_id,
     node_row.assignee_display_name,
     node_row.assignee_email,
-    node_row.resource_created_timestamp
+    node_row.resource_created_timestamp,
+    node_row.accounts
   from node_row
   join company_memberships membership
     on membership.company_id=node_row.company_id
@@ -99,7 +103,7 @@ with node_row as (
     and node_row.assignee_user_id is not null
 )`
 
-const postgresRacioLogicGateUserProjectionCTE = `
+var postgresRacioLogicGateUserProjectionCTE = `
 with user_raci as (
   select distinct assignment.user_id
   from logic_gate_raci_assignments assignment
@@ -140,7 +144,8 @@ with user_raci as (
     nullif(assignee.display_name, '') as assignee_display_name,
     nullif(assignee.email, '') as assignee_email,
     n.created_timestamp as resource_created_timestamp,
-    assignment.logic_gate_id
+    assignment.logic_gate_id,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
   from node_logic_gate_assignments assignment
   join nodes n
     on n.company_id=assignment.company_id
@@ -150,6 +155,7 @@ with user_raci as (
    and assignee_membership.user_id = n.assignee_user_id
   left join users assignee
     on assignee.user_id = assignee_membership.user_id
+  ` + postgresAccountSnapshotsForNodeLateralSQL("n") + `
   where assignment.company_id=$1::uuid
     and assignment.logic_gate_id=$2::uuid
 ), projected as (
@@ -167,7 +173,8 @@ with user_raci as (
     null::uuid as assignee_user_id,
     null::text as assignee_display_name,
     null::text as assignee_email,
-    gate_row.created_timestamp as resource_created_timestamp
+    gate_row.created_timestamp as resource_created_timestamp,
+    '[]'::jsonb as accounts
   from gate_row
   join user_raci on true
   union all
@@ -185,7 +192,8 @@ with user_raci as (
     node_rows.assignee_user_id,
     node_rows.assignee_display_name,
     node_rows.assignee_email,
-    node_rows.resource_created_timestamp
+    node_rows.resource_created_timestamp,
+    node_rows.accounts
   from node_rows
   join user_raci on true
 )`
@@ -276,6 +284,7 @@ insert into racio_matrix_projection_table (
   assignee_display_name,
   assignee_email,
   resource_created_timestamp,
+  accounts,
   updated_timestamp
 )
 select
@@ -293,6 +302,7 @@ select
   assignee_display_name,
   assignee_email,
   resource_created_timestamp,
+  accounts,
   now()
 from projected
 on conflict (company_id, user_id, resource_type, resource_id)
@@ -307,6 +317,7 @@ do update set
   assignee_display_name=excluded.assignee_display_name,
   assignee_email=excluded.assignee_email,
   resource_created_timestamp=excluded.resource_created_timestamp,
+  accounts=excluded.accounts,
   updated_timestamp=now()`, companyID, nodeID)
 	stop()
 	return err
@@ -404,6 +415,7 @@ insert into racio_matrix_projection_table (
   assignee_display_name,
   assignee_email,
   resource_created_timestamp,
+  accounts,
   updated_timestamp
 )
 select
@@ -421,6 +433,7 @@ select
   assignee_display_name,
   assignee_email,
   resource_created_timestamp,
+  accounts,
   now()
 from projected
 on conflict (company_id, user_id, resource_type, resource_id)
@@ -435,6 +448,7 @@ do update set
   assignee_display_name=excluded.assignee_display_name,
   assignee_email=excluded.assignee_email,
   resource_created_timestamp=excluded.resource_created_timestamp,
+  accounts=excluded.accounts,
   updated_timestamp=now()`, companyID, logicGateID, userID)
 	return err
 }
@@ -506,6 +520,7 @@ select entry.company_id::text,
        entry.assignee_user_id::text,
        entry.assignee_display_name,
        entry.assignee_email,
+       entry.accounts::text,
        entry.resource_created_timestamp,
        entry.updated_timestamp
 from racio_matrix_projection_table entry
@@ -554,6 +569,7 @@ select company_id::text,
        assignee_user_id::text,
        assignee_display_name,
        assignee_email,
+       accounts::text,
        resource_created_timestamp,
        updated_timestamp
 from racio_matrix_projection_table
@@ -599,6 +615,7 @@ select company_id::text,
        assignee_user_id::text,
        assignee_display_name,
        assignee_email,
+       accounts::text,
        resource_created_timestamp,
        updated_timestamp
 from racio_matrix_projection_table
@@ -630,6 +647,7 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 	var assigneeUserID sql.NullString
 	var assigneeDisplayName sql.NullString
 	var assigneeEmail sql.NullString
+	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.UserID,
@@ -644,6 +662,7 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 		&assigneeUserID,
 		&assigneeDisplayName,
 		&assigneeEmail,
+		&accountsJSON,
 		&item.ResourceCreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
@@ -672,6 +691,7 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 	if assigneeEmail.Valid {
 		item.AssigneeEmail = &assigneeEmail.String
 	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err
 }
 

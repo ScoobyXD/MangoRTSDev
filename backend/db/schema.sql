@@ -215,6 +215,54 @@ create table if not exists nodes (
   foreign key (assignee_user_id) references users (user_id)
 );
 
+create table if not exists account_folders (
+  company_id uuid not null,
+  folder_id uuid not null,
+  parent_folder_id uuid,
+  name text not null,
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint account_folders_name_nonblank_chk check (btrim(name) <> ''),
+  primary key (company_id, folder_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create index if not exists idx_account_folders_parent_position
+  on account_folders(company_id, parent_folder_id, position, lower(name), folder_id);
+
+create table if not exists accounts (
+  company_id uuid not null,
+  account_id uuid not null,
+  name text not null,
+  folder_id uuid,
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint accounts_name_nonblank_chk check (btrim(name) <> ''),
+  primary key (company_id, account_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create index if not exists idx_accounts_company_name
+  on accounts(company_id, lower(name), account_id);
+
+create index if not exists idx_accounts_folder_position
+  on accounts(company_id, folder_id, position, lower(name), account_id);
+
+create table if not exists node_account_assignments (
+  company_id uuid not null,
+  node_id uuid not null,
+  account_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  primary key (company_id, node_id, account_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
+  foreign key (company_id, account_id) references accounts (company_id, account_id) on delete cascade
+);
+
+create index if not exists idx_node_account_assignments_account
+  on node_account_assignments(company_id, account_id, node_id);
+
 create table if not exists node_relationships (
   company_id uuid not null,
   node_relationship_id uuid not null,
@@ -824,10 +872,12 @@ create table if not exists kanban_board_projection (
   assignment_updated_timestamp timestamptz not null,
   compatibility_board_id text not null,
   compatibility_card_id uuid not null,
+  accounts jsonb not null default '[]'::jsonb,
   projection_updated_timestamp timestamptz not null default now(),
   constraint kanban_board_projection_status_nonblank_chk check (btrim(status) <> ''),
   constraint kanban_board_projection_title_nonblank_chk check (btrim(title) <> ''),
   constraint kanban_board_projection_priority_chk check (priority is null or priority between 1 and 5),
+  constraint kanban_board_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
   primary key (company_id, logic_gate_id, node_id),
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
@@ -853,6 +903,7 @@ insert into kanban_board_projection (
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  accounts,
   projection_updated_timestamp
 )
 select
@@ -874,6 +925,7 @@ select
   assignment.updated_timestamp,
   assignment.compatibility_board_id,
   assignment.compatibility_card_id,
+  coalesce(account_snapshot.accounts_json, '[]'::jsonb),
   now()
 from node_logic_gate_assignments assignment
 join nodes node_row
@@ -882,6 +934,23 @@ join nodes node_row
 join logic_gates logic_gate
   on logic_gate.company_id = assignment.company_id
  and logic_gate.logic_gate_id = assignment.logic_gate_id
+left join lateral (
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'company_id', account.company_id::text,
+    'account_id', account.account_id::text,
+    'name', account.name,
+    'folder_id', account.folder_id::text,
+    'position', account.position,
+    'created_timestamp', account.created_timestamp,
+    'updated_timestamp', account.updated_timestamp
+  ) order by account.position asc, lower(account.name) asc, account.account_id::text asc), '[]'::jsonb) as accounts_json
+  from node_account_assignments node_account
+  join accounts account
+    on account.company_id=node_account.company_id
+   and account.account_id=node_account.account_id
+  where node_account.company_id=assignment.company_id
+    and node_account.node_id=assignment.node_id
+) account_snapshot on true
 on conflict (company_id, logic_gate_id, node_id)
 do update set
   status = excluded.status,
@@ -899,6 +968,7 @@ do update set
   assignment_updated_timestamp = excluded.assignment_updated_timestamp,
   compatibility_board_id = excluded.compatibility_board_id,
   compatibility_card_id = excluded.compatibility_card_id,
+  accounts = excluded.accounts,
   projection_updated_timestamp = now();
 
 create table if not exists company_projection_sequences (
@@ -933,9 +1003,11 @@ create table if not exists racio_matrix_projection_table (
   assignee_user_id uuid,
   assignee_display_name text,
   assignee_email text,
+  accounts jsonb not null default '[]'::jsonb,
   resource_created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint racio_matrix_projection_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  constraint racio_matrix_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
   constraint racio_matrix_projection_shape_chk check (
     (resource_type = 'node')
     or (resource_type = 'logic_gate' and logic_gate_id = resource_id)

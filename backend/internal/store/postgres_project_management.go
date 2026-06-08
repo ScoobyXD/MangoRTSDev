@@ -36,7 +36,8 @@ projection.position,
 projection.resource_created_timestamp,
 projection.timeline_created_timestamp,
 projection.timeline_updated_timestamp,
-projection.projection_updated_timestamp`
+projection.projection_updated_timestamp,
+projection.accounts::text`
 
 func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any) error }) (ProjectManagementTimelineProjectionRow, error) {
 	var item ProjectManagementTimelineProjectionRow
@@ -49,6 +50,7 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 	var assigneeUserID sql.NullString
 	var assigneeDisplayName sql.NullString
 	var assigneeEmail sql.NullString
+	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.ItemID,
@@ -73,6 +75,7 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 		&item.ProjectionUpdatedTimestamp,
+		&accountsJSON,
 	)
 	if err != nil {
 		return ProjectManagementTimelineProjectionRow{}, err
@@ -109,6 +112,7 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 	if item.NodeID != "" {
 		item.NodeTitle = item.DisplayTitle
 	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, nil
 }
 
@@ -196,7 +200,8 @@ with source as (
     item.position,
     coalesce(node_row.created_timestamp, gate.created_timestamp) as resource_created_timestamp,
     item.created_timestamp as timeline_created_timestamp,
-    item.updated_timestamp as timeline_updated_timestamp
+    item.updated_timestamp as timeline_updated_timestamp,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts_json
   from project_management_timeline_items item
   left join nodes node_row
     on node_row.company_id=item.company_id
@@ -206,6 +211,7 @@ with source as (
    and gate.logic_gate_id=item.logic_gate_id
   left join users assignee
     on assignee.user_id=node_row.assignee_user_id
+  ` + postgresAccountSnapshotsForNodeLateralSQL("node_row") + `
   where item.company_id=$1::uuid
     and item.item_id=$2::uuid
     and (
@@ -242,6 +248,7 @@ insert into project_management_timeline_projection (
   resource_created_timestamp,
   timeline_created_timestamp,
   timeline_updated_timestamp,
+  accounts,
   projection_updated_timestamp
 )
 select
@@ -267,6 +274,7 @@ select
   resource_created_timestamp,
   timeline_created_timestamp,
   timeline_updated_timestamp,
+  case when node_id is not null then coalesce(accounts_json, '[]'::jsonb) else '[]'::jsonb end,
   now()
 from source
 on conflict (company_id, user_id, item_id)
@@ -290,6 +298,7 @@ do update set
   resource_created_timestamp=excluded.resource_created_timestamp,
   timeline_created_timestamp=excluded.timeline_created_timestamp,
   timeline_updated_timestamp=excluded.timeline_updated_timestamp,
+  accounts=excluded.accounts,
   projection_updated_timestamp=now()`, companyID, itemID)
 	return err
 }

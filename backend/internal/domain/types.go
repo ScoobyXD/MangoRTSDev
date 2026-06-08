@@ -51,6 +51,26 @@ type Company struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type AccountFolder struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
+	Name             string    `json:"name"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type Account struct {
+	CompanyID        string    `json:"company_id"`
+	AccountID        string    `json:"account_id"`
+	Name             string    `json:"name"`
+	FolderID         *string   `json:"folder_id,omitempty"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type CompanyMembership struct {
 	CompanyID        string    `json:"company_id"`
 	CompanyName      string    `json:"company_name,omitempty"`
@@ -242,6 +262,7 @@ type Node struct {
 	AssigneeName     *string   `json:"assignee_name,omitempty"`
 	AssigneeEmail    *string   `json:"assignee_email,omitempty"`
 	LogicGateIDs     []string  `json:"logic_gate_ids,omitempty"`
+	Accounts         []Account `json:"accounts,omitempty"`
 	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
@@ -547,6 +568,7 @@ type KanbanCard struct {
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 	CreatedTimestamp           time.Time `json:"created_timestamp"`
 	UpdatedTimestamp           time.Time `json:"updated_timestamp"`
+	Accounts                   []Account `json:"accounts,omitempty"`
 }
 
 type NodeLogicGateAssignment struct {
@@ -563,6 +585,14 @@ type NodeLogicGateAssignment struct {
 	Version              int64     `json:"version"`
 	CreatedTimestamp     time.Time `json:"created_timestamp"`
 	UpdatedTimestamp     time.Time `json:"updated_timestamp"`
+}
+
+type NodeAccountAssignment struct {
+	CompanyID        string    `json:"company_id"`
+	NodeID           string    `json:"node_id"`
+	AccountID        string    `json:"account_id"`
+	AccountName      string    `json:"account_name,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
 const (

@@ -1,4 +1,5 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
+import type { Account } from "../accounts/accountsApi.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
 
@@ -18,6 +19,7 @@ export type ProjectManagementTimelineRow = {
   assignee_user_id?: string | null;
   assignee_display_name?: string | null;
   assignee_email?: string | null;
+  accounts?: Account[];
   start_date: string;
   end_date: string;
   duration_days: number;

@@ -3822,6 +3822,7 @@ export function RaciRoleInboxMatrix({
   nodeFolderItems,
   currentUserID,
   viewerSelector,
+  accountFilter,
   notificationSummary,
   selectedRowIDs,
   selectedLogicGateRowIDs,
@@ -3852,6 +3853,7 @@ export function RaciRoleInboxMatrix({
   nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
   viewerSelector?: React.ReactNode;
+  accountFilter?: React.ReactNode;
   notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
   selectedLogicGateRowIDs: Set<string>;
@@ -4032,6 +4034,7 @@ export function RaciRoleInboxMatrix({
             {viewerSelector}
           </div>
           <div style={inboxMatrixHeaderControlsStyle}>
+            {accountFilter}
             <InboxMatrixUnreadToggle unreadOnly={unreadOnly} onChange={setUnreadOnly} />
             <div style={inboxMatrixHeaderMetaStyle}>
               {placedCount > 0 && <span>{placedCount} active</span>}
