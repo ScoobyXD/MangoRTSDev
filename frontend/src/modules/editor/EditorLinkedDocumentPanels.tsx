@@ -1,6 +1,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
+import { AccountFilterControl } from "../accounts/AccountFilterControl";
+import type { Account } from "../accounts/accountsApi";
 import type { LogicGateRaciAssignment, LogicGateRaciRole } from "../logic-gate-map/shared";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
@@ -38,6 +40,8 @@ type EditorLinkedDocumentPanelsProps = {
     priorityDraft: string;
     priorityRequirementError?: string;
     assigneeDraft: string;
+    accounts: Account[];
+    accountOptions: Account[];
     dueDateDraft: string;
   } | null;
   logicGateRaciFields: {
@@ -58,6 +62,7 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodePriorityDraft: (draft: string) => void;
   onSetNodeAssigneeDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeAssigneeDraft: (draft: string) => void;
+  onCommitNodeAccountIDs: (accountIDs: string[]) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
   onAddLogicGateRaciUser: (role: LogicGateRaciRole, userID: string) => void;
@@ -225,6 +230,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodePriorityDraft,
   onSetNodeAssigneeDraft,
   onCommitNodeAssigneeDraft,
+  onCommitNodeAccountIDs,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
   onAddLogicGateRaciUser,
@@ -433,7 +439,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "164px 250px minmax(236px, 310px) 160px",
+                gridTemplateColumns: "164px 250px minmax(236px, 310px) minmax(260px, 340px) 160px",
                 justifyContent: "start",
                 columnGap: 8,
                 rowGap: 6,
@@ -640,7 +646,20 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </label>
-              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <div style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+                <strong style={{ paddingTop: 7 }}>Accounts:</strong>
+                <AccountFilterControl
+                  accounts={nodePresetFields.accountOptions}
+                  selectedAccountIDs={nodePresetFields.accounts.map((account) => account.account_id)}
+                  onChange={onCommitNodeAccountIDs}
+                  disabled={!canEdit}
+                  compact
+                  showLabel={false}
+                  placeholder="Search accounts"
+                  style={{ minWidth: 0, width: "100%" }}
+                />
+              </div>
+              <label style={{ gridColumn: 5, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
