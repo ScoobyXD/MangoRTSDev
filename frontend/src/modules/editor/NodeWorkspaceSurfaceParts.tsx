@@ -2505,10 +2505,11 @@ const AttachedEmailThreadCard: React.FC<{
   onToggleCollapsed: () => void;
   onSelect: () => void;
   onReply: (messageID: string) => void;
+  onReplyComplete: () => void;
   onError: (message: string) => void;
   onDragStart: React.DragEventHandler<HTMLDivElement>;
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
-}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", onToggleCollapsed, onSelect, onReply, onError, onDragStart, onDropOnEmail }) => {
+}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onDragStart, onDropOnEmail }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -2655,6 +2656,7 @@ const AttachedEmailThreadCard: React.FC<{
               ruleColor={ruleColor}
               initialReplyTargetMessageID={replyTargetMessageID}
               inlineExpansion
+              onReplyComplete={onReplyComplete}
               onError={onError}
             />
           </div>
@@ -2939,6 +2941,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         selectMessage(email.messageID);
         setReplyComposer({ rootMessageID: email.messageID, targetMessageID });
       }}
+      onReplyComplete={() => {
+        setReplyComposer((current) => current?.rootMessageID === email.messageID ? null : current);
+      }}
       onError={onError}
       onDragStart={(event) => {
         if (!editable) return;
@@ -3184,6 +3189,7 @@ type EmailConversationPaneProps = {
   activeSelection?: EmailActiveSelection | null;
   initialReplyTargetMessageID?: string;
   inlineExpansion?: boolean;
+  onReplyComplete?: () => void;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (quote: string) => void;
@@ -3409,6 +3415,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   activeSelection,
   initialReplyTargetMessageID,
   inlineExpansion = false,
+  onReplyComplete,
   onError,
   onSelectionChatRequest,
   onSelectionNodeRequest,
@@ -3648,6 +3655,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setSentReplies((current) => [...current, sentWithTimestamp]);
         setBodyDraft("");
         setDraftAttachments([]);
+        setReplyTargetMessageID("");
+        onReplyComplete?.();
       })
       .catch((cause) => {
         const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
@@ -3708,6 +3717,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           >
             {displayThreadMessages.map((threadMessage, index) => {
               const isSelectedMessage = threadMessage.id === message.id;
+              const hideInlineMessageChrome = inlineExpansion && isSelectedMessage;
               const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
@@ -3721,46 +3731,50 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     display: "grid",
                     gap: 5,
                     margin: "0 -8px",
-                    padding: "14px 8px 16px",
+                    padding: hideInlineMessageChrome ? "2px 8px 16px" : "14px 8px 16px",
                     borderTop: index === 0 ? "none" : `1px solid ${ruleColor}`,
                     borderRadius: 10,
                     background: "transparent",
-                    boxShadow: isReplyTarget ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)" : undefined,
+                    boxShadow: isReplyTarget && !hideInlineMessageChrome ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)" : undefined,
                     transition: "box-shadow 140ms ease",
                   }}
                 >
-                  <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
-                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
-                      {fromLine}
-                    </div>
-                    <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
-                      {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!editable}
-                      onClick={() => selectReplyTarget(threadMessage)}
-                      style={{
-                        minHeight: 22,
-                        border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                        borderRadius: 7,
-                        background: EDITOR_NEU_SURFACE,
-                        color: accent,
-                        cursor: editable ? "pointer" : "default",
-                        opacity: editable ? 1 : 0.46,
-                        padding: "0 8px",
-                        fontSize: 10.5,
-                        fontWeight: 900,
-                        letterSpacing: 0,
-                        boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
-                      }}
-                    >
-                      Reply
-                    </button>
-                  </div>
-                  <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
-                    to {toLine}
-                  </div>
+                  {!hideInlineMessageChrome && (
+                    <>
+                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
+                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
+                          {fromLine}
+                        </div>
+                        <div style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 750, whiteSpace: "nowrap" }}>
+                          {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!editable}
+                          onClick={() => selectReplyTarget(threadMessage)}
+                          style={{
+                            minHeight: 22,
+                            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                            borderRadius: 7,
+                            background: EDITOR_NEU_SURFACE,
+                            color: accent,
+                            cursor: editable ? "pointer" : "default",
+                            opacity: editable ? 1 : 0.46,
+                            padding: "0 8px",
+                            fontSize: 10.5,
+                            fontWeight: 900,
+                            letterSpacing: 0,
+                            boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
+                          }}
+                        >
+                          Reply
+                        </button>
+                      </div>
+                      <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
+                        to {toLine}
+                      </div>
+                    </>
+                  )}
                   {useRichEmailBody ? (
                     <iframe
                       title={`Email body ${index + 1}`}
@@ -3860,10 +3874,24 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           <div aria-hidden="true" style={{ minHeight: 0 }} />
         )}
         {message && replyTargetMessage && (
-          <div style={{ display: "grid", gap: 7, borderTop: `1px solid ${ruleColor}`, paddingTop: 8 }}>
-            <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
-              Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
-            </div>
+          <div
+            style={{
+              position: "relative",
+              zIndex: 2,
+              display: "grid",
+              gap: 7,
+              margin: inlineExpansion ? "0 -10px -8px" : 0,
+              borderTop: `1px solid ${ruleColor}`,
+              background: inlineExpansion ? EDITOR_NEU_ACTIVE_SURFACE : "transparent",
+              padding: inlineExpansion ? "8px 10px 0" : "8px 0 0",
+              boxShadow: inlineExpansion ? "0 -10px 18px rgba(248,250,252,0.92)" : undefined,
+            }}
+          >
+            {!inlineExpansion && (
+              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
+                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>To:</span>
               <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
