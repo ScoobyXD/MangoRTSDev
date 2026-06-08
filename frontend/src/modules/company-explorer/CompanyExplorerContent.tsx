@@ -11,7 +11,7 @@ import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntit
 import { type SelectionIntent } from "../selectionCoordinator";
 import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
+import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRaciRole } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
@@ -318,6 +318,10 @@ function raciVisualNodeTreeID(role: CompanyExplorerRaciFolderRole, folderID: str
 
 function isProtectedRaciRoleRow(row: ExplorerTreeNode | null | undefined): boolean {
   return row?.syntheticKind === "raci_folder";
+}
+
+function isLogicGateRaciRole(value: CompanyExplorerRaciFolderRole | string | undefined): value is LogicGateRaciRole {
+  return LOGIC_GATE_RACI_ROLES.includes(value as LogicGateRaciRole);
 }
 
 function logicGateRaciRolesForUser(logicGate: ExplorerLogicGateRecord, userID: string): CompanyExplorerRaciFolderRole[] {
@@ -1493,13 +1497,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, []);
 
-  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
+  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string) => {
     setError("");
+    const targetLogicGateID = logicGateID?.trim() ?? "";
+    const targetLogicGateTreeID = logicGateTreeID?.trim() ?? "";
     try {
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
-        folderID: parentFolderID,
+        folderID: targetLogicGateID ? "" : parentFolderID,
         mutationOrigin: "company_explorer",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-node"),
@@ -1516,6 +1522,20 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const createdFolderID = response.folder_items?.find((item) => item.item_type === "node" && item.item_id === node.node_id)?.folder_id ?? parentFolderID;
       dispatchExplorerStore({ type: "upsertNode", node });
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      if (targetLogicGateID) {
+        const assignment = await moveLogicGateAssignment({
+          apiBase,
+          companyID,
+          logicGateID: targetLogicGateID,
+          nodeID: node.node_id,
+          mutationOrigin: "matrix",
+          assigneePolicy: "first_responsible",
+        });
+        dispatchExplorerStore({ type: "replaceNode", node: assignment.node });
+        upsertNodeRelationshipGraphNode(apiBase, companyID, assignment.node);
+        if (targetLogicGateTreeID) setExpanded((previous) => new Set(previous).add(targetLogicGateTreeID));
+        requestRaciExplorerProjectionRefreshRef.current();
+      }
       if (!createdFolderID && position && position > 0) {
         setRootRowOrder((previous) => ({ ...previous, [`node-${node.node_id}`]: position }));
       }
@@ -1525,14 +1545,16 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
   }, [apiBase, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
 
-  const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
+  const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number, raciRole?: string) => {
     setError("");
+    const creatorLogicGateRaciRole: WorkspaceEntityBatchCreatorLogicGateRaciRole | undefined = isLogicGateRaciRole(raciRole) ? raciRole : undefined;
     try {
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
         folderID: parentFolderID,
         mutationOrigin: "company_explorer",
+        creatorLogicGateRaciRole,
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
           title: "new logic gate",
@@ -1544,7 +1566,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
       const created = response.logic_gates?.[0];
       if (!created) throw new Error("logic_gate_batch_create_missing_gate");
-      const logicGate = toLogicGateCanvasRecord(created);
+      const logicGate = toLogicGateCanvasRecord(created) as ExplorerLogicGateRecord;
+      logicGate.raci_assignments = created.raci_assignments ?? [];
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       const createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
       dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
@@ -1561,6 +1584,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setSelectedLogicGateID(logicGate.logic_gate_id);
       setSelectedNodeID("");
       setSelectedKanbanBoardID("");
+      if (creatorLogicGateRaciRole) requestRaciExplorerProjectionRefreshRef.current();
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
@@ -2351,6 +2375,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const protectedRaciRow = isProtectedRaciRoleRow(row);
     const canCreateForContext = !protectedRaciRow || Boolean(row?.folderID);
     const contextKind: CompanyExplorerFolderKind | null = creationRow?.folderKind ?? (creationRow?.kind === "node" ? "node" : creationRow?.kind === "logic_gate" ? "logic_gate" : null);
+    const createNodeLogicGateID = creationRow?.kind === "logic_gate"
+      ? (creationRow.logicGateID ?? "")
+      : (creationRow?.parentLogicGateID ?? "");
+    const createNodeLogicGateTreeID = creationRow?.kind === "logic_gate" && createNodeLogicGateID ? (creationRow.id ?? "") : "";
+    const createLogicGateRaciRole = isLogicGateRaciRole(creationRow?.raciRole) ? creationRow.raciRole : "";
     const targets = resolveExplorerCreationTargets(creationRow ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
@@ -2376,6 +2405,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       renameLabel: row?.label ?? "",
       contextKind,
       createPosition: getContextCreatePosition(row, event),
+      createNodeLogicGateID,
+      createNodeLogicGateTreeID,
+      createLogicGateRaciRole,
       canCreateBothFolderTypes: !contextKind && !scopedKind,
       canCreateFolder: canCreateForContext && (!scopedKind || Boolean(scopedRootFolder)),
       canCreateNode: canCreateForContext && !scopedKind,
@@ -2588,12 +2620,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           void createFolder(folderKind, parentFolderID, position);
           setExplorerContextMenu(null);
         }}
-        onCreateNode={(parentFolderID, position) => {
-          void createNodeAtFolder(parentFolderID, position);
+        onCreateNode={(parentFolderID, position, logicGateID, logicGateTreeID) => {
+          void createNodeAtFolder(parentFolderID, position, logicGateID, logicGateTreeID);
           setExplorerContextMenu(null);
         }}
-        onCreateLogicGate={(parentFolderID, position) => {
-          void createLogicGateAtFolder(parentFolderID, position);
+        onCreateLogicGate={(parentFolderID, position, raciRole) => {
+          void createLogicGateAtFolder(parentFolderID, position, raciRole);
           setExplorerContextMenu(null);
         }}
         onFindTarget={(target) => {
