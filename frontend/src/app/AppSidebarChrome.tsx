@@ -1870,7 +1870,7 @@ function appCompanyExplorerRailStyle(collapsed: boolean): React.CSSProperties {
 function appCompanyExplorerCollapseToggleStyle(collapsed: boolean): React.CSSProperties {
   return {
     position: "absolute",
-    left: 0,
+    left: -12,
     top: "50%",
     zIndex: 30,
     width: 24,
@@ -1879,8 +1879,7 @@ function appCompanyExplorerCollapseToggleStyle(collapsed: boolean): React.CSSPro
     placeItems: "center",
     transform: "translateY(-50%)",
     border: "1px solid rgba(100, 116, 139, 0.34)",
-    borderLeft: "1px solid rgba(255, 255, 255, 0.82)",
-    borderRadius: "8px 0 0 8px",
+    borderRadius: 8,
     background: "#ffffff",
     color: "#111827",
     boxShadow: collapsed
