@@ -2489,6 +2489,7 @@ type AttachedEmailOrganizerPaneProps = {
   ruleColor: string;
   selectedMessageID?: string;
   activeEmailSelection?: EmailActiveSelection | null;
+  emailHighlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onSelectMessage?: (messageID: string) => void;
   onClearSelectedMessage?: () => void;
   onRemoveEmail?: (emailID: string) => void;
@@ -2655,6 +2656,7 @@ const AttachedEmailThreadCard: React.FC<{
   draggable: boolean;
   replyTargetMessageID?: string;
   activeSelection?: EmailActiveSelection | null;
+  highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onToggleCollapsed: () => void;
   onSelect: () => void;
   onReply: (messageID: string) => void;
@@ -2666,7 +2668,7 @@ const AttachedEmailThreadCard: React.FC<{
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
-}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -2712,8 +2714,6 @@ const AttachedEmailThreadCard: React.FC<{
 
   return (
     <div
-      draggable={draggable}
-      onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onContextMenu={(event) => {
         if (!editable) return;
@@ -2761,6 +2761,7 @@ const AttachedEmailThreadCard: React.FC<{
             gap: 5,
             color: surfaceText,
             cursor: selected ? "pointer" : draggable ? "grab" : "pointer",
+            userSelect: "none",
             padding: selected ? "9px 10px 6px" : "9px 10px",
           }}
         >
@@ -2811,6 +2812,8 @@ const AttachedEmailThreadCard: React.FC<{
               overflow: "visible",
               padding: "0 10px 10px",
               boxSizing: "border-box",
+              cursor: "text",
+              userSelect: "text",
             }}
           >
             <EmailConversationPane
@@ -2822,6 +2825,7 @@ const AttachedEmailThreadCard: React.FC<{
               strokeColor={strokeColor}
               ruleColor={ruleColor}
               activeSelection={activeSelection}
+              highlightRemovalRequest={highlightRemovalRequest}
               initialReplyTargetMessageID={replyTargetMessageID}
               inlineExpansion
               onReplyComplete={onReplyComplete}
@@ -2878,7 +2882,7 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -3128,6 +3132,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       draggable={editable}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
       activeSelection={activeEmailSelection?.messageID === email.messageID ? activeEmailSelection : null}
+      highlightRemovalRequest={emailHighlightRemovalRequest?.messageID === email.messageID ? emailHighlightRemovalRequest : null}
       onToggleCollapsed={() => toggleThread(email.messageID)}
       onSelect={() => toggleSelectedMessage(email.messageID)}
       onReply={(targetMessageID) => {
@@ -3419,6 +3424,7 @@ type EmailConversationPaneProps = {
   strokeColor: string;
   ruleColor: string;
   activeSelection?: EmailActiveSelection | null;
+  highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   initialReplyTargetMessageID?: string;
   inlineExpansion?: boolean;
   onReplyComplete?: () => void;
@@ -3443,8 +3449,22 @@ type EmailLocalHighlight = {
   endOffset: number;
 };
 
+export type EmailHighlightSelection = {
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
+
 type EmailActiveSelection = {
   messageID?: string;
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+export type EmailHighlightRemovalRequest = {
+  requestID: number;
+  messageID: string;
   quote: string;
   startOffset: number;
   endOffset: number;
@@ -3472,6 +3492,9 @@ function clampEmailSelectionActionPosition(value: number, min: number, max: numb
 const emailSelectionActionButtonStyle: React.CSSProperties = {
   width: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
   height: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
+  minWidth: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
+  minHeight: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
+  flex: `0 0 ${EMAIL_SELECTION_ACTION_BUTTON_SIZE}px`,
   borderRadius: 8,
   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
   background: EDITOR_NEU_SURFACE,
@@ -3480,6 +3503,7 @@ const emailSelectionActionButtonStyle: React.CSSProperties = {
   placeItems: "center",
   padding: 0,
   cursor: "pointer",
+  lineHeight: 0,
   boxSizing: "border-box",
   boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)",
 };
@@ -3525,6 +3549,20 @@ function readStoredEmailLocalHighlights(messageID: string): EmailLocalHighlight[
 function storeEmailLocalHighlights(messageID: string, highlights: EmailLocalHighlight[]) {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(emailLocalHighlightsStorageKey(messageID), JSON.stringify(highlights.slice(-80)));
+}
+
+function emailLocalHighlightMatchesSelection(highlight: EmailLocalHighlight, selection: EmailHighlightSelection): boolean {
+  return highlight.quote.trim() === selection.quote.trim()
+    && Math.round(highlight.startOffset) === Math.round(selection.startOffset)
+    && Math.round(highlight.endOffset) === Math.round(selection.endOffset);
+}
+
+export function removeStoredEmailLocalHighlight(messageID: string, selection: EmailHighlightSelection): boolean {
+  const highlights = readStoredEmailLocalHighlights(messageID);
+  const next = highlights.filter((highlight) => !emailLocalHighlightMatchesSelection(highlight, selection));
+  if (next.length === highlights.length) return false;
+  storeEmailLocalHighlights(messageID, next);
+  return true;
 }
 
 function renderEmailTextWithHighlights(text: string, highlights: EmailLocalHighlight[], activeSelection?: EmailActiveSelection | null): React.ReactNode[] {
@@ -3691,6 +3729,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   strokeColor,
   ruleColor,
   activeSelection,
+  highlightRemovalRequest,
   initialReplyTargetMessageID,
   inlineExpansion = false,
   onReplyComplete,
@@ -3790,6 +3829,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       });
     return () => { cancelled = true; };
   }, [companyID, messageID]);
+
+  useEffect(() => {
+    if (!highlightRemovalRequest || highlightRemovalRequest.messageID !== messageID) return;
+    setEmailHighlights((current) => {
+      const next = current.filter((highlight) => !emailLocalHighlightMatchesSelection(highlight, highlightRemovalRequest));
+      if (next.length === current.length) return current;
+      storeEmailLocalHighlights(messageID, next);
+      return next;
+    });
+  }, [highlightRemovalRequest?.requestID, highlightRemovalRequest?.messageID, messageID]);
 
   const recipients = parseEmailAddressDraft(toDraft);
   const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
@@ -4094,10 +4143,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       style={{
                         marginTop: 7,
                         color: "#111827",
+                        cursor: "text",
                         fontSize: 13.5,
                         lineHeight: 1.5,
                         whiteSpace: "pre-wrap",
                         overflowWrap: "anywhere",
+                        userSelect: "text",
                       }}
                     >
                       {isSelectedMessage
@@ -4123,6 +4174,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   zIndex: 4,
                   display: "grid",
                   gridTemplateColumns: `repeat(${selectionActionCount}, ${EMAIL_SELECTION_ACTION_BUTTON_SIZE}px)`,
+                  gridAutoRows: `${EMAIL_SELECTION_ACTION_BUTTON_SIZE}px`,
+                  alignItems: "center",
+                  justifyContent: "start",
                   gap: EMAIL_SELECTION_ACTION_GAP,
                   width: selectionActionToolbarWidth,
                   minHeight: selectionActionToolbarHeight,

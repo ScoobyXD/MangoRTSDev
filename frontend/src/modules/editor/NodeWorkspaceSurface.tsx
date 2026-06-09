@@ -37,8 +37,10 @@ import {
   EmailCountDropdown,
   EmailPickerModal,
   NodeTextBlockEditor,
+  removeStoredEmailLocalHighlight,
   TextBlockActionsMenu,
   TimelineCell,
+  type EmailHighlightRemovalRequest,
   type TextBlockAttachmentListItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
@@ -110,6 +112,32 @@ type TextPaneLayoutSnapshot = {
   selectedEmailIDsByBlock: Record<string, string>;
   activeChatBlockID?: string;
 };
+
+type EmailChatSelectionAnchor = Omit<EmailHighlightRemovalRequest, "requestID">;
+
+function emailChatSelectionAnchorFromMessage(message: EditorTextBlockChatMessage): EmailChatSelectionAnchor | null {
+  const messageID = message.selectionMessageID?.trim() ?? "";
+  const quote = message.selectionQuote?.trim() ?? "";
+  const startOffset = message.selectionStart;
+  const endOffset = message.selectionEnd;
+  if (message.selectionSource !== "email" || !messageID || !quote) return null;
+  if (typeof startOffset !== "number" || typeof endOffset !== "number" || !Number.isFinite(startOffset) || !Number.isFinite(endOffset) || endOffset <= startOffset) return null;
+  return {
+    messageID,
+    quote,
+    startOffset,
+    endOffset,
+  };
+}
+
+function chatMessageHasEmailSelectionAnchor(message: EditorTextBlockChatMessage, anchor: EmailChatSelectionAnchor): boolean {
+  const candidate = emailChatSelectionAnchorFromMessage(message);
+  return Boolean(candidate
+    && candidate.messageID === anchor.messageID
+    && candidate.quote === anchor.quote
+    && Math.round(candidate.startOffset) === Math.round(anchor.startOffset)
+    && Math.round(candidate.endOffset) === Math.round(anchor.endOffset));
+}
 
 function formatTextBlockMetadataTimestamp(value: string | number | undefined): string {
   if (value === undefined || value === "") return "";
@@ -345,6 +373,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.openChatBlockIDs));
   const [sidePaneWidths, setSidePaneWidths] = useState<Record<string, Partial<Record<TextSidePaneKind, number>>>>({});
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
+  const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
@@ -1087,6 +1116,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError("cannot_delete_other_users_chat_message");
       return;
     }
+    const emailSelectionAnchor = emailChatSelectionAnchorFromMessage(message);
+    const removeEmailHighlight = Boolean(emailSelectionAnchor && !chatMessages.some((item) => (
+      item.id !== messageID && chatMessageHasEmailSelectionAnchor(item, emailSelectionAnchor)
+    )));
 
     setChatMessages((current) => current.filter((item) => item.id !== messageID));
     setChatReplyTargets((current) => {
@@ -1097,6 +1130,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       const nextEntries = Object.entries(current).filter(([, activeID]) => activeID !== messageID);
       return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
     });
+    if (emailSelectionAnchor && removeEmailHighlight) {
+      removeStoredEmailLocalHighlight(emailSelectionAnchor.messageID, emailSelectionAnchor);
+      setEmailHighlightRemovalRequest((current) => ({
+        ...emailSelectionAnchor,
+        requestID: (current?.requestID ?? 0) + 1,
+      }));
+    }
 
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${messageID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
@@ -1892,6 +1932,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               ruleColor={ruleColor}
               selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
               activeEmailSelection={activeEmailSelection}
+              emailHighlightRemovalRequest={emailHighlightRemovalRequest}
               onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
               onClearSelectedMessage={() => clearBlockEmail(block.id)}
               onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
