@@ -14,6 +14,13 @@ export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
 export const EDITOR_LINK_COLOR = "rgb(51, 65, 85)";
 export const EDITOR_TERMINAL_BREAK_ATTRIBUTE = "data-mango-editor-terminal-break";
 export const EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE = "data-mango-editor-image-clear";
+export const EDITOR_TABLE_ATTRIBUTE = "data-mango-editor-table";
+export const EDITOR_TABLE_CELL_ATTRIBUTE = "data-mango-editor-table-cell";
+export const EDITOR_TABLE_COLUMNS_ATTRIBUTE = "data-mango-editor-table-columns";
+
+const EDITOR_TABLE_MAX_ROWS = 20;
+const EDITOR_TABLE_MAX_COLUMNS = 8;
+const EDITOR_TABLE_MAX_CELL_TEXT_LENGTH = 2000;
 
 const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
 const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
@@ -102,6 +109,114 @@ function applySafeTableElementStyle(element: HTMLElement, tagName: string) {
   }
 }
 
+function clampEditorTableSize(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function readEditorGridTableColumns(element: HTMLElement, fallback = 3): number {
+  const raw = Number.parseInt(element.getAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE) ?? "", 10);
+  return clampEditorTableSize(raw || fallback, 1, EDITOR_TABLE_MAX_COLUMNS);
+}
+
+function applyEditorGridTableStyle(element: HTMLElement, columns: number) {
+  element.setAttribute(EDITOR_TABLE_ATTRIBUTE, "true");
+  element.setAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE, String(columns));
+  element.style.display = "grid";
+  element.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  element.style.width = "100%";
+  element.style.maxWidth = "100%";
+  element.style.margin = "8px 0";
+  element.style.borderTop = "1px solid rgba(100, 116, 139, 0.36)";
+  element.style.borderLeft = "1px solid rgba(100, 116, 139, 0.36)";
+  element.style.background = "#ffffff";
+  element.style.boxSizing = "border-box";
+  element.style.overflow = "hidden";
+}
+
+function applyEditorGridTableCellStyle(element: HTMLElement) {
+  element.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
+  element.style.display = "block";
+  element.style.minWidth = "0";
+  element.style.minHeight = "30px";
+  element.style.borderRight = "1px solid rgba(100, 116, 139, 0.36)";
+  element.style.borderBottom = "1px solid rgba(100, 116, 139, 0.36)";
+  element.style.padding = "6px 8px";
+  element.style.whiteSpace = "pre-wrap";
+  element.style.overflowWrap = "anywhere";
+  element.style.boxSizing = "border-box";
+}
+
+function directEditorGridTableCells(element: HTMLElement): HTMLElement[] {
+  return Array.from(element.children).filter((child): child is HTMLElement => (
+    child instanceof HTMLElement && child.getAttribute(EDITOR_TABLE_CELL_ATTRIBUTE) === "true"
+  ));
+}
+
+export function createEditorGridTableElement(ownerDocument: Document, rows = 3, columns = 3): HTMLElement {
+  const safeRows = clampEditorTableSize(rows, 1, EDITOR_TABLE_MAX_ROWS);
+  const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
+  const table = ownerDocument.createElement("div");
+  applyEditorGridTableStyle(table, safeColumns);
+  for (let index = 0; index < safeRows * safeColumns; index += 1) {
+    const cell = ownerDocument.createElement("span");
+    applyEditorGridTableCellStyle(cell);
+    cell.appendChild(ownerDocument.createElement("br"));
+    table.appendChild(cell);
+  }
+  return table;
+}
+
+function normalizeNativeTableCellText(value: string): string {
+  return normalizeEditorWhitespaceText(value)
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, EDITOR_TABLE_MAX_CELL_TEXT_LENGTH);
+}
+
+function appendNativeTableAsEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
+  const sourceRows = Array.from(source.querySelectorAll("tr")).slice(0, EDITOR_TABLE_MAX_ROWS);
+  const rowCells = sourceRows.map((row) => (
+    Array.from(row.children)
+      .filter((child): child is HTMLElement => (
+        child instanceof HTMLElement && (child.tagName === "TD" || child.tagName === "TH")
+      ))
+      .slice(0, EDITOR_TABLE_MAX_COLUMNS)
+  ));
+  const columns = clampEditorTableSize(Math.max(1, ...rowCells.map((cells) => cells.length)), 1, EDITOR_TABLE_MAX_COLUMNS);
+  const rows = clampEditorTableSize(Math.max(1, rowCells.length), 1, EDITOR_TABLE_MAX_ROWS);
+  const table = createEditorGridTableElement(ownerDocument, rows, columns);
+  const cells = directEditorGridTableCells(table);
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
+      const sourceCell = rowCells[rowIndex]?.[columnIndex];
+      const targetCell = cells[(rowIndex * columns) + columnIndex];
+      if (!sourceCell || !targetCell) continue;
+      const text = normalizeNativeTableCellText(sourceCell.textContent ?? "");
+      targetCell.replaceChildren(text ? ownerDocument.createTextNode(text) : ownerDocument.createElement("br"));
+    }
+  }
+  target.appendChild(table);
+}
+
+function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
+  const requestedColumns = readEditorGridTableColumns(source);
+  const sourceCells = directEditorGridTableCells(source).slice(0, EDITOR_TABLE_MAX_ROWS * EDITOR_TABLE_MAX_COLUMNS);
+  const rows = clampEditorTableSize(Math.max(1, Math.ceil(Math.max(1, sourceCells.length) / requestedColumns)), 1, EDITOR_TABLE_MAX_ROWS);
+  const table = createEditorGridTableElement(ownerDocument, rows, requestedColumns);
+  const targetCells = directEditorGridTableCells(table);
+  sourceCells.forEach((sourceCell, index) => {
+    const targetCell = targetCells[index];
+    if (!targetCell) return;
+    targetCell.replaceChildren();
+    appendSanitizedChildren(sourceCell, targetCell, ownerDocument);
+    if (targetCell.childNodes.length === 0) targetCell.appendChild(ownerDocument.createElement("br"));
+  });
+  target.appendChild(table);
+}
+
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
@@ -115,6 +230,20 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
+  if (element.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true") {
+    appendSanitizedEditorGridTable(element, target, ownerDocument);
+    return;
+  }
+
+  if (element.getAttribute(EDITOR_TABLE_CELL_ATTRIBUTE) === "true") {
+    const cell = ownerDocument.createElement("span");
+    applyEditorGridTableCellStyle(cell);
+    appendSanitizedChildren(element, cell, ownerDocument);
+    if (cell.childNodes.length === 0) cell.appendChild(ownerDocument.createElement("br"));
+    target.appendChild(cell);
+    return;
+  }
+
   if (tagName === "br") {
     const br = ownerDocument.createElement("br");
     if (element.getAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE) === "true") {
@@ -176,7 +305,12 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     return;
   }
 
-  if (tagName === "table" || tagName === "thead" || tagName === "tbody" || tagName === "tr" || tagName === "td" || tagName === "th") {
+  if (tagName === "table") {
+    appendNativeTableAsEditorGridTable(element, target, ownerDocument);
+    return;
+  }
+
+  if (tagName === "thead" || tagName === "tbody" || tagName === "tr" || tagName === "td" || tagName === "th") {
     const tableElement = ownerDocument.createElement(tagName);
     applySafeTableElementStyle(tableElement, tagName);
     appendSanitizedChildren(element, tableElement, ownerDocument);
@@ -289,6 +423,25 @@ export function readEditorDocumentText(root: HTMLElement): string {
     if (EDITOR_TABLE_CELL_TAGS.has(node.tagName)) {
       node.childNodes.forEach(appendNodeText);
       text += "\t";
+      return;
+    }
+    if (node.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true") {
+      const columns = readEditorGridTableColumns(node);
+      const cells = directEditorGridTableCells(node);
+      if (text && !text.endsWith("\n")) text += "\n";
+      cells.forEach((cell, index) => {
+        cell.childNodes.forEach(appendNodeText);
+        if ((index + 1) % columns === 0) {
+          if (!text.endsWith("\n")) text += "\n";
+        } else {
+          text += "\t";
+        }
+      });
+      if (!text.endsWith("\n")) text += "\n";
+      return;
+    }
+    if (node.getAttribute(EDITOR_TABLE_CELL_ATTRIBUTE) === "true") {
+      node.childNodes.forEach(appendNodeText);
       return;
     }
     const isBlock = EDITOR_TEXT_BLOCK_TAGS.has(node.tagName);

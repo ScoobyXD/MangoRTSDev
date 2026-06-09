@@ -97,6 +97,73 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	}
 }
 
+func TestRacioMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777402"
+	repo.EnsureCompany(companyID, "RACIO Matrix Creator Co")
+	creator := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-node-creator")
+	responsible := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-node-responsible")
+
+	batch, err := repo.CreateWorkspaceEntityBatch(store.WorkspaceEntityBatchInput{
+		CompanyID:     companyID,
+		EntityKind:    "logic_gate",
+		CreatorUserID: responsible.UserID,
+		Items: []store.WorkspaceEntityBatchItemInput{{
+			ClientID: "target-gate",
+			Title:    "Target gate",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch logic gate: %v", err)
+	}
+	if len(batch.LogicGates) != 1 {
+		t.Fatalf("created logic gates = %d, want 1", len(batch.LogicGates))
+	}
+	logicGate := batch.LogicGates[0]
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+	handler := server.Routes()
+
+	createRec := httptest.NewRecorder()
+	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes", map[string]any{
+		"company_id":      companyID,
+		"title":           "Creator-owned node",
+		"logic_gate_id":   logicGate.LogicGateID,
+		"priority":        3,
+		"status":          "pending",
+		"assignee_policy": "first_responsible",
+	}, creator, companyID)
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s, want 201", createRec.Code, createRec.Body.String())
+	}
+	payload := decodeRacioMatrixNodeCreatePayloadForTest(t, createRec)
+	if payload.Node.AssigneeUserID == nil || *payload.Node.AssigneeUserID != creator.UserID {
+		t.Fatalf("created node assignee = %+v, want creator %s", payload.Node.AssigneeUserID, creator.UserID)
+	}
+	loaded, err := repo.GetNode(companyID, payload.Node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if loaded.AssigneeUserID == nil || *loaded.AssigneeUserID != creator.UserID {
+		t.Fatalf("stored node assignee = %+v, want creator %s", loaded.AssigneeUserID, creator.UserID)
+	}
+	if *loaded.AssigneeUserID == responsible.UserID {
+		t.Fatalf("stored node assignee = responsible user, want creator")
+	}
+}
+
 type racioMatrixNodeCreatePayloadForTest struct {
 	Node                domain.Node                        `json:"node"`
 	LogicGate           *domain.LogicGate                  `json:"logic_gate"`

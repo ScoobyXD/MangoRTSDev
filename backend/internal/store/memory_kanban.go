@@ -790,6 +790,16 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	if createdNode.CompanyID != "" {
+		node := r.nodes[nodeKey]
+		if strings.TrimSpace(input.ActorUserID) != "" {
+			assigneeUserID := strings.TrimSpace(input.ActorUserID)
+			node.AssigneeUserID = &assigneeUserID
+		} else {
+			node.AssigneeUserID = nil
+		}
+		r.nodes[nodeKey] = node
+	}
 
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
