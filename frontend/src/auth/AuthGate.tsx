@@ -1135,6 +1135,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const [newChildUserGroupName, setNewChildUserGroupName] = useState("");
   const [groupMemberDraft, setGroupMemberDraft] = useState<Set<string>>(new Set());
   const [groupBusy, setGroupBusy] = useState(false);
+  const childGroupNameInputRef = useRef<HTMLInputElement | null>(null);
   const selectedUserGroup = userGroups.find((group) => group.group_id === selectedUserGroupID) ?? null;
   const userGroupChildrenByParent = useMemo(() => {
     const grouped = new Map<string, CompanyUserGroup[]>();
@@ -1300,21 +1301,38 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     const selected = selectedUserGroupID === group.group_id;
     return (
       <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
-        <button
-          className="mango-settings-action"
-          type="button"
-          style={{
-            ...smallButtonStyle,
-            justifyContent: "space-between",
-            display: "flex",
-            minHeight: 34,
-            ...(selected ? { background: SETTINGS_SELECTED_BACKGROUND, borderColor: "transparent", boxShadow: SETTINGS_SELECTED_SHADOW } : {}),
-          }}
-          onClick={() => setSelectedUserGroupID(group.group_id)}
-        >
-          <span style={{ overflowWrap: "anywhere", textAlign: "left" }}>{group.name}</span>
-          <span style={{ color: SETTINGS_MUTED }}>{memberCount}</span>
-        </button>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 4, alignItems: "stretch" }}>
+          <button
+            className="mango-settings-action"
+            type="button"
+            style={{
+              ...smallButtonStyle,
+              justifyContent: "space-between",
+              display: "flex",
+              minHeight: 34,
+              ...(selected ? { background: SETTINGS_SELECTED_BACKGROUND, borderColor: "transparent", boxShadow: SETTINGS_SELECTED_SHADOW } : {}),
+            }}
+            onClick={() => setSelectedUserGroupID(group.group_id)}
+          >
+            <span style={{ overflowWrap: "anywhere", textAlign: "left" }}>{group.name}</span>
+            <span style={{ color: SETTINGS_MUTED }}>{memberCount}</span>
+          </button>
+          <button
+            className="mango-settings-action"
+            type="button"
+            title={`Add subgroup under ${group.name}`}
+            aria-label={`Add subgroup under ${group.name}`}
+            style={{ ...smallButtonStyle, minHeight: 34, padding: 0, fontSize: 16, fontWeight: 760 }}
+            disabled={groupBusy}
+            onClick={() => {
+              setSelectedUserGroupID(group.group_id);
+              setNewChildUserGroupName("");
+              window.setTimeout(() => childGroupNameInputRef.current?.focus(), 0);
+            }}
+          >
+            +
+          </button>
+        </div>
         {childGroups.map((child) => renderUserGroup(child, depth + 1))}
       </div>
     );
@@ -1567,12 +1585,12 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             {selectedUserGroup ? (
               <>
                 <div style={settingsSubsectionTitleStyle}>{selectedUserGroup.name}</div>
-                <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8 }} onSubmit={(event) => {
+                <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }} onSubmit={(event) => {
                   event.preventDefault();
                   void createUserGroup(selectedUserGroup.group_id);
                 }}>
-                  <input className="mango-settings-input" style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder="Child group name" />
-                  <button className="mango-settings-action" type="submit" style={smallButtonStyle} disabled={groupBusy}>Create child</button>
+                  <input ref={childGroupNameInputRef} className="mango-settings-input" style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder={`New subgroup under ${selectedUserGroup.name}`} />
+                  <button className="mango-settings-action" type="submit" style={{ ...smallButtonStyle, minHeight: 34 }} disabled={groupBusy || !newChildUserGroupName.trim()}>Add subgroup</button>
                 </form>
                 <div className="company-explorer-scroll" style={{ display: "grid", gap: 4, maxHeight: 260, overflow: "auto", border: "1px solid rgba(255, 255, 255, 0.78)", borderRadius: 8, padding: 8, background: SETTINGS_INSET_SURFACE, boxShadow: SETTINGS_INSET_SHADOW }}>
                   {users.map((user) => (
