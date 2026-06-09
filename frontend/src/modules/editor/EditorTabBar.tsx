@@ -60,6 +60,7 @@ type EditorTabBarProps = {
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
   onInsertTable?: () => void;
+  onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
   reserveHeaderOffset?: boolean;
 };
 
@@ -80,6 +81,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onOutlineStyleChange,
   onCreateRelatedNode,
   onInsertTable,
+  onRelationshipTabAnchorChange,
   reserveHeaderOffset = true,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
@@ -89,6 +91,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
+  const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
   const outlineHoverBackground = colorWithAlpha(outlineMenuAccent, 0.14);
   const outlineSelectedBackground = colorWithAlpha(outlineMenuAccent, 0.2);
   const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
@@ -134,6 +137,28 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [createMenuOpen]);
+
+  useEffect(() => {
+    if (!onRelationshipTabAnchorChange) return;
+    const measure = () => {
+      const element = relationshipTabRef.current;
+      if (!element) {
+        onRelationshipTabAnchorChange(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      onRelationshipTabAnchorChange({ left: rect.left, width: rect.width });
+    };
+    measure();
+    const element = relationshipTabRef.current;
+    const observer = element && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (element) observer?.observe(element);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTab, onRelationshipTabAnchorChange]);
 
   const currentOutlineStyleLabel = EDITOR_OUTLINE_STYLE_ITEMS.find((item) => item.id === outlineStyle)?.label ?? "Outline Styles";
   const tabStyleFor = (selected: boolean, hovered: boolean): React.CSSProperties => ({
@@ -311,6 +336,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
         return (
           <button
             key={tab.id}
+            ref={tab.id === "relationships" ? relationshipTabRef : undefined}
             type="button"
             onMouseEnter={() => setHoveredTabID(tab.id)}
             onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
