@@ -179,6 +179,33 @@ run("scoped explorer rows render children under a named logic-gate root", () => 
   ]);
 });
 
+run("custom logic gate rows render assigned nodes when expanded", () => {
+  const rows = buildCompanyExplorerTreeRows({
+    expanded: new Set(["workspace-folder-custom", "logic-gate-gate-a"]),
+    nodes: [{ company_id: "c", node_id: "node-a", title: "Nested node", logic_gate_ids: ["gate-a"], created_timestamp: "5" }],
+    logicGates: [
+      { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
+    ],
+    kanbanBoards: [],
+    folders: [
+      ...systemFolders,
+      { company_id: "c", folder_id: "custom", folder_kind: "logic_gate" as const, name: "MangoRTS", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+    ],
+    folderItems: [
+      { company_id: "c", folder_id: "custom", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "6", updated_timestamp: "6" },
+    ],
+    rootRowOrder: {},
+  });
+
+  const logicGateIndex = rows.findIndex((row) => row.id === "logic-gate-gate-a");
+  assert.notEqual(logicGateIndex, -1);
+  assert.equal(rows[logicGateIndex]?.hasChildren, true);
+  assert.deepEqual(rows.slice(logicGateIndex, logicGateIndex + 2).map((row) => [row.id, row.depth, row.kind, row.parentLogicGateID ?? ""]), [
+    ["logic-gate-gate-a", 1, "logic_gate", ""],
+    ["logic-gate-gate-a-node-node-a", 2, "node", "gate-a"],
+  ]);
+});
+
 run("context creation targets nested logic gate folders", () => {
   const targets = resolveExplorerCreationTargets({ kind: "folder", folderKind: "logic_gate", folderID: "logic-folder-1" });
   assert.deepEqual(targets, {

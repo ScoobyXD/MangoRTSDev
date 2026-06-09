@@ -111,6 +111,16 @@ export function buildCompanyExplorerTreeRows({
   };
   const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
   const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
+  const nodesByLogicGateID = new Map<string, NodeRecord[]>();
+  for (const node of nodes) {
+    for (const logicGateID of node.logic_gate_ids ?? []) {
+      const cleanLogicGateID = logicGateID.trim();
+      if (!cleanLogicGateID) continue;
+      const bucket = nodesByLogicGateID.get(cleanLogicGateID) ?? [];
+      bucket.push(node);
+      nodesByLogicGateID.set(cleanLogicGateID, bucket);
+    }
+  }
   const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
   for (const folder of folders) {
     const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
@@ -128,6 +138,29 @@ export function buildCompanyExplorerTreeRows({
 
   const getRootAwarePosition = (folderKind: CompanyExplorerFolderKind, rowID: string, position: number): number => {
     return rootRowOrder[rowID] ?? position + ROOT_ROW_POSITION_OFFSET[folderKind];
+  };
+
+  const getLogicGateChildNodes = (logicGateID: string): NodeRecord[] => {
+    return [...(nodesByLogicGateID.get(logicGateID) ?? [])].sort((a, b) => (
+      getNodeTitle(a).localeCompare(getNodeTitle(b))
+      || a.created_timestamp.localeCompare(b.created_timestamp)
+      || a.node_id.localeCompare(b.node_id)
+    ));
+  };
+
+  const buildLogicGateChildNodeRows = (logicGateID: string, depth: number): ExplorerTreeNode[] => {
+    return getLogicGateChildNodes(logicGateID).map((node, index) => ({
+      id: `logic-gate-${logicGateID}-node-${node.node_id}`,
+      label: getNodeTitle(node) || node.node_id,
+      depth,
+      kind: "node",
+      nodeID: node.node_id,
+      scopeLevel: depth,
+      position: (index + 1) * TREE_ROW_POSITION_STEP,
+      createdTimestamp: node.created_timestamp,
+      parentLogicGateID: logicGateID,
+      syntheticKind: "logic_gate_children",
+    }));
   };
 
   const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
@@ -169,6 +202,7 @@ export function buildCompanyExplorerTreeRows({
           scopeLevel: depth,
           position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
           createdTimestamp: logicGate.created_timestamp,
+          hasChildren: getLogicGateChildNodes(logicGate.logic_gate_id).length > 0,
         });
       }
     }
@@ -205,6 +239,7 @@ export function buildCompanyExplorerTreeRows({
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
+            hasChildren: getLogicGateChildNodes(logicGate.logic_gate_id).length > 0,
           });
         }
       }
@@ -259,6 +294,9 @@ export function buildCompanyExplorerTreeRows({
   const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
     for (const row of buildFolderBranchRows(folderKind, parentFolderID, depth)) {
       rows.push(row);
+      if (row.kind === "logic_gate" && expanded.has(row.id) && row.logicGateID) {
+        rows.push(...buildLogicGateChildNodeRows(row.logicGateID, row.depth + 1));
+      }
       if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID) continue;
       for (const systemRow of buildSystemFolderContentRows(row.systemKey, depth + 1)) rows.push(systemRow);
       pushFolderBranch(folderKind, row.folderID, depth + 1);
@@ -273,6 +311,9 @@ export function buildCompanyExplorerTreeRows({
     ...buildFolderBranchRows("logic_gate", "", 0),
   ])) {
     rows.push(row);
+    if (row.kind === "logic_gate" && expanded.has(row.id) && row.logicGateID) {
+      rows.push(...buildLogicGateChildNodeRows(row.logicGateID, row.depth + 1));
+    }
     if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID || !row.folderKind) continue;
     for (const systemRow of buildSystemFolderContentRows(row.systemKey, 1)) rows.push(systemRow);
     pushFolderBranch(row.folderKind, row.folderID, 1);

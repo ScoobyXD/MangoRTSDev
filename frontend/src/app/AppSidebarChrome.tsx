@@ -273,6 +273,7 @@ export function AppSidebar({
   const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
+  const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const keyViewsSectionRef = useRef<HTMLElement | null>(null);
@@ -949,6 +950,27 @@ export function AppSidebar({
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
+      <div data-frame-interactive="true" style={appSidebarExplorerSearchShellStyle}>
+        <input
+          aria-label="Search Explorer"
+          value={explorerSearchQuery}
+          onChange={(event) => setExplorerSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setExplorerSearchQuery("");
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder="Search Explorer"
+          style={appSidebarExplorerSearchInputStyle}
+        />
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={appSidebarExplorerSearchIconStyle}>
+          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+
       <section ref={keyViewsSectionRef} style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
         <AppSidebarButton
           label="My Triage"
@@ -1202,7 +1224,11 @@ export function AppSidebar({
         </div>
       </section>
 
-      <AppSidebarCompanyExplorerSection selectionTargetFrameIDs={explorerSelectionTargetFrameIDs} />
+      <AppSidebarCompanyExplorerSection
+        selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+        explorerSearchQuery={explorerSearchQuery}
+        onExplorerSearchQueryChange={setExplorerSearchQuery}
+      />
 
       {WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
@@ -1296,8 +1322,12 @@ export function AppSidebar({
 
 function AppSidebarCompanyExplorerSection({
   selectionTargetFrameIDs,
+  explorerSearchQuery,
+  onExplorerSearchQueryChange,
 }: {
   selectionTargetFrameIDs: string[];
+  explorerSearchQuery: string;
+  onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
@@ -1308,6 +1338,8 @@ function AppSidebarCompanyExplorerSection({
           theme="light"
           useParentScroll
           selectionTargetFrameIDs={selectionTargetFrameIDs}
+          externalSearchQuery={explorerSearchQuery}
+          onSearchResultSelect={() => onExplorerSearchQueryChange("")}
         />
       </React.Suspense>
     </section>
@@ -1794,6 +1826,41 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "flex-end",
   minWidth: 0,
+};
+
+const appSidebarExplorerSearchShellStyle: React.CSSProperties = {
+  position: "relative",
+  flex: "0 0 auto",
+  minWidth: 0,
+  height: 32,
+  margin: "-2px 3px 0",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.9) 100%)",
+  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+};
+
+const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  boxSizing: "border-box",
+  border: "none",
+  borderRadius: 9,
+  background: "transparent",
+  color: "#111827",
+  fontFamily: "var(--mango-font-family)",
+  fontSize: 11,
+  fontWeight: 620,
+  outline: "none",
+  padding: "0 30px 0 10px",
+};
+
+const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 9,
+  top: 9,
+  color: "rgba(15, 23, 42, 0.72)",
+  pointerEvents: "none",
 };
 
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
