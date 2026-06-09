@@ -673,7 +673,7 @@ function buildRaciCompanyExplorerRows(input: {
     }
   }
   const customNodesByLogicGateID = new Map<string, NodeRecord[]>();
-  for (const node of input.customFolderNodes ?? input.nodes) {
+  for (const node of input.customFolderNodes ?? input.folderNodes) {
     const logicGateIDs = Array.from(new Set((node.logic_gate_ids ?? []).map(cleanExplorerID).filter(Boolean)));
     for (const cleanLogicGateID of logicGateIDs) {
       const bucket = customNodesByLogicGateID.get(cleanLogicGateID) ?? [];
