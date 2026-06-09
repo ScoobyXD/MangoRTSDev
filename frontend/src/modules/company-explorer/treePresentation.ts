@@ -239,7 +239,7 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const logicGateParentFolderID = containingFolderID;
   const nodeFolderParentID = nodeParentFolderID;
   const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
-  const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind === "logic_gate" || row?.kind === "logic_gate" ? "logic_gate" : "node";
+  const preferredFolderKind: CompanyExplorerFolderKind = !row || row.folderKind === "logic_gate" || row.kind === "logic_gate" ? "logic_gate" : "node";
 
   return {
     preferredFolderKind,

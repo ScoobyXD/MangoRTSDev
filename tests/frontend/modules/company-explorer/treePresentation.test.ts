@@ -218,6 +218,18 @@ run("context creation targets nested logic gate folders", () => {
   });
 });
 
+run("context creation defaults blank areas to root custom folders", () => {
+  const targets = resolveExplorerCreationTargets(null);
+  assert.deepEqual(targets, {
+    preferredFolderKind: "logic_gate",
+    preferredFolderParentID: "",
+    nodeFolderParentID: "",
+    logicGateFolderParentID: "",
+    nodeParentFolderID: "",
+    logicGateParentFolderID: "",
+  });
+});
+
 run("context creation targets node siblings from a node row", () => {
   const targets = resolveExplorerCreationTargets({ kind: "node", folderKind: "node", folderID: "node-folder-1" });
   assert.deepEqual(targets, {

@@ -12,7 +12,7 @@ import { type SelectionIntent } from "../selectionCoordinator";
 import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRaciRole } from "../workspace/workspaceEntityCommands";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
 import { ExplorerRowIcon } from "./CompanyExplorerIcons";
@@ -64,6 +64,7 @@ import {
   type CompanyExplorerDeleteBatchResponse,
   type CompanyExplorerFolderItemAssignment,
   type CompanyExplorerFolderItemsBatchResponse,
+  type CompanyExplorerSearchResultSummary,
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
@@ -1163,6 +1164,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   scopedRootFolderKind,
   scopedRootFolderName = "",
   externalSearchQuery,
+  externalSearchSelectionRequest,
+  onSearchResultsChange,
   onSearchResultSelect,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -1198,6 +1201,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const treeKeyboardActiveRef = useRef(false);
   const [treeScrollTop, setTreeScrollTop] = useState(() => useParentScroll ? 0 : readScrollTopFromStorage(scrollStorageKey));
   const previousExplorerSearchTextRef = useRef("");
+  const lastExternalSearchSelectionRequestRef = useRef(0);
   const preSearchScrollTopRef = useRef(treeScrollTop);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [rootRowOrder, setRootRowOrder] = useState<Record<string, number>>(() => readRootRowOrderFromStorage(rootOrderStorageKey));
@@ -1593,7 +1597,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   ), [companyGroupSections.length, fullTreeRows]);
   const baseTreeRows = useMemo(() => (
     raciExplorerActive
-        ? buildRaciCompanyExplorerRows({
+        ? [
+            ...buildRaciCompanyExplorerRows({
               expanded: effectiveExpanded,
               nodes: raciExplorerData.nodes,
               logicGates: raciExplorerData.logicGates,
@@ -1602,9 +1607,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               folders,
               folderItems,
               currentUserID,
-            })
+            }),
+            ...customExplorerRows,
+          ]
       : teamCompanyExplorerActive && scopeView === "team"
-        ? buildTeamRaciExplorerRows({
+        ? [
+            ...buildTeamRaciExplorerRows({
               expanded: effectiveExpanded,
               companyID,
               users: teamUsers,
@@ -1613,7 +1621,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
               folders,
               folderItems,
-            })
+            }),
+            ...customExplorerRows,
+          ]
       : teamCompanyExplorerActive && scopeView === "company"
         ? [
             ...buildCompanyRaciExplorerRows({
@@ -1667,7 +1677,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           raciExpanded.add(raciLogicGateTreeID(role, logicGate.logic_gate_id));
         }
       }
-      return buildRaciCompanyExplorerRows({
+      return [
+        ...buildRaciCompanyExplorerRows({
           expanded: raciExpanded,
           nodes: raciExplorerData.nodes,
           logicGates: raciExplorerData.logicGates,
@@ -1676,10 +1687,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           folders,
           folderItems,
           currentUserID,
-        });
+        }),
+        ...customSearchRows,
+      ];
     }
     if (teamCompanyExplorerActive && scopeView === "team") {
-      return buildTeamRaciExplorerRows({
+      return [
+        ...buildTeamRaciExplorerRows({
           expanded: new Set(["*"]),
           companyID,
           users: teamUsers,
@@ -1688,7 +1702,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
           folders,
           folderItems,
-        });
+        }),
+        ...customSearchRows,
+      ];
     }
     if (teamCompanyExplorerActive && scopeView === "company") {
       return [
@@ -1714,6 +1730,26 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
+  const explorerSearchResults = useMemo(() => (
+    buildExplorerSearchResults({ rows: allExpandedSearchTreeRows, selectedRowID: selectedTreeID, query: effectiveExplorerSearchQuery, limit: 8 })
+  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery, selectedTreeID]);
+  useEffect(() => {
+    if (!onSearchResultsChange) return;
+    if (!explorerSearchActive) {
+      onSearchResultsChange([]);
+      return;
+    }
+    const results: CompanyExplorerSearchResultSummary[] = explorerSearchResults.map((row) => ({
+      treeID: row.id,
+      label: row.label,
+      kind: row.kind,
+      depth: row.depth,
+      folderLabel: row.folderLabel,
+      systemKey: row.systemKey,
+      mangoDefaultFolder: row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder"),
+    }));
+    onSearchResultsChange(results);
+  }, [explorerSearchActive, explorerSearchResults, onSearchResultsChange]);
   const treeRows = explorerSearchActive ? explorerSearchViewRows : baseTreeRows;
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);
@@ -2601,6 +2637,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [emitExplorerEntityActivation, expandTreeIDs, focusTreeRow, onSearchResultSelect]);
 
   useEffect(() => {
+    const request = externalSearchSelectionRequest;
+    if (!request?.treeID || request.requestID === lastExternalSearchSelectionRequestRef.current) return;
+    lastExternalSearchSelectionRequestRef.current = request.requestID;
+    const row = allExpandedSearchTreeRows.find((candidate) => candidate.id === request.treeID);
+    if (row) selectExplorerSearchResult(row);
+  }, [allExpandedSearchTreeRows, externalSearchSelectionRequest, selectExplorerSearchResult]);
+
+  useEffect(() => {
     const rowID = pendingScrollTreeIDRef.current;
     if (!rowID || !treeRows.some((row) => row.id === rowID)) return;
     const align = pendingScrollAlignRef.current;
@@ -3108,19 +3152,21 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     </div>
   ) : undefined;
   const explorerCreateControlsStyle: React.CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: 5,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 4,
     minWidth: 0,
   };
-  const explorerCreateButtonStyle: React.CSSProperties = {
+  const explorerCreateButtonStyle = (width: number): React.CSSProperties => ({
     minWidth: 0,
-    height: 31,
+    width,
+    height: 29,
     display: "grid",
-    gridTemplateColumns: "16px minmax(0, 1fr)",
+    gridTemplateColumns: "15px minmax(0, 1fr)",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 3,
     border: "1px solid rgba(148, 163, 184, 0.34)",
     borderRadius: 7,
     background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.88) 100%)",
@@ -3130,10 +3176,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     fontSize: 10.5,
     fontWeight: 720,
     letterSpacing: 0,
-    padding: "0 6px",
+    padding: "0 5px",
     overflow: "hidden",
     boxShadow: "3px 3px 8px rgba(174, 174, 192, 0.18), -3px -3px 8px rgba(255, 255, 255, 0.76)",
-  };
+  });
   const explorerCreateButtonTextStyle: React.CSSProperties = {
     minWidth: 0,
     overflow: "hidden",
@@ -3154,20 +3200,24 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     void createLogicGateAtFolder(targets.logicGateParentFolderID, undefined, raciRole);
   }, [createLogicGateAtFolder, getToolbarCreationTargets, selectedTree]);
   const createToolbarNode = useCallback(() => {
+    if (selectedTree?.kind === "logic_gate" && selectedTree.logicGateID) {
+      void createNodeAtFolder("", undefined, selectedTree.logicGateID, selectedTree.id, 3);
+      return;
+    }
     const targets = getToolbarCreationTargets();
     void createNodeAtFolder(targets.nodeParentFolderID);
-  }, [createNodeAtFolder, getToolbarCreationTargets]);
+  }, [createNodeAtFolder, getToolbarCreationTargets, selectedTree]);
   const explorerCreateControls = (
     <div data-frame-interactive="true" style={explorerCreateControlsStyle} aria-label="Create Explorer item">
-      <button type="button" title="Create Folder" aria-label="Create Folder" style={explorerCreateButtonStyle} onClick={createToolbarFolder}>
+      <button type="button" title="Create Folder" aria-label="Create Folder" style={explorerCreateButtonStyle(82)} onClick={createToolbarFolder}>
         <ExplorerRowIcon kind="folder" tone="orange" />
         <span style={explorerCreateButtonTextStyle}>Folder</span>
       </button>
-      <button type="button" title="Create Logic Gate" aria-label="Create Logic Gate" style={explorerCreateButtonStyle} onClick={createToolbarLogicGate}>
+      <button type="button" title="Create Logic Gate" aria-label="Create Logic Gate" style={explorerCreateButtonStyle(102)} onClick={createToolbarLogicGate}>
         <ExplorerRowIcon kind="logic_gate" />
         <span style={explorerCreateButtonTextStyle}>Logic Gate</span>
       </button>
-      <button type="button" title="Create Node" aria-label="Create Node" style={explorerCreateButtonStyle} onClick={createToolbarNode}>
+      <button type="button" title="Create Node" aria-label="Create Node" style={explorerCreateButtonStyle(73)} onClick={createToolbarNode}>
         <ExplorerRowIcon kind="node" />
         <span style={explorerCreateButtonTextStyle}>Node</span>
       </button>

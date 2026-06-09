@@ -8,6 +8,7 @@ import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import type { CompanyExplorerSearchResultSummary, CompanyExplorerSearchSelectionRequest } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
@@ -274,6 +275,8 @@ export function AppSidebar({
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const [explorerSearchResults, setExplorerSearchResults] = useState<CompanyExplorerSearchResultSummary[]>([]);
+  const [explorerSearchSelectionRequest, setExplorerSearchSelectionRequest] = useState<CompanyExplorerSearchSelectionRequest | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const keyViewsSectionRef = useRef<HTMLElement | null>(null);
@@ -322,6 +325,17 @@ export function AppSidebar({
     onPageSelect("home");
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
+
+  const handleExplorerSearchResultsChange = useCallback((results: CompanyExplorerSearchResultSummary[]) => {
+    setExplorerSearchResults(results);
+  }, []);
+
+  const requestExplorerSearchResultSelection = useCallback((result: CompanyExplorerSearchResultSummary) => {
+    setExplorerSearchSelectionRequest((current) => ({
+      treeID: result.treeID,
+      requestID: (current?.requestID ?? 0) + 1,
+    }));
+  }, []);
 
   useEffect(() => {
     if (activeHomeView.startsWith("shared:")) return;
@@ -942,6 +956,7 @@ export function AppSidebar({
   const viewsActive = homeActive && APP_SIDEBAR_RACI_VIEWS.some((view) => (
     activeHomeView === view.viewID || (activeHomeView === "aci-inbox" && view.viewID === "a-inbox")
   ));
+  const explorerSearchOpen = explorerSearchQuery.trim().length > 0;
 
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
@@ -950,25 +965,50 @@ export function AppSidebar({
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
-      <div data-frame-interactive="true" style={appSidebarExplorerSearchShellStyle}>
-        <input
-          aria-label="Search Explorer"
-          value={explorerSearchQuery}
-          onChange={(event) => setExplorerSearchQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setExplorerSearchQuery("");
-              event.currentTarget.blur();
-            }
-          }}
-          placeholder="Search Explorer"
-          style={appSidebarExplorerSearchInputStyle}
-        />
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={appSidebarExplorerSearchIconStyle}>
-          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+      <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle(explorerSearchOpen)}>
+        <div style={appSidebarExplorerSearchShellStyle(explorerSearchOpen)}>
+          <input
+            aria-label="Search Explorer"
+            value={explorerSearchQuery}
+            onChange={(event) => setExplorerSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setExplorerSearchQuery("");
+                setExplorerSearchResults([]);
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder="Search Explorer"
+            style={appSidebarExplorerSearchInputStyle}
+          />
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={appSidebarExplorerSearchIconStyle}>
+            <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
+        <div style={appSidebarExplorerSearchResultsStyle(explorerSearchOpen)} aria-live="polite">
+          {explorerSearchOpen && (
+            explorerSearchResults.length > 0 ? explorerSearchResults.map((result) => (
+              <button
+                key={`${result.treeID}:${result.label}`}
+                type="button"
+                style={appSidebarExplorerSearchResultButtonStyle}
+                onClick={() => requestExplorerSearchResultSelection(result)}
+              >
+                <span style={appSidebarExplorerSearchResultIconStyle}>
+                  <ExplorerRowIcon kind={result.kind} systemKey={result.systemKey} mangoDefaultFolder={result.mangoDefaultFolder} />
+                </span>
+                <span style={appSidebarExplorerSearchResultTextStyle}>
+                  <span style={appSidebarExplorerSearchResultLabelStyle}>{result.label}</span>
+                  <span style={appSidebarExplorerSearchResultMetaStyle}>{formatExplorerSearchResultKind(result.kind)}</span>
+                </span>
+              </button>
+            )) : (
+              <div style={appSidebarExplorerSearchEmptyStyle}>No matches</div>
+            )
+          )}
+        </div>
       </div>
 
       <section ref={keyViewsSectionRef} style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
@@ -1227,7 +1267,9 @@ export function AppSidebar({
       <AppSidebarCompanyExplorerSection
         selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
         explorerSearchQuery={explorerSearchQuery}
+        explorerSearchSelectionRequest={explorerSearchSelectionRequest}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
+        onExplorerSearchResultsChange={handleExplorerSearchResultsChange}
       />
 
       {WORKTREE_VERSION && (
@@ -1323,11 +1365,15 @@ export function AppSidebar({
 function AppSidebarCompanyExplorerSection({
   selectionTargetFrameIDs,
   explorerSearchQuery,
+  explorerSearchSelectionRequest,
   onExplorerSearchQueryChange,
+  onExplorerSearchResultsChange,
 }: {
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
+  explorerSearchSelectionRequest: CompanyExplorerSearchSelectionRequest | null;
   onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
+  onExplorerSearchResultsChange: (results: CompanyExplorerSearchResultSummary[]) => void;
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
@@ -1339,7 +1385,12 @@ function AppSidebarCompanyExplorerSection({
           useParentScroll
           selectionTargetFrameIDs={selectionTargetFrameIDs}
           externalSearchQuery={explorerSearchQuery}
-          onSearchResultSelect={() => onExplorerSearchQueryChange("")}
+          externalSearchSelectionRequest={explorerSearchSelectionRequest}
+          onSearchResultsChange={onExplorerSearchResultsChange}
+          onSearchResultSelect={() => {
+            onExplorerSearchQueryChange("");
+            onExplorerSearchResultsChange([]);
+          }}
         />
       </React.Suspense>
     </section>
@@ -1372,6 +1423,13 @@ function sidebarNotificationMatchesFilter(item: NotificationItem, filter: Sideba
 
 function normalizeSidebarNotificationCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function formatExplorerSearchResultKind(kind: CompanyExplorerSearchResultSummary["kind"]): string {
+  if (kind === "logic_gate") return "Logic Gate";
+  if (kind === "node") return "Node";
+  if (kind === "kanban") return "Kanban Board";
+  return "Folder";
 }
 
 function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadge[] }): React.ReactElement | null {
@@ -1828,17 +1886,52 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const appSidebarExplorerSearchShellStyle: React.CSSProperties = {
-  position: "relative",
+function appSidebarExplorerSearchContainerStyle(open: boolean): React.CSSProperties {
+  return {
+    position: "sticky",
+    top: 0,
+    zIndex: 40,
+    flex: "0 0 auto",
+    display: "grid",
+    minWidth: 0,
+    margin: "-2px 3px 0",
+    borderRadius: 10,
+    background: open ? "linear-gradient(180deg, rgba(251, 251, 253, 0.98) 0%, rgba(246, 247, 251, 0.96) 100%)" : "transparent",
+    boxShadow: open ? "0 14px 24px rgba(15, 23, 42, 0.12)" : "none",
+    backdropFilter: open ? "blur(12px) saturate(1.04)" : undefined,
+    WebkitBackdropFilter: open ? "blur(12px) saturate(1.04)" : undefined,
+  };
+}
+
+function appSidebarExplorerSearchShellStyle(open: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    minWidth: 0,
+    height: 32,
+    border: "1px solid rgba(255, 255, 255, 0.78)",
+    borderRadius: open ? "9px 9px 0 0" : 9,
+    background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.9) 100%)",
+    boxShadow: open ? "inset 1px 1px 0 rgba(255, 255, 255, 0.82)" : "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+    transition: "border-radius 140ms ease, box-shadow 160ms ease",
+  };
+}
+
+const appSidebarExplorerSearchResultsStyle = (open: boolean): React.CSSProperties => ({
   flex: "0 0 auto",
+  display: "grid",
+  gap: 2,
   minWidth: 0,
-  height: 32,
-  margin: "-2px 3px 0",
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  borderRadius: 9,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.9) 100%)",
-  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-};
+  maxHeight: open ? 272 : 0,
+  opacity: open ? 1 : 0,
+  overflow: "hidden",
+  padding: open ? "5px 5px 6px" : "0 5px",
+  border: open ? "1px solid rgba(255, 255, 255, 0.78)" : "1px solid transparent",
+  borderTop: "none",
+  borderRadius: "0 0 9px 9px",
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
+  boxShadow: open ? "inset 1px 0 0 rgba(255, 255, 255, 0.7)" : "none",
+  transition: "max-height 180ms ease, opacity 140ms ease, padding 160ms ease, border-color 160ms ease",
+});
 
 const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
   width: "100%",
@@ -1861,6 +1954,67 @@ const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
   top: 9,
   color: "rgba(15, 23, 42, 0.72)",
   pointerEvents: "none",
+};
+
+const appSidebarExplorerSearchResultButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "19px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 5,
+  border: "1px solid transparent",
+  borderRadius: 7,
+  background: "transparent",
+  color: "#111827",
+  cursor: "pointer",
+  font: "inherit",
+  padding: "3px 6px",
+  textAlign: "left",
+};
+
+const appSidebarExplorerSearchResultIconStyle: React.CSSProperties = {
+  display: "grid",
+  placeItems: "center",
+  minWidth: 0,
+};
+
+const appSidebarExplorerSearchResultTextStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 1,
+  minWidth: 0,
+};
+
+const appSidebarExplorerSearchResultLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.1,
+};
+
+const appSidebarExplorerSearchResultMetaStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "rgba(71, 85, 105, 0.82)",
+  fontSize: 9.5,
+  fontWeight: 650,
+  lineHeight: 1.05,
+};
+
+const appSidebarExplorerSearchEmptyStyle: React.CSSProperties = {
+  minHeight: 28,
+  display: "flex",
+  alignItems: "center",
+  padding: "0 8px",
+  color: "rgba(71, 85, 105, 0.82)",
+  fontSize: 11,
+  fontWeight: 700,
 };
 
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {

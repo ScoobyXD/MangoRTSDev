@@ -84,6 +84,21 @@ export type CompanyExplorerDeleteConfirmationSummary = {
   requiresFolderAcknowledgement: boolean;
 };
 
+export type CompanyExplorerSearchResultSummary = {
+  treeID: string;
+  label: string;
+  kind: ExplorerTreeNode["kind"];
+  depth: number;
+  folderLabel?: string;
+  systemKey?: CompanyExplorerSystemFolderKey;
+  mangoDefaultFolder?: boolean;
+};
+
+export type CompanyExplorerSearchSelectionRequest = {
+  treeID: string;
+  requestID: number;
+};
+
 export type CompanyExplorerContentProps = {
   accent: string;
   widgetId?: string;
@@ -94,6 +109,8 @@ export type CompanyExplorerContentProps = {
   scopedRootFolderKind?: CompanyExplorerFolderKind;
   scopedRootFolderName?: string;
   externalSearchQuery?: string;
+  externalSearchSelectionRequest?: CompanyExplorerSearchSelectionRequest | null;
+  onSearchResultsChange?: (results: CompanyExplorerSearchResultSummary[]) => void;
   onSearchResultSelect?: () => void;
 };
 
