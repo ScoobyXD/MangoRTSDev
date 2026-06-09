@@ -22,6 +22,7 @@ import {
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
+import { filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
   { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
@@ -123,6 +124,28 @@ run("root folders from different domains can be locally ordered together", () =>
     "workspace-folder-logic-root",
     "workspace-folder-node-root",
   ]);
+});
+
+run("custom top-level rows exclude default roots and keep custom branches", () => {
+  const rows = [
+    { id: "raci-default-folders", label: "Default Folders", depth: 0, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 0, position: 1000, createdTimestamp: "", syntheticKind: "default_scope_folder" as const },
+    { id: "raci-folder-responsible", label: "Responsible", depth: 1, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "", syntheticKind: "raci_folder" as const },
+    { id: "workspace-folder-system-active", label: "Active Nodes", depth: 0, kind: "folder" as const, folderID: "system-active", folderKind: "node" as const, systemKey: "active_nodes" as const, scopeLevel: 0, position: 200, createdTimestamp: "0" },
+    { id: "node-system", label: "System Node", depth: 1, kind: "node" as const, nodeID: "system", folderID: "system-active", folderKind: "node" as const, scopeLevel: 1, position: 1000, createdTimestamp: "1" },
+    { id: "workspace-folder-function-root", label: "Logic Gates by Function", depth: 0, kind: "folder" as const, folderID: "function-root", folderKind: "logic_gate" as const, scopeLevel: 0, position: 300, createdTimestamp: "0" },
+    { id: "workspace-folder-function-child", label: "Finance", depth: 1, kind: "folder" as const, folderID: "function-child", parentFolderID: "function-root", folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "1" },
+    { id: "workspace-folder-custom", label: "MangoRTS", depth: 0, kind: "folder" as const, folderID: "custom", folderKind: "logic_gate" as const, scopeLevel: 0, position: 400, createdTimestamp: "0" },
+    { id: "logic-gate-custom", label: "Development Work", depth: 1, kind: "logic_gate" as const, logicGateID: "custom-gate", folderID: "custom", folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "1" },
+    { id: "node-root", label: "Unfoldered Node", depth: 0, kind: "node" as const, nodeID: "root", folderID: "", folderKind: "node" as const, scopeLevel: 0, position: 500, createdTimestamp: "1" },
+  ];
+
+  assert.deepEqual(
+    filterExplorerRowsForCustomTopLevel({
+      rows,
+      hiddenRootFolderNames: ["Logic Gates by Function", "Mango RACI Responsible"],
+    }).map((row) => row.id),
+    ["workspace-folder-custom", "logic-gate-custom", "node-root"],
+  );
 });
 
 run("scoped explorer rows render children under a named logic-gate root", () => {
