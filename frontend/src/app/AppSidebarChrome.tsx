@@ -8,6 +8,7 @@ import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { TREE_BASE_LEFT_PX, TREE_INDENT_PX, TREE_TOGGLE_SLOT_PX } from "../modules/company-explorer/companyExplorerDragDrop";
 import type { CompanyExplorerSearchResultSummary, CompanyExplorerSearchSelectionRequest } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
@@ -987,22 +988,32 @@ export function AppSidebar({
             <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </div>
-        <div style={appSidebarExplorerSearchResultsStyle(explorerSearchOpen)} aria-live="polite">
+        <div
+          className="company-explorer-scroll"
+          role={explorerSearchOpen && explorerSearchResults.length > 0 ? "tree" : undefined}
+          aria-label={explorerSearchOpen && explorerSearchResults.length > 0 ? "Explorer search results" : undefined}
+          style={appSidebarExplorerSearchResultsStyle(explorerSearchOpen)}
+          aria-live="polite"
+        >
           {explorerSearchOpen && (
             explorerSearchResults.length > 0 ? explorerSearchResults.map((result) => (
               <button
                 key={`${result.treeID}:${result.label}`}
                 type="button"
-                style={appSidebarExplorerSearchResultButtonStyle}
+                role="treeitem"
+                aria-level={Math.max(1, result.depth + 1)}
+                aria-expanded={result.hasChildren ? true : undefined}
+                title={`${result.label} (${formatExplorerSearchResultKind(result.kind)})`}
+                style={appSidebarExplorerSearchTreeRowStyle(result.depth)}
                 onClick={() => requestExplorerSearchResultSelection(result)}
               >
-                <span style={appSidebarExplorerSearchResultIconStyle}>
+                <span style={appSidebarExplorerSearchTreeToggleSlotStyle}>
+                  {result.hasChildren && <ExplorerDisclosureIcon open color="rgba(15, 23, 42, 0.58)" />}
+                </span>
+                <span style={appSidebarExplorerSearchTreeIconStyle}>
                   <ExplorerRowIcon kind={result.kind} systemKey={result.systemKey} mangoDefaultFolder={result.mangoDefaultFolder} />
                 </span>
-                <span style={appSidebarExplorerSearchResultTextStyle}>
-                  <span style={appSidebarExplorerSearchResultLabelStyle}>{result.label}</span>
-                  <span style={appSidebarExplorerSearchResultMetaStyle}>{formatExplorerSearchResultKind(result.kind)}</span>
-                </span>
+                <span style={appSidebarExplorerSearchTreeLabelStyle}>{result.label}</span>
               </button>
             )) : (
               <div style={appSidebarExplorerSearchEmptyStyle}>No matches</div>
@@ -1919,18 +1930,22 @@ function appSidebarExplorerSearchShellStyle(open: boolean): React.CSSProperties 
 const appSidebarExplorerSearchResultsStyle = (open: boolean): React.CSSProperties => ({
   flex: "0 0 auto",
   display: "grid",
-  gap: 2,
+  alignContent: "start",
+  gap: 1,
   minWidth: 0,
   maxHeight: open ? 272 : 0,
   opacity: open ? 1 : 0,
-  overflow: "hidden",
-  padding: open ? "5px 5px 6px" : "0 5px",
+  overflowY: open ? "auto" : "hidden",
+  overflowX: "hidden",
+  padding: open ? "5px 4px 6px" : "0 4px",
   border: open ? "1px solid rgba(255, 255, 255, 0.78)" : "1px solid transparent",
   borderTop: "none",
   borderRadius: "0 0 9px 9px",
   background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
   boxShadow: open ? "inset 1px 0 0 rgba(255, 255, 255, 0.7)" : "none",
   transition: "max-height 180ms ease, opacity 140ms ease, padding 160ms ease, border-color 160ms ease",
+  ["--company-explorer-scroll-accent" as string]: SIDEBAR_SCROLL_ACCENT,
+  ["--company-explorer-scroll-track" as string]: "transparent",
 });
 
 const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
@@ -1956,37 +1971,43 @@ const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
   pointerEvents: "none",
 };
 
-const appSidebarExplorerSearchResultButtonStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  minHeight: 28,
-  display: "grid",
-  gridTemplateColumns: "19px minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 5,
-  border: "1px solid transparent",
-  borderRadius: 7,
-  background: "transparent",
-  color: "#111827",
-  cursor: "pointer",
-  font: "inherit",
-  padding: "3px 6px",
-  textAlign: "left",
-};
+function appSidebarExplorerSearchTreeRowStyle(depth: number): React.CSSProperties {
+  const safeDepth = Math.max(0, Math.min(14, Math.floor(depth)));
+  return {
+    width: "100%",
+    minWidth: 0,
+    minHeight: 26,
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    border: "1px solid transparent",
+    borderRadius: 7,
+    background: "transparent",
+    color: "#111827",
+    cursor: "pointer",
+    font: "inherit",
+    padding: `2px 7px 2px ${TREE_BASE_LEFT_PX + safeDepth * TREE_INDENT_PX}px`,
+    textAlign: "left",
+  };
+}
 
-const appSidebarExplorerSearchResultIconStyle: React.CSSProperties = {
+const appSidebarExplorerSearchTreeToggleSlotStyle: React.CSSProperties = {
+  width: TREE_TOGGLE_SLOT_PX,
+  height: 20,
+  flexShrink: 0,
   display: "grid",
   placeItems: "center",
-  minWidth: 0,
 };
 
-const appSidebarExplorerSearchResultTextStyle: React.CSSProperties = {
+const appSidebarExplorerSearchTreeIconStyle: React.CSSProperties = {
+  width: 15,
+  height: 15,
   display: "grid",
-  gap: 1,
-  minWidth: 0,
+  placeItems: "center",
+  flexShrink: 0,
 };
 
-const appSidebarExplorerSearchResultLabelStyle: React.CSSProperties = {
+const appSidebarExplorerSearchTreeLabelStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -1994,17 +2015,6 @@ const appSidebarExplorerSearchResultLabelStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
   lineHeight: 1.1,
-};
-
-const appSidebarExplorerSearchResultMetaStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "rgba(71, 85, 105, 0.82)",
-  fontSize: 9.5,
-  fontWeight: 650,
-  lineHeight: 1.05,
 };
 
 const appSidebarExplorerSearchEmptyStyle: React.CSSProperties = {

@@ -92,6 +92,7 @@ export type CompanyExplorerSearchResultSummary = {
   folderLabel?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
   mangoDefaultFolder?: boolean;
+  hasChildren?: boolean;
 };
 
 export type CompanyExplorerSearchSelectionRequest = {
