@@ -26,6 +26,7 @@ type CompanyExplorerTreeProps = {
   isDarkTheme: boolean;
   elevatedControls?: boolean;
   topControlsAccessory?: React.ReactNode;
+  topControlsActions?: React.ReactNode;
   hideTopControls: boolean;
   useParentScroll: boolean;
   treeViewportRef: React.RefObject<HTMLDivElement>;
@@ -35,9 +36,7 @@ type CompanyExplorerTreeProps = {
   expanded: Set<string>;
   selectedTreeID: string;
   selectedTreeIDs: Set<string>;
-  explorerSearchQuery: string;
   explorerSearchActive: boolean;
-  explorerSearchResult: ExplorerTreeNode | null;
   draggingTreeID: string;
   dragOverTreeID: string;
   dragOverPlacement: ExplorerRowDropPlacement | null;
@@ -49,7 +48,6 @@ type CompanyExplorerTreeProps = {
   onScrollTopChange: (scrollTop: number) => void;
   onCloseContextMenu: () => void;
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
-  onSetExplorerSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   onSelectExplorerSearchResult: (row: ExplorerTreeNode) => void;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: "activate" | "navigate" }) => void;
   onStartRenamingRow: (row: ExplorerTreeNode) => void;
@@ -100,6 +98,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   isDarkTheme,
   elevatedControls = false,
   topControlsAccessory,
+  topControlsActions,
   hideTopControls,
   useParentScroll,
   treeViewportRef,
@@ -109,9 +108,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   expanded,
   selectedTreeID,
   selectedTreeIDs,
-  explorerSearchQuery,
   explorerSearchActive,
-  explorerSearchResult,
   draggingTreeID,
   dragOverTreeID,
   dragOverPlacement,
@@ -123,7 +120,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   onScrollTopChange,
   onCloseContextMenu,
   onOpenContextMenu,
-  onSetExplorerSearchQuery,
   onSelectExplorerSearchResult,
   onSelectTreeRow,
   onStartRenamingRow,
@@ -198,56 +194,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         letterSpacing: 0,
         color: accent,
       };
-  const searchShellStyle: React.CSSProperties = elevatedControls
-    ? {
-        position: "relative",
-        display: "block",
-        minWidth: 0,
-        height: 32,
-        border: "1px solid rgba(255, 255, 255, 0.78)",
-        borderRadius: 9,
-        background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
-        boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.22), -5px -5px 12px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-      }
-    : {
-        position: "relative",
-        display: "block",
-        minWidth: 0,
-        height: 25,
-      };
-  const searchInputStyle: React.CSSProperties = elevatedControls
-    ? {
-        width: "100%",
-        height: "100%",
-        boxSizing: "border-box",
-        border: "none",
-        borderRadius: 9,
-        background: "transparent",
-        color: surfaceText,
-        fontSize: 11,
-        fontWeight: 560,
-        padding: "0 30px 0 10px",
-        outline: "none",
-      }
-    : {
-        width: "100%",
-        height: "100%",
-        boxSizing: "border-box",
-        border: `1px solid ${ruleColor}`,
-        background: isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.94)",
-        color: surfaceText,
-        fontSize: 11,
-        fontWeight: 500,
-        padding: "0 28px 0 8px",
-        outline: "none",
-      };
-  const searchIconStyle: React.CSSProperties = {
-    position: "absolute",
-    right: elevatedControls ? 9 : 8,
-    top: elevatedControls ? 9 : 5,
-    color: folderToggleColor,
-    pointerEvents: "none",
-  };
 
   return (
     <div
@@ -303,30 +249,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         <div style={topControlsStyle}>
           <div style={titleStyle}>Explorer</div>
           {topControlsAccessory}
-          <div data-frame-interactive="true" style={searchShellStyle}>
-            <input
-              aria-label="Search Explorer"
-              value={explorerSearchQuery}
-              onChange={(event) => onSetExplorerSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  onSetExplorerSearchQuery("");
-                  event.currentTarget.blur();
-                }
-                if (event.key === "Enter" && explorerSearchResult) {
-                  event.preventDefault();
-                  onSelectExplorerSearchResult(explorerSearchResult);
-                }
-              }}
-              placeholder="Search Explorer"
-              style={searchInputStyle}
-            />
-            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={searchIconStyle}>
-              <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-              <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </div>
+          {topControlsActions}
         </div>
       )}
       {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
