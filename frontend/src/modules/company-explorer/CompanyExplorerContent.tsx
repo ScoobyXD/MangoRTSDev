@@ -1384,6 +1384,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       ? findCompanyExplorerRootFolderByName(folders, scopedKind, scopedRootName)
       : null
   ), [folders, scopedKind, scopedRootName]);
+  const logicGatesByFunctionRootFolder = useMemo(() => (
+    findCompanyExplorerRootFolderByName(folders, "logic_gate", "Logic Gates by Function")
+  ), [folders]);
   const scopedRootTreeID = scopedRootFolder ? `workspace-folder-${scopedRootFolder.folder_id}` : "";
   const effectiveExpanded = useMemo(() => {
     if (!scopedRootTreeID || expanded.has(scopedRootTreeID)) return expanded;
@@ -1423,6 +1426,25 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     treeViewportHeight,
     treeScrollTop,
   });
+  const logicGatesByFunctionRows = useMemo(() => {
+    if (!logicGatesByFunctionRootFolder) return [];
+    const rootTreeID = `workspace-folder-${logicGatesByFunctionRootFolder.folder_id}`;
+    const expandedForBranch = effectiveExpanded.has(rootTreeID)
+      ? effectiveExpanded
+      : new Set(effectiveExpanded).add(rootTreeID);
+    const rows = expandedForBranch === effectiveExpanded
+      ? fullTreeRows
+      : buildCompanyExplorerTreeRows({
+          expanded: expandedForBranch,
+          nodes: scopedExplorerData.nodes,
+          logicGates: scopedExplorerData.logicGates,
+          kanbanBoards,
+          folders: scopedExplorerData.folders,
+          folderItems: scopedExplorerData.folderItems,
+          rootRowOrder,
+        });
+    return buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id);
+  }, [effectiveExpanded, fullTreeRows, kanbanBoards, logicGatesByFunctionRootFolder, rootRowOrder, scopedExplorerData]);
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
   const teamCompanyExplorerActive = scopeViewsEnabled && scopeView !== "mine" && !scopedExplorerActive;
   const companyHistoryRows = useMemo(() => (
@@ -1450,19 +1472,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
           })
       : teamCompanyExplorerActive && scopeView === "company"
-        ? buildCompanyRaciExplorerRows({
-            expanded: effectiveExpanded,
-            companyID,
-            groups: companyGroupSections,
-            projectionByUserID: raciProjectionByUserID,
-            fallbackNodes: nodes,
-            fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
-            historyRows: companyHistoryRows,
-          })
+        ? [
+            ...buildCompanyRaciExplorerRows({
+              expanded: effectiveExpanded,
+              companyID,
+              groups: companyGroupSections,
+              projectionByUserID: raciProjectionByUserID,
+              fallbackNodes: nodes,
+              fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+              historyRows: companyHistoryRows,
+            }),
+            ...logicGatesByFunctionRows,
+          ]
       : scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(fullTreeRows)
-  ), [companyGroupSections, companyHistoryRows, companyID, currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
+  ), [companyGroupSections, companyHistoryRows, companyID, currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, logicGatesByFunctionRows, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
@@ -1509,6 +1534,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
     }
     if (teamCompanyExplorerActive && scopeView === "company") {
+      const logicGatesByFunctionSearchRows = logicGatesByFunctionRootFolder
+        ? buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id)
+        : [];
       return buildCompanyRaciExplorerRows({
         expanded: new Set(["*"]),
         companyID,
@@ -1517,12 +1545,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         fallbackNodes: nodes,
         fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
         historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
-      });
+      }).concat(logicGatesByFunctionSearchRows);
     }
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(rows);
-  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
+  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
@@ -2917,7 +2945,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     <div data-frame-interactive="true" style={scopeToggleStyle} aria-label="Company Explorer view scope">
       <button type="button" style={scopeButtonStyle(scopeView === "mine")} onClick={() => setScopeView("mine")}>Me</button>
       <button type="button" style={scopeButtonStyle(scopeView === "team")} onClick={() => setScopeView("team")}>Team</button>
-      <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>Company</button>
+      <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>All</button>
     </div>
   ) : undefined;
 
