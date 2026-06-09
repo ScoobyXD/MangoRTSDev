@@ -1030,7 +1030,6 @@ function buildCompanyRaciExplorerRows(input: {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   historyRows?: ExplorerTreeNode[];
-  additionalRows?: ExplorerTreeNode[];
 }): ExplorerTreeNode[] {
   const rows: ExplorerTreeNode[] = [];
   const defaultFoldersID = companyDefaultFoldersTreeID();
@@ -1043,7 +1042,7 @@ function buildCompanyRaciExplorerRows(input: {
     scopeLevel: 0,
     position: TREE_ROW_POSITION_STEP,
     createdTimestamp: "",
-    hasChildren: input.groups.length > 0 || Boolean(input.historyRows?.length) || Boolean(input.additionalRows?.length),
+    hasChildren: input.groups.length > 0 || Boolean(input.historyRows?.length),
     syntheticKind: "default_scope_folder",
   });
   if (!input.expanded.has(defaultFoldersID) && !input.expanded.has("*")) return rows;
@@ -1119,7 +1118,6 @@ function buildCompanyRaciExplorerRows(input: {
     pushGroupRows(group, 1, (groupIndex + 1) * TREE_ROW_POSITION_STEP);
   }
   if (input.historyRows?.length) pushShiftedRows(input.historyRows);
-  if (input.additionalRows?.length) pushShiftedRows(input.additionalRows);
   return rows;
 }
 
@@ -1628,8 +1626,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               folders,
               folderItems,
               historyRows: companyHistoryRows,
-              additionalRows: logicGatesByFunctionRows,
             }),
+            ...logicGatesByFunctionRows,
             ...customExplorerRows,
           ]
       : scopedExplorerActive
@@ -1703,8 +1701,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           folders,
           folderItems,
           historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
-          additionalRows: logicGatesByFunctionSearchRows,
         }),
+        ...logicGatesByFunctionSearchRows,
         ...customSearchRows,
       ];
     }
@@ -1909,7 +1907,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   } = useCompanyExplorerFolderShares(companyID, requestJSON);
 
   useEffect(() => {
-    if (!raciExplorerActive || !folderSnapshotLoaded || !companyID) return;
+    if (!scopeViewsEnabled || !folderSnapshotLoaded || !companyID) return;
     const missing = RACI_FOLDER_ROWS.find((folder) => !raciVisualRootFolderForRole(folders, folder.role));
     if (!missing) return;
     const creationKey = `${companyID}:${missing.role}`;
@@ -1936,7 +1934,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [apiBase, companyID, folderSnapshotLoaded, folders, raciExplorerActive, requestJSON]);
+  }, [apiBase, companyID, folderSnapshotLoaded, folders, requestJSON, scopeViewsEnabled]);
 
   useEffect(() => {
     if (!companyID || !folderSnapshotLoaded || !scopedKind || !scopedRootName || scopedRootFolder) return;
@@ -2951,7 +2949,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const protectedRaciRow = isProtectedRaciRoleRow(row);
     const syntheticScopeHeader = row?.syntheticKind === "default_scope_folder" && !row.folderID;
     const creationTargetRow = syntheticScopeHeader ? null : creationRow;
-    const canCreateForContext = !protectedRaciRow || syntheticScopeHeader || Boolean(row?.folderID);
+    const canCreateForContext = !protectedRaciRow || Boolean(row?.folderID);
     const contextKind: CompanyExplorerFolderKind | null = creationTargetRow?.folderKind ?? (creationTargetRow?.kind === "node" ? "node" : creationTargetRow?.kind === "logic_gate" ? "logic_gate" : null);
     const createNodeLogicGateID = creationTargetRow?.kind === "logic_gate"
       ? (creationTargetRow.logicGateID ?? "")
