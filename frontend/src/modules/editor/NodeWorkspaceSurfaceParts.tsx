@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMessage } from "../communications/communicationsApi";
+import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -2776,9 +2776,9 @@ const AttachedEmailThreadCard: React.FC<{
             className="mango-email-inline-detail"
             style={{
               minWidth: 0,
-              height: "clamp(360px, 68vh, 720px)",
-              display: "grid",
-              overflow: "hidden",
+              display: "block",
+              maxHeight: "min(620px, 72vh)",
+              overflow: "visible",
               padding: "0 10px 10px",
               boxSizing: "border-box",
             }}
@@ -3819,7 +3819,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   return (
     <>
-      <div style={{ height: "100%", minHeight: 0, display: "grid", gridTemplateRows: showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto", gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
+      <div style={{ height: inlineExpansion ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: inlineExpansion ? (showConversationHeader ? "auto auto auto" : "auto auto") : (showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto"), gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: inlineExpansion ? "visible" : "hidden", boxSizing: "border-box" }}>
         {showConversationHeader && (
           <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
             {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
@@ -3844,6 +3844,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               borderRadius: inlineExpansion ? 0 : 8,
               background: "#ffffff",
               overflow: "auto",
+              maxHeight: inlineExpansion ? "min(520px, 52vh)" : undefined,
               color: "#111827",
               padding: inlineExpansion ? "0 10px" : "0 14px",
               boxShadow: inlineExpansion ? "none" : "inset 1px 1px 0 rgba(255,255,255,0.86)",
@@ -4122,10 +4123,16 @@ type EmailPickerModalProps = {
 };
 
 export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText, panelBackground, strokeColor, onClose, onAttach }) => {
+  const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
   const [query, setQuery] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeDraft, setComposeDraft] = useState({ to: "", subject: "", body: "" });
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -4140,7 +4147,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      void listEmailMessages({ mailbox: "primary", limit: 30, q: query.trim() || undefined })
+      void listEmailMessages({ mailbox, limit: 50, q: query.trim() || undefined, unread: unreadOnly || undefined })
         .then((page) => {
           if (!cancelled) setMessages(page.messages ?? []);
         })
@@ -4155,7 +4162,64 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [mailbox, query, unreadOnly]);
+
+  const mailboxTabs: Array<{ mailbox: EmailMailbox; label: string }> = [
+    { mailbox: "primary", label: "Inbox" },
+    { mailbox: "starred", label: "Starred" },
+    { mailbox: "all", label: "All" },
+  ];
+  const unreadCount = messages.filter((message) => message.unread).length;
+  const recipients = parseEmailAddressDraft(composeDraft.to);
+  const canSend = !sending && recipients.length > 0 && composeDraft.subject.trim().length > 0 && composeDraft.body.trim().length > 0;
+
+  const tabButtonStyle = (active: boolean): React.CSSProperties => ({
+    minWidth: 0,
+    minHeight: 34,
+    border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+    borderRadius: 10,
+    background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+    color: active ? "#111827" : surfaceText,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    cursor: "pointer",
+    padding: "0 10px",
+    fontSize: 11.5,
+    fontWeight: 850,
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+    boxShadow: active ? `${EDITOR_NEU_SHADOW}, inset 1px 1px 0 rgba(255,255,255,0.78)` : EDITOR_NEU_SHADOW,
+  });
+
+  const submitSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    setQuery(searchDraft.trim());
+  };
+
+  const submitCompose = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canSend) return;
+    setSending(true);
+    setError("");
+    void sendEmail({
+      to: recipients,
+      subject: composeDraft.subject.trim(),
+      body: composeDraft.body.trim(),
+    })
+      .then((sent) => {
+        const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
+        setComposeDraft({ to: "", subject: "", body: "" });
+        setComposeOpen(false);
+        setMailbox("sent");
+        setMessages((current) => [sentWithTimestamp, ...current.filter((message) => message.id !== sentWithTimestamp.id)]);
+      })
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "failed_to_send_email");
+      })
+      .finally(() => setSending(false));
+  };
 
   return (
     <div
@@ -4166,43 +4230,137 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div style={{ width: "min(560px, 100%)", maxHeight: "min(680px, 92%)", display: "grid", gridTemplateRows: "auto 1fr", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder="Search email"
-            style={{ minWidth: 0, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, padding: "0 10px", outline: "none", color: surfaceText, fontSize: 13, letterSpacing: 0 }}
-          />
-          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+      <div style={{ width: "min(620px, 100%)", height: "min(760px, 92vh)", display: "grid", gridTemplateRows: "auto 1fr", border: `1px solid ${strokeColor}`, borderRadius: 12, background: panelBackground, color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
+        <div style={{ display: "grid", gap: 8, padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
+            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
+              <MailIcon color={accent} />
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14, fontWeight: 950 }}>My Triage</span>
+            </div>
+            <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 9, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1, boxShadow: EDITOR_NEU_SHADOW }}>
             x
-          </button>
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+            {mailboxTabs.map((tab) => (
+              <button
+                key={tab.mailbox}
+                type="button"
+                style={tabButtonStyle(!composeOpen && mailbox === tab.mailbox)}
+                onClick={() => {
+                  setComposeOpen(false);
+                  setMailbox(tab.mailbox);
+                }}
+              >
+                {tab.label}
+                {!composeOpen && mailbox === tab.mailbox && messages.length > 0 && (
+                  <span style={{ minWidth: 18, height: 18, display: "inline-grid", placeItems: "center", borderRadius: 9, padding: "0 5px", border: "1px solid rgba(148,163,184,0.18)", background: "#ffffff", color: "#334155", fontSize: 10, fontWeight: 850 }}>
+                    {messages.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 6 }}>
+            <button type="button" style={tabButtonStyle(composeOpen)} onClick={() => setComposeOpen(true)}>
+              <PlusIcon color={accent} />
+              Compose
+            </button>
+            <button
+              type="button"
+              style={tabButtonStyle(!composeOpen && mailbox === "sent")}
+              onClick={() => {
+                setComposeOpen(false);
+                setMailbox("sent");
+              }}
+            >
+              <ArrowRightIcon color={accent} />
+              Sent
+            </button>
+          </div>
+          {!composeOpen && (
+            <>
+              <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 76px", gap: 6 }} onSubmit={submitSearch}>
+                <input
+                  autoFocus
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.currentTarget.value)}
+                  placeholder="Search mail"
+                  style={{ minWidth: 0, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "0 10px", outline: "none", color: surfaceText, background: "#ffffff", fontSize: 12, letterSpacing: 0, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }}
+                />
+                <button type="submit" style={tabButtonStyle(false)}>Search</button>
+              </form>
+              <div style={{ minWidth: 0, minHeight: 24, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "0 2px" }}>
+                <span style={{ minWidth: 0, color: "rgba(15,23,42,0.58)", fontSize: 11, fontWeight: 800 }}>{unreadOnly ? "Unread only" : `${unreadCount} unread`}</span>
+                <label style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 700 }}>
+                  <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.currentTarget.checked)} />
+                  <span>Unread only</span>
+                </label>
+              </div>
+            </>
+          )}
         </div>
         <div className="editor-document-scroll" style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-          {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
-          {error && <div style={{ padding: 12, color: "#b00020", fontSize: 12, fontWeight: 700 }}>{error}</div>}
-          {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
-          {messages.map((message) => (
-            <button
-              key={message.id}
-              type="button"
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "copy";
-                event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message)));
-              }}
-              onClick={() => onAttach(message)}
-              style={{ display: "grid", gap: 4, width: "100%", minWidth: 0, textAlign: "left", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, padding: "9px 10px", cursor: "grab" }}
-            >
-              <span style={{ display: "flex", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 800 }}>{message.subject || "(no subject)"}</span>
-                <span style={{ color: accent, fontSize: 10, fontWeight: 800, flex: "0 0 auto" }}>{formatTimestamp(message.date, "day")}</span>
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, opacity: 0.68 }}>{formatAddressList(message.from)}</span>
-              {message.snippet && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, opacity: 0.72 }}>{message.snippet}</span>}
-            </button>
-          ))}
+          {error && <div style={{ padding: 10, border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.9)", color: "#991b1b", fontSize: 12, fontWeight: 800 }}>{error}</div>}
+          {composeOpen ? (
+            <form onSubmit={submitCompose} style={{ display: "grid", gap: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: "#ffffff", padding: 10, boxShadow: EDITOR_NEU_SHADOW }}>
+              <input value={composeDraft.to} onChange={(event) => setComposeDraft((current) => ({ ...current, to: event.currentTarget.value }))} placeholder="To" style={{ minWidth: 0, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, padding: "0 9px", outline: "none", color: surfaceText, fontSize: 12, letterSpacing: 0 }} />
+              <input value={composeDraft.subject} onChange={(event) => setComposeDraft((current) => ({ ...current, subject: event.currentTarget.value }))} placeholder="Subject" style={{ minWidth: 0, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, padding: "0 9px", outline: "none", color: surfaceText, fontSize: 12, letterSpacing: 0 }} />
+              <textarea value={composeDraft.body} onChange={(event) => setComposeDraft((current) => ({ ...current, body: event.currentTarget.value }))} placeholder="Message" rows={9} style={{ minWidth: 0, minHeight: 190, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "8px 9px", outline: "none", color: surfaceText, fontSize: 12, lineHeight: 1.45, letterSpacing: 0, resize: "vertical" }} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" disabled={sending} onClick={() => setComposeOpen(false)} style={tabButtonStyle(false)}>Cancel</button>
+                <button type="submit" disabled={!canSend} style={{ ...tabButtonStyle(true), opacity: canSend ? 1 : 0.46, cursor: canSend ? "pointer" : "default" }}>
+                  {sending ? "Sending" : "Send"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
+              {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
+              {messages.map((message) => (
+                <button
+                  key={message.id}
+                  type="button"
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "copy";
+                    event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message)));
+                  }}
+                  onClick={() => onAttach(message)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "18px minmax(0, 1fr) auto",
+                    gap: 8,
+                    alignItems: "center",
+                    width: "100%",
+                    minWidth: 0,
+                    textAlign: "left",
+                    border: message.unread ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                    borderRadius: 10,
+                    background: message.unread ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
+                    color: surfaceText,
+                    padding: "9px 10px",
+                    cursor: "grab",
+                    boxShadow: message.unread ? "0 8px 18px rgba(15,23,42,0.10), inset 1px 1px 0 rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW,
+                  }}
+                >
+                  <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, background: message.unread ? accent : "rgba(148,163,184,0.34)", boxShadow: message.unread ? "0 0 0 4px rgba(6,182,212,0.10)" : undefined }} />
+                  <span style={{ minWidth: 0, display: "grid", gap: 3 }}>
+                    <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
+                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                      <span style={{ color: "rgba(15,23,42,0.62)", fontSize: 10.5, fontWeight: 780, whiteSpace: "nowrap" }}>{formatTimestamp(message.date, "day")}</span>
+                    </span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 850 }}>{message.subject || "(no subject)"}</span>
+                    {message.snippet && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.78)", fontSize: 11, fontWeight: 650 }}>{message.snippet}</span>}
+                  </span>
+                  <span style={{ width: 34, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", boxShadow: EDITOR_NEU_SHADOW }}>
+                    <PaperclipIcon color={accent} />
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>

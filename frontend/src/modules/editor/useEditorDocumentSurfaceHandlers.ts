@@ -12,6 +12,8 @@ import {
 import {
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
   EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE,
+  EDITOR_TABLE_CELL_ATTRIBUTE,
+  createEditorGridTableElement,
   deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
@@ -663,29 +665,6 @@ function recordEditorDocumentMutation(
   recordEditorDocumentUndoChange(history, before, snapshotEditorDocumentRoot(root), kind);
 }
 
-function createEditorTable(ownerDocument: Document, rows = 3, columns = 3): HTMLTableElement {
-  const table = ownerDocument.createElement("table");
-  table.style.borderCollapse = "collapse";
-  table.style.width = "100%";
-  table.style.margin = "8px 0";
-  table.style.tableLayout = "fixed";
-  const tbody = ownerDocument.createElement("tbody");
-  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
-    const row = ownerDocument.createElement("tr");
-    for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
-      const cell = ownerDocument.createElement("td");
-      cell.style.border = "1px solid rgba(100, 116, 139, 0.36)";
-      cell.style.padding = "6px 8px";
-      cell.style.verticalAlign = "top";
-      cell.appendChild(ownerDocument.createElement("br"));
-      row.appendChild(cell);
-    }
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  return table;
-}
-
 function insertEditorTable(
   root: HTMLElement,
   documentUndoHistory: EditorDocumentUndoHistory,
@@ -696,10 +675,10 @@ function insertEditorTable(
   if (!range) return false;
   const undoBefore = snapshotEditorDocumentRoot(root);
   removeEditorTerminalBreaks(root);
-  const table = createEditorTable(root.ownerDocument);
+  const table = createEditorGridTableElement(root.ownerDocument);
   range.deleteContents();
   range.insertNode(table);
-  const firstCell = table.querySelector("td");
+  const firstCell = table.querySelector(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"]`);
   if (firstCell) {
     const selectionRange = root.ownerDocument.createRange();
     selectionRange.selectNodeContents(firstCell);

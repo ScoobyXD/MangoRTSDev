@@ -515,8 +515,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+	if createdNode.CompanyID == "" {
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
 	}
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
