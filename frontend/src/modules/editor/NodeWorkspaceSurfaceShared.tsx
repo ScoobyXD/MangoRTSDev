@@ -50,6 +50,7 @@ export type TextBlockState = {
   id: string;
   title: string;
   document: string;
+  attachments: EditorChatAttachment[];
   createdTimestamp: string;
   updatedTimestamp: string;
   pending: boolean;
@@ -334,6 +335,19 @@ export const MailIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
     <path d="M2.8 5.1h12.4v8H2.8z" fill="none" stroke={color} strokeWidth="1.45" />
     <path d="m3.4 5.7 5.6 4.1 5.6-4.1" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const PaperclipIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
+    <path d="m7.1 9.7 4.5-4.5a2.2 2.2 0 1 1 3.1 3.1l-6 6a3.8 3.8 0 0 1-5.4-5.4l6-6a3 3 0 0 1 4.2 0" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const TableIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
+    <rect x="3" y="4" width="12" height="10" rx="1.4" fill="none" stroke={color} strokeWidth="1.45" />
+    <path d="M3 7.4h12M7 4v10M11 4v10" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
   </svg>
 );
 

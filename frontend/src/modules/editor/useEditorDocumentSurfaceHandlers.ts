@@ -93,6 +93,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
 
 export type EditorDocumentSurfaceHandlerResult = EditorDocumentSurfaceHandlers & {
   mentionMenu: React.ReactNode;
+  insertTable: (root?: HTMLElement | null) => boolean;
 };
 
 type UseEditorDocumentSurfaceHandlersOptions = {
@@ -660,6 +661,56 @@ function recordEditorDocumentMutation(
 ) {
   if (!before) return;
   recordEditorDocumentUndoChange(history, before, snapshotEditorDocumentRoot(root), kind);
+}
+
+function createEditorTable(ownerDocument: Document, rows = 3, columns = 3): HTMLTableElement {
+  const table = ownerDocument.createElement("table");
+  table.style.borderCollapse = "collapse";
+  table.style.width = "100%";
+  table.style.margin = "8px 0";
+  table.style.tableLayout = "fixed";
+  const tbody = ownerDocument.createElement("tbody");
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    const row = ownerDocument.createElement("tr");
+    for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
+      const cell = ownerDocument.createElement("td");
+      cell.style.border = "1px solid rgba(100, 116, 139, 0.36)";
+      cell.style.padding = "6px 8px";
+      cell.style.verticalAlign = "top";
+      cell.appendChild(ownerDocument.createElement("br"));
+      row.appendChild(cell);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function insertEditorTable(
+  root: HTMLElement,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const range = getEditorSelectionRange(root);
+  if (!range) return false;
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  removeEditorTerminalBreaks(root);
+  const table = createEditorTable(root.ownerDocument);
+  range.deleteContents();
+  range.insertNode(table);
+  const firstCell = table.querySelector("td");
+  if (firstCell) {
+    const selectionRange = root.ownerDocument.createRange();
+    selectionRange.selectNodeContents(firstCell);
+    selectionRange.collapse(true);
+    const selection = root.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(selectionRange);
+  }
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+  return true;
 }
 
 function restoreEditorDocumentUndoSnapshot(
@@ -1587,10 +1638,11 @@ export function useEditorDocumentSurfaceHandlers({
         const currentText = readEditorDocumentText(root);
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle, { continueAutomaticOutline: !event.shiftKey });
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
+        const preserveTrailingNewline = edit.value.endsWith("\n") && offsets.end >= currentText.length;
         const anchor = getCollapsedAnchorAtSelectionEnd(root);
         const inserted = anchor
-          ? insertPlainTextAfterAnchor(root, anchor, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") })
-          : replaceSelectionWithText(root, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") });
+          ? insertPlainTextAfterAnchor(root, anchor, insertedText, { preserveTrailingNewline })
+          : replaceSelectionWithText(root, insertedText, { preserveTrailingNewline });
         if (inserted) {
           scrollEditorToLineStart(root);
           recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
@@ -1681,5 +1733,15 @@ export function useEditorDocumentSurfaceHandlers({
     scrollMemoryRef,
     setDocumentScrollTop,
   ]);
-  return { ...handlers, mentionMenu };
+  const insertTable = useCallback((root?: HTMLElement | null) => {
+    if (!root) return false;
+    root.focus();
+    pendingEditorFontSizeRef.current = null;
+    clearEditorImageSelection(root);
+    activeMentionRootRef.current = null;
+    setActiveMentionDraft(null);
+    return insertEditorTable(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  }, [documentUndoHistoryRef, pendingEditorFontSizeRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  return { ...handlers, mentionMenu, insertTable };
 }

@@ -105,17 +105,19 @@ function finiteRatio(value: unknown, fallback: number): number {
 
 export function clampNodeEditorOverlayRatio(value: Partial<NodeEditorOverlayRatio>, options?: NodeEditorOverlayClampOptions): NodeEditorOverlayRatio {
   const allowHorizontalOverflow = options?.allowHorizontalOverflow === true;
-  const maxWidth = allowHorizontalOverflow ? 2.4 : 0.96;
+  const optionMinLeft = finiteRatio(options?.minLeft, Number.NEGATIVE_INFINITY);
+  const baseMinLeft = allowHorizontalOverflow ? Number.NEGATIVE_INFINITY : 0.02;
+  const minLeft = Math.max(optionMinLeft, baseMinLeft);
+  const maxWidth = allowHorizontalOverflow ? 2.4 : Math.max(0.42, Math.min(0.96, 0.98 - minLeft));
   const width = Math.max(0.42, Math.min(finiteRatio(value.width, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width), maxWidth));
   const height = Math.max(0.42, Math.min(finiteRatio(value.height, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height), 0.94));
   const defaultLeft = (1 - width) / 2;
-  const optionMinLeft = finiteRatio(options?.minLeft, Number.NEGATIVE_INFINITY);
-  const minLeft = Math.max(optionMinLeft, allowHorizontalOverflow ? Math.min(0.02, 0.24 - width) : 0.02);
-  const maxLeft = allowHorizontalOverflow ? Math.max(minLeft, 0.98 - width) : Math.max(0.02, 0.98 - width);
+  const effectiveMinLeft = allowHorizontalOverflow ? Math.max(optionMinLeft, Math.min(0.02, 0.24 - width)) : minLeft;
+  const maxLeft = Math.max(effectiveMinLeft, 0.98 - width);
   const minTop = 0.02;
   const maxTop = Math.max(minTop, 0.98 - height);
   return {
-    left: Math.max(minLeft, Math.min(finiteRatio(value.left, defaultLeft), maxLeft)),
+    left: Math.max(effectiveMinLeft, Math.min(finiteRatio(value.left, defaultLeft), maxLeft)),
     top: Math.max(minTop, Math.min(finiteRatio(value.top, DEFAULT_NODE_EDITOR_OVERLAY_RATIO.top), maxTop)),
     width,
     height,

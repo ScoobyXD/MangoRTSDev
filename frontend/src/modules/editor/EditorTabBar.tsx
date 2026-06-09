@@ -15,6 +15,13 @@ const EditorCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
+const EditorTableIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 18 18" style={{ display: "block" }}>
+    <rect x="3" y="4" width="12" height="10" rx="1.3" fill="none" stroke={color} strokeWidth="1.45" />
+    <path d="M3 7.4h12M7 4v10M11 4v10" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
 
 function colorWithAlpha(color: string, alpha: number): string {
   const rgbMatch = /^rgba?\(([^)]+)\)$/i.exec(color.trim());
@@ -52,6 +59,7 @@ type EditorTabBarProps = {
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
+  onInsertTable?: () => void;
   reserveHeaderOffset?: boolean;
 };
 
@@ -71,6 +79,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onOutlineStyleFocus,
   onOutlineStyleChange,
   onCreateRelatedNode,
+  onInsertTable,
   reserveHeaderOffset = true,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
@@ -312,6 +321,18 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           </button>
         );
       })}
+      {onInsertTable && (
+        <button
+          type="button"
+          aria-label="Insert table"
+          title="Insert table"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onInsertTable}
+          style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0 }}
+        >
+          <EditorTableIcon color={surfaceText} />
+        </button>
+      )}
       {onCreateRelatedNode && (
         <div ref={createMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
           <button

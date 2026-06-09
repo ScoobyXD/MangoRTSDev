@@ -122,10 +122,12 @@ test("parses titled node text block content payloads with legacy fallback", () =
   assert.deepEqual(parseEditorTextBlockContent(payload), {
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
+    attachments: [],
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {
     title: "",
     document: "legacy text",
+    attachments: [],
   });
 });
 

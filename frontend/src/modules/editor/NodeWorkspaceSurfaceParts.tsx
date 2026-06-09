@@ -51,6 +51,7 @@ import {
   isImageAttachment,
   MailIcon,
   messageAttachmentPayload,
+  PaperclipIcon,
   PlusIcon,
   readChatAttachment,
   readStoredChatPaneHeight,
@@ -237,6 +238,7 @@ type NodeTextBlockEditorProps = {
   chatMessages: EditorTextBlockChatMessage[];
   activeChatAnchorMessageID: string;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
+  tableInsertRequestID: number;
   surfaceText: string;
   accent: string;
   outlineStyle: EditorOutlineStyleID;
@@ -553,6 +555,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   chatMessages,
   activeChatAnchorMessageID,
   chatNavigationRequest,
+  tableInsertRequestID,
   surfaceText,
   accent,
   outlineStyle,
@@ -741,7 +744,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
   });
-  const { mentionMenu: documentMentionMenu, ...documentSurfaceHandlers } = handlers;
+  const { mentionMenu: documentMentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
+
+  useEffect(() => {
+    if (!tableInsertRequestID || !editable) return;
+    insertTable(editorRef.current);
+  }, [editable, insertTable, tableInsertRequestID]);
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
     handlers.onBlur(event);
@@ -2309,6 +2317,135 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 650, color: "rgba(100,116,139,0.72)" }}>{email.snippet}</span>
               )}
             </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export type TextBlockAttachmentListItem = {
+  blockID: string;
+  blockTitle: string;
+  attachment: EditorChatAttachment;
+};
+
+type AttachmentCountDropdownProps = {
+  items: TextBlockAttachmentListItem[];
+  accent: string;
+  surfaceText: string;
+  align?: "left" | "right";
+  compact?: boolean;
+  editable?: boolean;
+  onRemove?: (blockID: string, attachmentID: string) => void;
+};
+
+export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = ({ items, accent, surfaceText, align = "right", compact = false, editable = false, onRemove }) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useCloseFloatingMenu(open, rootRef, close);
+  return (
+    <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Attachments"
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        style={{
+          minHeight: compact ? 24 : 30,
+          minWidth: compact ? 38 : 54,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          border: open ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+          borderRadius: compact ? 8 : 9,
+          background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+          color: open ? accent : surfaceText,
+          cursor: "pointer",
+          font: "inherit",
+          fontSize: compact ? 10.5 : 12,
+          fontWeight: 900,
+          letterSpacing: 0,
+          padding: compact ? "2px 7px" : "0 10px",
+          boxShadow: open ? "0 8px 18px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW,
+        }}
+      >
+        <PaperclipIcon color={open ? accent : "rgba(100,116,139,0.85)"} />
+        <span>{items.length}</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Attachments"
+          style={{
+            position: "absolute",
+            zIndex: 80,
+            top: "calc(100% + 7px)",
+            right: align === "right" ? 0 : undefined,
+            left: align === "left" ? 0 : undefined,
+            width: compact ? 264 : 340,
+            maxWidth: "min(86vw, 340px)",
+            maxHeight: 330,
+            overflowY: "auto",
+            display: "grid",
+            gap: 5,
+            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            borderRadius: 13,
+            background: EDITOR_NEU_PANEL_BACKGROUND,
+            boxShadow: EDITOR_NEU_PANEL_SHADOW,
+            padding: 6,
+          }}
+        >
+          {items.length === 0 && (
+            <div style={{ padding: "8px 10px", color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 800 }}>
+              No attachments
+            </div>
+          )}
+          {items.map(({ blockID, blockTitle, attachment }) => (
+            <div
+              key={`${blockID}:${attachment.id}`}
+              role="menuitem"
+              style={{
+                minWidth: 0,
+                display: "grid",
+                gridTemplateColumns: editable ? "minmax(0, 1fr) auto" : "minmax(0, 1fr)",
+                alignItems: "center",
+                gap: 7,
+                border: "1px solid transparent",
+                borderRadius: 10,
+                background: "#ffffff",
+                color: surfaceText,
+                padding: "7px 8px",
+                boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.14), -2px -2px 8px rgba(255,255,255,0.76)",
+              }}
+            >
+              <a
+                href={attachment.dataURL || undefined}
+                download={attachment.name}
+                title={attachment.name}
+                onClick={() => setOpen(false)}
+                style={{ minWidth: 0, display: "grid", gap: 3, color: surfaceText, textDecoration: "none", pointerEvents: attachment.dataURL ? "auto" : "none", opacity: attachment.dataURL ? 1 : 0.62 }}
+              >
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{attachment.name}</span>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
+                  {blockTitle || "Text box"} - {formatFileSize(attachment.size)}
+                </span>
+              </a>
+              {editable && onRemove && (
+                <button
+                  type="button"
+                  title="Remove attachment"
+                  aria-label="Remove attachment"
+                  onClick={() => onRemove(blockID, attachment.id)}
+                  style={{ width: 24, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: "#be123c", cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0, boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                >
+                  X
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}

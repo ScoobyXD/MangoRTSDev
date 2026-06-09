@@ -31,6 +31,7 @@ import { serializeEditorDocumentHTML } from "./richTextEditing";
 
 import {
   AttachedEmailOrganizerPane,
+  AttachmentCountDropdown,
   ChatPane,
   DeleteTextBlockConfirmationModal,
   EmailCountDropdown,
@@ -38,6 +39,7 @@ import {
   NodeTextBlockEditor,
   TextBlockActionsMenu,
   TimelineCell,
+  type TextBlockAttachmentListItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
   CHAT_ATTACHMENT_MAX_BYTES,
@@ -55,10 +57,12 @@ import {
   ChatIcon,
   MailIcon,
   messageAttachmentPayload,
+  PaperclipIcon,
   parseDraggedEmail,
   PlusIcon,
   projectionsKey,
   readChatAttachment,
+  TableIcon,
   type NodeWorkspaceSurfaceProps,
   type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
@@ -324,6 +328,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
+  const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
@@ -363,6 +368,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return Array.from(byMessageID.values());
   }, [attachedEmails]);
+  const nodeTextBlockAttachments = useMemo<TextBlockAttachmentListItem[]>(() => (
+    blocks.flatMap((block) => (block.attachments ?? []).map((attachment) => ({
+      blockID: block.id,
+      blockTitle: block.title,
+      attachment,
+    })))
+  ), [blocks]);
   const compact = width > 0 && width < 720;
   const textCommunicationContentWidth = Math.max(
     TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX,
@@ -527,6 +539,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         id: item.information_id,
         title: content.title,
         document: content.document,
+        attachments: content.attachments ?? [],
         createdTimestamp: item.created_timestamp,
         updatedTimestamp: item.updated_timestamp,
         pending: false,
@@ -534,7 +547,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     const parsedChatMessages = parseEditorTextBlockChats(projections);
     setBlocks(textBlocks);
-    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document }]));
+    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document, attachments: block.attachments }]));
     setChatMessages(parsedChatMessages);
     const parsedAttachedEmails = parseEditorAttachedEmails(projections);
     setAttachedEmails(parsedAttachedEmails);
@@ -562,6 +575,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
+    setTableInsertRequests((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setSidePaneWidths((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setActiveChatMessageIDs((current) => {
       if (nodeChanged) return {};
@@ -720,7 +734,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
-    void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
+    void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] });
   }, [canEdit, persistTextBlock]);
 
   const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
@@ -730,7 +744,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
     const timer = window.setTimeout(() => {
       saveTimersRef.current.delete(blockID);
-      void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
+      void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] });
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
   }, [canEdit, persistTextBlock]);
@@ -739,7 +753,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!canEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
-    const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "" };
+    const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "", attachments: [] };
     focusBlockIDRef.current = blockID;
     contentByBlockRef.current.set(blockID, initialContent);
     setBlocks((current) => [
@@ -747,6 +761,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         id: blockID,
         title: initialContent.title,
         document: "",
+        attachments: [],
         createdTimestamp: now,
         updatedTimestamp: now,
         pending: true,
@@ -764,10 +779,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
     if (!canEdit) return;
-    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
+    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
     const nextContent: EditorTextBlockContent = {
       title: patch.title ?? existing.title,
       document: patch.document ?? existing.document,
+      attachments: patch.attachments ?? existing.attachments ?? [],
     };
     setBlocks((current) => current.map((block) => {
       if (block.id !== blockID) return block;
@@ -775,6 +791,43 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }));
     scheduleTextBlockSave(blockID, nextContent);
   }, [canEdit, scheduleTextBlockSave]);
+
+  const addTextBlockAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
+    if (!canEdit) return;
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
+    const existingAttachments = existing.attachments ?? [];
+    let nextTotalSize = existingAttachments.reduce((total, attachment) => total + attachment.size, 0);
+    const accepted: File[] = [];
+    for (const file of incoming) {
+      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+        onError(`Attachments are limited to ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)} each.`);
+        continue;
+      }
+      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
+        onError(`Text box attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`);
+        continue;
+      }
+      accepted.push(file);
+      nextTotalSize += file.size;
+    }
+    if (accepted.length === 0) return;
+    try {
+      const attachments = await Promise.all(accepted.map(readChatAttachment));
+      updateTextBlockContent(blockID, { attachments: [...existingAttachments, ...attachments] });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_read_attachment");
+    }
+  }, [canEdit, onError, updateTextBlockContent]);
+
+  const removeTextBlockAttachment = useCallback((blockID: string, attachmentID: string) => {
+    if (!canEdit || !attachmentID.trim()) return;
+    const existing = contentByBlockRef.current.get(blockID);
+    if (!existing) return;
+    const nextAttachments = (existing.attachments ?? []).filter((attachment) => attachment.id !== attachmentID);
+    updateTextBlockContent(blockID, { attachments: nextAttachments });
+  }, [canEdit, updateTextBlockContent]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -808,6 +861,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setChatSelectionAnchors((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setTableInsertRequests((current) => {
       if (!(blockID in current)) return current;
       const next = { ...current };
       delete next[blockID];
@@ -1550,6 +1609,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             align="left"
             onOpenEmail={openAttachedEmailFromHeader}
           />
+          <AttachmentCountDropdown
+            items={nodeTextBlockAttachments}
+            accent={accent}
+            surfaceText={surfaceText}
+            align="left"
+            editable={canEdit}
+            onRemove={removeTextBlockAttachment}
+          />
           {canEdit && (
             <button
               type="button"
@@ -1731,6 +1798,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const selectionAnchor = chatSelectionAnchors[block.id];
           const activeChatMessageID = activeChatMessageIDs[block.id] ?? "";
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
+          const blockAttachmentItems: TextBlockAttachmentListItem[] = (block.attachments ?? []).map((attachment) => ({
+            blockID: block.id,
+            blockTitle: block.title,
+            attachment,
+          }));
+          const blockHeaderGridTemplateColumns = canEdit
+            ? "minmax(0, 1fr) 26px 42px 26px 26px 26px 26px"
+            : "minmax(0, 1fr) 42px 26px 26px 26px";
           const blockEmailPane = (
             <AttachedEmailOrganizerPane
               emails={blockEmails}
@@ -1838,7 +1913,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: blockCommunicationGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 8, alignItems: "start" }}>
                 <div style={{ border: textBlockIsFocused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 26px 26px 26px", alignItems: "center", gap: 6, minHeight: 34, borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 5px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", overflow: "visible" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: blockHeaderGridTemplateColumns, alignItems: "center", gap: 6, minHeight: 34, borderBottom: `1px solid ${ruleColor}`, padding: "5px 6px 5px 8px", background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", overflow: "visible" }}>
                     <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, paddingRight: 6, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: compact ? "normal" : "nowrap", overflow: "visible" }}>
                       <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7, overflow: "hidden", opacity: 0.58 }}>
                         <span title={`Last Updated: ${formatTextBlockMetadataTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1850,6 +1925,44 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         </span>
                       </span>
                     </div>
+                    {canEdit && (
+                      <label
+                        title="Add attachment"
+                        aria-label="Add attachment"
+                        style={{ width: 26, height: 24, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
+                      >
+                        <PaperclipIcon color={accent} />
+                        <input
+                          type="file"
+                          multiple
+                          style={{ display: "none" }}
+                          onChange={(event) => {
+                            const files = event.currentTarget.files;
+                            if (files) void addTextBlockAttachments(block.id, files);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    )}
+                    <AttachmentCountDropdown
+                      items={blockAttachmentItems}
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      compact
+                      editable={canEdit}
+                      onRemove={removeTextBlockAttachment}
+                    />
+                    {canEdit && (
+                      <button
+                        type="button"
+                        title="Insert table"
+                        aria-label="Insert table"
+                        onClick={() => setTableInsertRequests((current) => ({ ...current, [block.id]: (current[block.id] ?? 0) + 1 }))}
+                        style={{ width: 26, height: 24, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}
+                      >
+                        <TableIcon color={accent} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       title={emailPaneIsVisible ? "Hide email" : "Open email"}
@@ -1892,6 +2005,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     chatNavigationRequest={chatNavigationRequest?.blockID === block.id
                       ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID }
                       : null}
+                    tableInsertRequestID={tableInsertRequests[block.id] ?? 0}
                     surfaceText={surfaceText}
                     accent={accent}
                     outlineStyle={outlineStyle}

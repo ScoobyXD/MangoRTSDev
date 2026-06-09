@@ -171,9 +171,13 @@ export function KanbanNodeEditorOverlay({
   onCollapseToTab: () => void;
 }) {
   const boardWidth = boardRootRef.current?.getBoundingClientRect().width ?? 0;
+  const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow);
   const renderedLeft = boardWidth > 0
-    ? Math.max(ratio.left, getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow) / boardWidth)
+    ? Math.max(ratio.left, minLeftPx / boardWidth)
     : ratio.left;
+  const renderedLeftPx = boardWidth * renderedLeft;
+  const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - 22) : 0;
+  const renderedWidth = boardWidth > 0 ? Math.min(ratio.width, availableWidthPx / boardWidth) : ratio.width;
 
   return (
     <div
@@ -185,11 +189,11 @@ export function KanbanNodeEditorOverlay({
         zIndex: 40,
         top: `${Math.round(ratio.top * 1000) / 10}%`,
         left: `${Math.round(renderedLeft * 1000) / 10}%`,
-        width: `${Math.round(ratio.width * 1000) / 10}%`,
+        width: `${Math.round(renderedWidth * 1000) / 10}%`,
         height: `${Math.round(ratio.height * 1000) / 10}%`,
-        maxWidth: allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
+        maxWidth: boardWidth > 0 ? availableWidthPx : allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
         maxHeight: "calc(100% - 64px)",
-        minWidth: allowHorizontalOverflow ? 420 : "min(420px, calc(100% - 44px))",
+        minWidth: boardWidth > 0 ? Math.min(420, availableWidthPx) : allowHorizontalOverflow ? 420 : "min(420px, calc(100% - 44px))",
         minHeight: "min(320px, calc(100% - 64px))",
         border: "1px solid transparent",
         borderRadius: 18,

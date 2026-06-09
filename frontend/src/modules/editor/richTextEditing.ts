@@ -86,6 +86,22 @@ function applySafeFontSize(source: HTMLElement, target: HTMLElement) {
   target.style.fontSize = `${Math.round(parsed)}px`;
 }
 
+function applySafeTableElementStyle(element: HTMLElement, tagName: string) {
+  if (tagName === "table") {
+    element.style.borderCollapse = "collapse";
+    element.style.width = "100%";
+    element.style.margin = "8px 0";
+    element.style.tableLayout = "fixed";
+    return;
+  }
+  if (tagName === "td" || tagName === "th") {
+    element.style.border = "1px solid rgba(100, 116, 139, 0.36)";
+    element.style.padding = "6px 8px";
+    element.style.verticalAlign = "top";
+    if (tagName === "th") element.style.fontWeight = "800";
+  }
+}
+
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
@@ -157,6 +173,14 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     const inline = ownerDocument.createElement(tagName);
     appendSanitizedChildren(element, inline, ownerDocument);
     target.appendChild(inline);
+    return;
+  }
+
+  if (tagName === "table" || tagName === "thead" || tagName === "tbody" || tagName === "tr" || tagName === "td" || tagName === "th") {
+    const tableElement = ownerDocument.createElement(tagName);
+    applySafeTableElementStyle(tableElement, tagName);
+    appendSanitizedChildren(element, tableElement, ownerDocument);
+    target.appendChild(tableElement);
     return;
   }
 
@@ -240,7 +264,8 @@ export function normalizeEditorWhitespaceText(value: string): string {
   return value.replace(/\u00a0/g, " ");
 }
 
-const EDITOR_TEXT_BLOCK_TAGS = new Set(["DIV", "P", "LI"]);
+const EDITOR_TEXT_BLOCK_TAGS = new Set(["DIV", "P", "LI", "TABLE"]);
+const EDITOR_TABLE_CELL_TAGS = new Set(["TD", "TH"]);
 
 export function readEditorDocumentText(root: HTMLElement): string {
   let text = "";
@@ -252,6 +277,18 @@ export function readEditorDocumentText(root: HTMLElement): string {
     if (!(node instanceof HTMLElement)) return;
     if (node.tagName === "BR") {
       text += "\n";
+      return;
+    }
+    if (node.tagName === "TR") {
+      if (text && !text.endsWith("\n")) text += "\n";
+      node.childNodes.forEach(appendNodeText);
+      if (text.endsWith("\t")) text = text.slice(0, -1);
+      if (!text.endsWith("\n")) text += "\n";
+      return;
+    }
+    if (EDITOR_TABLE_CELL_TAGS.has(node.tagName)) {
+      node.childNodes.forEach(appendNodeText);
+      text += "\t";
       return;
     }
     const isBlock = EDITOR_TEXT_BLOCK_TAGS.has(node.tagName);
