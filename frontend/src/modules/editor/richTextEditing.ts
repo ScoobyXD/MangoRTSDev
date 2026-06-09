@@ -93,22 +93,6 @@ function applySafeFontSize(source: HTMLElement, target: HTMLElement) {
   target.style.fontSize = `${Math.round(parsed)}px`;
 }
 
-function applySafeTableElementStyle(element: HTMLElement, tagName: string) {
-  if (tagName === "table") {
-    element.style.borderCollapse = "collapse";
-    element.style.width = "100%";
-    element.style.margin = "8px 0";
-    element.style.tableLayout = "fixed";
-    return;
-  }
-  if (tagName === "td" || tagName === "th") {
-    element.style.border = "1px solid rgba(100, 116, 139, 0.36)";
-    element.style.padding = "6px 8px";
-    element.style.verticalAlign = "top";
-    if (tagName === "th") element.style.fontWeight = "800";
-  }
-}
-
 function clampEditorTableSize(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -119,52 +103,43 @@ function readEditorGridTableColumns(element: HTMLElement, fallback = 3): number 
   return clampEditorTableSize(raw || fallback, 1, EDITOR_TABLE_MAX_COLUMNS);
 }
 
-function applyEditorGridTableStyle(element: HTMLElement, columns: number) {
-  element.setAttribute(EDITOR_TABLE_ATTRIBUTE, "true");
-  element.setAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE, String(columns));
-  element.style.display = "grid";
-  element.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
-  element.style.width = "100%";
-  element.style.maxWidth = "100%";
-  element.style.margin = "8px 0";
-  element.style.borderTop = "1px solid rgba(100, 116, 139, 0.36)";
-  element.style.borderLeft = "1px solid rgba(100, 116, 139, 0.36)";
-  element.style.background = "#ffffff";
-  element.style.boxSizing = "border-box";
-  element.style.overflow = "hidden";
-}
-
-function applyEditorGridTableCellStyle(element: HTMLElement) {
-  element.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
-  element.style.display = "block";
-  element.style.minWidth = "0";
-  element.style.minHeight = "30px";
-  element.style.borderRight = "1px solid rgba(100, 116, 139, 0.36)";
-  element.style.borderBottom = "1px solid rgba(100, 116, 139, 0.36)";
-  element.style.padding = "6px 8px";
-  element.style.whiteSpace = "pre-wrap";
-  element.style.overflowWrap = "anywhere";
-  element.style.boxSizing = "border-box";
-}
-
 function directEditorGridTableCells(element: HTMLElement): HTMLElement[] {
   return Array.from(element.children).filter((child): child is HTMLElement => (
     child instanceof HTMLElement && child.getAttribute(EDITOR_TABLE_CELL_ATTRIBUTE) === "true"
   ));
 }
 
-export function createEditorGridTableElement(ownerDocument: Document, rows = 3, columns = 3): HTMLElement {
+function editorPlainTextTableLinesFromCells(rowCells: string[][], rows: number, columns: number): string[] {
   const safeRows = clampEditorTableSize(rows, 1, EDITOR_TABLE_MAX_ROWS);
   const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
-  const table = ownerDocument.createElement("div");
-  applyEditorGridTableStyle(table, safeColumns);
-  for (let index = 0; index < safeRows * safeColumns; index += 1) {
-    const cell = ownerDocument.createElement("span");
-    applyEditorGridTableCellStyle(cell);
-    cell.appendChild(ownerDocument.createElement("br"));
-    table.appendChild(cell);
+  const emptyRow = `| ${Array.from({ length: safeColumns }, () => " ").join(" | ")} |`;
+  const separatorRow = `|${Array.from({ length: safeColumns }, () => "---").join("|")}|`;
+  const lines: string[] = [];
+  for (let rowIndex = 0; rowIndex < safeRows; rowIndex += 1) {
+    const cells = Array.from({ length: safeColumns }, (_, columnIndex) => rowCells[rowIndex]?.[columnIndex]?.trim() ?? "");
+    const line = `| ${cells.map((cell) => cell || " ").join(" | ")} |`;
+    lines.push(line === emptyRow ? emptyRow : line);
+    if (rowIndex === 0) lines.push(separatorRow);
   }
-  return table;
+  return lines;
+}
+
+function appendEditorPlainTextLines(target: Node, ownerDocument: Document, lines: string[]) {
+  if (lines.length > 0 && target.lastChild && target.lastChild.nodeName !== "BR") {
+    target.appendChild(ownerDocument.createElement("br"));
+  }
+  lines.forEach((line, index) => {
+    if (index > 0) target.appendChild(ownerDocument.createElement("br"));
+    target.appendChild(ownerDocument.createTextNode(line));
+  });
+}
+
+export function createEditorPlainTextTableFragment(ownerDocument: Document, rows = 3, columns = 3): DocumentFragment {
+  const safeRows = clampEditorTableSize(rows, 1, EDITOR_TABLE_MAX_ROWS);
+  const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
+  const fragment = ownerDocument.createDocumentFragment();
+  appendEditorPlainTextLines(fragment, ownerDocument, editorPlainTextTableLinesFromCells([], safeRows, safeColumns));
+  return fragment;
 }
 
 function normalizeNativeTableCellText(value: string): string {
@@ -176,7 +151,7 @@ function normalizeNativeTableCellText(value: string): string {
     .slice(0, EDITOR_TABLE_MAX_CELL_TEXT_LENGTH);
 }
 
-function appendNativeTableAsEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
+function appendNativeTableAsPlainTextTable(source: HTMLElement, target: Node, ownerDocument: Document) {
   const sourceRows = Array.from(source.querySelectorAll("tr")).slice(0, EDITOR_TABLE_MAX_ROWS);
   const rowCells = sourceRows.map((row) => (
     Array.from(row.children)
@@ -184,37 +159,25 @@ function appendNativeTableAsEditorGridTable(source: HTMLElement, target: Node, o
         child instanceof HTMLElement && (child.tagName === "TD" || child.tagName === "TH")
       ))
       .slice(0, EDITOR_TABLE_MAX_COLUMNS)
+      .map((cell) => normalizeNativeTableCellText(cell.textContent ?? ""))
   ));
   const columns = clampEditorTableSize(Math.max(1, ...rowCells.map((cells) => cells.length)), 1, EDITOR_TABLE_MAX_COLUMNS);
   const rows = clampEditorTableSize(Math.max(1, rowCells.length), 1, EDITOR_TABLE_MAX_ROWS);
-  const table = createEditorGridTableElement(ownerDocument, rows, columns);
-  const cells = directEditorGridTableCells(table);
-  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
-    for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
-      const sourceCell = rowCells[rowIndex]?.[columnIndex];
-      const targetCell = cells[(rowIndex * columns) + columnIndex];
-      if (!sourceCell || !targetCell) continue;
-      const text = normalizeNativeTableCellText(sourceCell.textContent ?? "");
-      targetCell.replaceChildren(text ? ownerDocument.createTextNode(text) : ownerDocument.createElement("br"));
-    }
-  }
-  target.appendChild(table);
+  appendEditorPlainTextLines(target, ownerDocument, editorPlainTextTableLinesFromCells(rowCells, rows, columns));
 }
 
-function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
+function appendSanitizedEditorGridTableAsPlainText(source: HTMLElement, target: Node, ownerDocument: Document) {
   const requestedColumns = readEditorGridTableColumns(source);
   const sourceCells = directEditorGridTableCells(source).slice(0, EDITOR_TABLE_MAX_ROWS * EDITOR_TABLE_MAX_COLUMNS);
   const rows = clampEditorTableSize(Math.max(1, Math.ceil(Math.max(1, sourceCells.length) / requestedColumns)), 1, EDITOR_TABLE_MAX_ROWS);
-  const table = createEditorGridTableElement(ownerDocument, rows, requestedColumns);
-  const targetCells = directEditorGridTableCells(table);
+  const rowCells = Array.from({ length: rows }, () => Array.from({ length: requestedColumns }, () => ""));
   sourceCells.forEach((sourceCell, index) => {
-    const targetCell = targetCells[index];
-    if (!targetCell) return;
-    targetCell.replaceChildren();
-    appendSanitizedChildren(sourceCell, targetCell, ownerDocument);
-    if (targetCell.childNodes.length === 0) targetCell.appendChild(ownerDocument.createElement("br"));
+    const rowIndex = Math.floor(index / requestedColumns);
+    const columnIndex = index % requestedColumns;
+    if (!rowCells[rowIndex]) return;
+    rowCells[rowIndex][columnIndex] = normalizeNativeTableCellText(sourceCell.textContent ?? "");
   });
-  target.appendChild(table);
+  appendEditorPlainTextLines(target, ownerDocument, editorPlainTextTableLinesFromCells(rowCells, rows, requestedColumns));
 }
 
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
@@ -231,16 +194,13 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
   if (element.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true") {
-    appendSanitizedEditorGridTable(element, target, ownerDocument);
+    appendSanitizedEditorGridTableAsPlainText(element, target, ownerDocument);
+    target.appendChild(ownerDocument.createElement("br"));
     return;
   }
 
   if (element.getAttribute(EDITOR_TABLE_CELL_ATTRIBUTE) === "true") {
-    const cell = ownerDocument.createElement("span");
-    applyEditorGridTableCellStyle(cell);
-    appendSanitizedChildren(element, cell, ownerDocument);
-    if (cell.childNodes.length === 0) cell.appendChild(ownerDocument.createElement("br"));
-    target.appendChild(cell);
+    target.appendChild(ownerDocument.createTextNode(normalizeNativeTableCellText(element.textContent ?? "")));
     return;
   }
 
@@ -306,15 +266,34 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   }
 
   if (tagName === "table") {
-    appendNativeTableAsEditorGridTable(element, target, ownerDocument);
+    appendNativeTableAsPlainTextTable(element, target, ownerDocument);
+    target.appendChild(ownerDocument.createElement("br"));
     return;
   }
 
-  if (tagName === "thead" || tagName === "tbody" || tagName === "tr" || tagName === "td" || tagName === "th") {
-    const tableElement = ownerDocument.createElement(tagName);
-    applySafeTableElementStyle(tableElement, tagName);
-    appendSanitizedChildren(element, tableElement, ownerDocument);
-    target.appendChild(tableElement);
+  if (tagName === "thead" || tagName === "tbody") {
+    appendSanitizedChildren(element, target, ownerDocument);
+    return;
+  }
+
+  if (tagName === "tr") {
+    const rowCells = Array.from(element.children)
+      .filter((child): child is HTMLElement => (
+        child instanceof HTMLElement && (child.tagName === "TD" || child.tagName === "TH")
+      ))
+      .slice(0, EDITOR_TABLE_MAX_COLUMNS)
+      .map((cell) => normalizeNativeTableCellText(cell.textContent ?? ""));
+    if (rowCells.length > 0) {
+      appendEditorPlainTextLines(target, ownerDocument, [`| ${rowCells.map((cell) => cell || " ").join(" | ")} |`]);
+      target.appendChild(ownerDocument.createElement("br"));
+      return;
+    }
+    appendSanitizedChildren(element, target, ownerDocument);
+    return;
+  }
+
+  if (tagName === "td" || tagName === "th") {
+    target.appendChild(ownerDocument.createTextNode(normalizeNativeTableCellText(element.textContent ?? "")));
     return;
   }
 
@@ -403,6 +382,16 @@ const EDITOR_TABLE_CELL_TAGS = new Set(["TD", "TH"]);
 
 export function readEditorDocumentText(root: HTMLElement): string {
   let text = "";
+  const readNodePlainText = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof HTMLElement)) return "";
+    if (node.tagName === "BR") return "\n";
+    let value = "";
+    node.childNodes.forEach((child) => {
+      value += readNodePlainText(child);
+    });
+    return value;
+  };
   const appendNodeText = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       text += node.textContent ?? "";
@@ -414,6 +403,17 @@ export function readEditorDocumentText(root: HTMLElement): string {
       return;
     }
     if (node.tagName === "TR") {
+      const rowCells = Array.from(node.children)
+        .filter((child): child is HTMLElement => (
+          child instanceof HTMLElement && EDITOR_TABLE_CELL_TAGS.has(child.tagName)
+        ))
+        .map((cell) => normalizeNativeTableCellText(readNodePlainText(cell)));
+      if (rowCells.length > 0) {
+        if (text && !text.endsWith("\n")) text += "\n";
+        text += `| ${rowCells.map((cell) => cell || " ").join(" | ")} |`;
+        if (!text.endsWith("\n")) text += "\n";
+        return;
+      }
       if (text && !text.endsWith("\n")) text += "\n";
       node.childNodes.forEach(appendNodeText);
       if (text.endsWith("\t")) text = text.slice(0, -1);
@@ -422,21 +422,21 @@ export function readEditorDocumentText(root: HTMLElement): string {
     }
     if (EDITOR_TABLE_CELL_TAGS.has(node.tagName)) {
       node.childNodes.forEach(appendNodeText);
-      text += "\t";
       return;
     }
     if (node.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true") {
       const columns = readEditorGridTableColumns(node);
       const cells = directEditorGridTableCells(node);
-      if (text && !text.endsWith("\n")) text += "\n";
+      const rows = Math.max(1, Math.ceil(Math.max(1, cells.length) / columns));
+      const rowCells = Array.from({ length: rows }, () => Array.from({ length: columns }, () => ""));
       cells.forEach((cell, index) => {
-        cell.childNodes.forEach(appendNodeText);
-        if ((index + 1) % columns === 0) {
-          if (!text.endsWith("\n")) text += "\n";
-        } else {
-          text += "\t";
-        }
+        const rowIndex = Math.floor(index / columns);
+        const columnIndex = index % columns;
+        if (!rowCells[rowIndex]) return;
+        rowCells[rowIndex][columnIndex] = normalizeNativeTableCellText(readNodePlainText(cell));
       });
+      if (text && !text.endsWith("\n")) text += "\n";
+      text += editorPlainTextTableLinesFromCells(rowCells, rows, columns).join("\n");
       if (!text.endsWith("\n")) text += "\n";
       return;
     }

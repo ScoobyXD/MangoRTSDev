@@ -12,8 +12,7 @@ import {
 import {
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
   EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE,
-  EDITOR_TABLE_CELL_ATTRIBUTE,
-  createEditorGridTableElement,
+  createEditorPlainTextTableFragment,
   deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
@@ -675,18 +674,17 @@ function insertEditorTable(
   if (!range) return false;
   const undoBefore = snapshotEditorDocumentRoot(root);
   removeEditorTerminalBreaks(root);
-  const table = createEditorGridTableElement(root.ownerDocument);
+  const table = createEditorPlainTextTableFragment(root.ownerDocument);
+  const afterTable = root.ownerDocument.createElement("br");
   range.deleteContents();
+  table.appendChild(afterTable);
   range.insertNode(table);
-  const firstCell = table.querySelector(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"]`);
-  if (firstCell) {
-    const selectionRange = root.ownerDocument.createRange();
-    selectionRange.selectNodeContents(firstCell);
-    selectionRange.collapse(true);
-    const selection = root.ownerDocument.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(selectionRange);
-  }
+  const selectionRange = root.ownerDocument.createRange();
+  selectionRange.setStartAfter(afterTable);
+  selectionRange.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(selectionRange);
   recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   return true;

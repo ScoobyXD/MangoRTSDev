@@ -1243,6 +1243,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
+  const removeAttachedEmail = useCallback(async (emailID: string) => {
+    if (!canEdit || !nodeID || !companyID) return;
+    const cleanEmailID = emailID.trim();
+    if (!cleanEmailID) return;
+    const target = attachedEmails.find((email) => email.id === cleanEmailID || email.messageID === cleanEmailID);
+    if (!target) return;
+    setAttachedEmails((current) => current.filter((email) => email.id !== target.id));
+    setSelectedEmailIDsByBlock((current) => {
+      const nextEntries = Object.entries(current).filter(([, messageID]) => messageID !== target.messageID);
+      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+    });
+    try {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      onProjectionMutation();
+    } catch (cause) {
+      setAttachedEmails((current) => current.some((email) => email.id === target.id) ? current : [target, ...current]);
+      onError(cause instanceof Error ? cause.message : "failed_to_remove_email");
+      onProjectionMutation();
+    }
+  }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+
   const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
     if (!canEdit) return;
     const cleanLogicGateID = logicGate.logic_gate_id.trim();
@@ -1797,7 +1818,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const textBlockIsFocused = focusedTextBlockID === block.id;
           const selectionAnchor = chatSelectionAnchors[block.id];
           const activeChatMessageID = activeChatMessageIDs[block.id] ?? "";
+          const activeChatMessage = activeChatMessageID ? messages.find((message) => message.id === activeChatMessageID) ?? null : null;
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
+          const activeEmailSelection = activeChatMessage?.selectionSource === "email"
+            && activeChatMessage.selectionMessageID
+            && activeChatMessage.selectionQuote
+            && Number.isFinite(activeChatMessage.selectionStart)
+            && Number.isFinite(activeChatMessage.selectionEnd)
+            ? {
+              messageID: activeChatMessage.selectionMessageID,
+              quote: activeChatMessage.selectionQuote,
+              startOffset: activeChatMessage.selectionStart ?? 0,
+              endOffset: activeChatMessage.selectionEnd ?? 0,
+            }
+            : null;
           const blockAttachmentItems: TextBlockAttachmentListItem[] = (block.attachments ?? []).map((attachment) => ({
             blockID: block.id,
             blockTitle: block.title,
@@ -1817,8 +1851,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               strokeColor={strokeColor}
               ruleColor={ruleColor}
               selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
+              activeEmailSelection={activeEmailSelection}
               onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
               onClearSelectedMessage={() => clearBlockEmail(block.id)}
+              onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
+              onEmailSelectionChatRequest={(messageID, selection) => openSelectionChat({
+                blockID: block.id,
+                source: "email",
+                messageID,
+                quote: selection.quote,
+                startOffset: selection.startOffset,
+                endOffset: selection.endOffset,
+                x: selection.x,
+                y: selection.y,
+              })}
               onError={onError}
             />
           );
