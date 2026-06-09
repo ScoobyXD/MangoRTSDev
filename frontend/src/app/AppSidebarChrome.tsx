@@ -122,6 +122,7 @@ type AppSidebarProps = {
   explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
+  onNotificationNodeOpen: (node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => void;
   onPinOpen: (pin: SidebarPin) => void;
   onPinRemove: (pin: SidebarPin) => void;
   onPinReorder: (moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => void;
@@ -242,6 +243,7 @@ export function AppSidebar({
   explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
   onPageSelect,
+  onNotificationNodeOpen,
   onPinOpen,
   onPinRemove,
   onPinReorder,
@@ -444,15 +446,10 @@ export function AppSidebar({
       return;
     }
     if (nodeID) {
-      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
-        companyID: notification.company_id || companyID,
-        sourceFrameID: "app-sidebar-notifications",
-        kind: "node",
-        id: nodeID,
-        label: notification.title || nodeID,
-        selectedTreeID: `node-${nodeID}`,
-        informationID: informationID || undefined,
-        changedAt: Date.now(),
+      onNotificationNodeOpen({
+        nodeID,
+        nodeTitle: notification.title || nodeID,
+        focusInformationID: informationID || undefined,
       });
       return;
     }
@@ -479,7 +476,7 @@ export function AppSidebar({
       onPageSelect("home");
       onHomeViewSelect("my-triage");
     }
-  }, [companyID, onHomeViewSelect, onPageSelect]);
+  }, [companyID, onHomeViewSelect, onNotificationNodeOpen, onPageSelect]);
 
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {

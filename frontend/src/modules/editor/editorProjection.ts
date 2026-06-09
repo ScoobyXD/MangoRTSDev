@@ -60,6 +60,7 @@ export type EditorAttachedEmail = {
 export type EditorTextBlockContent = {
   title: string;
   document: string;
+  attachments?: EditorChatAttachment[];
 };
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
@@ -171,21 +172,33 @@ export function buildEditorAttachedEmailPayload(input: {
 }
 
 export function parseEditorTextBlockContent(value: string): EditorTextBlockContent {
-  if (!value.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return { title: "", document: value };
+  if (!value.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return { title: "", document: value, attachments: [] };
   const payload = parsePayload(value.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
-  if (!payload || typeof payload !== "object") return { title: "", document: "" };
+  if (!payload || typeof payload !== "object") return { title: "", document: "", attachments: [] };
   const record = payload as Record<string, unknown>;
   return {
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
+    attachments: parseEditorChatAttachments(record.attachments),
   };
 }
 
 export function buildEditorTextBlockContentPayload(input: EditorTextBlockContent): string {
   const title = input.title.trim();
   const document = input.document.trim() ? input.document : "";
-  if (!title && !document) return "";
-  return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({ title, document })}`;
+  const attachments = normalizeChatAttachments(input.attachments ?? []);
+  if (!title && !document && attachments.length === 0) return "";
+  return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({
+    title,
+    document,
+    attachments: attachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      type: attachment.type,
+      size: attachment.size,
+      data_url: attachment.dataURL ?? "",
+    })),
+  })}`;
 }
 
 function parsePayload(value: string): unknown {

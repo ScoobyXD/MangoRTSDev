@@ -1246,6 +1246,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setExplorerNodePopup({ nodeID: cleanNodeID, nodeTitle: cleanNodeID, focusRequestID: Date.now() });
   }, [closeMenus]);
 
+  const openNotificationNodePopup = useCallback((node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => {
+    const cleanNodeID = node.nodeID.trim();
+    if (!cleanNodeID) return;
+    closeMenus();
+    setActiveDockTabID(null);
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup({
+      nodeID: cleanNodeID,
+      nodeTitle: node.nodeTitle.trim() || cleanNodeID,
+      focusInformationID: node.focusInformationID?.trim() || undefined,
+      focusRequestID: Date.now(),
+    });
+  }, [closeMenus]);
+
   const closeHomeNodeRoute = useCallback(() => {
     if (!onNavigate) return;
     const role = (racioDeepLink as RacioDeepLinkRoute | null)?.role ?? racioRoleForViewID(homeViewID);
@@ -1537,6 +1551,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
           onHomeViewSelect={selectHomeSidebarView}
           onPageSelect={selectPrimaryPage}
+          onNotificationNodeOpen={openNotificationNodePopup}
           onPinOpen={openSidebarPin}
           onPinRemove={removeSidebarPin}
           onPinReorder={reorderSidebarPin}

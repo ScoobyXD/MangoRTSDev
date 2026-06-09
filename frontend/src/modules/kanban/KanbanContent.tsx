@@ -303,7 +303,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [priorityMenu, setPriorityMenu] = useState<KanbanPriorityMenuState | null>(null);
   const [arenaCellContextMenu, setArenaCellContextMenu] = useState<KanbanArenaCellContextMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
-  const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID, { allowHorizontalOverflow: arenaMode }));
+  const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
@@ -416,7 +416,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   useEffect(() => {
     if (arenaMode) {
-      setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID, { allowHorizontalOverflow: true }));
+      setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID));
       return;
     }
     const nextLogicGateID = logicGateIDFromKanbanBoardID(frameBoardID);
@@ -424,7 +424,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setActiveLogicGateID(nextLogicGateID);
     setActiveLogicGateLabel("");
     setNodeEditorOverlay(null);
-    setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID, { allowHorizontalOverflow: false }));
+    setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID));
   }, [arenaMode, companyID, frameBoardID]);
 
   useEffect(() => {
@@ -436,10 +436,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const reclampOverlay = () => {
       const boardBounds = boardRootRef.current?.getBoundingClientRect();
       const boardWidth = Math.max(1, boardBounds?.width ?? 1);
-      const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, arenaMode);
+      const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, false);
       const minLeft = minLeftPx / boardWidth;
       setNodeEditorOverlayRatio((current) => {
-        const next = clampNodeEditorOverlayRatio(current, { allowHorizontalOverflow: arenaMode, minLeft });
+        const next = clampNodeEditorOverlayRatio(current, { minLeft });
         nodeEditorOverlayRatioRef.current = next;
         return sameNodeEditorOverlayRatio(current, next) ? current : next;
       });
@@ -458,7 +458,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       window.removeEventListener("resize", reclampOverlay);
       resizeObserver?.disconnect();
     };
-  }, [arenaMode, nodeEditorOverlay]);
+  }, [nodeEditorOverlay]);
 
   useEffect(() => {
     activeBoardIDRef.current = activeBoardID;
@@ -541,7 +541,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         ...nodeEditorOverlayRatioRef.current,
         width: width / boardWidth,
         height: height / boardHeight,
-      }, { allowHorizontalOverflow: arenaMode });
+      });
       let nextWidth = nextSize.width;
       let left = state.edges.left
         ? state.startLeft + state.startWidth - nextSize.width * boardWidth
@@ -559,13 +559,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         top: top / boardHeight,
         width: nextWidth,
         height: nextSize.height,
-      }, { allowHorizontalOverflow: arenaMode, minLeft: resizeMinLeftRatio });
+      }, { minLeft: resizeMinLeftRatio });
       nodeEditorOverlayRatioRef.current = nextRatio;
       setNodeEditorOverlayRatio(nextRatio);
     };
     const onEnd = () => {
       if (nodeEditorOverlayResizeRef.current) {
-        storeNodeEditorOverlayRatio(companyID, frameID, nodeEditorOverlayRatioRef.current, { allowHorizontalOverflow: arenaMode });
+        storeNodeEditorOverlayRatio(companyID, frameID, nodeEditorOverlayRatioRef.current);
       }
       nodeEditorOverlayResizeRef.current = null;
     };
@@ -575,7 +575,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onEnd);
     };
-  }, [arenaMode, companyID, frameID]);
+  }, [companyID, frameID]);
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
@@ -2508,7 +2508,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           frameID={frameID}
           accent={accent}
           theme={theme}
-          allowHorizontalOverflow={arenaMode}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
         />
