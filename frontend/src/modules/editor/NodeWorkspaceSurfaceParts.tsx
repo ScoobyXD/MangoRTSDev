@@ -2712,6 +2712,9 @@ const AttachedEmailThreadCard: React.FC<{
 
   return (
     <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onContextMenu={(event) => {
         if (!editable) return;
         event.preventDefault();

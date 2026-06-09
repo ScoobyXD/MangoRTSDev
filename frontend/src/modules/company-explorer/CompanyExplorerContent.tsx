@@ -1022,6 +1022,8 @@ function buildCompanyRaciExplorerRows(input: {
   fallbackLogicGates: ExplorerLogicGateRecord[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
+  historyRows?: ExplorerTreeNode[];
+  additionalRows?: ExplorerTreeNode[];
 }): ExplorerTreeNode[] {
   const rows: ExplorerTreeNode[] = [];
   const defaultFoldersID = companyDefaultFoldersTreeID();
@@ -1034,10 +1036,16 @@ function buildCompanyRaciExplorerRows(input: {
     scopeLevel: 0,
     position: TREE_ROW_POSITION_STEP,
     createdTimestamp: "",
-    hasChildren: input.groups.length > 0,
+    hasChildren: input.groups.length > 0 || Boolean(input.historyRows?.length) || Boolean(input.additionalRows?.length),
     syntheticKind: "default_scope_folder",
   });
   if (!input.expanded.has(defaultFoldersID) && !input.expanded.has("*")) return rows;
+
+  const pushShiftedRows = (items: ExplorerTreeNode[]) => {
+    for (const row of items) {
+      rows.push({ ...row, depth: row.depth + 1, scopeLevel: row.scopeLevel + 1 });
+    }
+  };
 
   const pushUserRows = (group: ExplorerGroupSummary, user: ExplorerUserSummary, userDepth: number, position: number) => {
     const userRowID = companyGroupUserFolderTreeID(group.groupID, user.userID);
@@ -1103,7 +1111,24 @@ function buildCompanyRaciExplorerRows(input: {
   for (const [groupIndex, group] of input.groups.entries()) {
     pushGroupRows(group, 1, (groupIndex + 1) * TREE_ROW_POSITION_STEP);
   }
+  if (input.historyRows?.length) pushShiftedRows(input.historyRows);
+  if (input.additionalRows?.length) pushShiftedRows(input.additionalRows);
   return rows;
+}
+
+function extractSystemFolderBranch(rows: ExplorerTreeNode[], systemKey: CompanyExplorerSystemFolderKey, position: number): ExplorerTreeNode[] {
+  const rootIndex = rows.findIndex((row) => row.kind === "folder" && row.systemKey === systemKey);
+  if (rootIndex < 0) return [];
+  const root = rows[rootIndex];
+  const rootDepth = root.depth;
+  const branch: ExplorerTreeNode[] = [{ ...root, depth: 0, scopeLevel: 0, position }];
+  for (let index = rootIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.depth <= rootDepth) break;
+    const depth = Math.max(1, row.depth - rootDepth);
+    branch.push({ ...row, depth, scopeLevel: depth });
+  }
+  return branch;
 }
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
@@ -1558,6 +1583,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   ), [fullTreeRows, logicGatesByFunctionRows]);
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
   const teamCompanyExplorerActive = scopeViewsEnabled && scopeView !== "mine" && !scopedExplorerActive;
+  const companyHistoryRows = useMemo(() => (
+    extractSystemFolderBranch(fullTreeRows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP)
+  ), [companyGroupSections.length, fullTreeRows]);
   const baseTreeRows = useMemo(() => (
     raciExplorerActive
       ? [
@@ -1588,8 +1616,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             ...customExplorerRows,
           ]
       : teamCompanyExplorerActive && scopeView === "company"
-        ? [
-            ...buildCompanyRaciExplorerRows({
+        ? buildCompanyRaciExplorerRows({
               expanded: effectiveExpanded,
               companyID,
               groups: companyGroupSections,
@@ -1598,13 +1625,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
               folders,
               folderItems,
-            }),
-            ...customExplorerRows,
-          ]
+              historyRows: companyHistoryRows,
+              additionalRows: logicGatesByFunctionRows,
+            })
       : scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(fullTreeRows)
-  ), [companyGroupSections, companyID, currentUserID, customExplorerRows, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
+  ), [companyGroupSections, companyHistoryRows, companyID, currentUserID, customExplorerRows, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, logicGatesByFunctionRows, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
@@ -1667,19 +1694,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       ];
     }
     if (teamCompanyExplorerActive && scopeView === "company") {
-      return [
-        ...buildCompanyRaciExplorerRows({
-          expanded: new Set(["*"]),
-          companyID,
-          groups: companyGroupSections,
-          projectionByUserID: raciProjectionByUserID,
-          fallbackNodes: nodes,
-          fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
-          folders,
-          folderItems,
-        }),
-        ...customSearchRows,
-      ];
+      return buildCompanyRaciExplorerRows({
+        expanded: new Set(["*"]),
+        companyID,
+        groups: companyGroupSections,
+        projectionByUserID: raciProjectionByUserID,
+        fallbackNodes: nodes,
+        fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+        folders,
+        folderItems,
+        historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
+        additionalRows: logicGatesByFunctionSearchRows,
+      });
     }
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
