@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage } from "../communications/communicationsApi";
+import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -3449,6 +3449,8 @@ type EmailLocalHighlight = {
   endOffset: number;
 };
 
+type EmailLocalHighlightsByMessageID = Record<string, EmailLocalHighlight[]>;
+
 export type EmailHighlightSelection = {
   quote: string;
   startOffset: number;
@@ -3477,6 +3479,15 @@ const EMAIL_SELECTION_ACTION_GAP = 5;
 const EMAIL_SELECTION_ACTION_PADDING = 4;
 const EMAIL_SELECTION_ACTION_BORDER = 1;
 const EMAIL_SELECTION_ACTION_OFFSET = 8;
+const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 20;
+const EMAIL_PICKER_PREFETCH_REMAINING_ROWS = 5;
+const EMAIL_PICKER_APPROX_ROW_HEIGHT = 80;
+
+type EmailPickerPrefetchedPage = {
+  filterKey: string;
+  pageToken: string;
+  page: MessagePage;
+};
 
 function emailSelectionActionToolbarWidth(actionCount: number): number {
   return (actionCount * EMAIL_SELECTION_ACTION_BUTTON_SIZE)
@@ -3755,7 +3766,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
-  const [emailHighlights, setEmailHighlights] = useState<EmailLocalHighlight[]>(() => readStoredEmailLocalHighlights(messageID));
+  const [emailHighlightsByMessageID, setEmailHighlightsByMessageID] = useState<EmailLocalHighlightsByMessageID>(() => ({
+    [messageID]: readStoredEmailLocalHighlights(messageID),
+  }));
   const [bodyFrameHeights, setBodyFrameHeights] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -3769,7 +3782,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setDraftAttachments([]);
     setPreviewAttachment(null);
     setSelectionDraft(null);
-    setEmailHighlights(readStoredEmailLocalHighlights(messageID));
+    setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     setBodyFrameHeights({});
     void (async () => {
       const payload = await getEmailMessage(messageID, companyID);
@@ -3831,12 +3844,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [companyID, messageID]);
 
   useEffect(() => {
-    if (!highlightRemovalRequest || highlightRemovalRequest.messageID !== messageID) return;
-    setEmailHighlights((current) => {
-      const next = current.filter((highlight) => !emailLocalHighlightMatchesSelection(highlight, highlightRemovalRequest));
-      if (next.length === current.length) return current;
-      storeEmailLocalHighlights(messageID, next);
-      return next;
+    if (!highlightRemovalRequest) return;
+    const targetMessageID = highlightRemovalRequest.messageID.trim() || messageID;
+    setEmailHighlightsByMessageID((current) => {
+      const currentHighlights = current[targetMessageID] ?? readStoredEmailLocalHighlights(targetMessageID);
+      const nextHighlights = currentHighlights.filter((highlight) => !emailLocalHighlightMatchesSelection(highlight, highlightRemovalRequest));
+      if (nextHighlights.length === currentHighlights.length) return current;
+      storeEmailLocalHighlights(targetMessageID, nextHighlights);
+      return { ...current, [targetMessageID]: nextHighlights };
     });
   }, [highlightRemovalRequest?.requestID, highlightRemovalRequest?.messageID, messageID]);
 
@@ -3848,6 +3863,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  useEffect(() => {
+    setEmailHighlightsByMessageID((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const threadMessage of displayThreadMessages) {
+        const threadMessageID = threadMessage.id?.trim();
+        if (!threadMessageID || threadMessageID in next) continue;
+        next[threadMessageID] = readStoredEmailLocalHighlights(threadMessageID);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [displayThreadMessages]);
   const selectionActionCount = (onSelectionChatRequest ? 1 : 0) + (onSelectionNodeRequest ? 1 : 0);
   const selectionActionToolbarWidth = emailSelectionActionToolbarWidth(selectionActionCount);
   const selectionActionToolbarHeight = EMAIL_SELECTION_ACTION_BUTTON_SIZE + (EMAIL_SELECTION_ACTION_PADDING * 2) + (EMAIL_SELECTION_ACTION_BORDER * 2);
@@ -3899,17 +3927,30 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         : Boolean(selection.anchorNode.compareDocumentPosition(selection.focusNode) & Node.DOCUMENT_POSITION_PRECEDING)
       : false;
     const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-    const selectionRect = (selectionIsBackward ? rangeRects[0] : rangeRects[rangeRects.length - 1]) ?? range.getBoundingClientRect();
+    const focusRect = (selectionIsBackward ? rangeRects[0] : rangeRects[rangeRects.length - 1]) ?? range.getBoundingClientRect();
+    const selectionRect = range.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
-    const rawX = selectionIsBackward
-      ? selectionRect.left - rootRect.left + root.scrollLeft - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET
-      : selectionRect.right - rootRect.left + root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
     const minX = root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
     const maxX = root.scrollLeft + root.clientWidth - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET;
     const minY = root.scrollTop + EMAIL_SELECTION_ACTION_OFFSET;
     const maxY = root.scrollTop + root.clientHeight - selectionActionToolbarHeight - EMAIL_SELECTION_ACTION_OFFSET;
-    const x = clampEmailSelectionActionPosition(rawX, minX, maxX);
-    const y = clampEmailSelectionActionPosition(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - selectionActionToolbarHeight) / 2), minY, maxY);
+    const rawSideX = selectionIsBackward
+      ? focusRect.left - rootRect.left + root.scrollLeft - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET
+      : focusRect.right - rootRect.left + root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
+    const sideHasRoom = rawSideX >= minX && rawSideX <= maxX;
+    const rawCenteredX = selectionRect.left - rootRect.left + root.scrollLeft + ((selectionRect.width - selectionActionToolbarWidth) / 2);
+    const x = sideHasRoom ? rawSideX : clampEmailSelectionActionPosition(rawCenteredX, minX, maxX);
+    const rawCenteredY = focusRect.top - rootRect.top + root.scrollTop + ((focusRect.height - selectionActionToolbarHeight) / 2);
+    const rawBelowY = selectionRect.bottom - rootRect.top + root.scrollTop + EMAIL_SELECTION_ACTION_OFFSET;
+    const rawAboveY = selectionRect.top - rootRect.top + root.scrollTop - selectionActionToolbarHeight - EMAIL_SELECTION_ACTION_OFFSET;
+    const rawY = sideHasRoom
+      ? rawCenteredY
+      : rawBelowY <= maxY
+        ? rawBelowY
+        : rawAboveY >= minY
+          ? rawAboveY
+          : rawCenteredY;
+    const y = clampEmailSelectionActionPosition(rawY, minY, maxY);
     return { messageID: selectionMessageID, quote, startOffset, endOffset, x, y };
   }, [canUseEmailSelection, messageID, selectionActionToolbarHeight, selectionActionToolbarWidth]);
 
@@ -3918,18 +3959,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [readEmailSelectionDraft]);
 
   const addEmailLocalHighlight = useCallback((draft: EmailSelectionDraft) => {
-    if (draft.messageID && draft.messageID !== messageID) return;
+    const targetMessageID = draft.messageID.trim() || messageID;
     const highlight: EmailLocalHighlight = {
       id: `${Date.now()}:${draft.startOffset}:${draft.endOffset}`,
       quote: draft.quote,
       startOffset: draft.startOffset,
       endOffset: draft.endOffset,
     };
-    setEmailHighlights((current) => {
-      if (current.some((item) => item.startOffset === highlight.startOffset && item.endOffset === highlight.endOffset && item.quote === highlight.quote)) return current;
-      const next = [...current, highlight].slice(-80);
-      storeEmailLocalHighlights(messageID, next);
-      return next;
+    setEmailHighlightsByMessageID((current) => {
+      const currentHighlights = current[targetMessageID] ?? readStoredEmailLocalHighlights(targetMessageID);
+      if (currentHighlights.some((item) => item.startOffset === highlight.startOffset && item.endOffset === highlight.endOffset && item.quote === highlight.quote)) return current;
+      const nextHighlights = [...currentHighlights, highlight].slice(-80);
+      storeEmailLocalHighlights(targetMessageID, nextHighlights);
+      return { ...current, [targetMessageID]: nextHighlights };
     });
   }, [messageID]);
 
@@ -4062,6 +4104,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             }}
           >
             {displayThreadMessages.map((threadMessage, index) => {
+              const threadMessageID = threadMessage.id || messageID;
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = inlineExpansion && isSelectedMessage;
               const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
@@ -4139,7 +4182,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   ) : (
                     <div
                       ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
-                      {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessage.id || messageID }}
+                      {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessageID }}
                       style={{
                         marginTop: 7,
                         color: "#111827",
@@ -4153,8 +4196,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     >
                       {renderEmailTextWithHighlights(
                         threadBody || "(empty email)",
-                        isSelectedMessage ? emailHighlights : [],
-                        activeSelection?.messageID === (threadMessage.id || messageID) ? activeSelection : null
+                        emailHighlightsByMessageID[threadMessageID] ?? [],
+                        activeSelection?.messageID === threadMessageID ? activeSelection : null
                       )}
                     </div>
                   )}
@@ -4354,9 +4397,62 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeDraft, setComposeDraft] = useState({ to: "", subject: "", body: "" });
   const [messages, setMessages] = useState<EmailMessage[]>([]);
+  const [nextPageToken, setNextPageToken] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const requestSeqRef = useRef(0);
+  const prefetchedPageRef = useRef<EmailPickerPrefetchedPage | null>(null);
+  const prefetchPromiseRef = useRef<Promise<void> | null>(null);
+  const prefetchFilterKeyRef = useRef("");
+  const prefetchPageTokenRef = useRef("");
+  const filterKey = useMemo(() => `${mailbox}\n${query.trim()}\n${unreadOnly ? "1" : "0"}`, [mailbox, query, unreadOnly]);
+  const filterKeyRef = useRef(filterKey);
+  const nextPageTokenRef = useRef(nextPageToken);
+  const loadingRef = useRef(loading);
+  const loadingMoreRef = useRef(loadingMore);
+
+  useEffect(() => {
+    filterKeyRef.current = filterKey;
+  }, [filterKey]);
+
+  useEffect(() => {
+    nextPageTokenRef.current = nextPageToken;
+  }, [nextPageToken]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+
+  const clearPrefetchedPage = useCallback(() => {
+    prefetchedPageRef.current = null;
+    prefetchPromiseRef.current = null;
+    prefetchFilterKeyRef.current = "";
+    prefetchPageTokenRef.current = "";
+  }, []);
+
+  const appendMessagePage = useCallback((page: MessagePage) => {
+    setMessages((current) => {
+      const seen = new Set(current.map((message) => message.id));
+      const next = [...current];
+      for (const message of page.messages ?? []) {
+        if (!message.id || seen.has(message.id)) continue;
+        seen.add(message.id);
+        next.push(message);
+      }
+      return next;
+    });
+    const nextToken = page.next_page_token ?? "";
+    nextPageTokenRef.current = nextToken;
+    setNextPageToken(nextToken);
+    return nextToken;
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -4369,24 +4465,153 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
+      const requestSeq = requestSeqRef.current + 1;
+      requestSeqRef.current = requestSeq;
+      loadingRef.current = true;
+      loadingMoreRef.current = false;
       setLoading(true);
+      setLoadingMore(false);
       setError("");
-      void listEmailMessages({ mailbox, limit: 50, q: query.trim() || undefined, unread: unreadOnly || undefined })
+      setMessages([]);
+      nextPageTokenRef.current = "";
+      setNextPageToken("");
+      clearPrefetchedPage();
+      void listEmailMessages({ mailbox, limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, q: query.trim() || undefined, unread: unreadOnly || undefined })
         .then((page) => {
-          if (!cancelled) setMessages(page.messages ?? []);
+          if (cancelled || requestSeqRef.current !== requestSeq) return;
+          setMessages(page.messages ?? []);
+          const nextToken = page.next_page_token ?? "";
+          nextPageTokenRef.current = nextToken;
+          setNextPageToken(nextToken);
         })
         .catch((cause) => {
-          if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
+          if (!cancelled && requestSeqRef.current === requestSeq) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
         })
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled && requestSeqRef.current === requestSeq) {
+            loadingRef.current = false;
+            setLoading(false);
+          }
         });
     }, query.trim() ? 220 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
+  }, [clearPrefetchedPage, mailbox, query, unreadOnly]);
+
+  const appendPrefetchedPage = useCallback((pageToken: string): string | null => {
+    const prefetched = prefetchedPageRef.current;
+    if (!prefetched || prefetched.filterKey !== filterKeyRef.current || prefetched.pageToken !== pageToken) return null;
+    prefetchedPageRef.current = null;
+    prefetchPromiseRef.current = null;
+    prefetchFilterKeyRef.current = "";
+    prefetchPageTokenRef.current = "";
+    return appendMessagePage(prefetched.page);
+  }, [appendMessagePage]);
+
+  const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
+    if (loadingRef.current || loadingMoreRef.current) return;
+    const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
+    if (!pageToken) return;
+    const requestFilterKey = filterKeyRef.current;
+    const prefetched = prefetchedPageRef.current;
+    if (prefetched?.filterKey === requestFilterKey && prefetched.pageToken === pageToken) return;
+    if (prefetchPromiseRef.current && prefetchFilterKeyRef.current === requestFilterKey && prefetchPageTokenRef.current === pageToken) return;
+    prefetchFilterKeyRef.current = requestFilterKey;
+    prefetchPageTokenRef.current = pageToken;
+    const request = listEmailMessages({
+      mailbox,
+      limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
+      pageToken,
+      q: query.trim() || undefined,
+      unread: unreadOnly || undefined,
+    })
+      .then((page) => {
+        if (filterKeyRef.current !== requestFilterKey || nextPageTokenRef.current !== pageToken) return;
+        prefetchedPageRef.current = { filterKey: requestFilterKey, pageToken, page };
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (prefetchPromiseRef.current === request) {
+          prefetchPromiseRef.current = null;
+          prefetchFilterKeyRef.current = "";
+          prefetchPageTokenRef.current = "";
+        }
+      });
+    prefetchPromiseRef.current = request;
+    await request;
   }, [mailbox, query, unreadOnly]);
+
+  const loadMoreMessages = useCallback(async () => {
+    if (loadingRef.current || loadingMoreRef.current) return;
+    const pageToken = nextPageTokenRef.current.trim();
+    if (!pageToken) return;
+    const appendedNextToken = appendPrefetchedPage(pageToken);
+    if (appendedNextToken !== null) {
+      window.setTimeout(() => {
+        if (appendedNextToken) void prefetchNextMessagePage(appendedNextToken);
+      }, 0);
+      return;
+    }
+    const requestFilterKey = filterKeyRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setError("");
+    try {
+      if (prefetchPromiseRef.current && prefetchFilterKeyRef.current === requestFilterKey && prefetchPageTokenRef.current === pageToken) {
+        await prefetchPromiseRef.current;
+        const prefetchedNextToken = appendPrefetchedPage(pageToken);
+        if (prefetchedNextToken !== null) {
+          window.setTimeout(() => {
+            if (prefetchedNextToken) void prefetchNextMessagePage(prefetchedNextToken);
+          }, 0);
+          return;
+        }
+      }
+      const page = await listEmailMessages({
+        mailbox,
+        limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
+        pageToken,
+        q: query.trim() || undefined,
+        unread: unreadOnly || undefined,
+      });
+      if (filterKeyRef.current !== requestFilterKey || nextPageTokenRef.current !== pageToken) return;
+      const nextToken = appendMessagePage(page);
+      window.setTimeout(() => {
+        if (nextToken) void prefetchNextMessagePage(nextToken);
+      }, 0);
+    } catch (cause) {
+      if (filterKeyRef.current === requestFilterKey) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [appendMessagePage, appendPrefetchedPage, mailbox, prefetchNextMessagePage, query, unreadOnly]);
+
+  const emailPickerWithinPrefetchDistance = useCallback((): boolean => {
+    const list = messageListRef.current;
+    if (!list) return false;
+    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    return remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * EMAIL_PICKER_PREFETCH_REMAINING_ROWS;
+  }, []);
+
+  const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * EMAIL_PICKER_PREFETCH_REMAINING_ROWS) void prefetchNextMessagePage();
+    if (remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * 2) void loadMoreMessages();
+  }, [loadMoreMessages, prefetchNextMessagePage]);
+
+  useEffect(() => {
+    if (composeOpen || loading || !nextPageToken) return;
+    window.setTimeout(() => {
+      const list = messageListRef.current;
+      if (!list) return;
+      if (emailPickerWithinPrefetchDistance()) void prefetchNextMessagePage();
+      if (list.scrollHeight <= list.clientHeight + (EMAIL_PICKER_APPROX_ROW_HEIGHT * 2)) void loadMoreMessages();
+    }, 0);
+  }, [composeOpen, emailPickerWithinPrefetchDistance, loadMoreMessages, loading, messages.length, nextPageToken, prefetchNextMessagePage]);
 
   const mailboxTabs: Array<{ mailbox: EmailMailbox; label: string }> = [
     { mailbox: "primary", label: "Inbox" },
@@ -4524,7 +4749,12 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
             </>
           )}
         </div>
-        <div className="editor-document-scroll" style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+        <div
+          ref={messageListRef}
+          className="editor-document-scroll"
+          onScroll={handleMessageListScroll}
+          style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}
+        >
           {error && <div style={{ padding: 10, border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.9)", color: "#991b1b", fontSize: 12, fontWeight: 800 }}>{error}</div>}
           {composeOpen ? (
             <form onSubmit={submitCompose} style={{ display: "grid", gap: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: "#ffffff", padding: 10, boxShadow: EDITOR_NEU_SHADOW }}>
@@ -4583,6 +4813,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
                   </span>
                 </button>
               ))}
+              {loadingMore && <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 800, textAlign: "center" }}>Loading more</div>}
             </>
           )}
         </div>
