@@ -1,18 +1,19 @@
-import { type NodeRecord } from "../node-map/shared";
-import { type LogicGateRecord as LogicGateApiRecord } from "../logic-gate-map/shared";
+import { type NodeRecord } from "../node-map/shared.js";
+import { type LogicGateRecord as LogicGateApiRecord } from "../logic-gate-map/shared.js";
 import {
   type CompanyExplorerFolder,
   type CompanyExplorerFolderItem,
   type CompanyExplorerFolderKind,
   type CompanyExplorerItemType,
   type CompanyExplorerSystemFolderKey,
-} from "../folders/companyExplorerFolders";
-import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop";
+} from "../folders/companyExplorerFolders.js";
+import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop.js";
 import {
   type ExplorerDeleteTarget,
   type ExplorerDeleteTargetWithLabel,
-} from "./companyExplorerTypes";
-import { isExplorerSystemFolderKey } from "./treePresentation";
+  type ExplorerTreeNode,
+} from "./companyExplorerTypes.js";
+import { isExplorerSystemFolderKey } from "./treePresentation.js";
 
 export type WorkspaceStreamEnvelope = {
   company_id: string;
@@ -180,4 +181,38 @@ export function findProtectedSystemFolderInDeleteTargets(
     if (protectedFolder) return protectedFolder;
   }
   return null;
+}
+
+function normalizeExplorerRootFolderLabel(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function filterExplorerRowsForCustomTopLevel(input: {
+  rows: ExplorerTreeNode[];
+  hiddenRootFolderNames?: Iterable<string>;
+}): ExplorerTreeNode[] {
+  const hiddenRootFolderNames = new Set(
+    Array.from(input.hiddenRootFolderNames ?? [], normalizeExplorerRootFolderLabel).filter(Boolean),
+  );
+  const customRows: ExplorerTreeNode[] = [];
+  let skippedRootDepth: number | null = null;
+  for (const row of input.rows) {
+    if (skippedRootDepth !== null) {
+      if (row.depth > skippedRootDepth) continue;
+      skippedRootDepth = null;
+    }
+    const isRootFolder = row.kind === "folder" && row.depth === 0;
+    const isDefaultRootFolder = isRootFolder && (
+      Boolean(row.systemKey)
+      || row.syntheticKind === "default_scope_folder"
+      || row.syntheticKind === "raci_folder"
+      || hiddenRootFolderNames.has(normalizeExplorerRootFolderLabel(row.label))
+    );
+    if (isDefaultRootFolder) {
+      skippedRootDepth = row.depth;
+      continue;
+    }
+    customRows.push(row);
+  }
+  return customRows;
 }

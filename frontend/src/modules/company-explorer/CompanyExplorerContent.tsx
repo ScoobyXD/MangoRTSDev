@@ -56,6 +56,7 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { listMyLogicGates, listRacioMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
+  filterExplorerRowsForCustomTopLevel,
   findProtectedSystemFolderInDeleteTargets,
   getSystemFolderKeyForTreeRowID,
   type CompanyExplorerContentProps,
@@ -77,7 +78,8 @@ import {
 const scopedRootCreationKeys = new Set<string>();
 const raciVisualRootCreationKeys = new Set<string>();
 const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
-const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set(["logic gates by function", "logic gates by person"]);
+const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS = ["logic gates by function", "logic gates by person"] as const;
+const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS);
 type CompanyExplorerScopeView = "mine" | "team" | "company";
 type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "raci_assignments">>;
 type CompanyExplorerRaciFolderRole = LogicGateRaciRole | "other";
@@ -111,6 +113,11 @@ function isRaciVisualRootFolderName(value: string): boolean {
   const normalized = normalizeExplorerFolderName(value);
   return RACI_FOLDER_ROWS.some((folder) => normalized === normalizeExplorerFolderName(raciVisualRootFolderName(folder.role)));
 }
+
+const HIDDEN_CUSTOM_EXPLORER_ROOT_FOLDER_NAMES = [
+  ...HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS,
+  ...RACI_FOLDER_ROWS.map((folder) => raciVisualRootFolderName(folder.role)),
+];
 
 function raciVisualRootFolderForRole(folders: CompanyExplorerFolder[], role: CompanyExplorerRaciFolderRole): CompanyExplorerFolder | null {
   const targetName = normalizeExplorerFolderName(raciVisualRootFolderName(role));
@@ -1576,11 +1583,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id);
   }, [effectiveExpanded, fullTreeRows, kanbanBoards, logicGatesByFunctionRootFolder, rootRowOrder, scopedExplorerData]);
   const customExplorerRows = useMemo(() => (
-    [
-      ...hideMainExplorerRootFolders(fullTreeRows),
-      ...logicGatesByFunctionRows,
-    ]
-  ), [fullTreeRows, logicGatesByFunctionRows]);
+    filterExplorerRowsForCustomTopLevel({
+      rows: fullTreeRows,
+      hiddenRootFolderNames: HIDDEN_CUSTOM_EXPLORER_ROOT_FOLDER_NAMES,
+    })
+  ), [fullTreeRows]);
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
   const teamCompanyExplorerActive = scopeViewsEnabled && scopeView !== "mine" && !scopedExplorerActive;
   const companyHistoryRows = useMemo(() => (
@@ -1588,22 +1595,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   ), [companyGroupSections.length, fullTreeRows]);
   const baseTreeRows = useMemo(() => (
     raciExplorerActive
-      ? [
-          ...buildRaciCompanyExplorerRows({
-            expanded: effectiveExpanded,
-            nodes: raciExplorerData.nodes,
-            logicGates: raciExplorerData.logicGates,
-            folderNodes: nodes,
-            folderLogicGates: logicGates as ExplorerLogicGateRecord[],
-            folders,
-            folderItems,
-            currentUserID,
-          }),
-          ...customExplorerRows,
-        ]
+        ? buildRaciCompanyExplorerRows({
+              expanded: effectiveExpanded,
+              nodes: raciExplorerData.nodes,
+              logicGates: raciExplorerData.logicGates,
+              folderNodes: nodes,
+              folderLogicGates: logicGates as ExplorerLogicGateRecord[],
+              folders,
+              folderItems,
+              currentUserID,
+            })
       : teamCompanyExplorerActive && scopeView === "team"
-        ? [
-            ...buildTeamRaciExplorerRows({
+        ? buildTeamRaciExplorerRows({
               expanded: effectiveExpanded,
               companyID,
               users: teamUsers,
@@ -1612,11 +1615,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
               folders,
               folderItems,
-            }),
-            ...customExplorerRows,
-          ]
+            })
       : teamCompanyExplorerActive && scopeView === "company"
-        ? buildCompanyRaciExplorerRows({
+        ? [
+            ...buildCompanyRaciExplorerRows({
               expanded: effectiveExpanded,
               companyID,
               groups: companyGroupSections,
@@ -1627,7 +1629,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               folderItems,
               historyRows: companyHistoryRows,
               additionalRows: logicGatesByFunctionRows,
-            })
+            }),
+            ...customExplorerRows,
+          ]
       : scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : hideMainExplorerRootFolders(fullTreeRows)
@@ -1649,10 +1653,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const logicGatesByFunctionSearchRows = logicGatesByFunctionRootFolder
       ? buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id)
       : [];
-    const customSearchRows = [
-      ...hideMainExplorerRootFolders(rows),
-      ...logicGatesByFunctionSearchRows,
-    ];
+    const customSearchRows = filterExplorerRowsForCustomTopLevel({
+      rows,
+      hiddenRootFolderNames: HIDDEN_CUSTOM_EXPLORER_ROOT_FOLDER_NAMES,
+    });
     if (raciExplorerActive) {
       const raciExpanded = new Set(expandedForSearch);
       raciExpanded.add(raciDefaultFoldersTreeID());
@@ -1664,8 +1668,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           raciExpanded.add(raciLogicGateTreeID(role, logicGate.logic_gate_id));
         }
       }
-      return [
-        ...buildRaciCompanyExplorerRows({
+      return buildRaciCompanyExplorerRows({
           expanded: raciExpanded,
           nodes: raciExplorerData.nodes,
           logicGates: raciExplorerData.logicGates,
@@ -1674,13 +1677,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           folders,
           folderItems,
           currentUserID,
-        }),
-        ...customSearchRows,
-      ];
+        });
     }
     if (teamCompanyExplorerActive && scopeView === "team") {
-      return [
-        ...buildTeamRaciExplorerRows({
+      return buildTeamRaciExplorerRows({
           expanded: new Set(["*"]),
           companyID,
           users: teamUsers,
@@ -1689,23 +1689,24 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
           folders,
           folderItems,
+        });
+    }
+    if (teamCompanyExplorerActive && scopeView === "company") {
+      return [
+        ...buildCompanyRaciExplorerRows({
+          expanded: new Set(["*"]),
+          companyID,
+          groups: companyGroupSections,
+          projectionByUserID: raciProjectionByUserID,
+          fallbackNodes: nodes,
+          fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
+          folders,
+          folderItems,
+          historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
+          additionalRows: logicGatesByFunctionSearchRows,
         }),
         ...customSearchRows,
       ];
-    }
-    if (teamCompanyExplorerActive && scopeView === "company") {
-      return buildCompanyRaciExplorerRows({
-        expanded: new Set(["*"]),
-        companyID,
-        groups: companyGroupSections,
-        projectionByUserID: raciProjectionByUserID,
-        fallbackNodes: nodes,
-        fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
-        folders,
-        folderItems,
-        historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
-        additionalRows: logicGatesByFunctionSearchRows,
-      });
     }
     return scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
