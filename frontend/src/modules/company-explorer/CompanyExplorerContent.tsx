@@ -1412,6 +1412,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     folders,
     folderItems,
   }), [currentUserID, folderItems, folders, groupMembers, logicGates, nodes, scopeView, scopeViewsEnabled, teamMemberUserIDs]);
+  const allExplorerData = useMemo(() => ({
+    nodes,
+    logicGates,
+    folders,
+    folderItems,
+  }), [folderItems, folders, logicGates, nodes]);
   const raciExplorerActive = scopeViewsEnabled && scopeView === "mine" && currentUserID.trim().length > 0;
   const fetchRaciProjectionForUser = useCallback(async (targetUserID: string): Promise<RaciProjectionCacheEntry> => {
     const cleanUserID = cleanExplorerID(targetUserID);
@@ -1648,87 +1654,24 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerSearchActive = explorerSearchText.length > 0;
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
-    for (const folder of scopedExplorerData.folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
-    for (const logicGate of scopedExplorerData.logicGates) expandedForSearch.add(`logic-gate-${logicGate.logic_gate_id}`);
+    for (const folder of allExplorerData.folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
+    for (const logicGate of allExplorerData.logicGates) expandedForSearch.add(`logic-gate-${logicGate.logic_gate_id}`);
     const rows = buildCompanyExplorerTreeRows({
       expanded: expandedForSearch,
-      nodes: scopedExplorerData.nodes,
-      logicGates: scopedExplorerData.logicGates,
+      nodes: allExplorerData.nodes,
+      logicGates: allExplorerData.logicGates,
       kanbanBoards,
-      folders: scopedExplorerData.folders,
-      folderItems: scopedExplorerData.folderItems,
+      folders: allExplorerData.folders,
+      folderItems: allExplorerData.folderItems,
       rootRowOrder,
     });
-    const logicGatesByFunctionSearchRows = logicGatesByFunctionRootFolder
-      ? buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id)
-      : [];
-    const customSearchRows = filterExplorerRowsForCustomTopLevel({
-      rows,
-      hiddenRootFolderNames: HIDDEN_CUSTOM_EXPLORER_ROOT_FOLDER_NAMES,
-    });
-    if (raciExplorerActive) {
-      const raciExpanded = new Set(expandedForSearch);
-      raciExpanded.add(raciDefaultFoldersTreeID());
-      for (const folder of RACI_FOLDER_ROWS) raciExpanded.add(raciFolderTreeID(folder.role));
-      for (const folder of folders) raciExpanded.add(`workspace-folder-${folder.folder_id}`);
-      raciExpanded.add(raciNoLogicGateTreeID("other"));
-      for (const logicGate of raciExplorerData.logicGates) {
-        for (const role of logicGateRaciRolesForUser(logicGate, currentUserID)) {
-          raciExpanded.add(raciLogicGateTreeID(role, logicGate.logic_gate_id));
-        }
-      }
-      return [
-        ...buildRaciCompanyExplorerRows({
-          expanded: raciExpanded,
-          nodes: raciExplorerData.nodes,
-          logicGates: raciExplorerData.logicGates,
-          folderNodes: nodes,
-          folderLogicGates: logicGates as ExplorerLogicGateRecord[],
-          folders,
-          folderItems,
-          currentUserID,
-        }),
-        ...customSearchRows,
-      ];
-    }
-    if (teamCompanyExplorerActive && scopeView === "team") {
-      return [
-        ...buildTeamRaciExplorerRows({
-          expanded: new Set(["*"]),
-          companyID,
-          users: teamUsers,
-          projectionByUserID: raciProjectionByUserID,
-          fallbackNodes: nodes,
-          fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
-          folders,
-          folderItems,
-        }),
-        ...customSearchRows,
-      ];
-    }
-    if (teamCompanyExplorerActive && scopeView === "company") {
-      return [
-        ...buildCompanyRaciExplorerRows({
-          expanded: new Set(["*"]),
-          companyID,
-          groups: companyGroupSections,
-          projectionByUserID: raciProjectionByUserID,
-          fallbackNodes: nodes,
-          fallbackLogicGates: logicGates as ExplorerLogicGateRecord[],
-          folders,
-          folderItems,
-          historyRows: extractSystemFolderBranch(rows, "history", (companyGroupSections.length + 1) * TREE_ROW_POSITION_STEP),
-        }),
-        ...logicGatesByFunctionSearchRows,
-        ...customSearchRows,
-      ];
-    }
-    return scopedExplorerActive
-      ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
-      : hideMainExplorerRootFolders(rows);
-  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, raciExplorerActive, raciExplorerData, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedExplorerData, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
+    return hideMainExplorerRootFolders(rows);
+  }, [allExplorerData, kanbanBoards, rootRowOrder]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
+  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
+  const explorerSearchDropdownRows = useMemo(() => (
+    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery, includeBranchDescendants: true })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
   useEffect(() => {
     if (!onSearchResultsChange) return;
@@ -1736,18 +1679,21 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       onSearchResultsChange([]);
       return;
     }
-    const results: CompanyExplorerSearchResultSummary[] = explorerSearchViewRows.map((row) => ({
-      treeID: row.id,
-      label: row.label,
-      kind: row.kind,
-      depth: row.depth,
-      folderLabel: row.folderLabel,
-      systemKey: row.systemKey,
-      mangoDefaultFolder: row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder"),
-      hasChildren: Boolean(row.hasChildren),
-    }));
+    const results: CompanyExplorerSearchResultSummary[] = explorerSearchDropdownRows.map((row, index) => {
+      const nextRow = explorerSearchDropdownRows[index + 1];
+      return {
+        treeID: row.id,
+        label: row.label,
+        kind: row.kind,
+        depth: row.depth,
+        folderLabel: row.folderLabel,
+        systemKey: row.systemKey,
+        mangoDefaultFolder: row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder"),
+        hasChildren: Boolean(row.hasChildren) || Boolean(nextRow && nextRow.depth > row.depth),
+      };
+    });
     onSearchResultsChange(results);
-  }, [explorerSearchActive, explorerSearchViewRows, onSearchResultsChange]);
+  }, [explorerSearchActive, explorerSearchDropdownRows, onSearchResultsChange]);
   const treeRows = explorerSearchActive ? explorerSearchViewRows : baseTreeRows;
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);

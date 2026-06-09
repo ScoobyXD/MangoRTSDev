@@ -234,6 +234,25 @@ function usePersistedSidebarSectionOpen(sectionID: SidebarSectionID, fallback: b
   return [open, setOpen];
 }
 
+function filterExplorerSearchResultsForCollapsedBranches(
+  results: CompanyExplorerSearchResultSummary[],
+  collapsedTreeIDs: Set<string>,
+): CompanyExplorerSearchResultSummary[] {
+  if (collapsedTreeIDs.size === 0) return results;
+  const visible: CompanyExplorerSearchResultSummary[] = [];
+  let collapsedDepth = -1;
+  for (const result of results) {
+    const depth = Math.max(0, result.depth);
+    if (collapsedDepth >= 0) {
+      if (depth > collapsedDepth) continue;
+      collapsedDepth = -1;
+    }
+    visible.push(result);
+    if (result.hasChildren && collapsedTreeIDs.has(result.treeID)) collapsedDepth = depth;
+  }
+  return visible;
+}
+
 export function AppSidebar({
   accountChrome,
   activePage,
@@ -277,6 +296,7 @@ export function AppSidebar({
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchResults, setExplorerSearchResults] = useState<CompanyExplorerSearchResultSummary[]>([]);
+  const [collapsedExplorerSearchTreeIDs, setCollapsedExplorerSearchTreeIDs] = useState<Set<string>>(new Set());
   const [explorerSearchSelectionRequest, setExplorerSearchSelectionRequest] = useState<CompanyExplorerSearchSelectionRequest | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -331,12 +351,42 @@ export function AppSidebar({
     setExplorerSearchResults(results);
   }, []);
 
+  const visibleExplorerSearchResults = useMemo(
+    () => filterExplorerSearchResultsForCollapsedBranches(explorerSearchResults, collapsedExplorerSearchTreeIDs),
+    [collapsedExplorerSearchTreeIDs, explorerSearchResults],
+  );
+
   const requestExplorerSearchResultSelection = useCallback((result: CompanyExplorerSearchResultSummary) => {
     setExplorerSearchSelectionRequest((current) => ({
       treeID: result.treeID,
       requestID: (current?.requestID ?? 0) + 1,
     }));
   }, []);
+
+  const toggleExplorerSearchResultBranch = useCallback((treeID: string) => {
+    setCollapsedExplorerSearchTreeIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(treeID)) next.delete(treeID);
+      else next.add(treeID);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setCollapsedExplorerSearchTreeIDs(new Set());
+  }, [explorerSearchQuery]);
+
+  useEffect(() => {
+    setCollapsedExplorerSearchTreeIDs((previous) => {
+      if (previous.size === 0) return previous;
+      const availableTreeIDs = new Set(explorerSearchResults.map((result) => result.treeID));
+      const next = new Set<string>();
+      for (const treeID of previous) {
+        if (availableTreeIDs.has(treeID)) next.add(treeID);
+      }
+      return next.size === previous.size ? previous : next;
+    });
+  }, [explorerSearchResults]);
 
   useEffect(() => {
     if (activeHomeView.startsWith("shared:")) return;
@@ -996,26 +1046,54 @@ export function AppSidebar({
           aria-live="polite"
         >
           {explorerSearchOpen && (
-            explorerSearchResults.length > 0 ? explorerSearchResults.map((result) => (
-              <button
-                key={`${result.treeID}:${result.label}`}
-                type="button"
-                role="treeitem"
-                aria-level={Math.max(1, result.depth + 1)}
-                aria-expanded={result.hasChildren ? true : undefined}
-                title={`${result.label} (${formatExplorerSearchResultKind(result.kind)})`}
-                style={appSidebarExplorerSearchTreeRowStyle(result.depth)}
-                onClick={() => requestExplorerSearchResultSelection(result)}
-              >
-                <span style={appSidebarExplorerSearchTreeToggleSlotStyle}>
-                  {result.hasChildren && <ExplorerDisclosureIcon open color="rgba(15, 23, 42, 0.58)" />}
-                </span>
-                <span style={appSidebarExplorerSearchTreeIconStyle}>
-                  <ExplorerRowIcon kind={result.kind} systemKey={result.systemKey} mangoDefaultFolder={result.mangoDefaultFolder} />
-                </span>
-                <span style={appSidebarExplorerSearchTreeLabelStyle}>{result.label}</span>
-              </button>
-            )) : (
+            explorerSearchResults.length > 0 ? visibleExplorerSearchResults.map((result) => {
+              const collapsed = collapsedExplorerSearchTreeIDs.has(result.treeID);
+              return (
+                <div
+                  key={`${result.treeID}:${result.label}`}
+                  role="treeitem"
+                  tabIndex={0}
+                  aria-level={Math.max(1, result.depth + 1)}
+                  aria-expanded={result.hasChildren ? !collapsed : undefined}
+                  title={`${result.label} (${formatExplorerSearchResultKind(result.kind)})`}
+                  style={appSidebarExplorerSearchTreeRowStyle(result.depth)}
+                  onClick={() => requestExplorerSearchResultSelection(result)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      requestExplorerSearchResultSelection(result);
+                    } else if (result.hasChildren && event.key === "ArrowRight" && collapsed) {
+                      event.preventDefault();
+                      toggleExplorerSearchResultBranch(result.treeID);
+                    } else if (result.hasChildren && event.key === "ArrowLeft" && !collapsed) {
+                      event.preventDefault();
+                      toggleExplorerSearchResultBranch(result.treeID);
+                    }
+                  }}
+                >
+                  <span style={appSidebarExplorerSearchTreeToggleSlotStyle}>
+                    {result.hasChildren && (
+                      <button
+                        type="button"
+                        aria-label={`${collapsed ? "Expand" : "Collapse"} ${result.label}`}
+                        style={appSidebarExplorerSearchTreeToggleButtonStyle}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          toggleExplorerSearchResultBranch(result.treeID);
+                        }}
+                      >
+                        <ExplorerDisclosureIcon open={!collapsed} color="rgba(15, 23, 42, 0.58)" />
+                      </button>
+                    )}
+                  </span>
+                  <span style={appSidebarExplorerSearchTreeIconStyle}>
+                    <ExplorerRowIcon kind={result.kind} systemKey={result.systemKey} mangoDefaultFolder={result.mangoDefaultFolder} />
+                  </span>
+                  <span style={appSidebarExplorerSearchTreeLabelStyle}>{result.label}</span>
+                </div>
+              );
+            }) : (
               <div style={appSidebarExplorerSearchEmptyStyle}>No matches</div>
             )
           )}
@@ -1997,6 +2075,18 @@ const appSidebarExplorerSearchTreeToggleSlotStyle: React.CSSProperties = {
   flexShrink: 0,
   display: "grid",
   placeItems: "center",
+};
+
+const appSidebarExplorerSearchTreeToggleButtonStyle: React.CSSProperties = {
+  width: TREE_TOGGLE_SLOT_PX,
+  height: 20,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
 };
 
 const appSidebarExplorerSearchTreeIconStyle: React.CSSProperties = {
