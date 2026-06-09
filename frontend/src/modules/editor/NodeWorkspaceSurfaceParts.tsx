@@ -3127,7 +3127,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       collapsed={collapsedThreadIDs.has(email.messageID)}
       draggable={editable}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
-      activeSelection={activeEmailSelection?.messageID === email.messageID ? activeEmailSelection : null}
+      activeSelection={activeEmailSelection}
       onToggleCollapsed={() => toggleThread(email.messageID)}
       onSelect={() => toggleSelectedMessage(email.messageID)}
       onReply={(targetMessageID) => {
@@ -4100,9 +4100,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         overflowWrap: "anywhere",
                       }}
                     >
-                      {isSelectedMessage
-                        ? renderEmailTextWithHighlights(threadBody || "(empty email)", emailHighlights, activeSelection)
-                        : (threadBody || "(empty email)")}
+                      {renderEmailTextWithHighlights(
+                        threadBody || "(empty email)",
+                        isSelectedMessage ? emailHighlights : [],
+                        activeSelection?.messageID === (threadMessage.id || messageID) ? activeSelection : null
+                      )}
                     </div>
                   )}
                 </div>
