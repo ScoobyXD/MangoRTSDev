@@ -81,6 +81,25 @@ const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v1";
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v1";
+const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
+
+function buildEmailSelectionNodeTitle(quote: string, fallback: string): string {
+  const compactQuote = quote.replace(/\s+/g, " ").trim();
+  const base = compactQuote || fallback.trim() || "Email selection";
+  if (base.length <= EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH) return base;
+  return `${base.slice(0, EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH - 3).trimEnd()}...`;
+}
+
+function createEmailSelectionDocument(ownerDocument: Document, quote: string): string {
+  const container = ownerDocument.createElement("div");
+  const paragraph = ownerDocument.createElement("div");
+  quote.split(/\r\n|\r|\n/).forEach((line, index) => {
+    if (index > 0) paragraph.appendChild(ownerDocument.createElement("br"));
+    paragraph.appendChild(ownerDocument.createTextNode(line));
+  });
+  container.appendChild(paragraph);
+  return serializeEditorDocumentHTML(container);
+}
 
 type TextSidePaneKind = "email" | "chat";
 
@@ -1197,6 +1216,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [blocks, canEdit, onCreateNodeFromImage, onError]);
 
+  const createNodeFromEmailSelection = useCallback(async (blockID: string, messageID: string, quote: string) => {
+    if (!canEdit) return;
+    if (typeof document === "undefined") return;
+    const cleanQuote = quote.trim();
+    if (!cleanQuote) return;
+    const sourceBlock = blocks.find((block) => block.id === blockID);
+    const sourceEmail = attachedEmails.find((email) => email.messageID === messageID || email.id === messageID);
+    const fallbackTitle = sourceEmail?.subject.trim() || sourceBlock?.title.trim() || "Email selection";
+    const selectionDocument = createEmailSelectionDocument(document, cleanQuote);
+    if (!selectionDocument) return;
+    try {
+      await onCreateNodeFromImage({
+        title: buildEmailSelectionNodeTitle(cleanQuote, fallbackTitle),
+        blockTitle: "Email selection",
+        document: selectionDocument,
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_create_email_selection_node");
+    }
+  }, [attachedEmails, blocks, canEdit, onCreateNodeFromImage, onError]);
+
   const attachEmail = useCallback(async (email: ReturnType<typeof messageAttachmentPayload>, blockID = "") => {
     if (!canEdit) return;
     const cleanBlockID = blockID.trim();
@@ -1865,6 +1905,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 x: selection.x,
                 y: selection.y,
               })}
+              onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(block.id, messageID, quote); }}
               onError={onError}
             />
           );

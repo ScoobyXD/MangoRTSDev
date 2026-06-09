@@ -44,6 +44,7 @@ export type NodeWorkspaceSurfaceProps = {
 export type NodeImageNodeRequest = {
   title: string;
   document: string;
+  blockTitle?: string;
 };
 
 export type TextBlockState = {
