@@ -239,6 +239,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         overflowY: useParentScroll ? "visible" : "auto",
         overflowX: useParentScroll ? "visible" : "hidden",
         minWidth: 0,
+        minHeight: useParentScroll ? 180 : undefined,
         outline: "none",
         scrollbarGutter: useParentScroll ? undefined : "stable",
         ["--company-explorer-scroll-accent" as string]: scrollbarAccent,
