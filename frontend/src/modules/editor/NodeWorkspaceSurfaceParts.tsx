@@ -581,6 +581,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const pendingFontSizeRef = useRef<number | null>(null);
   const indentGuideFrameRef = useRef<number | null>(null);
   const selectionPointerDownRef = useRef(false);
+  const lastHandledTableInsertRequestIDRef = useRef(0);
   const lastAppliedDocumentRef = useRef("");
   const lastStoredHeightRef = useRef(0);
   const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
@@ -748,6 +749,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
   useEffect(() => {
     if (!tableInsertRequestID || !editable) return;
+    if (lastHandledTableInsertRequestIDRef.current === tableInsertRequestID) return;
+    lastHandledTableInsertRequestIDRef.current = tableInsertRequestID;
     insertTable(editorRef.current);
   }, [editable, insertTable, tableInsertRequestID]);
 
@@ -1397,16 +1400,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [active, editable, replyTargetID, selectionAnchor?.quote, showingEmail]);
-
-  useEffect(() => {
-    if (!activeMessageID) return;
-    const frame = window.requestAnimationFrame(() => {
-      messageListRef.current
-        ?.querySelector<HTMLElement>(`[data-node-chat-message-id="${activeMessageID}"]`)
-        ?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeMessageID, messages]);
 
   const focusComposer = () => {
     onFocus();
@@ -2218,6 +2211,22 @@ type EmailCountDropdownProps = {
   onOpenEmail: (messageID: string) => void;
 };
 
+const ATTACHED_EMAIL_DRAG_MIME = "application/x-mango-node-attached-email";
+
+function writeAttachedEmailDragData(dataTransfer: DataTransfer, email: EditorAttachedEmail) {
+  dataTransfer.effectAllowed = "move";
+  dataTransfer.setData(ATTACHED_EMAIL_DRAG_MIME, email.messageID);
+  dataTransfer.setData("text/plain", email.subject || email.messageID);
+}
+
+function readAttachedEmailDragMessageID(dataTransfer: DataTransfer): string {
+  return dataTransfer.getData(ATTACHED_EMAIL_DRAG_MIME).trim();
+}
+
+function hasAttachedEmailDragData(dataTransfer: DataTransfer): boolean {
+  return dataTransfer.types.includes(ATTACHED_EMAIL_DRAG_MIME);
+}
+
 export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, accent, surfaceText, align = "right", compact = false, onOpenEmail }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -2288,6 +2297,8 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
               type="button"
               role="menuitem"
               title={email.subject}
+              draggable
+              onDragStart={(event) => writeAttachedEmailDragData(event.dataTransfer, email)}
               onClick={() => {
                 setOpen(false);
                 onOpenEmail(email.messageID);
@@ -2477,8 +2488,12 @@ type AttachedEmailOrganizerPaneProps = {
   strokeColor: string;
   ruleColor: string;
   selectedMessageID?: string;
+  activeEmailSelection?: EmailActiveSelection | null;
   onSelectMessage?: (messageID: string) => void;
   onClearSelectedMessage?: () => void;
+  onRemoveEmail?: (emailID: string) => void;
+  onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
+  onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
   onError: (message: string) => void;
 };
 
@@ -2639,14 +2654,19 @@ const AttachedEmailThreadCard: React.FC<{
   collapsed: boolean;
   draggable: boolean;
   replyTargetMessageID?: string;
+  activeSelection?: EmailActiveSelection | null;
   onToggleCollapsed: () => void;
   onSelect: () => void;
   onReply: (messageID: string) => void;
   onReplyComplete: () => void;
   onError: (message: string) => void;
+  onContextMenu: (event: React.MouseEvent<HTMLDivElement>, email: EditorAttachedEmail) => void;
   onDragStart: React.DragEventHandler<HTMLDivElement>;
+  onDragEnd: React.DragEventHandler<HTMLDivElement>;
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
-}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onDragStart, onDropOnEmail }) => {
+  onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
+  onSelectionNodeRequest?: (messageID: string, quote: string) => void;
+}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -2692,8 +2712,12 @@ const AttachedEmailThreadCard: React.FC<{
 
   return (
     <div
-      draggable={draggable}
-      onDragStart={onDragStart}
+      onContextMenu={(event) => {
+        if (!editable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onContextMenu(event, email);
+      }}
       onDragOver={(event) => {
         if (!draggable) return;
         event.preventDefault();
@@ -2716,7 +2740,10 @@ const AttachedEmailThreadCard: React.FC<{
         <div
           role="button"
           tabIndex={0}
+          draggable={draggable}
           title={selected ? "Collapse email" : email.subject}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
           onClick={onSelect}
           onDoubleClick={(event) => {
             event.preventDefault();
@@ -2791,10 +2818,13 @@ const AttachedEmailThreadCard: React.FC<{
               surfaceText={surfaceText}
               strokeColor={strokeColor}
               ruleColor={ruleColor}
+              activeSelection={activeSelection}
               initialReplyTargetMessageID={replyTargetMessageID}
               inlineExpansion
               onReplyComplete={onReplyComplete}
               onError={onError}
+              onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(email.messageID, selection) : undefined}
+              onSelectionNodeRequest={onSelectionNodeRequest ? (quote) => onSelectionNodeRequest(email.messageID, quote) : undefined}
             />
           </div>
         )}
@@ -2845,14 +2875,16 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, onSelectMessage, onClearSelectedMessage, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
   const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
+  const [emailMenu, setEmailMenu] = useState<{ messageID: string; x: number; y: number } | null>(null);
   const [editingFolder, setEditingFolder] = useState<{ folderID: string; draft: string; isNew: boolean } | null>(null);
   const folderMenuRef = useRef<HTMLDivElement | null>(null);
+  const emailMenuRef = useRef<HTMLDivElement | null>(null);
   const folderTitleInputRef = useRef<HTMLInputElement | null>(null);
   const uniqueEmails = useMemo(() => uniqueAttachedEmailsByMessageID(emails), [emails]);
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
@@ -2881,7 +2913,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     return groups;
   }, [normalizedLayout.emailFolderByID, orderedEmails]);
   const closeFolderMenu = useCallback(() => setFolderMenu(null), []);
+  const closeEmailMenu = useCallback(() => setEmailMenu(null), []);
   useCloseFloatingMenu(Boolean(folderMenu), folderMenuRef, closeFolderMenu);
+  useCloseFloatingMenu(Boolean(emailMenu), emailMenuRef, closeEmailMenu);
 
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));
@@ -3022,6 +3056,14 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     });
   }, [editable, updateLayout]);
 
+  const dropMessageIDFromEvent = useCallback((event: React.DragEvent): string => (
+    draggingMessageID || readAttachedEmailDragMessageID(event.dataTransfer)
+  ), [draggingMessageID]);
+
+  const canAcceptAttachedEmailDrop = useCallback((event: React.DragEvent): boolean => (
+    editable && Boolean(draggingMessageID || hasAttachedEmailDragData(event.dataTransfer))
+  ), [draggingMessageID, editable]);
+
   const toggleFolder = useCallback((folderID: string) => {
     updateLayout((current) => ({ ...current, folders: current.folders.map((folder) => folder.id === folderID ? { ...folder, collapsed: !folder.collapsed } : folder) }));
   }, [updateLayout]);
@@ -3048,6 +3090,16 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     onClearSelectedMessage?.();
   }, [onClearSelectedMessage]);
 
+  const removeEmailFromNode = useCallback((messageID: string) => {
+    if (!editable || !onRemoveEmail) return;
+    const email = emailByID.get(messageID);
+    if (!email) return;
+    closeEmailMenu();
+    if (activeSelectedMessageID === messageID) clearSelectedMessage();
+    setReplyComposer((current) => current?.rootMessageID === messageID ? null : current);
+    onRemoveEmail(email.id);
+  }, [activeSelectedMessageID, clearSelectedMessage, closeEmailMenu, editable, emailByID, onRemoveEmail]);
+
   const toggleSelectedMessage = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return;
@@ -3072,6 +3124,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       collapsed={collapsedThreadIDs.has(email.messageID)}
       draggable={editable}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
+      activeSelection={activeEmailSelection?.messageID === email.messageID ? activeEmailSelection : null}
       onToggleCollapsed={() => toggleThread(email.messageID)}
       onSelect={() => toggleSelectedMessage(email.messageID)}
       onReply={(targetMessageID) => {
@@ -3082,19 +3135,25 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         setReplyComposer((current) => current?.rootMessageID === email.messageID ? null : current);
       }}
       onError={onError}
+      onContextMenu={(event, targetEmail) => setEmailMenu({ messageID: targetEmail.messageID, x: event.clientX, y: event.clientY })}
       onDragStart={(event) => {
         if (!editable) return;
         setDraggingMessageID(email.messageID);
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", email.subject);
+        writeAttachedEmailDragData(event.dataTransfer, email);
       }}
-      onDropOnEmail={(event) => {
-        if (!draggingMessageID || draggingMessageID === email.messageID) return;
-        event.preventDefault();
-        event.stopPropagation();
-        moveEmail(draggingMessageID, folderID, email.messageID);
+      onDragEnd={() => {
         setDraggingMessageID("");
       }}
+      onDropOnEmail={(event) => {
+        const droppedMessageID = dropMessageIDFromEvent(event);
+        if (!droppedMessageID || droppedMessageID === email.messageID) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveEmail(droppedMessageID, folderID, email.messageID);
+        setDraggingMessageID("");
+      }}
+      onSelectionChatRequest={onEmailSelectionChatRequest}
+      onSelectionNodeRequest={onEmailSelectionNodeRequest}
     />
   ));
 
@@ -3107,16 +3166,17 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       <div
         key={folder.id}
         onDragOver={(event) => {
-          if (!editable || !draggingMessageID) return;
+          if (!canAcceptAttachedEmailDrop(event)) return;
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
         }}
         onDrop={(event) => {
-          if (!draggingMessageID) return;
+          const droppedMessageID = dropMessageIDFromEvent(event);
+          if (!droppedMessageID) return;
           event.preventDefault();
           event.stopPropagation();
-          moveEmail(draggingMessageID, folder.id);
+          moveEmail(droppedMessageID, folder.id);
           setDraggingMessageID("");
         }}
         style={{
@@ -3208,16 +3268,17 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       <div
         key="unfiled"
         onDragOver={(event) => {
-          if (!editable || !draggingMessageID) return;
+          if (!canAcceptAttachedEmailDrop(event)) return;
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
         }}
         onDrop={(event) => {
-          if (!draggingMessageID) return;
+          const droppedMessageID = dropMessageIDFromEvent(event);
+          if (!droppedMessageID) return;
           event.preventDefault();
           event.stopPropagation();
-          moveEmail(draggingMessageID, "");
+          moveEmail(droppedMessageID, "");
           setDraggingMessageID("");
         }}
         style={{ minWidth: 0, display: "grid", gap: 8, border: "1px solid transparent", borderRadius: 13, background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, boxShadow: EDITOR_NEU_SHADOW, padding: 8 }}
@@ -3293,6 +3354,37 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
             style={{ minHeight: 28, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "4px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
           >
             Delete
+          </button>
+        </div>
+      )}
+      {emailMenu && onRemoveEmail && (
+        <div
+          ref={emailMenuRef}
+          role="menu"
+          aria-label="Email actions"
+          onContextMenu={(event) => event.preventDefault()}
+          style={{
+            position: "fixed",
+            zIndex: 120,
+            top: emailMenu.y,
+            left: emailMenu.x,
+            minWidth: 162,
+            display: "grid",
+            gap: 4,
+            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            borderRadius: 11,
+            background: EDITOR_NEU_PANEL_BACKGROUND,
+            boxShadow: EDITOR_NEU_PANEL_SHADOW,
+            padding: 5,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => removeEmailFromNode(emailMenu.messageID)}
+            style={{ minHeight: 28, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "4px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
+          >
+            Remove from node
           </button>
         </div>
       )}
@@ -3697,10 +3789,18 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const startOffset = Math.max(0, Math.min(selectedEmailBodyText.length, beforeRange.toString().length + leadingTrim));
     const endOffset = Math.max(startOffset, Math.min(selectedEmailBodyText.length, startOffset + quote.length));
     if (endOffset <= startOffset) return null;
+    const selectionIsBackward = selection.anchorNode && selection.focusNode
+      ? selection.anchorNode === selection.focusNode
+        ? selection.focusOffset < selection.anchorOffset
+        : Boolean(selection.anchorNode.compareDocumentPosition(selection.focusNode) & Node.DOCUMENT_POSITION_PRECEDING)
+      : false;
     const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-    const selectionRect = rangeRects[rangeRects.length - 1] ?? range.getBoundingClientRect();
+    const selectionRect = (selectionIsBackward ? rangeRects[0] : rangeRects[rangeRects.length - 1]) ?? range.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
-    const x = Math.max(8, Math.min(selectionRect.right - rootRect.left + root.scrollLeft + 8, root.scrollWidth - 72));
+    const rawX = selectionIsBackward
+      ? selectionRect.left - rootRect.left + root.scrollLeft - 72
+      : selectionRect.right - rootRect.left + root.scrollLeft + 8;
+    const x = Math.max(8, Math.min(rawX, root.scrollWidth - 72));
     const y = Math.max(8, Math.min(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - 32) / 2), root.scrollHeight - 44));
     return { quote, startOffset, endOffset, x, y };
   }, [canUseEmailSelection, selectedEmailBodyText]);
@@ -3961,7 +4061,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   top: selectionDraft.y,
                   zIndex: 4,
                   display: "grid",
-                  gridTemplateColumns: "28px 28px",
+                  gridTemplateColumns: `repeat(${onSelectionChatRequest && onSelectionNodeRequest ? 2 : 1}, 28px)`,
                   gap: 5,
                   padding: 4,
                   border: "1px solid transparent",
