@@ -4,6 +4,9 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { buildNodeRelationshipTreeRows, type NodeRelationshipTreeRow } from "../node-map/nodeRelationshipStructure";
+import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-map/shared";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import {
@@ -237,6 +240,20 @@ function logicGateOptionLabel(logicGate: LogicGateRecord): string {
   return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Logic Gate"));
 }
 
+function relationshipRowRoleLabel(row: NodeRelationshipTreeRow): string {
+  if (row.role === "Current") return "This node";
+  if (row.direct) return row.role;
+  return "";
+}
+
+function relationshipRowAccentColor(row: NodeRelationshipTreeRow, accent: string): string {
+  if (row.role === "Current") return accent;
+  if (row.role === "Parent") return "#64748b";
+  if (row.role === "Peer") return "#475569";
+  if (row.role === "Child") return "#64748b";
+  return "rgba(100,116,139,0.72)";
+}
+
 function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
   return [...items].sort((a, b) => (
     logicGateOptionLabel(a).localeCompare(logicGateOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
@@ -391,6 +408,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
+  const [relationshipMenuOpen, setRelationshipMenuOpen] = useState(false);
+  const [relationshipGraph, setRelationshipGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
+  });
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
@@ -490,6 +512,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignLogicGateButtonLabel = hasAssignedLogicGate
     ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
     : "Assign to Logic Gate";
+  const relationshipNodeTitle = useMemo(() => {
+    const node = relationshipGraph.nodes.find((item) => item.node_id === nodeID);
+    return node ? getNodeTitle(node) : humanLabelOrFallback(nodeID, "This node");
+  }, [nodeID, relationshipGraph.nodes]);
+  const relationshipRows = useMemo(() => buildNodeRelationshipTreeRows({
+    nodes: relationshipGraph.nodes,
+    relationships: relationshipGraph.relationships,
+    focusNodeID: nodeID,
+    fallbackTitle: relationshipNodeTitle,
+  }), [nodeID, relationshipGraph.nodes, relationshipGraph.relationships, relationshipNodeTitle]);
+  const relationshipCount = Math.max(0, relationshipRows.length - (relationshipRows.some((row) => row.nodeID === nodeID) ? 1 : 0));
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
@@ -525,6 +558,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [assignedLogicGateLabel, companyID, nodeID, primaryAssignedLogicGateID]);
 
+  const goToRelationshipNode = useCallback((row: NodeRelationshipTreeRow) => {
+    const cleanNodeID = row.nodeID.trim();
+    if (!cleanNodeID) return;
+    setRelationshipMenuOpen(false);
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: "editor",
+      kind: "node",
+      id: cleanNodeID,
+      label: row.title || cleanNodeID,
+      changedAt: Date.now(),
+    });
+  }, [companyID]);
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -540,7 +587,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   useEffect(() => {
+    const updateRelationshipGraph = () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      setRelationshipGraph({ nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] });
+    };
+    updateRelationshipGraph();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, updateRelationshipGraph);
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
     setLogicGateAssignerOpen(false);
+    setRelationshipMenuOpen(false);
     setLogicGateSearch("");
     setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
@@ -551,6 +608,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (canEdit) return;
     setLogicGateAssignerOpen(false);
+    setRelationshipMenuOpen(false);
     setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
@@ -1724,6 +1782,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               title={assignLogicGateButtonLabel}
               onClick={() => {
                 setLogicGateAssignerOpen((open) => !open);
+                setRelationshipMenuOpen(false);
                 setLogicGateAssignStatus("");
               }}
               style={{
@@ -1779,7 +1838,108 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               Go to Logic Gate
             </button>
           )}
+          <button
+            type="button"
+            title="Relationships"
+            aria-expanded={relationshipMenuOpen}
+            onClick={() => {
+              setRelationshipMenuOpen((open) => !open);
+              setLogicGateAssignerOpen(false);
+            }}
+            style={{
+              minHeight: 30,
+              borderRadius: 9,
+              border: relationshipMenuOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+              background: relationshipMenuOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+              color: relationshipMenuOpen ? accent : surfaceText,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              padding: "0 10px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 900,
+              letterSpacing: 0,
+              whiteSpace: "nowrap",
+              flex: "0 0 auto",
+              boxShadow: EDITOR_NEU_SHADOW,
+            }}
+          >
+            <ExplorerRowIcon kind="node" />
+            <span>Relationship</span>
+            {relationshipCount > 0 && (
+              <span style={{ minWidth: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: "rgba(100,116,139,0.12)", color: accent, fontSize: 10, fontWeight: 900, padding: "0 5px", boxSizing: "border-box" }}>
+                {relationshipCount}
+              </span>
+            )}
+          </button>
         </div>
+
+        {relationshipMenuOpen && (
+          <>
+            <div aria-hidden="true" />
+            <div style={{ minWidth: 0, display: "grid", gap: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, padding: 9, boxShadow: EDITOR_NEU_PANEL_SHADOW }}>
+              <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7, color: surfaceText }}>
+                  <ExplorerRowIcon kind="node" />
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>Relationship</span>
+                </div>
+                <span style={{ flex: "0 0 auto", color: "rgba(100,116,139,0.72)", fontSize: 10, fontWeight: 850 }}>{relationshipCount} linked</span>
+              </div>
+              <div className="editor-document-scroll" role="tree" aria-label="Node relationships" style={{ minWidth: 0, maxHeight: 248, overflowY: "auto", display: "grid", gap: 4, paddingRight: 2, ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
+                {relationshipRows.length === 0 && (
+                  <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 10, padding: "10px 9px", color: "rgba(100,116,139,0.76)", fontSize: 11, fontWeight: 800 }}>No relationships</div>
+                )}
+                {relationshipRows.map((row) => {
+                  const active = row.nodeID === nodeID;
+                  const label = relationshipRowRoleLabel(row);
+                  const roleColor = relationshipRowAccentColor(row, accent);
+                  return (
+                    <button
+                      key={`${row.nodeID}:${row.depth}:${row.role}`}
+                      type="button"
+                      role="treeitem"
+                      aria-current={active ? "true" : undefined}
+                      title={row.title}
+                      onClick={() => goToRelationshipNode(row)}
+                      style={{
+                        width: "100%",
+                        minWidth: 0,
+                        minHeight: 30,
+                        boxSizing: "border-box",
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) auto",
+                        alignItems: "center",
+                        gap: 7,
+                        padding: `4px 7px 4px ${8 + row.depth * 16}px`,
+                        border: `1px solid ${active ? accent : "transparent"}`,
+                        borderRadius: 7,
+                        background: active ? "rgba(100,116,139,0.12)" : EDITOR_NEU_SURFACE,
+                        color: surfaceText,
+                        cursor: "pointer",
+                        font: "inherit",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
+                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: row.hasChildren ? 3 : 999, background: roleColor, flex: "0 0 auto" }} />
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: active ? 900 : 750 }}>
+                          {row.title}
+                        </span>
+                      </span>
+                      {label && (
+                        <span style={{ flex: "0 0 auto", maxWidth: 78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", border: `1px solid ${active ? accent : strokeColor}`, borderRadius: 5, padding: "2px 5px", color: roleColor, background: "rgba(255,255,255,0.72)", fontSize: 9, fontWeight: 850 }}>
+                          {label}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
 
         {canEdit && logicGateAssignerOpen && (
           <>
