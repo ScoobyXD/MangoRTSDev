@@ -290,6 +290,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editorHeaderHeightPx, setEditorHeaderHeightPx] = useState(0);
+  const [relationshipTabAnchorCenterPx, setRelationshipTabAnchorCenterPx] = useState<number | null>(null);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorDocumentRef = useRef<HTMLDivElement | null>(null);
@@ -1962,6 +1963,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const now = Date.now();
     return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
   }, [collaborators]);
+  const updateRelationshipTabAnchor = useCallback((anchor: { left: number; width: number } | null) => {
+    const root = editorRootRef.current;
+    if (!anchor || !root) {
+      setRelationshipTabAnchorCenterPx(null);
+      return;
+    }
+    const rootRect = root.getBoundingClientRect();
+    setRelationshipTabAnchorCenterPx(anchor.left + (anchor.width / 2) - rootRect.left);
+  }, []);
 
   return (
     <div
@@ -1996,6 +2006,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             }}
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
             onInsertTable={linkedEntityKind !== "node" && linkedEntityCanEdit ? () => insertDocumentTable(editorDocumentRef.current) : undefined}
+            onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
           />
           
@@ -2082,7 +2093,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ruleColor={ruleColor}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
-            theme={theme}
+            relationshipAnchorCenterPx={relationshipTabAnchorCenterPx}
           />
         )}
         {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "permissions" && (
