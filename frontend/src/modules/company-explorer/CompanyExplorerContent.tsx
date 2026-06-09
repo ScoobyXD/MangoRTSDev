@@ -12,7 +12,7 @@ import { type SelectionIntent } from "../selectionCoordinator";
 import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRaciRole } from "../workspace/workspaceEntityCommands";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
 import { ExplorerRowIcon } from "./CompanyExplorerIcons";
@@ -1730,16 +1730,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
-  const explorerSearchResults = useMemo(() => (
-    buildExplorerSearchResults({ rows: allExpandedSearchTreeRows, selectedRowID: selectedTreeID, query: effectiveExplorerSearchQuery, limit: 8 })
-  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery, selectedTreeID]);
   useEffect(() => {
     if (!onSearchResultsChange) return;
     if (!explorerSearchActive) {
       onSearchResultsChange([]);
       return;
     }
-    const results: CompanyExplorerSearchResultSummary[] = explorerSearchResults.map((row) => ({
+    const results: CompanyExplorerSearchResultSummary[] = explorerSearchViewRows.map((row) => ({
       treeID: row.id,
       label: row.label,
       kind: row.kind,
@@ -1747,9 +1744,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       folderLabel: row.folderLabel,
       systemKey: row.systemKey,
       mangoDefaultFolder: row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder"),
+      hasChildren: Boolean(row.hasChildren),
     }));
     onSearchResultsChange(results);
-  }, [explorerSearchActive, explorerSearchResults, onSearchResultsChange]);
+  }, [explorerSearchActive, explorerSearchViewRows, onSearchResultsChange]);
   const treeRows = explorerSearchActive ? explorerSearchViewRows : baseTreeRows;
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);
