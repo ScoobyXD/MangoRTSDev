@@ -896,6 +896,8 @@ function buildRaciCompanyExplorerRows(input: {
     }
   };
 
+  pushCustomRootFolders();
+
   const defaultFoldersID = prefixTreeID(raciDefaultFoldersTreeID());
   rows.push({
     id: defaultFoldersID,
@@ -1023,7 +1025,6 @@ function buildRaciCompanyExplorerRows(input: {
       }
     }
   }
-  pushCustomRootFolders();
   return rows;
 }
 
@@ -3027,7 +3028,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (selectedTreeIDs.has(row.id)) focusTreeRow(row, { selectionIntent: "navigate" });
       else selectTreeRow(row, undefined, { selectionIntent: "navigate" });
     }
-    const creationRow = row ?? scopedRootRow;
+    const creationRow = row ?? (raciExplorerActive || teamCompanyExplorerActive ? null : scopedRootRow);
     const protectedRaciRow = isProtectedRaciRoleRow(row);
     const syntheticScopeHeader = row?.syntheticKind === "default_scope_folder" && !row.folderID;
     const creationTargetRow = syntheticScopeHeader ? null : creationRow;
@@ -3071,7 +3072,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       canCreateNode: canCreateForContext && !scopedKind,
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
     });
-  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, treeRows]);
+  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, raciExplorerActive, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
