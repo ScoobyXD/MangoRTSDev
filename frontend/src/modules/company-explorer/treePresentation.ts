@@ -315,19 +315,30 @@ export function buildExplorerSearchResults<T extends ExplorerSearchRow>(input: {
 export function buildExplorerSearchViewRows<T extends ExplorerSearchRow & { id: string }>(input: {
   rows: T[];
   query: string;
+  includeBranchDescendants?: boolean;
 }): T[] {
   const query = input.query.trim().toLowerCase();
   if (!query) return input.rows;
 
   const includedIDs = new Set<string>();
   const rowStack: T[] = [];
+  const includedBranchDepths: number[] = [];
   for (const row of input.rows) {
     const depth = Math.max(0, row.depth);
+    while (includedBranchDepths.length > 0 && depth <= includedBranchDepths[includedBranchDepths.length - 1]) {
+      includedBranchDepths.pop();
+    }
     rowStack.length = depth;
     rowStack[depth] = row;
+    if (input.includeBranchDescendants && includedBranchDepths.length > 0) {
+      includedIDs.add(row.id);
+    }
     if (!explorerSearchRowMatches(row, query)) continue;
     for (const ancestor of rowStack) {
       if (ancestor?.id) includedIDs.add(ancestor.id);
+    }
+    if (input.includeBranchDescendants && (row.kind === "folder" || row.kind === "logic_gate")) {
+      includedBranchDepths.push(depth);
     }
   }
 
