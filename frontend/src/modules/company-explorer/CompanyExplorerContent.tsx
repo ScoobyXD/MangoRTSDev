@@ -96,6 +96,7 @@ const RACI_FOLDER_ROWS = [
 const LOGIC_GATE_RACI_ROLES: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
 const RACI_PROJECTION_LIMIT = 500;
 const RACI_VISUAL_ROOT_FOLDER_PREFIX = "Mango RACI ";
+const DEFAULT_FOLDERS_LABEL = "Default Folders";
 
 function normalizeExplorerFolderName(value: string): string {
   return value.trim().toLowerCase();
@@ -341,6 +342,10 @@ function filterCompanyExplorerDataForScope(input: {
 
 function raciFolderTreeID(role: CompanyExplorerRaciFolderRole): string {
   return `raci-folder-${role}`;
+}
+
+function raciDefaultFoldersTreeID(): string {
+  return "raci-default-folders";
 }
 
 function raciLogicGateTreeID(role: CompanyExplorerRaciFolderRole, logicGateID: string): string {
@@ -777,6 +782,21 @@ function buildRaciCompanyExplorerRows(input: {
     }
   };
 
+  const defaultFoldersID = prefixTreeID(raciDefaultFoldersTreeID());
+  rows.push({
+    id: defaultFoldersID,
+    label: DEFAULT_FOLDERS_LABEL,
+    depth: rowDepth(0),
+    kind: "folder",
+    folderKind: "logic_gate",
+    scopeLevel: rowDepth(0),
+    position: TREE_ROW_POSITION_STEP,
+    createdTimestamp: "",
+    hasChildren: true,
+    syntheticKind: "default_scope_folder",
+  });
+  if (!isExpanded(defaultFoldersID)) return rows;
+
   for (const [folderIndex, folder] of RACI_FOLDER_ROWS.entries()) {
     const folderID = prefixTreeID(raciFolderTreeID(folder.role));
     const visualRootFolder = roleRootByRole.get(folder.role);
@@ -799,12 +819,12 @@ function buildRaciCompanyExplorerRows(input: {
     rows.push({
       id: folderID,
       label: folder.label,
-      depth: rowDepth(0),
+      depth: rowDepth(1),
       kind: "folder",
       folderID: visualRootFolderID || undefined,
       parentFolderID: "",
       folderKind: "logic_gate",
-      scopeLevel: rowDepth(0),
+      scopeLevel: rowDepth(1),
       position: (folderIndex + 1) * TREE_ROW_POSITION_STEP,
       createdTimestamp: visualRootFolder?.created_timestamp ?? "",
       hasChildren: visualRootHasChildren || logicGateRows.length > 0 || noLogicGateNodes.length > 0,
@@ -813,16 +833,16 @@ function buildRaciCompanyExplorerRows(input: {
     });
     if (!isExpanded(folderID)) continue;
 
-    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 1);
+    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 2);
 
     if (noLogicGateNodes.length > 0) {
       rows.push({
         id: prefixTreeID(noLogicGateRowID),
         label: "No Logic Gate",
-        depth: rowDepth(1),
+        depth: rowDepth(2),
         kind: "folder",
         folderKind: "node",
-        scopeLevel: rowDepth(1),
+        scopeLevel: rowDepth(2),
         position: TREE_ROW_POSITION_STEP,
         createdTimestamp: "",
         hasChildren: noLogicGateNodes.length > 0,
@@ -834,10 +854,10 @@ function buildRaciCompanyExplorerRows(input: {
           rows.push({
             id: prefixTreeID(raciNoLogicGateNodeTreeID(folder.role, node.node_id)),
             label: getNodeRecordTitle(node) || node.node_id,
-            depth: rowDepth(2),
+            depth: rowDepth(3),
             kind: "node",
             nodeID: node.node_id,
-            scopeLevel: rowDepth(2),
+            scopeLevel: rowDepth(3),
             position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
             createdTimestamp: node.created_timestamp,
             raciRole: folder.role,
@@ -858,12 +878,12 @@ function buildRaciCompanyExplorerRows(input: {
       rows.push({
         id: logicGateRowID,
         label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
-        depth: rowDepth(1),
+        depth: rowDepth(2),
         kind: "logic_gate",
         logicGateID: logicGate.logic_gate_id,
         folderID: visualRootFolderID || undefined,
         folderKind: visualRootFolderID ? "logic_gate" : undefined,
-        scopeLevel: rowDepth(1),
+        scopeLevel: rowDepth(2),
         position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
         hasChildren: nestedNodes.length > 0,
@@ -876,10 +896,10 @@ function buildRaciCompanyExplorerRows(input: {
         rows.push({
           id: prefixTreeID(raciNodeTreeID(folder.role, logicGate.logic_gate_id, node.node_id)),
           label: getNodeRecordTitle(node) || node.node_id,
-          depth: rowDepth(2),
+          depth: rowDepth(3),
           kind: "node",
           nodeID: node.node_id,
-          scopeLevel: rowDepth(2),
+          scopeLevel: rowDepth(3),
           position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
           createdTimestamp: node.created_timestamp,
           parentLogicGateID: logicGate.logic_gate_id,
@@ -1504,6 +1524,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
     if (raciExplorerActive) {
       const raciExpanded = new Set(expandedForSearch);
+      raciExpanded.add(raciDefaultFoldersTreeID());
       for (const folder of RACI_FOLDER_ROWS) raciExpanded.add(raciFolderTreeID(folder.role));
       for (const folder of folders) raciExpanded.add(`workspace-folder-${folder.folder_id}`);
       raciExpanded.add(raciNoLogicGateTreeID("other"));
