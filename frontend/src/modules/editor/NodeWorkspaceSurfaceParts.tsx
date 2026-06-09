@@ -2826,8 +2826,8 @@ const AttachedEmailThreadCard: React.FC<{
               inlineExpansion
               onReplyComplete={onReplyComplete}
               onError={onError}
-              onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(email.messageID, selection) : undefined}
-              onSelectionNodeRequest={onSelectionNodeRequest ? (quote) => onSelectionNodeRequest(email.messageID, quote) : undefined}
+              onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(selection.messageID || email.messageID, selection) : undefined}
+              onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => onSelectionNodeRequest(selection.messageID || email.messageID, selection.quote) : undefined}
             />
           </div>
         )}
@@ -3424,10 +3424,11 @@ type EmailConversationPaneProps = {
   onReplyComplete?: () => void;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
-  onSelectionNodeRequest?: (quote: string) => void;
+  onSelectionNodeRequest?: (selection: EmailSelectionDraft) => void;
 };
 
 type EmailSelectionDraft = {
+  messageID: string;
   quote: string;
   startOffset: number;
   endOffset: number;
@@ -3450,6 +3451,51 @@ type EmailActiveSelection = {
 };
 
 const EMAIL_LOCAL_HIGHLIGHTS_STORAGE_PREFIX = "node-editor-email-local-highlights-v1";
+const EMAIL_BODY_MESSAGE_ID_ATTRIBUTE = "data-mango-email-body-message-id";
+const EMAIL_SELECTION_ACTION_BUTTON_SIZE = 28;
+const EMAIL_SELECTION_ACTION_GAP = 5;
+const EMAIL_SELECTION_ACTION_PADDING = 4;
+const EMAIL_SELECTION_ACTION_BORDER = 1;
+const EMAIL_SELECTION_ACTION_OFFSET = 8;
+
+function emailSelectionActionToolbarWidth(actionCount: number): number {
+  return (actionCount * EMAIL_SELECTION_ACTION_BUTTON_SIZE)
+    + (Math.max(0, actionCount - 1) * EMAIL_SELECTION_ACTION_GAP)
+    + (EMAIL_SELECTION_ACTION_PADDING * 2)
+    + (EMAIL_SELECTION_ACTION_BORDER * 2);
+}
+
+function clampEmailSelectionActionPosition(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, Math.max(min, max)));
+}
+
+const emailSelectionActionButtonStyle: React.CSSProperties = {
+  width: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
+  height: EMAIL_SELECTION_ACTION_BUTTON_SIZE,
+  borderRadius: 8,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  background: EDITOR_NEU_SURFACE,
+  color: "inherit",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+  cursor: "pointer",
+  boxSizing: "border-box",
+  boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)",
+};
+
+const EmailSelectionActionIconFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span aria-hidden="true" style={{ width: 16, height: 16, display: "grid", placeItems: "center", lineHeight: 0 }}>
+    {children}
+  </span>
+);
+
+const EmailSelectionCreateNodeIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <rect x="2.7" y="2.7" width="10.6" height="10.6" rx="2.2" fill="none" stroke={color} strokeWidth="1.45" />
+    <path d="M8 5.2v5.6M5.2 8h5.6" fill="none" stroke={color} strokeWidth="1.65" strokeLinecap="round" />
+  </svg>
+);
 
 function emailLocalHighlightsStorageKey(messageID: string): string {
   return `${EMAIL_LOCAL_HIGHLIGHTS_STORAGE_PREFIX}:${messageID}`;
@@ -3753,6 +3799,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
+  const selectionActionCount = (onSelectionChatRequest ? 1 : 0) + (onSelectionNodeRequest ? 1 : 0);
+  const selectionActionToolbarWidth = emailSelectionActionToolbarWidth(selectionActionCount);
+  const selectionActionToolbarHeight = EMAIL_SELECTION_ACTION_BUTTON_SIZE + (EMAIL_SELECTION_ACTION_PADDING * 2) + (EMAIL_SELECTION_ACTION_BORDER * 2);
   const replyTargetMessage = useMemo(() => (
     replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
   ), [displayThreadMessages, replyTargetMessageID]);
@@ -3773,15 +3822,18 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
     const root = bodyRef.current;
-    const content = selectedEmailBodyRef.current;
-    if (!root || !content) return null;
+    if (!root) return null;
     const selection = root.ownerDocument.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
     const range = selection.getRangeAt(0);
     const commonElement = range.commonAncestorContainer instanceof Element
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
-    if (!commonElement || !content.contains(commonElement)) return null;
+    const content = commonElement?.closest(`[${EMAIL_BODY_MESSAGE_ID_ATTRIBUTE}]`);
+    if (!(content instanceof HTMLElement) || !root.contains(content)) return null;
+    if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return null;
+    const selectionMessageID = content.getAttribute(EMAIL_BODY_MESSAGE_ID_ATTRIBUTE)?.trim() || messageID;
+    const contentText = content.textContent ?? "";
     const rawQuote = range.toString();
     const quote = rawQuote.trim();
     if (!quote) return null;
@@ -3789,8 +3841,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const beforeRange = range.cloneRange();
     beforeRange.selectNodeContents(content);
     beforeRange.setEnd(range.startContainer, range.startOffset);
-    const startOffset = Math.max(0, Math.min(selectedEmailBodyText.length, beforeRange.toString().length + leadingTrim));
-    const endOffset = Math.max(startOffset, Math.min(selectedEmailBodyText.length, startOffset + quote.length));
+    const startOffset = Math.max(0, Math.min(contentText.length, beforeRange.toString().length + leadingTrim));
+    const endOffset = Math.max(startOffset, Math.min(contentText.length, startOffset + quote.length));
     if (endOffset <= startOffset) return null;
     const selectionIsBackward = selection.anchorNode && selection.focusNode
       ? selection.anchorNode === selection.focusNode
@@ -3801,18 +3853,23 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const selectionRect = (selectionIsBackward ? rangeRects[0] : rangeRects[rangeRects.length - 1]) ?? range.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
     const rawX = selectionIsBackward
-      ? selectionRect.left - rootRect.left + root.scrollLeft - 72
-      : selectionRect.right - rootRect.left + root.scrollLeft + 8;
-    const x = Math.max(8, Math.min(rawX, root.scrollWidth - 72));
-    const y = Math.max(8, Math.min(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - 32) / 2), root.scrollHeight - 44));
-    return { quote, startOffset, endOffset, x, y };
-  }, [canUseEmailSelection, selectedEmailBodyText]);
+      ? selectionRect.left - rootRect.left + root.scrollLeft - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET
+      : selectionRect.right - rootRect.left + root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
+    const minX = root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
+    const maxX = root.scrollLeft + root.clientWidth - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET;
+    const minY = root.scrollTop + EMAIL_SELECTION_ACTION_OFFSET;
+    const maxY = root.scrollTop + root.clientHeight - selectionActionToolbarHeight - EMAIL_SELECTION_ACTION_OFFSET;
+    const x = clampEmailSelectionActionPosition(rawX, minX, maxX);
+    const y = clampEmailSelectionActionPosition(selectionRect.top - rootRect.top + root.scrollTop + ((selectionRect.height - selectionActionToolbarHeight) / 2), minY, maxY);
+    return { messageID: selectionMessageID, quote, startOffset, endOffset, x, y };
+  }, [canUseEmailSelection, messageID, selectionActionToolbarHeight, selectionActionToolbarWidth]);
 
   const captureEmailSelection = useCallback(() => {
     window.setTimeout(() => setSelectionDraft(readEmailSelectionDraft()), 0);
   }, [readEmailSelectionDraft]);
 
   const addEmailLocalHighlight = useCallback((draft: EmailSelectionDraft) => {
+    if (draft.messageID && draft.messageID !== messageID) return;
     const highlight: EmailLocalHighlight = {
       id: `${Date.now()}:${draft.startOffset}:${draft.endOffset}`,
       quote: draft.quote,
@@ -4033,6 +4090,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   ) : (
                     <div
                       ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
+                      {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessage.id || messageID }}
                       style={{
                         marginTop: 7,
                         color: "#111827",
@@ -4064,13 +4122,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   top: selectionDraft.y,
                   zIndex: 4,
                   display: "grid",
-                  gridTemplateColumns: `repeat(${onSelectionChatRequest && onSelectionNodeRequest ? 2 : 1}, 28px)`,
-                  gap: 5,
-                  padding: 4,
+                  gridTemplateColumns: `repeat(${selectionActionCount}, ${EMAIL_SELECTION_ACTION_BUTTON_SIZE}px)`,
+                  gap: EMAIL_SELECTION_ACTION_GAP,
+                  width: selectionActionToolbarWidth,
+                  minHeight: selectionActionToolbarHeight,
+                  padding: EMAIL_SELECTION_ACTION_PADDING,
                   border: "1px solid transparent",
                   borderRadius: 10,
                   background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
                   boxShadow: EDITOR_NEU_SHADOW,
+                  boxSizing: "border-box",
                 }}
               >
                 {onSelectionChatRequest && (
@@ -4085,9 +4146,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       setSelectionDraft(null);
                       bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
                     }}
-                    style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                    style={{ ...emailSelectionActionButtonStyle, color: accent }}
                   >
-                    <ChatIcon color={accent} />
+                    <EmailSelectionActionIconFrame>
+                      <ChatIcon color={accent} />
+                    </EmailSelectionActionIconFrame>
                   </button>
                 )}
                 {onSelectionNodeRequest && (
@@ -4098,13 +4161,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     onClick={(event) => {
                       event.stopPropagation();
                       addEmailLocalHighlight(selectionDraft);
-                      onSelectionNodeRequest(selectionDraft.quote);
+                      onSelectionNodeRequest(selectionDraft);
                       setSelectionDraft(null);
                       bodyRef.current?.ownerDocument.getSelection()?.removeAllRanges();
                     }}
-                    style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                    style={{ ...emailSelectionActionButtonStyle, color: accent }}
                   >
-                    <PlusIcon color={accent} />
+                    <EmailSelectionActionIconFrame>
+                      <EmailSelectionCreateNodeIcon color={accent} />
+                    </EmailSelectionActionIconFrame>
                   </button>
                 )}
               </div>

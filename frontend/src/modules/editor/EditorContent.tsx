@@ -973,10 +973,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
-  const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string }) => {
+  const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string; blockTitle?: string }) => {
     if (!linkedEntityCanEdit) return;
     if (!companyID || linkedEntityKind !== "node") return;
     const title = input.title.trim() || "Image";
+    const blockTitle = input.blockTitle?.trim() || "Image";
     const document = input.document.trim();
     if (!document) return;
 
@@ -1018,7 +1019,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       body: JSON.stringify({
         company_id: companyID,
         type: EDITOR_TEXT_BLOCK_TYPE,
-        information: buildEditorTextBlockContentPayload({ title: "Image", document }),
+        information: buildEditorTextBlockContentPayload({ title: blockTitle, document }),
         information_id: informationID,
       }),
     });
