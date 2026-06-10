@@ -423,8 +423,6 @@ export function oppositeSide(direction: NodeDirection): NodeDirection {
   return "top";
 }
 
-// Editor box model used in module-local render state.
-export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
 export const NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "node-map-explorer-context-v1";
 export const NODE_DOC_MIN_W = 180;
 export const NODE_DOC_MIN_H = 36;

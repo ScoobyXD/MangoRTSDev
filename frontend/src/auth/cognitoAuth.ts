@@ -62,10 +62,6 @@ let currentUserCache: { value: CurrentUserResponse; fetchedAt: number } | null =
 let currentUserInflight: Promise<CurrentUserResponse> | null = null;
 let currentUserCacheGeneration = 0;
 
-export function bootstrapAuth(): Promise<void> {
-  return Promise.resolve();
-}
-
 export function readAuthConfig(): CognitoConfig {
   const env = import.meta.env ?? {};
   const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";

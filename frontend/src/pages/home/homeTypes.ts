@@ -104,8 +104,6 @@ export type HomeColumnResizeDrag = {
   captureTarget: HTMLButtonElement;
 };
 
-export type AciInboxRaciRole = Extract<LogicGateRaciRole, "accountable" | "consulted" | "informed">;
-export type AciInboxRole = AciInboxRaciRole;
 export type RaciInboxRole = LogicGateRaciRole | "other";
 export type RaciInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 export type ResponsibleInboxStatus = "pending" | "in_progress" | "verify" | "done";

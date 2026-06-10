@@ -6,18 +6,11 @@ import {
   ACCOUNT_MANAGER_MODULE_KINDS,
   DEFAULT_DASHBOARD_MODULE_KINDS,
   HOME_MODULE_KINDS,
-  HOT_DASHBOARD_MODULE_KINDS,
   LOGIC_GATE_ARENA_MODULE_KINDS,
   PROJECT_MANAGEMENT_MODULE_KINDS,
   planLikelyDashboardPreload,
   type DashboardPreloadPlan,
 } from "./preloadDashboardPlan";
-
-export function preloadHotDashboardModules(): void {
-  preloadLogicGateArenaPage();
-  preloadHomePage();
-  preloadModuleKinds(HOT_DASHBOARD_MODULE_KINDS);
-}
 
 export function preloadDefaultDashboardModules(): void {
   preloadModuleKinds(DEFAULT_DASHBOARD_MODULE_KINDS);

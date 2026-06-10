@@ -232,6 +232,9 @@ func TestProjectRelationshipProjectionDependencyLayerUsesExactKeys(t *testing.T)
 		"truncate project_relationship_projection",
 		"rebuildprojectrelationshipprojection",
 		"delete from project_relationship_projection where company_id=$1::uuid;",
+		"truncate project_projection_table",
+		"rebuildprojectprojection",
+		"delete from project_projection_table where company_id=$1::uuid;",
 	} {
 		if strings.Contains(normalized, forbidden) {
 			t.Fatalf("dependency layer contains broad projection behavior %q", forbidden)
@@ -454,6 +457,9 @@ func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
 			"rebuildprojectrelationshipprojection",
 			"truncate project_relationship_projection",
 			"delete from project_relationship_projection where company_id=$1::uuid;",
+			"truncate project_projection_table",
+			"rebuildprojectprojection",
+			"delete from project_projection_table where company_id=$1::uuid;",
 		} {
 			if strings.Contains(source, forbidden) {
 				t.Fatalf("%s contains broad projection behavior %q", path, forbidden)

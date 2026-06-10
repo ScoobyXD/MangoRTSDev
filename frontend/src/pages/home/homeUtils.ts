@@ -7,8 +7,8 @@ import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
-import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
-import type { AciInboxRaciRole, AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes.js";
+import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
+import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HOME_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
@@ -328,10 +328,6 @@ export function logicGateHasAnyRaciRole(logicGate: LogicGateRecord | undefined, 
   return (logicGate.raci_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
 }
 
-export function nodeHasLogicGateRaciRole(node: NodeRecord, logicGateByID: Map<string, LogicGateRecord>, role: LogicGateRaciRole, userID: string): boolean {
-  return cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasRaciRole(logicGateByID.get(logicGateID), role, userID));
-}
-
 export function addRaciInboxGroupNode(byCell: Map<string, Map<string, Set<string>>>, cellKey: string, logicGateID: string, nodeID: string): void {
   const byLogicGate = byCell.get(cellKey) ?? new Map<string, Set<string>>();
   const nodeIDs = byLogicGate.get(logicGateID) ?? new Set<string>();
@@ -357,28 +353,6 @@ export function materializeRaciInboxGroupsByCell(
     out.set(cellKey, groups);
   }
   return out;
-}
-
-export function buildAciInboxGroupsByCell(
-  nodes: NodeRecord[],
-  nodeByID: Map<string, NodeRecord>,
-  logicGateByID: Map<string, LogicGateRecord>,
-  currentUserID: string,
-): Map<string, InboxLogicGateNodeGroup[]> {
-  const byCell = new Map<string, Map<string, Set<string>>>();
-  for (const node of nodes) {
-    const priority = normalizeInboxPriority(node.priority);
-    if (priority === null) continue;
-    for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
-      const logicGate = logicGateByID.get(logicGateID);
-      for (const column of ACI_COLUMNS) {
-        if (!isAciRaciRole(column.role)) continue;
-        if (!logicGateHasRaciRole(logicGate, column.role, currentUserID)) continue;
-        addRaciInboxGroupNode(byCell, aciCellKey(column.role, priority), logicGateID, node.node_id);
-      }
-    }
-  }
-  return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
 }
 
 export function buildRaciRoleInboxGroupsByCell(
@@ -413,31 +387,6 @@ export function buildRaciRoleInboxGroupsByCell(
       const logicGate = logicGateByID.get(logicGateID);
       if (!logicGateHasRaciRole(logicGate, role, cleanUserID)) continue;
       addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), logicGateID, node.node_id);
-    }
-  }
-  return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
-}
-
-function isAciRaciRole(role: AciInboxRole): role is AciInboxRaciRole {
-  return role === "accountable" || role === "consulted" || role === "informed";
-}
-
-export function buildResponsibleInboxGroupsByCell(
-  nodes: NodeRecord[],
-  nodeByID: Map<string, NodeRecord>,
-  logicGateByID: Map<string, LogicGateRecord>,
-  currentUserID: string,
-): Map<string, InboxLogicGateNodeGroup[]> {
-  const byCell = new Map<string, Map<string, Set<string>>>();
-  for (const node of nodes) {
-    const priority = normalizeInboxPriority(node.priority);
-    const status = normalizeResponsibleInboxStatus(node.status);
-    if (priority === null || !status) continue;
-    if (status === "done") continue;
-    for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
-      const logicGate = logicGateByID.get(logicGateID);
-      if (!logicGateHasRaciRole(logicGate, "responsible", currentUserID)) continue;
-      addRaciInboxGroupNode(byCell, responsibleCellKey(status, priority), logicGateID, node.node_id);
     }
   }
   return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
@@ -540,16 +489,8 @@ export function setNodeDragData(dataTransfer: DataTransfer, nodeIDs: string[], n
   );
 }
 
-export function aciCellKey(role: AciInboxRole, priority: InboxPriority): string {
-  return `${role}:${priority}`;
-}
-
 export function raciRoleCellKey(role: RaciInboxRole, status: ResponsibleInboxStatus, priority: InboxPriority): string {
   return `${role}:${status}:${priority}`;
-}
-
-export function responsibleCellKey(status: ResponsibleInboxStatus, priority: InboxPriority): string {
-  return `${status}:${priority}`;
 }
 
 export function normalizeInboxPriority(value: unknown): InboxPriority | null {
@@ -575,15 +516,6 @@ export function responsibleStatusColor(status: ResponsibleInboxStatus): string {
   if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
   if (status === "verify") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
   return KANBAN_LOGIC_GATE_DONE_COLOR;
-}
-
-export function responsibleStatusLetter(value: unknown): string {
-  const status = normalizeResponsibleInboxStatus(value);
-  if (status === "pending") return "P";
-  if (status === "in_progress") return "IP";
-  if (status === "verify") return "V";
-  if (status === "done") return "D";
-  return "";
 }
 
 export function logicGateIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
@@ -808,10 +740,6 @@ export function sharedInboxHasAnyAccessGrants(folders: CommunicationsSharedInbox
   return folders.some((folder) => (folder.access_grants ?? []).length > 0);
 }
 
-export function sharedInboxHasAnyRaciAssignments(folders: CommunicationsSharedInbox[]): boolean {
-  return sharedInboxHasAnyAccessGrants(folders);
-}
-
 type SharedInboxAccessUser = {
   is_dev_admin?: boolean;
   memberships?: Array<{ company_id?: string; role?: string }>;
@@ -859,13 +787,6 @@ export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedIn
   const cleanFolderID = folderID.trim();
   const scopedFolderIDs = cleanFolderID ? collectSharedInboxSubtreeIDs(folders, cleanFolderID) : new Set(folders.map((folder) => folder.folder_id));
   return folders.some((folder) => scopedFolderIDs.has(folder.folder_id) && sharedInboxUserCanManageMail(folder, userID, false));
-}
-
-export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[], userID: string, hasFullAccess = false): CommunicationsSharedInbox[] {
-  if (hasFullAccess) return folders;
-  const cleanUserID = userID.trim();
-  if (!cleanUserID) return [];
-  return folders.filter((folder) => sharedInboxUserHasRole(folder, cleanUserID));
 }
 
 export function raciInboxSectionForView(viewID: HomeViewID): (typeof RACI_INBOX_SECTIONS)[number] | null {

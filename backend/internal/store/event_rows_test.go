@@ -537,6 +537,229 @@ func TestEditorNodeInformationEventRowRollbackLeavesNoProjection(t *testing.T) {
 	}
 }
 
+func TestEditorProjectInformationWritesSourceProjectionAndEventRow(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999114"
+	actorID := "11111111-1111-4111-8111-111111111115"
+	repo.EnsureCompany(companyID, "Editor Project Event Rows Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Editor event row project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := projectResult.Project.ProjectID
+	informationID := "11111111-1111-4111-8111-111111111116"
+	item, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: informationID,
+		Type:          "Text box",
+		Information:   "project editor content",
+		ActorUserID:   actorID,
+	})
+	if err != nil {
+		t.Fatalf("AddProjectInformation: %v", err)
+	}
+
+	view, err := repo.GetProjectView(companyID, projectID, "")
+	if err != nil {
+		t.Fatalf("GetProjectView: %v", err)
+	}
+	if len(view.Information) != 1 || view.Information[0].InformationID != item.InformationID || view.Information[0].Information != "project editor content" {
+		t.Fatalf("project source information = %+v, want saved source item %+v", view.Information, item)
+	}
+	projections, err := repo.ListProjectProjections(companyID, projectID)
+	if err != nil {
+		t.Fatalf("ListProjectProjections: %v", err)
+	}
+	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != "project editor content" {
+		t.Fatalf("project projections = %+v, want one editor projection", projections)
+	}
+	row := latestEventRowOfTypeForTest(t, repo, companyID, EventTypeEditorProjectionDelta)
+	wantScope := EditorRealtimeScope(EntityTypeProject, projectID)
+	if row.PrimaryScope != wantScope || row.SequenceScope != wantScope || row.Sequence != 1 || row.ActorUserID != actorID {
+		t.Fatalf("editor project event row = %+v, want scope=%s sequence=1 actor=%s", row, wantScope, actorID)
+	}
+	payload, err := DecodeEditorProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeEditorProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Scope != wantScope || payload.ResourceType != EntityTypeProject || payload.ResourceID != projectID || len(payload.Deltas) != 1 {
+		t.Fatalf("payload = %+v, want one project editor delta for %s", payload, wantScope)
+	}
+	delta := payload.Deltas[0]
+	if delta.Operation != ProjectionDeltaOperationUpsert || delta.Row == nil || delta.Row.ProjectID != projectID || delta.Row.InformationID != informationID || delta.Row.Information != "project editor content" {
+		t.Fatalf("delta = %+v, want project upsert row", delta)
+	}
+}
+
+func TestEditorProjectProjectionDeleteInsertsDeleteEventRow(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999115"
+	actorID := "11111111-1111-4111-8111-111111111117"
+	repo.EnsureCompany(companyID, "Editor Project Delete Event Rows Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Editor delete event row project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := projectResult.Project.ProjectID
+	informationID := "11111111-1111-4111-8111-111111111118"
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: informationID,
+		Type:          "Text box",
+		Information:   "delete me",
+	}); err != nil {
+		t.Fatalf("AddProjectInformation: %v", err)
+	}
+	if err := repo.DeleteProjectProjection(ProjectProjectionDeleteInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: informationID,
+		ActorUserID:   actorID,
+	}); err != nil {
+		t.Fatalf("DeleteProjectProjection: %v", err)
+	}
+	projections, err := repo.ListProjectProjections(companyID, projectID)
+	if err != nil {
+		t.Fatalf("ListProjectProjections: %v", err)
+	}
+	if len(projections) != 0 {
+		t.Fatalf("project projections after delete = %+v, want none", projections)
+	}
+	row := latestEventRowOfTypeForTest(t, repo, companyID, EventTypeEditorProjectionDelta)
+	wantScope := EditorRealtimeScope(EntityTypeProject, projectID)
+	if row.PrimaryScope != wantScope || row.SequenceScope != wantScope || row.Sequence != 2 || row.ActorUserID != actorID {
+		t.Fatalf("editor project delete event row = %+v, want scope=%s sequence=2 actor=%s", row, wantScope, actorID)
+	}
+	payload, err := DecodeEditorProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeEditorProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Scope != wantScope || payload.ResourceType != EntityTypeProject || payload.ResourceID != projectID || len(payload.Deltas) != 1 {
+		t.Fatalf("payload = %+v, want one project editor delete delta for %s", payload, wantScope)
+	}
+	delta := payload.Deltas[0]
+	if delta.Operation != ProjectionDeltaOperationDelete || delta.Row != nil || delta.RowKey.InformationID != informationID {
+		t.Fatalf("delta = %+v, want project delete row key", delta)
+	}
+}
+
+func TestEditorProjectInformationEventRowRollbackLeavesNoSourceOrProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999116"
+	repo.EnsureCompany(companyID, "Editor Project Rollback Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Editor rollback project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := projectResult.Project.ProjectID
+	beforeRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+
+	repo.eventRowAppendErr = errors.New("forced project editor event row failure")
+	_, err = repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: "11111111-1111-4111-8111-111111111119",
+		Type:          "Text box",
+		Information:   "rollback project content",
+	})
+	if !errors.Is(err, repo.eventRowAppendErr) {
+		t.Fatalf("AddProjectInformation error = %v, want forced event row failure", err)
+	}
+	repo.eventRowAppendErr = nil
+	afterRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("event rows after rollback = %d, want %d", len(afterRows), len(beforeRows))
+	}
+	view, err := repo.GetProjectView(companyID, projectID, "")
+	if err != nil {
+		t.Fatalf("GetProjectView after rollback: %v", err)
+	}
+	if len(view.Information) != 0 {
+		t.Fatalf("project source information after rollback = %+v, want none", view.Information)
+	}
+	projections, err := repo.ListProjectProjections(companyID, projectID)
+	if err != nil {
+		t.Fatalf("ListProjectProjections after rollback: %v", err)
+	}
+	if len(projections) != 0 {
+		t.Fatalf("project projections after rollback = %+v, want none", projections)
+	}
+}
+
+func TestEditorProjectProjectionDeleteEventRowRollbackRestoresProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999117"
+	repo.EnsureCompany(companyID, "Editor Project Delete Rollback Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Editor delete rollback project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := projectResult.Project.ProjectID
+	informationID := "11111111-1111-4111-8111-111111111120"
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: informationID,
+		Type:          "Text box",
+		Information:   "keep me",
+	}); err != nil {
+		t.Fatalf("AddProjectInformation: %v", err)
+	}
+	beforeRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+
+	repo.eventRowAppendErr = errors.New("forced project editor delete event row failure")
+	err = repo.DeleteProjectProjection(ProjectProjectionDeleteInput{
+		CompanyID:     companyID,
+		ProjectID:     projectID,
+		InformationID: informationID,
+	})
+	if !errors.Is(err, repo.eventRowAppendErr) {
+		t.Fatalf("DeleteProjectProjection error = %v, want forced event row failure", err)
+	}
+	repo.eventRowAppendErr = nil
+	afterRows, err := repo.ListEventRows(companyID, 10)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("event rows after rollback = %d, want %d", len(afterRows), len(beforeRows))
+	}
+	projections, err := repo.ListProjectProjections(companyID, projectID)
+	if err != nil {
+		t.Fatalf("ListProjectProjections after rollback: %v", err)
+	}
+	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != "keep me" {
+		t.Fatalf("project projections after delete rollback = %+v, want original projection", projections)
+	}
+}
+
 func TestEventWorkerClaimAndProcessBookkeeping(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999103"

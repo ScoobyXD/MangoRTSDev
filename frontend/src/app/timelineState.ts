@@ -282,11 +282,6 @@ export function formatTimelineDate(date: string): string {
   });
 }
 
-export function shortTimelineLabel(label: string, maxLength = 4): string {
-  const compact = label.trim().replace(/\s+/g, "");
-  return (compact || "Item").slice(0, Math.max(1, maxLength));
-}
-
 export function sortTimelineItems(items: AppTimelineItem[]): AppTimelineItem[] {
   return [...items].sort((a, b) => (
     a.startMinute - b.startMinute

@@ -15,9 +15,6 @@ export interface FrameDataModel {
   accent: string;
 }
 
-// Backward compatibility during migration.
-export type Widget = FrameDataModel;
-
 // Resize edge flags used by pointer-resize state machine in AppLayout.
 export interface ResizeEdges {
   top?: boolean;

@@ -138,4 +138,3 @@ let tabCounter = 0;
 
 export const createFrameId = () => `frame-${Date.now()}-${++frameCounter}`;
 export const createTabId = () => `view-${Date.now()}-${++tabCounter}`;
-export const getFrameCreationCounter = () => frameCounter;
