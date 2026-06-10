@@ -119,6 +119,7 @@ func cloneProject(item domain.Project) domain.Project {
 func cloneProjectRelationshipProjection(item domain.ProjectRelationshipProjection) domain.ProjectRelationshipProjection {
 	item.LogicGateID = cloneStringPointer(item.LogicGateID)
 	item.NodeID = cloneStringPointer(item.NodeID)
+	item.AssignmentID = cloneStringPointer(item.AssignmentID)
 	item.Status = cloneStringPointer(item.Status)
 	item.StatusColor = cloneStringPointer(item.StatusColor)
 	return item

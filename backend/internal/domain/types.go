@@ -479,6 +479,7 @@ type ProjectRelationshipProjection struct {
 	ResourceID                   string    `json:"resource_id"`
 	LogicGateID                  *string   `json:"logic_gate_id,omitempty"`
 	NodeID                       *string   `json:"node_id,omitempty"`
+	AssignmentID                 *string   `json:"assignment_id,omitempty"`
 	DisplayTitle                 string    `json:"display_title"`
 	Status                       *string   `json:"status,omitempty"`
 	StatusColor                  *string   `json:"status_color,omitempty"`

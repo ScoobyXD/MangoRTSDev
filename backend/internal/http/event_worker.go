@@ -97,6 +97,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 		return s.processRacioProjectionDeltaEvent(row)
 	case store.EventTypeProjectManagementProjectionDelta:
 		return s.processProjectManagementProjectionDeltaEvent(row)
+	case store.EventTypeProjectRelationshipProjectionDelta:
+		return s.processProjectRelationshipProjectionDeltaEvent(row)
 	case store.EventTypeEditorProjectionDelta:
 		return s.processEditorProjectionDeltaEvent(row)
 	case store.EventTypePermissionChanged:
@@ -142,6 +144,21 @@ func (s *Server) processProjectManagementProjectionDeltaEvent(row store.EventRow
 		return err
 	}
 	if payload.Projection != store.ProjectionNameProjectManagementTimeline {
+		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
+	}
+	if len(payload.Deltas) == 0 {
+		return nil
+	}
+	s.publishProjectionDeltasAsync(payload.Deltas)
+	return nil
+}
+
+func (s *Server) processProjectRelationshipProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeProjectRelationshipProjectionDeltaEventPayload(row)
+	if err != nil {
+		return err
+	}
+	if payload.Projection != store.ProjectionNameProjectRelationship {
 		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
 	}
 	if len(payload.Deltas) == 0 {
@@ -212,6 +229,9 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
+		return nil
+	case store.EntityTypeProject:
+		s.revalidateProjectRelationshipSubscriptionsForProject(row.CompanyID, entityID)
 		return nil
 	default:
 		return nil
@@ -359,6 +379,53 @@ func (s *Server) revalidateKanbanBoardSubscriptionsForLogicGate(companyID, logic
 			Scope:        scope,
 			ResourceType: store.EntityTypeLogicGate,
 			ResourceID:   logicGateID,
+			Reason:       "permission_revoked",
+		})
+		s.recordOperationalMetric("realtime.permission_revoked_count", realtimeScopeType(scope), 1, 0)
+		s.realtimeRegistry.unsubscribe(conn.id, companyID, scope)
+		s.recordRealtimeActiveSubscriptions()
+	}
+}
+
+func (s *Server) revalidateProjectRelationshipSubscriptionsForProject(companyID, projectID string) {
+	companyID = strings.TrimSpace(companyID)
+	projectID = strings.TrimSpace(projectID)
+	if companyID == "" || projectID == "" {
+		return
+	}
+	scope := realtimeProjectRelationshipScope(projectID)
+	for _, conn := range s.realtimeRegistry.connectionsForScope(companyID, scope) {
+		if conn == nil {
+			continue
+		}
+		authorized, _, err := s.authorizeRealtimeSubscription(conn.actor, companyID, scope)
+		if err != nil {
+			log.Printf("failed to revalidate project relationship realtime subscription company_id=%s user_id=%s scope=%s: %v", companyID, conn.userID, scope, err)
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:      realtimeMessageSnapshotRefetch,
+				CompanyID: companyID,
+				Scope:     scope,
+				Reason:    "permission_check_failed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		if authorized {
+			_ = conn.sendJSON(realtimeServerMessage{
+				Type:      realtimeMessageSnapshotRefetch,
+				CompanyID: companyID,
+				Scope:     scope,
+				Reason:    "permission_changed",
+			})
+			s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
+			continue
+		}
+		_ = conn.sendJSON(realtimeServerMessage{
+			Type:         realtimeMessagePermissionRevoked,
+			CompanyID:    companyID,
+			Scope:        scope,
+			ResourceType: store.EntityTypeProject,
+			ResourceID:   projectID,
 			Reason:       "permission_revoked",
 		})
 		s.recordOperationalMetric("realtime.permission_revoked_count", realtimeScopeType(scope), 1, 0)

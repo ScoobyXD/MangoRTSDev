@@ -372,6 +372,23 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if projectID := realtimeProjectRelationshipProjectIDFromScope(scope); projectID != "" {
+		if actorCanManageCompany(actor, companyID) {
+			return true, "", nil
+		}
+		userID := strings.TrimSpace(actor.User.UserID)
+		if userID == "" {
+			return false, "unauthorized", nil
+		}
+		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeProject, projectID, store.EntityPermissionView)
+		if err != nil {
+			return false, "", err
+		}
+		if !allowed {
+			return false, "access_denied", nil
+		}
+		return true, "", nil
+	}
 	if userID := realtimeNotificationUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
@@ -419,6 +436,18 @@ func realtimeBoardIDFromScope(scope string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(scope, "board:"))
+}
+
+func realtimeProjectRelationshipScope(projectID string) string {
+	return store.ProjectRelationshipProjectionProjectScope(projectID)
+}
+
+func realtimeProjectRelationshipProjectIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "project:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "project:"))
 }
 
 func realtimeEditorScope(resourceType, resourceID string) string {
@@ -557,6 +586,8 @@ func realtimeScopeType(scope string) string {
 	switch {
 	case realtimeBoardIDFromScope(scope) != "":
 		return "board"
+	case realtimeProjectRelationshipProjectIDFromScope(scope) != "":
+		return "project"
 	case realtimeEditorResourceIDFromScope(scope) != "":
 		return "editor"
 	case realtimeNotificationUserIDFromScope(scope) != "":
@@ -704,6 +735,9 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 	} else if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameProjectManagementTimeline
 		projectionScope = store.ProjectManagementProjectionUserScope(userID)
+	} else if projectID := realtimeProjectRelationshipProjectIDFromScope(scope); projectID != "" {
+		projectionName = store.ProjectionNameProjectRelationship
+		projectionScope = store.ProjectRelationshipProjectionProjectScope(projectID)
 	} else if realtimeEditorResourceIDFromScope(scope) != "" {
 		sequence, err := s.repo.CurrentEventRowSequence(companyID, scope)
 		if err != nil {

@@ -519,22 +519,22 @@ Build the central dependency layer and make Project relationship projection a fi
 
 Tasks:
 
-- [ ] Add `backend/internal/store/projection_delta_dependencies.go`.
-- [ ] Define typed inputs for node, Logic Gate, node Logic Gate assignment, project, project relationship, and permission dependency helpers.
-- [ ] Add `assignment_id` to `project_relationship_projection`.
-- [ ] Add exact lookup indexes for project relationship projection dependency keys.
-- [ ] Implement `syncProjectRelationshipProjectionForRelationshipTx`.
-- [ ] Implement `syncProjectRelationshipProjectionForNodeTx`.
-- [ ] Implement `syncProjectRelationshipProjectionForLogicGateTx`.
-- [ ] Implement `syncProjectRelationshipProjectionForNodeLogicGateAssignmentTx`.
-- [ ] Implement `deleteProjectRelationshipProjectionForRelationshipTx`.
-- [ ] Add project relationship projection delta row types.
-- [ ] Add project relationship projection delta event payload encoding/decoding.
-- [ ] Add event worker support for project relationship projection delta delivery.
-- [ ] Wire project relationship create/update/delete commands through `applyProjectRelationshipProjectionDeltaDependenciesTx`.
+- [x] Add `backend/internal/store/projection_delta_dependencies.go`.
+- [x] Define typed inputs for node, Logic Gate, node Logic Gate assignment, project, project relationship, and permission dependency helpers.
+- [x] Add `assignment_id` to `project_relationship_projection`.
+- [x] Add exact lookup indexes for project relationship projection dependency keys.
+- [x] Implement `syncProjectRelationshipProjectionForRelationshipTx`.
+- [x] Implement `syncProjectRelationshipProjectionForNodeTx`.
+- [x] Implement `syncProjectRelationshipProjectionForLogicGateTx`.
+- [x] Implement `syncProjectRelationshipProjectionForNodeLogicGateAssignmentTx`.
+- [x] Implement `deleteProjectRelationshipProjectionForRelationshipTx`.
+- [x] Add project relationship projection delta row types.
+- [x] Add project relationship projection delta event payload encoding/decoding.
+- [x] Add event worker support for project relationship projection delta delivery.
+- [x] Wire project relationship create/update/delete commands through `applyProjectRelationshipProjectionDeltaDependenciesTx`.
 - [ ] Wire project editor information writes through `applyProjectProjectionDeltaDependenciesTx` if any duplicated event logic remains.
-- [ ] Add focused tests proving project relationship projection rows are patched by exact relationship/node/Logic Gate/assignment keys.
-- [ ] Add tests proving no normal product write does a broad project relationship projection rebuild.
+- [x] Add focused tests proving project relationship projection rows are patched by exact relationship/node/Logic Gate/assignment keys.
+- [x] Add tests proving no normal product write does a broad project relationship projection rebuild.
 
 Success criteria:
 
@@ -639,3 +639,11 @@ V6 is complete when:
 ### 2026-06-10 - Tracker Created
 
 Created V6 as a two-phase backend refactor focused on projection delta dependencies. The core direction is to keep dependency rules in Go code, keep projection tables as precise read models, and make Projects another transactional dependent projection rather than a new owner of nodes or Logic Gates.
+
+### 2026-06-10 - Phase 1 Projection Delta Dependency Layer
+
+Implemented the Phase 1 project relationship projection dependency layer. Added `projection_delta_dependencies.go`, exact project relationship projection sync/delete helpers, `assignment_id` projection support, dependency-key indexes, project relationship projection delta row/event encoding, and event worker delivery for the `project_relationship` lane.
+
+Project relationship create/update/delete now route through `applyProjectRelationshipProjectionDeltaDependenciesTx` and append durable project relationship projection delta event rows in the same transaction as the source write. Focused tests cover exact row keys, assignment IDs, delete deltas, schema indexes, dependency helper names, and no broad project relationship projection maintenance.
+
+The conditional project editor information wiring remains unchanged in this pass; existing project editor event writes are still direct editor projection events and were not part of the requested project relationship projection Phase 1 scope.
