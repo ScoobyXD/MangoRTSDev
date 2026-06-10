@@ -10,13 +10,17 @@ import {
   type EditorOutlineStyleID,
 } from "./plainTextEditing";
 import {
+  EDITOR_TABLE_ATTRIBUTE,
+  EDITOR_TABLE_CELL_ATTRIBUTE,
+  EDITOR_TABLE_COLUMNS_ATTRIBUTE,
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
   EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE,
-  createEditorPlainTextTableFragment,
+  createEditorTableElement,
   deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
   readEditorDocumentText,
+  sanitizeEditorDocumentHTML,
   serializeEditorDocumentHTML,
 } from "./richTextEditing";
 import {
@@ -376,6 +380,251 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   return true;
 }
 
+function getClosestEditorTableCell(root: HTMLElement, node: Node | EventTarget | null): HTMLTableCellElement | null {
+  if (!node) return null;
+  const element = node instanceof Element
+    ? node
+    : node instanceof Node ? node.parentElement : null;
+  const cell = element?.closest?.(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"],td,th`) ?? null;
+  return cell instanceof HTMLTableCellElement && root.contains(cell) ? cell : null;
+}
+
+function getCurrentEditorTableCell(root: HTMLElement): HTMLTableCellElement | null {
+  const range = getEditorSelectionRange(root);
+  if (!range) return null;
+  return getClosestEditorTableCell(root, range.startContainer)
+    ?? getClosestEditorTableCell(root, range.endContainer)
+    ?? getClosestEditorTableCell(root, range.commonAncestorContainer);
+}
+
+function getEditorTableForCell(root: HTMLElement, cell: HTMLTableCellElement | null): HTMLTableElement | null {
+  const table = cell?.closest(`table[${EDITOR_TABLE_ATTRIBUTE}="true"],table`) ?? null;
+  return table instanceof HTMLTableElement && root.contains(table) ? table : null;
+}
+
+function getEditorTableRows(table: HTMLTableElement): HTMLTableRowElement[] {
+  return Array.from(table.rows).filter((row): row is HTMLTableRowElement => row instanceof HTMLTableRowElement);
+}
+
+function getEditorTableCells(row: HTMLTableRowElement): HTMLTableCellElement[] {
+  return Array.from(row.cells).filter((cell): cell is HTMLTableCellElement => cell instanceof HTMLTableCellElement);
+}
+
+function getEditorTableColumnCount(table: HTMLTableElement): number {
+  return Math.max(1, ...getEditorTableRows(table).map((row) => getEditorTableCells(row).length));
+}
+
+function updateEditorTableColumnAttribute(table: HTMLTableElement) {
+  table.setAttribute(EDITOR_TABLE_ATTRIBUTE, "true");
+  table.setAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE, String(getEditorTableColumnCount(table)));
+}
+
+function createEmptyEditorTableCell(ownerDocument: Document): HTMLTableCellElement {
+  const cell = ownerDocument.createElement("td");
+  cell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
+  cell.appendChild(ownerDocument.createElement("br"));
+  return cell;
+}
+
+function createEmptyEditorTableRow(ownerDocument: Document, columns: number): HTMLTableRowElement {
+  const row = ownerDocument.createElement("tr");
+  for (let index = 0; index < Math.max(1, columns); index += 1) {
+    row.appendChild(createEmptyEditorTableCell(ownerDocument));
+  }
+  return row;
+}
+
+function normalizeEditorTable(table: HTMLTableElement) {
+  const ownerDocument = table.ownerDocument;
+  const body = table.tBodies[0] ?? table.createTBody();
+  const rows = getEditorTableRows(table);
+  const columns = getEditorTableColumnCount(table);
+  if (rows.length === 0) body.appendChild(createEmptyEditorTableRow(ownerDocument, columns));
+  getEditorTableRows(table).forEach((row) => {
+    const cells = getEditorTableCells(row);
+    cells.forEach((cell) => {
+      cell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
+      if (cell.childNodes.length === 0) cell.appendChild(ownerDocument.createElement("br"));
+    });
+    for (let index = cells.length; index < columns; index += 1) {
+      row.appendChild(createEmptyEditorTableCell(ownerDocument));
+    }
+  });
+  updateEditorTableColumnAttribute(table);
+}
+
+function getEditorTableCellCoordinates(table: HTMLTableElement, cell: HTMLTableCellElement): { rowIndex: number; columnIndex: number } | null {
+  const rows = getEditorTableRows(table);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const columnIndex = getEditorTableCells(rows[rowIndex]).indexOf(cell);
+    if (columnIndex >= 0) return { rowIndex, columnIndex };
+  }
+  return null;
+}
+
+function setSelectionInEditorTableCell(root: HTMLElement, cell: HTMLTableCellElement) {
+  const selection = root.ownerDocument.getSelection();
+  if (!selection) return;
+  if (cell.childNodes.length === 0) cell.appendChild(root.ownerDocument.createElement("br"));
+  const range = root.ownerDocument.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function removeEditorTableAndSetCaret(root: HTMLElement, table: HTMLTableElement) {
+  const caretNode = root.ownerDocument.createTextNode("");
+  const nextSibling = table.nextSibling;
+  table.remove();
+  if (nextSibling?.parentNode) {
+    nextSibling.parentNode.insertBefore(caretNode, nextSibling);
+  } else {
+    root.appendChild(caretNode);
+  }
+  const range = root.ownerDocument.createRange();
+  range.setStart(caretNode, 0);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function insertEditorTableCellLineBreak(
+  root: HTMLElement,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const cell = getCurrentEditorTableCell(root);
+  const range = getEditorSelectionRange(root);
+  if (!cell || !range || !cell.contains(range.startContainer) || !cell.contains(range.endContainer)) return false;
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const breakNode = root.ownerDocument.createElement("br");
+  const caretNode = root.ownerDocument.createTextNode("");
+  range.deleteContents();
+  range.insertNode(breakNode);
+  breakNode.after(caretNode);
+  const nextRange = root.ownerDocument.createRange();
+  nextRange.setStart(caretNode, 0);
+  nextRange.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(nextRange);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "lineBreak");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  return true;
+}
+
+function moveEditorTableSelection(
+  root: HTMLElement,
+  direction: -1 | 1,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const cell = getCurrentEditorTableCell(root);
+  const table = getEditorTableForCell(root, cell);
+  if (!cell || !table) return false;
+  normalizeEditorTable(table);
+  const cells = getEditorTableRows(table).flatMap(getEditorTableCells);
+  const currentIndex = cells.indexOf(cell);
+  if (currentIndex < 0) return false;
+  const nextIndex = currentIndex + direction;
+  if (nextIndex >= 0 && nextIndex < cells.length) {
+    setSelectionInEditorTableCell(root, cells[nextIndex]);
+    return true;
+  }
+  if (direction < 0) {
+    setSelectionInEditorTableCell(root, cells[0]);
+    return true;
+  }
+
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const columns = getEditorTableColumnCount(table);
+  const newRow = createEmptyEditorTableRow(root.ownerDocument, columns);
+  const body = table.tBodies[0] ?? table.createTBody();
+  body.appendChild(newRow);
+  updateEditorTableColumnAttribute(table);
+  const firstCell = getEditorTableCells(newRow)[0];
+  if (firstCell) setSelectionInEditorTableCell(root, firstCell);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+  return true;
+}
+
+type EditorTableCommand = "insert-row-after" | "insert-column-after" | "delete-row" | "delete-column" | "delete-table";
+
+function applyEditorTableCommand(
+  root: HTMLElement,
+  command: EditorTableCommand,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const cell = getCurrentEditorTableCell(root);
+  const table = getEditorTableForCell(root, cell);
+  if (!cell || !table) return false;
+  normalizeEditorTable(table);
+  const coordinates = getEditorTableCellCoordinates(table, cell);
+  if (!coordinates) return false;
+
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const rows = getEditorTableRows(table);
+  const targetRow = rows[coordinates.rowIndex];
+  let nextSelectionCell: HTMLTableCellElement | null = cell;
+
+  if (command === "delete-table") {
+    removeEditorTableAndSetCaret(root, table);
+  } else if (command === "insert-row-after") {
+    const newRow = createEmptyEditorTableRow(root.ownerDocument, getEditorTableColumnCount(table));
+    targetRow.after(newRow);
+    nextSelectionCell = getEditorTableCells(newRow)[Math.min(coordinates.columnIndex, getEditorTableCells(newRow).length - 1)] ?? null;
+    updateEditorTableColumnAttribute(table);
+  } else if (command === "insert-column-after") {
+    getEditorTableRows(table).forEach((row) => {
+      const cells = getEditorTableCells(row);
+      const newCell = createEmptyEditorTableCell(root.ownerDocument);
+      const anchor = cells[Math.min(coordinates.columnIndex, cells.length - 1)];
+      if (anchor) anchor.after(newCell);
+      else row.appendChild(newCell);
+      if (row === targetRow) nextSelectionCell = newCell;
+    });
+    updateEditorTableColumnAttribute(table);
+  } else if (command === "delete-row") {
+    if (rows.length <= 1) {
+      removeEditorTableAndSetCaret(root, table);
+    } else {
+      const fallbackRow = rows[coordinates.rowIndex + 1] ?? rows[coordinates.rowIndex - 1] ?? null;
+      targetRow.remove();
+      nextSelectionCell = fallbackRow ? getEditorTableCells(fallbackRow)[Math.min(coordinates.columnIndex, getEditorTableCells(fallbackRow).length - 1)] ?? null : null;
+      updateEditorTableColumnAttribute(table);
+    }
+  } else if (command === "delete-column") {
+    const columns = getEditorTableColumnCount(table);
+    if (columns <= 1) {
+      removeEditorTableAndSetCaret(root, table);
+    } else {
+      getEditorTableRows(table).forEach((row) => {
+        const cells = getEditorTableCells(row);
+        cells[coordinates.columnIndex]?.remove();
+      });
+      const nextCoordinates = {
+        rowIndex: Math.min(coordinates.rowIndex, Math.max(0, getEditorTableRows(table).length - 1)),
+        columnIndex: Math.min(coordinates.columnIndex, Math.max(0, columns - 2)),
+      };
+      const nextRow = getEditorTableRows(table)[nextCoordinates.rowIndex];
+      nextSelectionCell = nextRow ? getEditorTableCells(nextRow)[nextCoordinates.columnIndex] ?? null : null;
+      updateEditorTableColumnAttribute(table);
+    }
+  }
+
+  if (nextSelectionCell && root.contains(nextSelectionCell)) setSelectionInEditorTableCell(root, nextSelectionCell);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+  return true;
+}
+
 function getImageFileFromDataTransfer(dataTransfer: DataTransfer): File | null {
   for (let index = 0; index < dataTransfer.items.length; index += 1) {
     const item = dataTransfer.items[index];
@@ -674,17 +923,14 @@ function insertEditorTable(
   if (!range) return false;
   const undoBefore = snapshotEditorDocumentRoot(root);
   removeEditorTerminalBreaks(root);
-  const table = createEditorPlainTextTableFragment(root.ownerDocument);
+  const table = createEditorTableElement(root.ownerDocument);
   const afterTable = root.ownerDocument.createElement("br");
+  const fragment = root.ownerDocument.createDocumentFragment();
+  fragment.append(table, afterTable);
   range.deleteContents();
-  table.appendChild(afterTable);
-  range.insertNode(table);
-  const selectionRange = root.ownerDocument.createRange();
-  selectionRange.setStartAfter(afterTable);
-  selectionRange.collapse(true);
-  const selection = root.ownerDocument.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(selectionRange);
+  range.insertNode(fragment);
+  const firstCell = table.querySelector(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"]`);
+  if (firstCell instanceof HTMLTableCellElement) setSelectionInEditorTableCell(root, firstCell);
   recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   return true;
@@ -727,9 +973,25 @@ type RichTextMentionDraft = ActiveMentionDraft & {
   position: "fixed" | "absolute";
 };
 
+type RichTextTableDraft = {
+  left: number;
+  top: number;
+  position: "fixed" | "absolute";
+  rows: number;
+  columns: number;
+};
+
+type EditorImagePreviewDraft = {
+  src: string;
+  label: string;
+  html: string;
+};
+
 const EDITOR_MENTION_MENU_WIDTH_PX = 320;
 const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = 242;
 const EDITOR_MENTION_MENU_MARGIN_PX = 8;
+const EDITOR_TABLE_MENU_WIDTH_PX = 286;
+const EDITOR_TABLE_MENU_HEIGHT_PX = 76;
 
 function closestMentionElement(root: HTMLElement, node: Node | null): HTMLElement | null {
   if (!node) return null;
@@ -783,6 +1045,51 @@ function readRichTextMentionDraft(root: HTMLElement, position: "fixed" | "absolu
     left: Math.max(minLeft, Math.min(coordinateLeft, maxLeft)),
     top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(coordinateTop, maxTop)),
     position,
+  };
+}
+
+function readRichTextTableDraft(root: HTMLElement, position: "fixed" | "absolute" = "fixed"): RichTextTableDraft | null {
+  const cell = getCurrentEditorTableCell(root);
+  const table = getEditorTableForCell(root, cell);
+  if (!cell || !table) return null;
+
+  const cellRect = cell.getBoundingClientRect();
+  const tableRect = table.getBoundingClientRect();
+  const container = position === "absolute" ? root.parentElement : null;
+  const containerRect = container?.getBoundingClientRect() ?? null;
+  const rootRect = root.getBoundingClientRect();
+  const view = root.ownerDocument.defaultView;
+  const viewportWidth = view?.innerWidth ?? 1280;
+  const viewportHeight = view?.innerHeight ?? 720;
+  const coordinateLeft = position === "absolute" && containerRect
+    ? cellRect.left - containerRect.left
+    : cellRect.left;
+  const aboveTop = position === "absolute" && containerRect
+    ? tableRect.top - containerRect.top - EDITOR_TABLE_MENU_HEIGHT_PX - 6
+    : tableRect.top - EDITOR_TABLE_MENU_HEIGHT_PX - 6;
+  const belowTop = position === "absolute" && containerRect
+    ? cellRect.bottom - containerRect.top + 6
+    : cellRect.bottom + 6;
+  const boundaryLeft = position === "absolute" && containerRect ? 0 : rootRect.left;
+  const boundaryRight = position === "absolute" && containerRect ? containerRect.width : rootRect.right;
+  const boundaryHeight = position === "absolute" && containerRect ? containerRect.height : viewportHeight;
+  const editorMinLeft = Number.isFinite(boundaryLeft) ? boundaryLeft + EDITOR_MENTION_MENU_MARGIN_PX : EDITOR_MENTION_MENU_MARGIN_PX;
+  const editorMaxLeft = Number.isFinite(boundaryRight)
+    ? boundaryRight - EDITOR_TABLE_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX
+    : viewportWidth - EDITOR_TABLE_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  const viewportMaxLeft = viewportWidth - EDITOR_TABLE_MENU_WIDTH_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  const minLeft = position === "absolute"
+    ? Math.max(EDITOR_MENTION_MENU_MARGIN_PX, editorMinLeft)
+    : Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(editorMinLeft, viewportMaxLeft));
+  const maxLeft = Math.max(minLeft, position === "absolute" ? editorMaxLeft : Math.min(editorMaxLeft, viewportMaxLeft));
+  const preferredTop = aboveTop >= EDITOR_MENTION_MENU_MARGIN_PX ? aboveTop : belowTop;
+  const maxTop = boundaryHeight - EDITOR_TABLE_MENU_HEIGHT_PX - EDITOR_MENTION_MENU_MARGIN_PX;
+  return {
+    left: Math.max(minLeft, Math.min(coordinateLeft, maxLeft)),
+    top: Math.max(EDITOR_MENTION_MENU_MARGIN_PX, Math.min(preferredTop, maxTop)),
+    position,
+    rows: getEditorTableRows(table).length,
+    columns: getEditorTableColumnCount(table),
   };
 }
 
@@ -981,6 +1288,7 @@ function startEditorImagePointerInteraction(
   documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
+  onPreviewImage?: (preview: EditorImagePreviewDraft) => void,
 ) {
   const ownerDocument = root.ownerDocument;
   const frameRect = frame.getBoundingClientRect();
@@ -1011,11 +1319,13 @@ function startEditorImagePointerInteraction(
   const undoBefore = snapshotEditorDocumentRoot(root);
   let latestDragVisualTop = start.visualTop;
   let shouldReanchorAfterDrag = false;
+  let moved = false;
 
   const onPointerMove = (event: PointerEvent) => {
     event.preventDefault();
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
+    moved = true;
     const nextMetrics = getEditorRootContentMetrics(root);
     if (interaction.kind === "resize") {
       const minWidth = 48;
@@ -1111,6 +1421,17 @@ function startEditorImagePointerInteraction(
     ownerDocument.removeEventListener("pointerup", finish);
     ownerDocument.removeEventListener("pointercancel", finish);
     ownerDocument.body.style.cursor = previousCursor;
+    if (!moved) {
+      const data = readEditorImageData(frame);
+      if (data && onPreviewImage) {
+        onPreviewImage({
+          src: data.src,
+          label: "Editor image",
+          html: createEditorImageClipboardHTML(root.ownerDocument, data),
+        });
+      }
+      return;
+    }
     if (interaction.kind === "drag" && shouldReanchorAfterDrag && reanchorEditorImageForVisualTop(root, frame, latestDragVisualTop)) {
       frame.style.marginTop = `${DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX}px`;
     }
@@ -1144,8 +1465,11 @@ export function useEditorDocumentSurfaceHandlers({
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
+  const activeTableRootRef = useRef<HTMLElement | null>(null);
   const [activeMentionDraft, setActiveMentionDraft] = useState<RichTextMentionDraft | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [activeTableDraft, setActiveTableDraft] = useState<RichTextTableDraft | null>(null);
+  const [activeImagePreview, setActiveImagePreview] = useState<EditorImagePreviewDraft | null>(null);
   const mentionOptions = useMemo(() => (
     activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
   ), [activeMentionDraft?.query, mentionUsers]);
@@ -1170,11 +1494,41 @@ export function useEditorDocumentSurfaceHandlers({
     setActiveMentionDraft(draft);
   }, [mentionMenuPosition, mentionUsers.length]);
 
+  const refreshTableDraft = useCallback((root: HTMLElement) => {
+    const draft = readRichTextTableDraft(root, mentionMenuPosition);
+    activeTableRootRef.current = draft ? root : null;
+    setActiveTableDraft(draft);
+  }, [mentionMenuPosition]);
+
   const insertMention = useCallback((root: HTMLElement, mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
     replaceEditorMentionDraft(root, mention, user, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
     activeMentionRootRef.current = null;
     setActiveMentionDraft(null);
   }, [documentUndoHistoryRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  const runTableCommand = useCallback((command: EditorTableCommand) => {
+    const root = activeTableRootRef.current;
+    if (!root) return;
+    const applied = applyEditorTableCommand(root, command, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    if (applied) refreshTableDraft(root);
+  }, [documentUndoHistoryRef, refreshTableDraft, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  useEffect(() => {
+    if (!activeImagePreview) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveImagePreview(null);
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "c") return;
+      if (writeImageToSystemClipboard(activeImagePreview.src, activeImagePreview.html)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [activeImagePreview]);
 
   const mentionMenu = mentionMenuOpen && activeMentionDraft
     ? React.createElement(
@@ -1265,6 +1619,193 @@ export function useEditorDocumentSurfaceHandlers({
           ),
         );
       }),
+    )
+    : null;
+
+  const imagePreviewModal = activeImagePreview
+    ? React.createElement(
+      "div",
+      {
+        role: "dialog",
+        "aria-modal": true,
+        "aria-label": activeImagePreview.label,
+        "data-mango-copyable-image": "true",
+        onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => {
+          if (event.target === event.currentTarget) setActiveImagePreview(null);
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 2400,
+          background: "rgba(17,24,39,0.46)",
+          display: "grid",
+          placeItems: "center",
+          padding: 18,
+        } satisfies React.CSSProperties,
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            width: "min(920px, 96vw)",
+            maxHeight: "92vh",
+            display: "grid",
+            gridTemplateRows: "auto minmax(0, 1fr)",
+            border: `1px solid ${mentionStrokeColor}`,
+            borderRadius: 8,
+            background: "#ffffff",
+            color: mentionSurfaceText,
+            boxShadow: "0 18px 48px rgba(0,0,0,0.26)",
+            overflow: "hidden",
+          } satisfies React.CSSProperties,
+        },
+        React.createElement(
+          "div",
+          {
+            style: {
+              minWidth: 0,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 32px",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 10px",
+              borderBottom: `1px solid ${mentionStrokeColor}`,
+            } satisfies React.CSSProperties,
+          },
+          React.createElement(
+            "span",
+            {
+              style: {
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: 12,
+                fontWeight: 800,
+              } satisfies React.CSSProperties,
+            },
+            activeImagePreview.label,
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "aria-label": "Close image preview",
+              onClick: () => setActiveImagePreview(null),
+              style: {
+                width: 32,
+                height: 32,
+                border: `1px solid ${mentionStrokeColor}`,
+                borderRadius: 6,
+                background: "#ffffff",
+                color: mentionSurfaceText,
+                cursor: "pointer",
+                fontSize: 18,
+                lineHeight: 1,
+              } satisfies React.CSSProperties,
+            },
+            "x",
+          ),
+        ),
+        React.createElement(
+          "div",
+          {
+            style: {
+              minHeight: 0,
+              overflow: "auto",
+              display: "grid",
+              placeItems: "center",
+              background: "#111827",
+              padding: 10,
+            } satisfies React.CSSProperties,
+          },
+          React.createElement("img", {
+            alt: activeImagePreview.label,
+            src: activeImagePreview.src,
+            style: {
+              maxWidth: "100%",
+              maxHeight: "78vh",
+              objectFit: "contain",
+              display: "block",
+            } satisfies React.CSSProperties,
+          }),
+        ),
+      ),
+    )
+    : null;
+
+  const tableButtonStyle = {
+    minHeight: 26,
+    border: `1px solid ${mentionStrokeColor}`,
+    borderRadius: 6,
+    background: "#ffffff",
+    color: mentionSurfaceText,
+    cursor: "pointer",
+    fontSize: 10.5,
+    fontWeight: 800,
+    letterSpacing: 0,
+    padding: "0 8px",
+    whiteSpace: "nowrap",
+  } satisfies React.CSSProperties;
+
+  const tableMenu = activeTableDraft && !mentionMenuOpen
+    ? React.createElement(
+      "div",
+      {
+        role: "toolbar",
+        "aria-label": "Table actions",
+        onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+        },
+        style: {
+          position: activeTableDraft.position,
+          left: activeTableDraft.left,
+          top: activeTableDraft.top,
+          zIndex: 1990,
+          width: EDITOR_TABLE_MENU_WIDTH_PX,
+          maxWidth: "calc(100vw - 16px)",
+          display: "grid",
+          gap: 6,
+          padding: 6,
+          border: `1px solid ${mentionStrokeColor}`,
+          borderRadius: 8,
+          background: "#ffffff",
+          boxShadow: "0 16px 36px rgba(15,23,42,0.18)",
+          color: mentionSurfaceText,
+          fontFamily: "var(--mango-font-family)",
+        } satisfies React.CSSProperties,
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            minWidth: 0,
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 5,
+          } satisfies React.CSSProperties,
+        },
+        React.createElement("button", { type: "button", onClick: () => runTableCommand("insert-row-after"), style: tableButtonStyle }, "Add row"),
+        React.createElement("button", { type: "button", onClick: () => runTableCommand("insert-column-after"), style: tableButtonStyle }, "Add column"),
+        React.createElement("button", { type: "button", onClick: () => runTableCommand("delete-row"), style: tableButtonStyle }, activeTableDraft.rows <= 1 ? "Delete table" : "Delete row"),
+        React.createElement("button", { type: "button", onClick: () => runTableCommand("delete-column"), style: tableButtonStyle }, activeTableDraft.columns <= 1 ? "Delete table" : "Delete column"),
+      ),
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => runTableCommand("delete-table"),
+          style: {
+            ...tableButtonStyle,
+            width: "100%",
+            color: "#991b1b",
+            borderColor: "rgba(153,27,27,0.22)",
+            background: "rgba(254,242,242,0.96)",
+          } satisfies React.CSSProperties,
+        },
+        "Delete table",
+      ),
     )
     : null;
 
@@ -1369,6 +1910,24 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      const sanitizedHTML = sanitizeEditorDocumentHTML(html);
+      if (sanitizedHTML.trim()) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(root);
+        const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
+        if (mentionUndoBefore) {
+          activeMentionRootRef.current = null;
+          setActiveMentionDraft(null);
+        }
+        if (replaceSelectionWithHTML(root, sanitizedHTML)) {
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          refreshTableDraft(root);
+        }
+        return;
+      }
+
       const text = event.clipboardData.getData("text/plain");
       if (!text) return;
       event.preventDefault();
@@ -1412,6 +1971,25 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      const sanitizedHTML = sanitizeEditorDocumentHTML(html);
+      if (sanitizedHTML.trim()) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(root);
+        root.focus({ preventScroll: true });
+        const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
+        if (mentionUndoBefore) {
+          activeMentionRootRef.current = null;
+          setActiveMentionDraft(null);
+        }
+        if (replaceSelectionWithHTML(root, sanitizedHTML)) {
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          refreshTableDraft(root);
+        }
+        return;
+      }
+
       const text = event.dataTransfer.getData("text/plain");
       if (!text) return;
       event.preventDefault();
@@ -1435,11 +2013,14 @@ export function useEditorDocumentSurfaceHandlers({
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
       refreshMentionDraft(event.currentTarget);
+      refreshTableDraft(event.currentTarget);
     },
     onSelect(event) {
       const range = getEditorSelectionRange(event.currentTarget);
       if (range && !range.collapsed) {
         setActiveMentionDraft(null);
+        activeTableRootRef.current = null;
+        setActiveTableDraft(null);
         pendingEditorFontSizeRef.current = null;
         syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
         return;
@@ -1449,6 +2030,7 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
+      refreshTableDraft(event.currentTarget);
     },
     onClick(event) {
       if (!findEditorImageFrame(event.currentTarget, event.target)) {
@@ -1459,6 +2041,7 @@ export function useEditorDocumentSurfaceHandlers({
       const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!anchor) {
         refreshMentionDraft(event.currentTarget);
+        refreshTableDraft(event.currentTarget);
         return;
       }
       event.preventDefault();
@@ -1474,7 +2057,15 @@ export function useEditorDocumentSurfaceHandlers({
       event.currentTarget.focus({ preventScroll: true });
       selectEditorImageFrame(event.currentTarget, frame);
       if (event.button === 0) {
-        startEditorImagePointerInteraction(event.currentTarget, frame, event, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        startEditorImagePointerInteraction(
+          event.currentTarget,
+          frame,
+          event,
+          documentUndoHistoryRef.current,
+          scheduleDocumentSave,
+          scheduleIndentGuideUpdate,
+          setActiveImagePreview,
+        );
       }
     },
     onPointerMove(event) {
@@ -1487,17 +2078,22 @@ export function useEditorDocumentSurfaceHandlers({
       }
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
       refreshMentionDraft(event.currentTarget);
+      refreshTableDraft(event.currentTarget);
     },
     onBlur(event) {
       setActiveMentionDraft(null);
+      setActiveTableDraft(null);
       activeMentionRootRef.current = null;
+      activeTableRootRef.current = null;
       pendingEditorFontSizeRef.current = null;
       rememberCurrentDocumentScroll();
       flushPendingDocumentSave(serializeEditorDocumentHTML(event.currentTarget));
     },
     onScroll(event) {
       setActiveMentionDraft(null);
+      setActiveTableDraft(null);
       activeMentionRootRef.current = null;
+      activeTableRootRef.current = null;
       if (restoringScrollRef.current) return;
       const targetKey = currentDocumentTargetKeyRef.current;
       if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
@@ -1567,10 +2163,45 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      const activeTableCell = getCurrentEditorTableCell(root);
+      if (activeTableCell) {
+        if (event.key === "Tab") {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          pendingNativeUndoSnapshotRef.current = null;
+          clearEditorImageSelection(root);
+          moveEditorTableSelection(
+            root,
+            event.shiftKey ? -1 : 1,
+            documentUndoHistoryRef.current,
+            scheduleDocumentSave,
+            scheduleIndentGuideUpdate,
+          );
+          refreshTableDraft(root);
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          pendingNativeUndoSnapshotRef.current = null;
+          clearEditorImageSelection(root);
+          insertEditorTableCellLineBreak(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          refreshTableDraft(root);
+          return;
+        }
+        if (event.key === "Backspace" || event.key === "Delete") {
+          pendingEditorFontSizeRef.current = null;
+          clearEditorImageSelection(root);
+          return;
+        }
+      }
+
       if (event.key === "Escape") {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         clearEditorImageSelection(root);
+        activeTableRootRef.current = null;
+        setActiveTableDraft(null);
         root.blur();
         return;
       }
@@ -1704,6 +2335,7 @@ export function useEditorDocumentSurfaceHandlers({
     pendingEditorFontSizeRef,
     rememberCurrentDocumentScroll,
     refreshMentionDraft,
+    refreshTableDraft,
     restoringScrollRef,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
@@ -1717,8 +2349,11 @@ export function useEditorDocumentSurfaceHandlers({
     clearEditorImageSelection(root);
     activeMentionRootRef.current = null;
     setActiveMentionDraft(null);
-    return insertEditorTable(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
-  }, [documentUndoHistoryRef, pendingEditorFontSizeRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+    const inserted = insertEditorTable(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    if (inserted) refreshTableDraft(root);
+    return inserted;
+  }, [documentUndoHistoryRef, pendingEditorFontSizeRef, refreshTableDraft, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
-  return { ...handlers, mentionMenu, insertTable };
+  const overlay = React.createElement(React.Fragment, null, mentionMenu, tableMenu, imagePreviewModal);
+  return { ...handlers, mentionMenu: overlay, insertTable };
 }
