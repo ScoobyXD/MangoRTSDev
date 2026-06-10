@@ -1470,6 +1470,11 @@ export function useEditorDocumentSurfaceHandlers({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [activeTableDraft, setActiveTableDraft] = useState<RichTextTableDraft | null>(null);
   const [activeImagePreview, setActiveImagePreview] = useState<EditorImagePreviewDraft | null>(null);
+  const [activeImagePreviewSize, setActiveImagePreviewSize] = useState<{ width: number; height: number } | null>(null);
+  const [activeImagePreviewViewport, setActiveImagePreviewViewport] = useState(() => ({
+    width: typeof window === "undefined" ? 1440 : window.innerWidth,
+    height: typeof window === "undefined" ? 900 : window.innerHeight,
+  }));
   const mentionOptions = useMemo(() => (
     activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
   ), [activeMentionDraft?.query, mentionUsers]);
@@ -1482,6 +1487,36 @@ export function useEditorDocumentSurfaceHandlers({
   useEffect(() => {
     setActiveMentionIndex((current) => Math.min(current, Math.max(0, mentionOptions.length - 1)));
   }, [mentionOptions.length]);
+
+  useEffect(() => {
+    setActiveImagePreviewSize(null);
+    if (!activeImagePreview || typeof window === "undefined") return undefined;
+    const updateViewport = () => {
+      setActiveImagePreviewViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, [activeImagePreview?.src]);
+
+  const imagePreviewImageSize = useMemo(() => {
+    if (!activeImagePreviewSize) return null;
+    const maxUpscale = 1.4;
+    const modalPadding = 12;
+    const headerHeight = 49;
+    const maxWidth = Math.max(1, activeImagePreviewViewport.width - (modalPadding * 2));
+    const maxHeight = Math.max(1, activeImagePreviewViewport.height - (modalPadding * 2) - headerHeight);
+    const scale = Math.min(
+      maxWidth / activeImagePreviewSize.width,
+      maxHeight / activeImagePreviewSize.height,
+      maxUpscale,
+    );
+    if (!Number.isFinite(scale) || scale <= 0) return null;
+    return {
+      width: Math.max(1, Math.round(activeImagePreviewSize.width * scale)),
+      height: Math.max(1, Math.round(activeImagePreviewSize.height * scale)),
+    };
+  }, [activeImagePreviewSize, activeImagePreviewViewport.height, activeImagePreviewViewport.width]);
 
   const refreshMentionDraft = useCallback((root: HTMLElement) => {
     if (mentionUsers.length === 0) {
@@ -1640,15 +1675,15 @@ export function useEditorDocumentSurfaceHandlers({
           background: "rgba(17,24,39,0.46)",
           display: "grid",
           placeItems: "center",
-          padding: 18,
+          padding: 12,
         } satisfies React.CSSProperties,
       },
       React.createElement(
         "div",
         {
           style: {
-            width: "min(920px, 96vw)",
-            maxHeight: "92vh",
+            width: imagePreviewImageSize ? imagePreviewImageSize.width : "min(1800px, calc(100vw - 24px))",
+            maxHeight: "calc(100vh - 24px)",
             display: "grid",
             gridTemplateRows: "auto minmax(0, 1fr)",
             border: `1px solid ${mentionStrokeColor}`,
@@ -1712,19 +1747,29 @@ export function useEditorDocumentSurfaceHandlers({
           {
             style: {
               minHeight: 0,
-              overflow: "auto",
+              width: imagePreviewImageSize ? imagePreviewImageSize.width : "100%",
+              height: imagePreviewImageSize ? imagePreviewImageSize.height : undefined,
+              overflow: "hidden",
               display: "grid",
               placeItems: "center",
               background: "#111827",
-              padding: 10,
+              padding: 0,
             } satisfies React.CSSProperties,
           },
           React.createElement("img", {
             alt: activeImagePreview.label,
             src: activeImagePreview.src,
+            onLoad: (event: React.SyntheticEvent<HTMLImageElement>) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0) {
+                setActiveImagePreviewSize({ width: naturalWidth, height: naturalHeight });
+              }
+            },
             style: {
-              maxWidth: "100%",
-              maxHeight: "78vh",
+              width: imagePreviewImageSize ? "100%" : "auto",
+              height: imagePreviewImageSize ? "100%" : "auto",
+              maxWidth: "calc(100vw - 24px)",
+              maxHeight: "calc(100vh - 73px)",
               objectFit: "contain",
               display: "block",
             } satisfies React.CSSProperties,
