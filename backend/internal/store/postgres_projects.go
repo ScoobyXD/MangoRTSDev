@@ -444,7 +444,7 @@ func (r *PostgresRepo) GetProjectView(companyID, projectID, viewerUserID string)
 	if err != nil {
 		return domain.ProjectView{}, err
 	}
-	relationships, err := r.ListProjectRelationshipProjections(companyID, projectID)
+	relationships, err := r.ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID)
 	if err != nil {
 		return domain.ProjectView{}, err
 	}
@@ -688,10 +688,29 @@ where company_id=$1::uuid
 }
 
 func (r *PostgresRepo) ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error) {
-	rows, err := r.db.QueryContext(context.Background(), projectRelationshipProjectionSelectSQL+`
+	return r.ListProjectRelationshipProjectionsForViewer(companyID, projectID, "")
+}
+
+func (r *PostgresRepo) ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error) {
+	companyID = cleanUUIDText(companyID)
+	projectID = cleanUUIDText(projectID)
+	viewerUserID = cleanUUIDText(viewerUserID)
+	if companyID == "" || projectID == "" {
+		return nil, ErrInvalid
+	}
+	query := projectRelationshipProjectionSelectSQL + `
 where projection.company_id=$1::uuid
-  and projection.project_id=$2::uuid
-order by projection.position asc, lower(projection.display_title) asc, projection.relationship_id asc`, companyID, projectID)
+  and projection.project_id=$2::uuid`
+	args := []any{companyID, projectID}
+	if viewerUserID != "" {
+		query += `
+  and mangorts_user_can_access_resource(projection.company_id, 'project', projection.project_id, $3::uuid, $4::text)
+  and mangorts_user_can_access_resource(projection.company_id, projection.resource_type, projection.resource_id, $3::uuid, $4::text)`
+		args = append(args, viewerUserID, EntityPermissionView)
+	}
+	query += `
+order by projection.position asc, lower(projection.display_title) asc, projection.relationship_id asc`
+	rows, err := r.db.QueryContext(context.Background(), query, args...)
 	if err != nil {
 		return nil, err
 	}

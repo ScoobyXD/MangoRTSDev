@@ -463,15 +463,17 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			return nil, err
 		}
 	}
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", r.projectRelationshipPermissionProjectionDeltasLocked(companyID, entityType, entityID))
 	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-		if _, err := r.appendEventRowLocked(eventInput); err != nil {
-			r.entityPermissions = permissionsSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			r.nodes = nodesSnapshot
-			r.logicGates = logicGatesSnapshot
-			r.eventRows = eventRowsSnapshot
-			return nil, err
-		}
+		eventInputs = append(eventInputs, eventInput)
+	}
+	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
+		r.entityPermissions = permissionsSnapshot
+		r.effectiveAccess = effectiveAccessSnapshot
+		r.nodes = nodesSnapshot
+		r.logicGates = logicGatesSnapshot
+		r.eventRows = eventRowsSnapshot
+		return nil, err
 	}
 	sortEntityPermissions(out)
 	return out, nil
@@ -622,11 +624,13 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			return nil, err
 		}
 	}
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", r.projectRelationshipPermissionProjectionDeltasLocked(companyID, entityType, entityID))
 	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-		if _, err := r.appendEventRowLocked(eventInput); err != nil {
-			restore()
-			return nil, err
-		}
+		eventInputs = append(eventInputs, eventInput)
+	}
+	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
+		restore()
+		return nil, err
 	}
 	sortEntityPermissions(out)
 	return out, nil
