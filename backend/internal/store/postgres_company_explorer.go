@@ -910,6 +910,8 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	directNodeIDs := map[string]bool{}
 	logicGateIDs := map[string]bool{}
 	directLogicGateIDs := map[string]bool{}
+	projectIDs := map[string]bool{}
+	directProjectIDs := map[string]bool{}
 	kanbanBoardIDs := map[string]bool{}
 	directKanbanBoardIDs := map[string]bool{}
 
@@ -979,6 +981,16 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			}
 			logicGateIDs[target.ID] = true
 			directLogicGateIDs[target.ID] = true
+		case "project":
+			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1 and project_id=$2)`, companyID, target.ID)
+			if err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+			if !exists {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			projectIDs[target.ID] = true
+			directProjectIDs[target.ID] = true
 		case "kanban":
 			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, target.ID)
 			if err != nil {
@@ -1014,6 +1026,8 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 				nodeIDs[itemID] = true
 			case "logic_gate":
 				logicGateIDs[itemID] = true
+			case "project":
+				projectIDs[itemID] = true
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -1045,6 +1059,19 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
 			delete(logicGateIDs, logicGateID)
+			continue
+		}
+	}
+	for projectID := range projectIDs {
+		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1 and project_id=$2)`, companyID, projectID)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if !exists {
+			if directProjectIDs[projectID] {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			delete(projectIDs, projectID)
 			continue
 		}
 	}
@@ -1080,6 +1107,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("folder", folderIDs)
 	appendSorted("node", nodeIDs)
 	appendSorted("logic_gate", logicGateIDs)
+	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
 
 	for folderID := range folderIDs {
@@ -1096,6 +1124,11 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	}
 	for boardID := range kanbanBoardIDs {
 		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for projectID := range projectIDs {
+		if err := postgresDeleteProjectTx(ctx, tx, companyID, projectID); err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
@@ -1369,6 +1402,8 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
 	} else if itemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
+	} else if itemType == EntityTypeProject {
+		existsQuery = `select exists(select 1 from projects where company_id=$1 and project_id=$2)`
 	} else {
 		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
@@ -1594,10 +1629,10 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		   and ($3::text is null or item.item_type=$3)
 		   and item.item_type <> 'kanban'
 		   and (
-		     item.item_type not in ('node', 'logic_gate')
+		     item.item_type not in ('node', 'logic_gate', 'project')
 		     or mangorts_user_can_access_resource(
 		       item.company_id,
-		       case item.item_type when 'node' then 'node' else 'logic_gate' end,
+		       item.item_type,
 		       item.item_id::uuid,
 		       $4::uuid,
 		       $5
@@ -1720,10 +1755,10 @@ where item.company_id=$1::uuid
   and ($3::text is null or item.item_type=$3)
   and item.item_type <> 'kanban'
   and (
-    item.item_type not in ('node', 'logic_gate')
+    item.item_type not in ('node', 'logic_gate', 'project')
     or mangorts_user_can_access_resource(
       item.company_id,
-      case item.item_type when 'node' then 'node' else 'logic_gate' end,
+      item.item_type,
       item.item_id::uuid,
       $4::uuid,
       $5

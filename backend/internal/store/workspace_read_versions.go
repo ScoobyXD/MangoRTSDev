@@ -38,6 +38,16 @@ var (
 		"logic_gate_relationship_deleted",
 		"logic_gate_deleted",
 	}
+	ProjectListWorkspaceEventTypes = []string{
+		"project_created",
+		"project_updated",
+		"project_deleted",
+		"project_information_created",
+		"project_information_deleted",
+		"project_relationship_upserted",
+		"project_relationship_deleted",
+		"project_permissions_updated",
+	}
 	NodeMapPositionWorkspaceEventTypes = []string{
 		"node_map_positions_updated",
 	}
@@ -133,11 +143,14 @@ func WorkspaceReadVersionStaticRows(companyID string) []WorkspaceReadVersionQuer
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer"},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "node")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "logic_gate")},
+		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "project")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "communications")},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items"},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "node")},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "logic_gate")},
+		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "project")},
 		{CompanyID: companyID, Scope: "nodes"},
+		{CompanyID: companyID, Scope: "projects"},
 		{CompanyID: companyID, Scope: "node-relationships"},
 		{CompanyID: companyID, Scope: "logic-gates"},
 		{CompanyID: companyID, Scope: "logic-gate-relationships"},
@@ -245,6 +258,16 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 		add("map-layout:logic_gate-window", "")
 	}
 
+	if stringInList(eventType, ProjectListWorkspaceEventTypes) {
+		add("projects", "")
+		addCompanyExplorer("")
+		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "project"))
+	}
+	if eventType == "project_deleted" || eventType == "project_permissions_updated" {
+		addCompanyExplorerFolderItems("")
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
+	}
+
 	if stringInList(eventType, CompanyExplorerFolderWorkspaceEventTypes) {
 		switch folderKind {
 		case "node":
@@ -261,6 +284,11 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
 			addCompanyExplorerFolderItems("")
 			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
+		case "project":
+			addCompanyExplorer("")
+			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "project"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
 		case "communications":
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "communications"))
 		}
@@ -281,6 +309,11 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
 			addCompanyExplorerFolderItems("")
 			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
+		case "project":
+			addCompanyExplorer("")
+			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "project"))
+			addCompanyExplorerFolderItems("")
+			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
 		}
 	}
 

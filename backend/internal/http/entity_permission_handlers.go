@@ -215,6 +215,14 @@ func visibleLogicGateIDs(logicGates []domain.LogicGate) map[string]bool {
 	return ids
 }
 
+func visibleProjectIDs(projects []domain.Project) map[string]bool {
+	ids := make(map[string]bool, len(projects))
+	for _, project := range projects {
+		ids[project.ProjectID] = true
+	}
+	return ids
+}
+
 func filterNodeRelationshipsByVisibleNodes(items []domain.NodeRelationship, ids map[string]bool) []domain.NodeRelationship {
 	out := make([]domain.NodeRelationship, 0, len(items))
 	for _, item := range items {
@@ -291,7 +299,7 @@ func (s *Server) filterVisibleLogicGateMapPositions(r *http.Request, companyID s
 	return out, nil
 }
 
-func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorerFolderItem, nodeIDs map[string]bool, logicGateIDs map[string]bool) []domain.CompanyExplorerFolderItem {
+func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorerFolderItem, nodeIDs map[string]bool, logicGateIDs map[string]bool, projectIDs map[string]bool) []domain.CompanyExplorerFolderItem {
 	out := make([]domain.CompanyExplorerFolderItem, 0, len(items))
 	for _, item := range items {
 		switch item.ItemType {
@@ -301,6 +309,10 @@ func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorer
 			}
 		case "logic_gate":
 			if logicGateIDs[item.ItemID] {
+				out = append(out, item)
+			}
+		case "project":
+			if projectIDs[item.ItemID] {
 				out = append(out, item)
 			}
 		default:
@@ -313,12 +325,15 @@ func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorer
 func (s *Server) filterVisibleCompanyExplorerFolderItems(r *http.Request, companyID string, items []domain.CompanyExplorerFolderItem) ([]domain.CompanyExplorerFolderItem, error) {
 	nodeIDs := make([]string, 0)
 	logicGateIDs := make([]string, 0)
+	projectIDs := make([]string, 0)
 	for _, item := range items {
 		switch item.ItemType {
 		case "node":
 			nodeIDs = append(nodeIDs, item.ItemID)
 		case "logic_gate":
 			logicGateIDs = append(logicGateIDs, item.ItemID)
+		case "project":
+			projectIDs = append(projectIDs, item.ItemID)
 		}
 	}
 	visibleNodes, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
@@ -326,6 +341,10 @@ func (s *Server) filterVisibleCompanyExplorerFolderItems(r *http.Request, compan
 		return nil, err
 	}
 	visibleLogicGates, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
+	if err != nil {
+		return nil, err
+	}
+	visibleProjects, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeProject, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -338,6 +357,10 @@ func (s *Server) filterVisibleCompanyExplorerFolderItems(r *http.Request, compan
 			}
 		case "logic_gate":
 			if visibleLogicGates[item.ItemID] {
+				out = append(out, item)
+			}
+		case "project":
+			if visibleProjects[item.ItemID] {
 				out = append(out, item)
 			}
 		default:
@@ -353,6 +376,8 @@ func companyExplorerEntityType(itemType string) (string, bool) {
 		return store.EntityTypeNode, true
 	case "logic_gate":
 		return store.EntityTypeLogicGate, true
+	case "project":
+		return store.EntityTypeProject, true
 	default:
 		return "", false
 	}
@@ -364,6 +389,8 @@ func companyExplorerEntityNotFoundCode(itemType string) string {
 		return "node_not_found"
 	case "logic_gate":
 		return "logic_gate_not_found"
+	case "project":
+		return "project_not_found"
 	default:
 		return "company_explorer_folder_or_item_not_found"
 	}

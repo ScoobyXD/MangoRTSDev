@@ -424,6 +424,84 @@ type LogicGateView struct {
 	EffectiveAccessFlags
 }
 
+type Project struct {
+	CompanyID        string    `json:"company_id"`
+	ProjectID        string    `json:"project_id"`
+	Name             string    `json:"name"`
+	Status           string    `json:"status"`
+	DefaultAccess    string    `json:"default_access"`
+	AccountID        *string   `json:"account_id,omitempty"`
+	AccountName      *string   `json:"account_name,omitempty"`
+	TeamID           *string   `json:"team_id,omitempty"`
+	TeamName         *string   `json:"team_name,omitempty"`
+	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type ProjectInformation struct {
+	CompanyID        string    `json:"company_id"`
+	InformationID    string    `json:"information_id"`
+	ProjectID        string    `json:"project_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type ProjectProjection struct {
+	CompanyID        string    `json:"company_id"`
+	ProjectID        string    `json:"project_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	InformationID    string    `json:"information_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type ProjectRelationship struct {
+	CompanyID        string    `json:"company_id"`
+	RelationshipID   string    `json:"relationship_id"`
+	ProjectID        string    `json:"project_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type ProjectRelationshipProjection struct {
+	CompanyID                    string    `json:"company_id"`
+	ProjectID                    string    `json:"project_id"`
+	ProjectName                  string    `json:"project_name"`
+	RelationshipID               string    `json:"relationship_id"`
+	ResourceType                 string    `json:"resource_type"`
+	ResourceID                   string    `json:"resource_id"`
+	LogicGateID                  *string   `json:"logic_gate_id,omitempty"`
+	NodeID                       *string   `json:"node_id,omitempty"`
+	DisplayTitle                 string    `json:"display_title"`
+	Status                       *string   `json:"status,omitempty"`
+	StatusColor                  *string   `json:"status_color,omitempty"`
+	Position                     int       `json:"position"`
+	ResourceCreatedTimestamp     time.Time `json:"resource_created_timestamp"`
+	RelationshipCreatedTimestamp time.Time `json:"relationship_created_timestamp"`
+	RelationshipUpdatedTimestamp time.Time `json:"relationship_updated_timestamp"`
+	ProjectionUpdatedTimestamp   time.Time `json:"projection_updated_timestamp"`
+}
+
+type ProjectView struct {
+	CompanyID         string                          `json:"company_id"`
+	ProjectID         string                          `json:"project_id"`
+	Project           Project                         `json:"project"`
+	Information       []ProjectInformation            `json:"information"`
+	Projections       []ProjectProjection             `json:"projections"`
+	Relationships     []ProjectRelationshipProjection `json:"relationships"`
+	InformationCount  int                             `json:"information_count"`
+	ProjectionCount   int                             `json:"projection_count"`
+	RelationshipCount int                             `json:"relationship_count"`
+	EffectiveAccessFlags
+}
+
 type LogicGateArenaView struct {
 	LogicGate          LogicGate      `json:"logic_gate"`
 	Board              KanbanBoard    `json:"board"`

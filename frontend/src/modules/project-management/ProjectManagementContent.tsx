@@ -36,14 +36,18 @@ import {
   type CompanyPerspective,
 } from "../perspectives/PerspectiveSelector.js";
 import {
+  createProject,
   createProjectManagementTimelineItem,
   deleteProjectManagementNode,
   deleteProjectManagementTimelineItem,
   fetchProjectManagementTimeline,
+  listProjects,
   updateProjectManagementTimelineItem,
+  type ProjectRecord,
   type ProjectManagementEntityType,
   type ProjectManagementTimelineRow,
 } from "./projectManagementApi.js";
+import { ProjectSummaryContent } from "./ProjectSummaryContent.js";
 
 type ProjectManagementContentProps = {
   accent: string;
@@ -51,6 +55,10 @@ type ProjectManagementContentProps = {
   hideTopControls?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
   onNodeOpen?: (nodeID: string) => void;
+  onLogicGateOpen?: (logicGateID: string) => void;
+  onProjectOpen?: (projectID: string) => void;
+  targetProjectID?: string;
+  targetProjectRequestID?: number;
 };
 
 type ProjectTimelinePayload = {
@@ -96,6 +104,8 @@ type TimelineContextMenuState = {
 type TimelineLoadOptions = {
   showLoading?: boolean;
 };
+
+type ProjectManagementViewMode = "timeline" | "list";
 
 type TimelineDisplayRow = {
   id: string;
@@ -180,6 +190,18 @@ function projectManagementWorkspaceEventTouchesPanel(type: string): boolean {
     cleanType === "logic_gate_raci_updated" ||
     cleanType === "logic_gate_permissions_updated" ||
     cleanType.startsWith("company_explorer_folder_");
+}
+
+function projectManagementWorkspaceEventTouchesProjects(type: string): boolean {
+  const cleanType = type.trim();
+  return cleanType === "project_created" ||
+    cleanType === "project_updated" ||
+    cleanType === "project_deleted" ||
+    cleanType === "project_information_created" ||
+    cleanType === "project_information_deleted" ||
+    cleanType === "project_relationship_upserted" ||
+    cleanType === "project_relationship_deleted" ||
+    cleanType === "project_permissions_updated";
 }
 
 function defaultUserPerspective(currentUserID: string): CompanyPerspective {
@@ -361,6 +383,7 @@ function buildProjectExplorerRows(input: {
     expanded: input.expanded,
     nodes: input.nodes,
     logicGates: input.logicGates.map(toLogicGateCanvasRecord),
+    projects: [],
     kanbanBoards: [],
     folders: [...input.nodeFolders, ...input.logicGateFolders],
     folderItems: [...input.nodeFolderItems, ...input.logicGateFolderItems],
@@ -493,11 +516,16 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   hideTopControls: _hideTopControls,
   theme: _theme,
   onNodeOpen,
+  onLogicGateOpen,
+  onProjectOpen,
+  targetProjectID,
+  targetProjectRequestID,
 }) => {
   const companyID = getActiveCompanyID();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const sequenceByUserRef = useRef(new Map<string, number>());
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
+  const projectListReloadTimerRef = useRef<number | null>(null);
   const timelineRowsRef = useRef<ProjectManagementTimelineRow[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -506,7 +534,12 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [workspace, setWorkspace] = useState<WorkspacePanelState>(EMPTY_WORKSPACE_PANEL);
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("timeline");
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [activeProjectID, setActiveProjectID] = useState("");
+  const [projectSummaryReloadKey, setProjectSummaryReloadKey] = useState(0);
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
@@ -532,6 +565,20 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
   }, [companyID]);
 
+  const loadProjectList = useCallback(async (showLoading = false) => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) return;
+    if (showLoading) setProjectsLoading(true);
+    try {
+      const response = await listProjects(cleanCompanyID);
+      setProjects(response.projects ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load projects");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, [companyID]);
+
   const scheduleWorkspacePanelReload = useCallback(() => {
     const cleanCompanyID = companyID.trim();
     if (!cleanCompanyID) return;
@@ -545,10 +592,23 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }, 250);
   }, [companyID, loadWorkspacePanel]);
 
+  const scheduleProjectListReload = useCallback(() => {
+    const cleanCompanyID = companyID.trim();
+    if (!cleanCompanyID) return;
+    if (projectListReloadTimerRef.current !== null) {
+      window.clearTimeout(projectListReloadTimerRef.current);
+    }
+    projectListReloadTimerRef.current = window.setTimeout(() => {
+      projectListReloadTimerRef.current = null;
+      void loadProjectList();
+    }, 250);
+  }, [companyID, loadProjectList]);
+
   const handleWorkspaceGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (gap.companyID !== companyID) return;
     if (projectManagementWorkspaceScopesTouchPanel(gap.scopes)) scheduleWorkspacePanelReload();
-  }, [companyID, scheduleWorkspacePanelReload]);
+    scheduleProjectListReload();
+  }, [companyID, scheduleProjectListReload, scheduleWorkspacePanelReload]);
 
   const handleWorkspaceEvent = useCallback((event: { event: string; data: string }, context: WorkspaceStreamEventContext) => {
     if (event.event !== "workspace" || event.data.length === 0) return;
@@ -561,10 +621,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
     const eventCompanyID = envelope.company_id?.trim() ?? "";
     if (eventCompanyID && eventCompanyID !== companyID) return;
-    if (projectManagementWorkspaceScopesTouchPanel(context.scopes) || projectManagementWorkspaceEventTouchesPanel(envelope.type ?? "")) {
+    const eventType = envelope.type ?? "";
+    if (projectManagementWorkspaceScopesTouchPanel(context.scopes) || projectManagementWorkspaceEventTouchesPanel(eventType)) {
       scheduleWorkspacePanelReload();
     }
-  }, [companyID, scheduleWorkspacePanelReload]);
+    if (projectManagementWorkspaceEventTouchesProjects(eventType)) {
+      scheduleProjectListReload();
+      if (activeProjectID) setProjectSummaryReloadKey((current) => current + 1);
+    }
+  }, [activeProjectID, companyID, scheduleProjectListReload, scheduleWorkspacePanelReload]);
 
   useEffect(() => {
     let cancelled = false;
@@ -614,6 +679,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     if (workspacePanelReloadTimerRef.current !== null) {
       window.clearTimeout(workspacePanelReloadTimerRef.current);
       workspacePanelReloadTimerRef.current = null;
+    }
+    if (projectListReloadTimerRef.current !== null) {
+      window.clearTimeout(projectListReloadTimerRef.current);
+      projectListReloadTimerRef.current = null;
     }
   }, []);
 
@@ -675,6 +744,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   useEffect(() => {
     void loadTimelineRows({ showLoading: true });
   }, [loadTimelineRows]);
+
+  useEffect(() => {
+    void loadProjectList(true);
+  }, [loadProjectList]);
+
+  useEffect(() => {
+    const cleanProjectID = targetProjectID?.trim() ?? "";
+    if (!cleanProjectID) return;
+    setActiveProjectID(cleanProjectID);
+    setViewMode("list");
+  }, [targetProjectID, targetProjectRequestID]);
 
   useEffect(() => {
     if (!companyID || !timelineTargetKey) return undefined;
@@ -922,6 +1002,34 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setTimelineRows((current) => current.filter((row) => !items.some((item) => item.item_id === row.item_id)));
     void Promise.allSettled(items.map((item) => deleteProjectManagementTimelineItem(companyID, item.item_id))).then(() => loadTimelineRows());
   }, [companyID, loadTimelineRows, visibleTimelineRows]);
+
+  const openProject = useCallback((projectID: string) => {
+    const cleanProjectID = projectID.trim();
+    if (!cleanProjectID) return;
+    setActiveProjectID(cleanProjectID);
+    setViewMode("list");
+    onProjectOpen?.(cleanProjectID);
+  }, [onProjectOpen]);
+
+  const createNewProject = useCallback(async () => {
+    setError("");
+    try {
+      const result = await createProject({
+        companyID,
+        name: "Untitled Project",
+        status: "Active",
+      });
+      if (result.project) {
+        setProjects((current) => [result.project!, ...current.filter((project) => project.project_id !== result.project!.project_id)]);
+        openProject(result.project.project_id);
+      } else {
+        await loadProjectList();
+      }
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to create project");
+    }
+  }, [companyID, loadProjectList, openProject]);
+
   const showLocalProjectExplorer = false;
 
   const startVerticalResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -931,56 +1039,88 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setResizeState({ kind: "vertical", pageTop: rect.top, pageHeight: rect.height });
   };
 
+  if (activeProjectID) {
+    return (
+      <ProjectSummaryContent
+        key={`${activeProjectID}:${projectSummaryReloadKey}`}
+        projectID={activeProjectID}
+        accent={accent}
+        onBack={() => setActiveProjectID("")}
+        onNodeOpen={onNodeOpen}
+        onLogicGateOpen={onLogicGateOpen}
+      />
+    );
+  }
+
   return (
     <div ref={pageRef} style={pageStyle(showLocalProjectExplorer, verticalSplit)}>
       <section style={timelineSurfaceStyle}>
         <div style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
             <h2 style={surfaceTitleStyle}>Project Management</h2>
-            <div style={surfaceMetaStyle}>{shortDayLabel(weekDays[0])} - {shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}</div>
+            <div style={surfaceMetaStyle}>{viewMode === "timeline" ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}` : `${projects.length} projects`}</div>
           </div>
-          <CompanyPerspectiveSelector
-            companyUsers={companyUsers}
-            groups={groups}
-            groupMembers={groupMembers}
-            currentUserID={currentUserID}
-            value={timelinePerspective}
-            onChange={setTimelinePerspective}
-            label="Timeline"
-          />
-          <AccountFilterControl
-            accounts={timelineAccounts}
-            selectedAccountIDs={timelineAccountFilterIDs}
-            onChange={setTimelineAccountFilterIDs}
-            label="Accounts"
-            placeholder="Filter accounts"
-            compact
-          />
-          <div style={weekControlsStyle}>
-            <button type="button" aria-label="Previous week" style={iconButtonStyle} onClick={() => setWeekAnchor((current) => addDays(current, -WEEK_DAY_COUNT))}>{"<"}</button>
-            <button type="button" style={todayButtonStyle} onClick={() => setWeekAnchor(weekStart(new Date()))}>Today</button>
-            <button type="button" aria-label="Next week" style={iconButtonStyle} onClick={() => setWeekAnchor((current) => addDays(current, WEEK_DAY_COUNT))}>{">"}</button>
-            <button type="button" style={secondaryButtonStyle} onClick={clearTimelinePerspective}>Clear</button>
+          <div style={viewToggleStyle}>
+            <button type="button" style={viewToggleButtonStyle(viewMode === "list")} onClick={() => setViewMode("list")}>List View</button>
+            <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>
           </div>
+          {viewMode === "timeline" ? (
+            <>
+              <CompanyPerspectiveSelector
+                companyUsers={companyUsers}
+                groups={groups}
+                groupMembers={groupMembers}
+                currentUserID={currentUserID}
+                value={timelinePerspective}
+                onChange={setTimelinePerspective}
+                label="Timeline"
+              />
+              <AccountFilterControl
+                accounts={timelineAccounts}
+                selectedAccountIDs={timelineAccountFilterIDs}
+                onChange={setTimelineAccountFilterIDs}
+                label="Accounts"
+                placeholder="Filter accounts"
+                compact
+              />
+              <div style={weekControlsStyle}>
+                <button type="button" aria-label="Previous week" style={iconButtonStyle} onClick={() => setWeekAnchor((current) => addDays(current, -WEEK_DAY_COUNT))}>{"<"}</button>
+                <button type="button" style={todayButtonStyle} onClick={() => setWeekAnchor(weekStart(new Date()))}>Today</button>
+                <button type="button" aria-label="Next week" style={iconButtonStyle} onClick={() => setWeekAnchor((current) => addDays(current, WEEK_DAY_COUNT))}>{">"}</button>
+                <button type="button" style={secondaryButtonStyle} onClick={clearTimelinePerspective}>Clear</button>
+              </div>
+            </>
+          ) : (
+            <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
+          )}
         </div>
         <div style={timelineMessageSlotStyle}>
           {error && <div style={errorStyle}>{error}</div>}
         </div>
-        <TimelineChart
-          accent={accent}
-          loading={loading || timelineLoading}
-          weekDays={weekDays}
-          rows={timelineDisplayRows}
-          draft={barDraft}
-          onDropEntity={addTimelineItem}
-          onRemoveItem={removeTimelineItem}
-          onDeleteNode={deleteTimelineNode}
-          onNodeOpen={onNodeOpen}
-          contextMenu={timelineContextMenu}
-          onOpenContextMenu={setTimelineContextMenu}
-          onStartBarInteraction={setBarInteraction}
-          onToggleGate={toggleTimelineGate}
-        />
+        {viewMode === "timeline" ? (
+          <TimelineChart
+            accent={accent}
+            loading={loading || timelineLoading}
+            weekDays={weekDays}
+            rows={timelineDisplayRows}
+            draft={barDraft}
+            onDropEntity={addTimelineItem}
+            onRemoveItem={removeTimelineItem}
+            onDeleteNode={deleteTimelineNode}
+            onNodeOpen={onNodeOpen}
+            onLogicGateOpen={onLogicGateOpen}
+            contextMenu={timelineContextMenu}
+            onOpenContextMenu={setTimelineContextMenu}
+            onStartBarInteraction={setBarInteraction}
+            onToggleGate={toggleTimelineGate}
+          />
+        ) : (
+          <ProjectListTable
+            projects={projects}
+            loading={projectsLoading}
+            onProjectOpen={openProject}
+          />
+        )}
       </section>
       {showLocalProjectExplorer && (
         <>
@@ -1010,6 +1150,63 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   );
 };
 
+function ProjectListTable({
+  projects,
+  loading,
+  onProjectOpen,
+}: {
+  projects: ProjectRecord[];
+  loading: boolean;
+  onProjectOpen: (projectID: string) => void;
+}) {
+  const sortedProjects = useMemo(() => [...projects].sort((left, right) => (
+    left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.project_id.localeCompare(right.project_id)
+  )), [projects]);
+
+  if (loading) {
+    return <div style={projectListEmptyStyle}>Loading</div>;
+  }
+
+  return (
+    <div className="kanban-board-scroll" style={projectListScrollStyle}>
+      <table style={projectTableStyle}>
+        <thead>
+          <tr>
+            <th style={projectHeaderCellStyle}>Project Name</th>
+            <th style={projectHeaderCellStyle}>Status</th>
+            <th style={projectHeaderCellStyle}>Account</th>
+            <th style={projectHeaderCellStyle}>Team</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedProjects.map((project) => (
+            <tr
+              key={project.project_id}
+              style={projectRowStyle}
+              onClick={() => onProjectOpen(project.project_id)}
+              onDoubleClick={() => onProjectOpen(project.project_id)}
+            >
+              <td style={projectNameCellStyle}>
+                <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
+                <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
+              </td>
+              <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
+              <td style={projectCellStyle}>{project.account_name || "Unassigned"}</td>
+              <td style={projectCellStyle}>{project.team_name || "Unassigned"}</td>
+            </tr>
+          ))}
+          {sortedProjects.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={projectEmptyCellStyle}>No projects</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function TimelineChart({
   accent,
   loading,
@@ -1020,6 +1217,7 @@ function TimelineChart({
   onRemoveItem,
   onDeleteNode,
   onNodeOpen,
+  onLogicGateOpen,
   contextMenu,
   onOpenContextMenu,
   onStartBarInteraction,
@@ -1034,6 +1232,7 @@ function TimelineChart({
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
   onDeleteNode: (item: ProjectManagementTimelineRow) => void;
   onNodeOpen?: (nodeID: string) => void;
+  onLogicGateOpen?: (logicGateID: string) => void;
   contextMenu: TimelineContextMenuState | null;
   onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
   onStartBarInteraction: (interaction: BarInteraction) => void;
@@ -1095,6 +1294,13 @@ function TimelineChart({
             <React.Fragment key={displayRow.id}>
               <div
                 style={timelineRowLabelStyle(rowIndex, displayRow.depth, displayRow.kind)}
+                onDoubleClick={() => {
+                  if (displayRow.kind === "logic_gate" && displayRow.gateID) onLogicGateOpen?.(displayRow.gateID);
+                  if (displayRow.kind === "node") {
+                    const nodeID = nodeIDForTimelineRow(item);
+                    if (nodeID) onNodeOpen?.(nodeID);
+                  }
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -1424,10 +1630,144 @@ const bottomExplorerStyle: React.CSSProperties = {
 
 const surfaceHeaderStyle: React.CSSProperties = {
   minHeight: 38,
-  display: "grid",
-  gridTemplateColumns: "minmax(170px, 1fr) minmax(300px, auto) minmax(260px, 0.75fr) auto",
+  display: "flex",
   alignItems: "center",
+  justifyContent: "space-between",
   gap: 12,
+  flexWrap: "wrap",
+};
+
+const viewToggleStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: 3,
+  borderRadius: 999,
+  background: "#e2e8f0",
+  gap: 2,
+};
+
+const viewToggleButtonStyle = (active: boolean): React.CSSProperties => ({
+  minHeight: 30,
+  border: 0,
+  borderRadius: 999,
+  padding: "0 12px",
+  background: active ? "#ffffff" : "transparent",
+  color: active ? "#0f172a" : "#64748b",
+  fontSize: 12,
+  fontWeight: 900,
+  cursor: "pointer",
+  boxShadow: active ? "0 1px 4px rgba(15, 23, 42, 0.10)" : "none",
+});
+
+const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
+  minHeight: 32,
+  border: 0,
+  borderRadius: 8,
+  background: accent,
+  color: "#ffffff",
+  padding: "0 12px",
+  fontWeight: 900,
+  cursor: "pointer",
+  boxShadow: "0 8px 18px rgba(37, 99, 235, 0.16)",
+});
+
+const projectListScrollStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflow: "auto",
+  border: "1px solid rgba(148, 163, 184, 0.20)",
+  borderRadius: 10,
+  background: "rgba(255, 255, 255, 0.82)",
+};
+
+const projectTableStyle: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+  minWidth: 720,
+  color: "#0f172a",
+};
+
+const projectHeaderCellStyle: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 1,
+  height: 42,
+  padding: "0 14px",
+  background: "#f8fafc",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.26)",
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 900,
+  textAlign: "left",
+};
+
+const projectRowStyle: React.CSSProperties = {
+  height: 48,
+  cursor: "pointer",
+};
+
+const projectCellStyle: React.CSSProperties = {
+  padding: "0 14px",
+  borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#334155",
+  whiteSpace: "nowrap",
+};
+
+const projectNameCellStyle: React.CSSProperties = {
+  ...projectCellStyle,
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+  color: "#0f172a",
+  fontWeight: 900,
+};
+
+const projectIconCellStyle: React.CSSProperties = {
+  width: 18,
+  height: 18,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+};
+
+const projectNameTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const projectStatusPillStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 24,
+  borderRadius: 999,
+  padding: "0 9px",
+  background: "rgba(16, 185, 129, 0.12)",
+  color: "#047857",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const projectEmptyCellStyle: React.CSSProperties = {
+  height: 120,
+  textAlign: "center",
+  color: "#64748b",
+  fontWeight: 850,
+};
+
+const projectListEmptyStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(148, 163, 184, 0.20)",
+  borderRadius: 10,
+  background: "rgba(255, 255, 255, 0.82)",
+  color: "#64748b",
+  fontWeight: 850,
 };
 
 const titleClusterStyle: React.CSSProperties = {

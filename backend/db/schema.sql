@@ -389,6 +389,122 @@ create index if not exists idx_logic_gate_raci_user_role_gate
 create index if not exists idx_logic_gate_raci_gate_role_user
   on logic_gate_raci_assignments(company_id, logic_gate_id, role, user_id);
 
+create table if not exists projects (
+  company_id uuid not null,
+  project_id uuid not null,
+  name text not null,
+  status text not null default 'Active',
+  account_id uuid,
+  team_id uuid,
+  default_access text not null default 'edit',
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint projects_name_nonblank_chk check (btrim(name) <> ''),
+  constraint projects_status_nonblank_chk check (btrim(status) <> ''),
+  constraint projects_default_access_chk check (default_access in ('edit', 'no_access')),
+  primary key (company_id, project_id),
+  foreign key (company_id) references companies(company_id) on delete cascade
+);
+
+create index if not exists idx_projects_company_name
+  on projects(company_id, lower(name), project_id);
+
+create index if not exists idx_projects_account
+  on projects(company_id, account_id, lower(name), project_id)
+  where account_id is not null;
+
+create index if not exists idx_projects_team
+  on projects(company_id, team_id, lower(name), project_id)
+  where team_id is not null;
+
+create table if not exists project_information (
+  company_id uuid not null,
+  information_id uuid not null,
+  project_id uuid not null,
+  type information_type not null,
+  information text not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint project_information_nonblank_chk check (btrim(information) <> ''),
+  primary key (company_id, information_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
+);
+
+create index if not exists idx_project_information_project
+  on project_information(company_id, project_id, created_timestamp, information_id);
+
+create table if not exists project_projection_table (
+  company_id uuid not null,
+  project_id uuid not null,
+  information_id uuid not null,
+  type information_type not null,
+  information text not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint project_projection_table_nonblank_chk check (btrim(information) <> ''),
+  primary key (company_id, project_id, information_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
+);
+
+create index if not exists idx_project_projection_table_project_created
+  on project_projection_table(company_id, project_id, type, created_timestamp desc, information_id);
+
+create table if not exists project_relationships (
+  company_id uuid not null,
+  relationship_id uuid not null,
+  project_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint project_relationships_resource_type_chk check (resource_type in ('logic_gate', 'node')),
+  primary key (company_id, relationship_id),
+  unique (company_id, project_id, resource_type, resource_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
+);
+
+create index if not exists idx_project_relationships_project_position
+  on project_relationships(company_id, project_id, position, relationship_id);
+
+create index if not exists idx_project_relationships_resource
+  on project_relationships(company_id, resource_type, resource_id, project_id);
+
+create table if not exists project_relationship_projection (
+  company_id uuid not null,
+  project_id uuid not null,
+  relationship_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  logic_gate_id uuid,
+  node_id uuid,
+  display_title text not null,
+  status text,
+  status_color text,
+  position integer not null default 0,
+  resource_created_timestamp timestamptz not null,
+  relationship_created_timestamp timestamptz not null,
+  relationship_updated_timestamp timestamptz not null,
+  projection_updated_timestamp timestamptz not null default now(),
+  constraint project_relationship_projection_resource_type_chk check (resource_type in ('logic_gate', 'node')),
+  constraint project_relationship_projection_title_chk check (btrim(display_title) <> ''),
+  constraint project_relationship_projection_target_chk check (
+    (resource_type='logic_gate' and logic_gate_id is not null and node_id is null and resource_id=logic_gate_id)
+    or (resource_type='node' and node_id is not null and resource_id=node_id)
+  ),
+  primary key (company_id, relationship_id),
+  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade,
+  foreign key (company_id, relationship_id) references project_relationships(company_id, relationship_id) on delete cascade,
+  foreign key (company_id, logic_gate_id) references logic_gates(company_id, logic_gate_id) on delete cascade,
+  foreign key (company_id, node_id) references nodes(company_id, node_id) on delete cascade
+);
+
+create index if not exists idx_project_relationship_projection_project
+  on project_relationship_projection(company_id, project_id, position, lower(display_title), relationship_id);
+
+create index if not exists idx_project_relationship_projection_resource
+  on project_relationship_projection(company_id, resource_type, resource_id, project_id);
+
 create table if not exists resource_raci_assignments (
   company_id uuid not null,
   resource_type text not null,
@@ -397,7 +513,7 @@ create table if not exists resource_raci_assignments (
   subject_type text not null,
   subject_id uuid not null,
   created_timestamp timestamptz not null default now(),
-  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
+  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder')),
   constraint resource_raci_assignments_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
   constraint resource_raci_assignments_subject_type_chk check (subject_type in ('user', 'group')),
   primary key (company_id, resource_type, resource_id, role, subject_type, subject_id),
@@ -418,7 +534,7 @@ create table if not exists entity_access_permissions (
   subject_id uuid not null,
   permission text not null default 'view',
   created_timestamp timestamptz not null default now(),
-  constraint entity_access_permissions_entity_type_chk check (entity_type in ('node', 'logic_gate')),
+  constraint entity_access_permissions_entity_type_chk check (entity_type in ('node', 'logic_gate', 'project')),
   constraint entity_access_permissions_subject_type_chk check (subject_type in ('user', 'group')),
   constraint entity_access_permissions_permission_chk check (permission = 'view'),
   primary key (company_id, entity_type, entity_id, subject_type, subject_id, permission),
@@ -440,7 +556,7 @@ create table if not exists resource_access_grants (
   principal_id uuid not null,
   access_level text not null default 'view',
   created_timestamp timestamptz not null default now(),
-  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'shared_triage_folder')),
+  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder')),
   constraint resource_access_grants_principal_type_chk check (principal_type in ('user', 'group')),
   constraint resource_access_grants_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   primary key (company_id, resource_type, resource_id, principal_type, principal_id),
@@ -460,7 +576,7 @@ create table if not exists resource_permissions (
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project')),
   primary key (company_id, resource_type, resource_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
@@ -519,6 +635,12 @@ returns boolean as $$
     where normalized.resource_type='logic_gate'
       and gate.company_id=p_company_id
       and gate.logic_gate_id=p_resource_id
+    union all
+    select coalesce(project.default_access, 'edit')
+    from projects project, normalized_resource normalized
+    where normalized.resource_type='project'
+      and project.company_id=p_company_id
+      and project.project_id=p_resource_id
   ),
   direct_override(exists_override) as (
     select exists (
@@ -602,9 +724,9 @@ returns boolean as $$
   )
   select case
     when requested.required_rank = 0 then false
-    when normalized_resource.resource_type not in ('node', 'logic_gate', 'shared_triage_folder') then false
+    when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'shared_triage_folder') then false
     when (select allowed from role_admin_actor) then true
-    when normalized_resource.resource_type in ('node', 'logic_gate')
+    when normalized_resource.resource_type in ('node', 'logic_gate', 'project')
       and exists (
         select 1
         from company_memberships membership
@@ -1106,7 +1228,7 @@ create table if not exists company_explorer_folders (
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'communications')),
+  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project', 'communications')),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_account_email_chk check (
     account_email is null or (
@@ -1184,7 +1306,7 @@ create table if not exists company_explorer_folder_items (
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate')),
+  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate', 'project')),
   primary key (company_id, item_type, item_id),
   foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
 );
@@ -1327,11 +1449,14 @@ returns table(scope text, resource_key text) as $$
     ('workspace-snapshot:company_explorer', ''),
     ('workspace-snapshot:company_explorer', 'folder_kind:node'),
     ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+    ('workspace-snapshot:company_explorer', 'folder_kind:project'),
     ('workspace-snapshot:company_explorer', 'folder_kind:communications'),
     ('company-explorer-folder-items', ''),
     ('company-explorer-folder-items', 'item_type:node'),
     ('company-explorer-folder-items', 'item_type:logic_gate'),
+    ('company-explorer-folder-items', 'item_type:project'),
     ('nodes', ''),
+    ('projects', ''),
     ('node-relationships', ''),
     ('logic-gates', ''),
     ('logic-gate-relationships', ''),
@@ -1426,6 +1551,30 @@ begin
     ) as v(scope, resource_key);
   end if;
 
+  if p_event_type = any(array[
+    'project_created',
+    'project_updated',
+    'project_deleted',
+    'project_information_created',
+    'project_information_deleted',
+    'project_relationship_upserted',
+    'project_relationship_deleted',
+    'project_permissions_updated'
+  ]::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('projects', ''),
+      ('workspace-snapshot:company_explorer', ''),
+      ('workspace-snapshot:company_explorer', 'folder_kind:project')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['project_deleted', 'project_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:project')
+    ) as v(scope, resource_key);
+  end if;
+
   if p_event_type = any(array['logic_gate_relationship_created', 'logic_gate_relationship_deleted', 'logic_gate_deleted']::text[]) then
     return query select v.scope, v.resource_key from (values
       ('logic-gate-relationships', ''),
@@ -1477,6 +1626,13 @@ begin
         ('company-explorer-folder-items', ''),
         ('company-explorer-folder-items', 'item_type:logic_gate')
       ) as v(scope, resource_key);
+    elsif folder_kind = 'project' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:project')
+      ) as v(scope, resource_key);
     elsif folder_kind = 'communications' then
       return query select v.scope, v.resource_key from (values
         ('workspace-snapshot:company_explorer', 'folder_kind:communications')
@@ -1504,6 +1660,13 @@ begin
         ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
         ('company-explorer-folder-items', ''),
         ('company-explorer-folder-items', 'item_type:logic_gate')
+      ) as v(scope, resource_key);
+    elsif item_type = 'project' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:project')
       ) as v(scope, resource_key);
     end if;
   end if;

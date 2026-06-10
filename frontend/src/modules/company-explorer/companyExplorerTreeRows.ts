@@ -2,6 +2,7 @@ import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
 import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard } from "../kanban/shared.js";
+import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import {
   formatExplorerFolderLabel,
   isExplorerSystemFolderKey,
@@ -13,6 +14,7 @@ type BuildCompanyExplorerTreeRowsInput = {
   expanded: Set<string>;
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
+  projects: ProjectRecord[];
   kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
@@ -23,6 +25,7 @@ type BuildCompanyExplorerTreeRowsInput = {
 const ROOT_ROW_POSITION_OFFSET: Record<CompanyExplorerFolderKind, number> = {
   node: 0,
   logic_gate: 100_000_000,
+  project: 200_000_000,
 };
 
 function normalizeFolderName(value: string): string {
@@ -78,6 +81,7 @@ export function buildCompanyExplorerTreeRows({
   expanded,
   nodes,
   logicGates,
+  projects,
   kanbanBoards,
   folders,
   folderItems,
@@ -89,6 +93,7 @@ export function buildCompanyExplorerTreeRows({
   const currentDate = normalizeISODate(todayISODate) || getLocalISODate();
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+  const projectByID = new Map(projects.map((project) => [project.project_id, project]));
   const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
   const folderPathLabelByID = new Map<string, string>();
   const getFolderPathLabel = (folderID: string): string => {
@@ -111,6 +116,7 @@ export function buildCompanyExplorerTreeRows({
   };
   const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
   const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
+  const assignedProjects = new Set(folderItems.filter((item) => item.item_type === "project").map((item) => item.item_id));
   const nodesByLogicGateID = new Map<string, NodeRecord[]>();
   for (const node of nodes) {
     for (const logicGateID of node.logic_gate_ids ?? []) {
@@ -206,6 +212,25 @@ export function buildCompanyExplorerTreeRows({
         });
       }
     }
+    if (parentFolderID === "" && folderKind === "project") {
+      for (const project of projects) {
+        if (assignedProjects.has(project.project_id)) continue;
+        syntheticRootPosition += TREE_ROW_POSITION_STEP;
+        const rowID = `project-${project.project_id}`;
+        branchRows.push({
+          id: rowID,
+          label: project.name || project.project_id,
+          depth,
+          kind: "project",
+          projectID: project.project_id,
+          folderID: "",
+          folderKind,
+          scopeLevel: depth,
+          position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
+          createdTimestamp: project.created_timestamp,
+        });
+      }
+    }
     for (const item of directItems) {
       if (item.item_type === "node") {
         const node = nodeByID.get(item.item_id);
@@ -240,6 +265,23 @@ export function buildCompanyExplorerTreeRows({
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
             hasChildren: getLogicGateChildNodes(logicGate.logic_gate_id).length > 0,
+          });
+        }
+      } else if (item.item_type === "project") {
+        const project = projectByID.get(item.item_id);
+        if (project) {
+          branchRows.push({
+            id: `project-${project.project_id}`,
+            label: project.name || project.project_id,
+            depth,
+            kind: "project",
+            projectID: project.project_id,
+            folderID: parentFolderID,
+            folderKind,
+            folderLabel: getFolderPathLabel(parentFolderID),
+            scopeLevel: depth,
+            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `project-${project.project_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
+            createdTimestamp: item.created_timestamp,
           });
         }
       }
@@ -309,6 +351,7 @@ export function buildCompanyExplorerTreeRows({
   for (const row of sortExplorerRowsByPosition([
     ...buildFolderBranchRows("node", "", 0),
     ...buildFolderBranchRows("logic_gate", "", 0),
+    ...buildFolderBranchRows("project", "", 0),
   ])) {
     rows.push(row);
     if (row.kind === "logic_gate" && expanded.has(row.id) && row.logicGateID) {

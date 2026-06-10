@@ -14,9 +14,10 @@ export type ExplorerTreeNode = {
   id: string;
   label: string;
   depth: number;
-  kind: "folder" | "node" | "logic_gate" | "kanban";
+  kind: "folder" | "node" | "logic_gate" | "project" | "kanban";
   nodeID?: string;
   logicGateID?: string;
+  projectID?: string;
   kanbanBoardID?: string;
   folderID?: string;
   parentFolderID?: string;
@@ -37,7 +38,7 @@ export type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorer
 export type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
 export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
-export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string };
+export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string } | { kind: "project"; id: string };
 export type ExplorerPinTarget = { kind: "node" | "logic_gate"; id: string; label: string };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
 export type CompanyExplorerFindRequestDetail = {

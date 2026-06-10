@@ -269,6 +269,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/account-folders/", s.handleAccountFolderByID)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
+	mux.HandleFunc("/v1/projects", s.handleProjects)
+	mux.HandleFunc("/v1/projects/", s.handleProjectSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)

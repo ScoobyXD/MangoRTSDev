@@ -88,6 +88,17 @@ export const ExplorerRowIcon: React.FC<{
       </svg>
     );
   }
+  if (kind === "project") {
+    const stroke = inverse ? "#ffffff" : orange ? "#ff9708" : "#2563eb";
+    const fill = inverse ? "rgba(255,255,255,0.10)" : orange ? "rgba(255,151,8,0.10)" : "rgba(37,99,235,0.10)";
+    return (
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+        <path d="M2.3 3.1h11.4v9.8H2.3z" fill={fill} stroke={stroke} strokeWidth="1.25" strokeLinejoin="round" />
+        <path d="M4.1 5.25h3.2M4.1 7.85h5.7M4.1 10.45h3.9" fill="none" stroke={stroke} strokeWidth="1.05" strokeLinecap="round" />
+        <path d="M11.25 5.15h1.3v1.3h-1.3zM11.25 7.45h1.3v1.3h-1.3zM11.25 9.75h1.3v1.3h-1.3z" fill={stroke} />
+      </svg>
+    );
+  }
   if (kind === "kanban") {
     return <KanbanBoardIcon />;
   }

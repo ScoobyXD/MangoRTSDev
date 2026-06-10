@@ -1269,7 +1269,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const rootOrderStorageKey = `company-explorer-root-order-v1:${companyID}:${scope}`;
 
   const [explorerStore, dispatchExplorerStore] = useReducer(reduceCompanyExplorerStore, undefined, createCompanyExplorerStoreState);
-  const { nodes, logicGates, kanbanBoards, folders, folderItems, folderSnapshotLoaded } = explorerStore;
+  const { nodes, logicGates, projects, kanbanBoards, folders, folderItems, folderSnapshotLoaded } = explorerStore;
   const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
   const [selectedTreeIDs, setSelectedTreeIDs] = useState<Set<string>>(new Set(["folder-root"]));
   const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
@@ -1647,6 +1647,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     expanded: effectiveExpanded,
     nodes: scopedExplorerData.nodes,
     logicGates: scopedExplorerData.logicGates,
+    projects,
     kanbanBoards,
     folders: scopedExplorerData.folders,
     folderItems: scopedExplorerData.folderItems,
@@ -1667,13 +1668,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           expanded: expandedForBranch,
           nodes: scopedExplorerData.nodes,
           logicGates: scopedExplorerData.logicGates,
+          projects,
           kanbanBoards,
           folders: scopedExplorerData.folders,
           folderItems: scopedExplorerData.folderItems,
           rootRowOrder,
         });
     return buildScopedCompanyExplorerTreeRows(rows, logicGatesByFunctionRootFolder.folder_id);
-  }, [effectiveExpanded, fullTreeRows, kanbanBoards, logicGatesByFunctionRootFolder, rootRowOrder, scopedExplorerData]);
+  }, [effectiveExpanded, fullTreeRows, kanbanBoards, logicGatesByFunctionRootFolder, projects, rootRowOrder, scopedExplorerData]);
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
   const teamCompanyExplorerActive = scopeViewsEnabled && scopeView !== "mine" && !scopedExplorerActive;
   const companyHistoryRows = useMemo(() => (
@@ -1738,6 +1740,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       expanded: expandedForSearch,
       nodes,
       logicGates,
+      projects,
       kanbanBoards,
       folders,
       folderItems,
@@ -1763,7 +1766,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       }),
       ...logicGatesByFunctionSearchRows,
     ];
-  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopeViewsEnabled]);
+  }, [companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, projects, raciProjectionByUserID, rootRowOrder, scopedExplorerActive, scopeViewsEnabled]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
@@ -2259,6 +2262,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const deletedFolderIDs = new Set<string>();
     const deletedNodeIDs = new Set<string>();
     const deletedLogicGateIDs = new Set<string>();
+    const deletedProjectIDs = new Set<string>();
     const deletedKanbanBoardIDs = new Set<string>();
 
     for (const target of normalizedTargets) {
@@ -2269,6 +2273,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       } else if (target.kind === "logic_gate") {
         deletedLogicGateIDs.add(target.id);
         deletedKanbanBoardIDs.add(logicGateKanbanBoardID(target.id));
+      } else if (target.kind === "project") {
+        deletedProjectIDs.add(target.id);
       } else {
         deletedKanbanBoardIDs.add(target.id);
       }
@@ -2280,6 +2286,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       } else if (item.item_type === "logic_gate") {
         deletedLogicGateIDs.add(item.item_id);
         deletedKanbanBoardIDs.add(logicGateKanbanBoardID(item.item_id));
+      } else if (item.item_type === "project") {
+        deletedProjectIDs.add(item.item_id);
       }
     }
     for (const board of kanbanBoards) {
@@ -2296,6 +2304,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deletedFolderIDs,
       deletedNodeIDs,
       deletedLogicGateIDs,
+      deletedProjectIDs,
       deletedKanbanBoardIDs,
     });
     try {
@@ -2511,8 +2520,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [focusTreeRow]);
 
   const emitExplorerEntityActivation = useCallback((row: ExplorerTreeNode) => {
-    const kind = row.kind === "node" || row.kind === "logic_gate" ? row.kind : "";
-    const id = kind === "node" ? (row.nodeID ?? "") : kind === "logic_gate" ? (row.logicGateID ?? "") : "";
+    const kind = row.kind === "node" || row.kind === "logic_gate" || row.kind === "project" ? row.kind : "";
+    const id = kind === "node" ? (row.nodeID ?? "") : kind === "logic_gate" ? (row.logicGateID ?? "") : kind === "project" ? (row.projectID ?? "") : "";
     const cleanID = id.trim();
     if (!kind || !cleanID) return;
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
@@ -2522,7 +2531,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       id: cleanID,
       label: row.label,
       selectedTreeID: row.id,
-      suppressNavigation: kind === "node",
       changedAt: Date.now(),
     });
   }, [companyID, scope]);
@@ -2638,6 +2646,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       folderItems,
       nodeIDs: nodes.map((node) => node.node_id),
       logicGateIDs: logicGates.map((logicGate) => logicGate.logic_gate_id),
+      projectIDs: projects.map((project) => project.project_id),
       currentExpandedIDs: expandedRef.current,
     });
     if (!plan.primaryTreeID || !plan.primaryEntity) return;
@@ -2654,14 +2663,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setSelectedNodeID(plan.primaryEntity.id);
       setSelectedLogicGateID("");
       setSelectedKanbanBoardID("");
-    } else {
+    } else if (plan.primaryEntity.kind === "logic_gate") {
       setSelectedLogicGateID(plan.primaryEntity.id);
       setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
+    } else {
+      setSelectedNodeID("");
+      setSelectedLogicGateID("");
       setSelectedKanbanBoardID("");
     }
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = plan.primaryTreeID;
-  }, [folderItems, folders, logicGates, nodes]);
+  }, [folderItems, folders, logicGates, nodes, projects]);
 
   const selectExplorerSearchResult = useCallback((row: ExplorerTreeNode) => {
     treeKeyboardActiveRef.current = true;
@@ -2859,8 +2872,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : "";
+      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (row.folderID && itemType && itemID) itemAssignments.push({ folder_id: row.folderID, item_type: itemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -2903,8 +2916,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, parentFolderID, { position, parentProvided: row.id === source.id }));
         continue;
       }
-      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
+      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -2955,8 +2968,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : "";
+      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -2984,6 +2997,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [assignItemsToFolders, baseTreeRows, scopedAllowedItemType]);
 
   const requestMapFind = useCallback((target: ExplorerFindTarget) => {
+    if (target.kind === "project") return;
     if (target.kind === "node") {
       emitDashboardEvent(EVENT_NODE_MAP_FOCUS_REQUESTED, {
         mapWidgetID: linkedMapFrameID,
@@ -3033,7 +3047,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const syntheticScopeHeader = row?.syntheticKind === "default_scope_folder" && !row.folderID;
     const creationTargetRow = syntheticScopeHeader ? null : creationRow;
     const canCreateForContext = !protectedRaciRow || Boolean(row?.folderID);
-    const contextKind: CompanyExplorerFolderKind | null = creationTargetRow?.folderKind ?? (creationTargetRow?.kind === "node" ? "node" : creationTargetRow?.kind === "logic_gate" ? "logic_gate" : null);
+    const contextKind: CompanyExplorerFolderKind | null = creationTargetRow?.folderKind ?? (creationTargetRow?.kind === "node" ? "node" : creationTargetRow?.kind === "logic_gate" ? "logic_gate" : creationTargetRow?.kind === "project" ? "project" : null);
     const createNodeLogicGateID = creationTargetRow?.kind === "logic_gate"
       ? (creationTargetRow.logicGateID ?? "")
       : (creationTargetRow?.parentLogicGateID ?? "");

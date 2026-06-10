@@ -12,6 +12,7 @@ const companyExplorerDefaultCommunicationsFolderSeedKey = "communications_v1"
 const companyExplorerSystemFolderSeedKey = "system_folders_v1"
 const CompanyExplorerSystemActiveNodesKey = "active_nodes"
 const CompanyExplorerSystemActiveLogicGatesKey = "active_logic_gates"
+const CompanyExplorerSystemActiveProjectsKey = "active_projects"
 const CompanyExplorerSystemHistoryKey = "history"
 
 var companyExplorerDefaultLogicGateChildFolderNames = []string{
@@ -85,6 +86,7 @@ type companyExplorerSystemFolderDefinition struct {
 var companyExplorerSystemFolderSeeds = []companyExplorerSystemFolderDefinition{
 	{Key: CompanyExplorerSystemActiveNodesKey, FolderKind: "node", Name: "Active Nodes", Position: 200},
 	{Key: CompanyExplorerSystemActiveLogicGatesKey, FolderKind: "logic_gate", Name: "Active Logic Gates", Position: 200},
+	{Key: CompanyExplorerSystemActiveProjectsKey, FolderKind: "project", Name: "Active Projects", Position: 200},
 	{Key: CompanyExplorerSystemHistoryKey, FolderKind: "node", Name: "History", Position: 300},
 }
 
@@ -694,6 +696,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	folderKinds := map[string]string{}
 	nodeIDs := map[string]bool{}
 	logicGateIDs := map[string]bool{}
+	projectIDs := map[string]bool{}
 	kanbanBoardIDs := map[string]bool{}
 
 	for _, target := range targets {
@@ -736,6 +739,11 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
 			logicGateIDs[target.ID] = true
+		case "project":
+			if _, ok := r.projects[key(companyID, target.ID)]; !ok {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			projectIDs[target.ID] = true
 		case "kanban":
 			if _, ok := r.kanbanBoards[boardKey(companyID, target.ID)]; !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
@@ -756,6 +764,10 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		case "logic_gate":
 			if _, ok := r.logicGates[key(companyID, item.ItemID)]; ok {
 				logicGateIDs[item.ItemID] = true
+			}
+		case "project":
+			if _, ok := r.projects[key(companyID, item.ItemID)]; ok {
+				projectIDs[item.ItemID] = true
 			}
 		}
 	}
@@ -799,6 +811,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("folder", folderIDs)
 	appendSorted("node", nodeIDs)
 	appendSorted("logic_gate", logicGateIDs)
+	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
 
 	for folderID := range folderIDs {
@@ -818,6 +831,11 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			continue
 		}
 		if err := r.deleteKanbanBoardLocked(companyID, boardID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for projectID := range projectIDs {
+		if err := r.deleteProjectLocked(companyID, projectID); err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
@@ -897,6 +915,10 @@ func (r *MemoryRepo) validateCompanyExplorerFolderItemAssignmentLocked(companyID
 		}
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
+			return ErrNotFound
+		}
+	} else if itemType == EntityTypeProject {
+		if _, ok := r.projects[key(companyID, itemID)]; !ok {
 			return ErrNotFound
 		}
 	} else {

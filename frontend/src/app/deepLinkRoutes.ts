@@ -12,6 +12,11 @@ export type NodeDeepLinkRoute = {
   nodeID: string;
 };
 
+export type ProjectDeepLinkRoute = {
+  kind: "project";
+  projectID: string;
+};
+
 export type RacioDeepLinkRoute = {
   kind: "racio";
   role: RaciInboxRole;
@@ -19,7 +24,7 @@ export type RacioDeepLinkRoute = {
   nodeID?: string;
 };
 
-export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | RacioDeepLinkRoute;
+export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | RacioDeepLinkRoute;
 
 function cleanSegment(value: string): string {
   try {
@@ -68,6 +73,10 @@ export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
     const nodeID = cleanSegment(segments[1]);
     return nodeID ? { kind: "node", nodeID } : null;
   }
+  if (segments.length === 2 && segments[0] === "projects") {
+    const projectID = cleanSegment(segments[1]);
+    return projectID ? { kind: "project", projectID } : null;
+  }
   if ((segments.length === 2 || segments.length === 4) && segments[0] === "racio") {
     if (segments.length === 4 && segments[2] !== "nodes") return null;
     const section = racioSectionForRoleOrView(cleanSegment(segments[1]));
@@ -92,6 +101,10 @@ export function buildLogicGateRoute(logicGateID: string, nodeID?: string): strin
 
 export function buildNodeRoute(nodeID: string): string {
   return `/nodes/${encodeSegment(nodeID)}`;
+}
+
+export function buildProjectRoute(projectID: string): string {
+  return `/projects/${encodeSegment(projectID)}`;
 }
 
 export function buildRacioRoute(role: RaciInboxRole, nodeID?: string): string {

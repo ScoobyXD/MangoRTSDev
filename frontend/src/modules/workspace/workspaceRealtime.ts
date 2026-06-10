@@ -27,6 +27,7 @@ export type WorkspaceReconciliationScope = {
   eventType: string;
   boardID?: string;
   logicGateID?: string;
+  projectID?: string;
   nodeID?: string;
   assignmentID?: string;
   cardID?: string;
@@ -216,6 +217,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   const column = nestedRecord(data, "column");
   const node = nestedRecord(data, "node");
   const logicGate = nestedRecord(data, "logic_gate");
+  const project = nestedRecord(data, "project");
   const folder = nestedRecord(data, "folder");
   const folderItem = nestedRecord(data, "folder_item");
 
@@ -224,6 +226,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   const columnID = cleanString(data.column_id) || cleanString(column.column_id) || cleanString(card.column_id);
   const nodeID = cleanString(data.node_id) || cleanString(node.node_id) || cleanString(card.node_id);
   const logicGateID = cleanString(data.logic_gate_id) || cleanString(logicGate.logic_gate_id) || cleanString(board.logic_gate_id) || cleanString(card.logic_gate_id);
+  const projectID = cleanString(data.project_id) || cleanString(project.project_id);
   const assignmentID = cleanString(data.assignment_id);
   const folderID = cleanString(data.folder_id) || cleanString(folder.folder_id) || cleanString(folderItem.folder_id);
   const folderKind = cleanString(data.folder_kind) || cleanString(folder.folder_kind);
@@ -290,6 +293,20 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
+  if (
+    type === "project_created" ||
+    type === "project_updated" ||
+    type === "project_deleted" ||
+    type === "project_permissions_updated" ||
+    type === "project_information_created" ||
+    type === "project_information_deleted" ||
+    type === "project_relationship_upserted" ||
+    type === "project_relationship_deleted"
+  ) {
+    addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "project", itemID: projectID, projectID });
+    return scopes;
+  }
+
   if (type === "company_explorer_folder_created" || type === "company_explorer_folder_moved" || type === "company_explorer_folder_updated" || type === "company_explorer_folder_deleted" || type === "communications_shared_inbox_raci_updated" || type === "shared_triage_access_updated") {
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, folderID, folderKind });
     if (folderKind === "node") addScope(scopes, seen, { kind: "node_graph", eventType: type, folderID });
@@ -301,6 +318,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, folderID, itemType, itemID });
     if (itemType === "node") addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID: itemID, folderID });
     if (itemType === "logic_gate") addScope(scopes, seen, { kind: "logic_gate_graph", eventType: type, logicGateID: itemID, folderID });
+    if (itemType === "project") addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType, itemID, projectID: itemID, folderID });
     if (itemType === "kanban") {
       addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID: itemID, folderID });
       addScope(scopes, seen, { kind: "kanban_board_list", eventType: type, boardID: itemID });

@@ -95,6 +95,7 @@ type EditorProjectionRow struct {
 	ResourceID       string    `json:"resource_id"`
 	NodeID           string    `json:"node_id,omitempty"`
 	LogicGateID      string    `json:"logic_gate_id,omitempty"`
+	ProjectID        string    `json:"project_id,omitempty"`
 	InformationID    string    `json:"information_id"`
 	Type             string    `json:"type"`
 	Information      string    `json:"information"`
@@ -223,6 +224,20 @@ func EditorProjectionRowFromLogicGate(row domain.LogicGateProjection) EditorProj
 	}
 }
 
+func EditorProjectionRowFromProject(row domain.ProjectProjection) EditorProjectionRow {
+	return EditorProjectionRow{
+		CompanyID:        strings.TrimSpace(row.CompanyID),
+		ResourceType:     EntityTypeProject,
+		ResourceID:       strings.TrimSpace(row.ProjectID),
+		ProjectID:        strings.TrimSpace(row.ProjectID),
+		InformationID:    strings.TrimSpace(row.InformationID),
+		Type:             strings.TrimSpace(row.Type),
+		Information:      row.Information,
+		CreatedTimestamp: row.CreatedTimestamp,
+		UpdatedTimestamp: row.UpdatedTimestamp,
+	}
+}
+
 func EditorProjectionUpsertEventInput(companyID, actorUserID, idempotencyKey string, row EditorProjectionRow) (EventRowInput, bool) {
 	resourceType, ok := NormalizeEntityType(row.ResourceType)
 	resourceID := strings.TrimSpace(row.ResourceID)
@@ -240,9 +255,15 @@ func EditorProjectionUpsertEventInput(companyID, actorUserID, idempotencyKey str
 	if resourceType == EntityTypeNode {
 		row.NodeID = resourceID
 		row.LogicGateID = ""
+		row.ProjectID = ""
 	} else if resourceType == EntityTypeLogicGate {
 		row.LogicGateID = resourceID
 		row.NodeID = ""
+		row.ProjectID = ""
+	} else if resourceType == EntityTypeProject {
+		row.ProjectID = resourceID
+		row.NodeID = ""
+		row.LogicGateID = ""
 	}
 	return EditorProjectionDeltaEventInput(companyID, actorUserID, idempotencyKey, resourceType, resourceID, []EditorProjectionDelta{{
 		Operation: ProjectionDeltaOperationUpsert,
@@ -295,9 +316,15 @@ func EditorProjectionDeltaEventInput(companyID, actorUserID, idempotencyKey, res
 			if resourceType == EntityTypeNode {
 				row.NodeID = resourceID
 				row.LogicGateID = ""
-			} else {
+				row.ProjectID = ""
+			} else if resourceType == EntityTypeLogicGate {
 				row.LogicGateID = resourceID
 				row.NodeID = ""
+				row.ProjectID = ""
+			} else if resourceType == EntityTypeProject {
+				row.ProjectID = resourceID
+				row.NodeID = ""
+				row.LogicGateID = ""
 			}
 			delta.Row = &row
 		}
@@ -337,6 +364,8 @@ func EditorRealtimeScope(resourceType, resourceID string) string {
 		return "editor:node:" + resourceID
 	case EntityTypeLogicGate:
 		return "editor:logic_gate:" + resourceID
+	case EntityTypeProject:
+		return "editor:project:" + resourceID
 	default:
 		return ""
 	}

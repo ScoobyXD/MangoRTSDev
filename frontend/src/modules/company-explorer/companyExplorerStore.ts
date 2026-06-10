@@ -9,11 +9,13 @@ import type {
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard, KanbanBoardsUpdatedDetail } from "../kanban/shared.js";
+import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop.js";
 
 export type CompanyExplorerSnapshotPayload = {
   nodes?: NodeRecord[];
   logic_gates?: LogicGateApiRecord[];
+  projects?: ProjectRecord[];
   folders?: CompanyExplorerFolder[];
   folder_items?: CompanyExplorerFolderItem[];
 };
@@ -27,6 +29,7 @@ export type CompanyExplorerWorkspaceStreamEnvelope = {
 export type CompanyExplorerStoreState = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
+  projects: ProjectRecord[];
   kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
@@ -46,11 +49,14 @@ export type CompanyExplorerStoreAction =
   | { type: "replaceNode"; node: NodeRecord }
   | { type: "upsertLogicGate"; logicGate: LogicGateRecord }
   | { type: "replaceLogicGate"; logicGate: LogicGateRecord }
+  | { type: "upsertProject"; project: ProjectRecord }
+  | { type: "replaceProject"; project: ProjectRecord }
   | {
       type: "removeDeletedEntities";
       deletedFolderIDs: ReadonlySet<string>;
       deletedNodeIDs: ReadonlySet<string>;
       deletedLogicGateIDs: ReadonlySet<string>;
+      deletedProjectIDs: ReadonlySet<string>;
       deletedKanbanBoardIDs: ReadonlySet<string>;
     }
   | { type: "restore"; state: CompanyExplorerStoreState };
@@ -64,6 +70,7 @@ export function createCompanyExplorerStoreState(): CompanyExplorerStoreState {
   return {
     nodes: [],
     logicGates: [],
+    projects: [],
     kanbanBoards: [],
     folders: [],
     folderItems: [],
@@ -81,6 +88,7 @@ export function reduceCompanyExplorerStore(
         ...state,
         nodes: [],
         logicGates: [],
+        projects: [],
         folders: [],
         folderItems: [],
         folderSnapshotLoaded: false,
@@ -90,6 +98,7 @@ export function reduceCompanyExplorerStore(
         ...state,
         nodes: action.snapshot.nodes ?? [],
         logicGates: (action.snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord),
+        projects: action.snapshot.projects ?? [],
         folders: action.snapshot.folders ?? [],
         folderItems: action.snapshot.folder_items ?? [],
         folderSnapshotLoaded: true,
@@ -114,6 +123,10 @@ export function reduceCompanyExplorerStore(
       return { ...state, logicGates: upsertByID(state.logicGates, action.logicGate, (logicGate) => logicGate.logic_gate_id) };
     case "replaceLogicGate":
       return { ...state, logicGates: replaceByID(state.logicGates, action.logicGate, (logicGate) => logicGate.logic_gate_id) };
+    case "upsertProject":
+      return { ...state, projects: upsertByID(state.projects, action.project, (project) => project.project_id) };
+    case "replaceProject":
+      return { ...state, projects: replaceByID(state.projects, action.project, (project) => project.project_id) };
     case "removeDeletedEntities":
       return removeDeletedEntities(state, action);
     case "restore":
@@ -203,6 +216,19 @@ function applyWorkspaceEnvelope(
       folderItems: state.folderItems.filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
     };
   }
+  if (envelope.type === "project_created" || envelope.type === "project_updated") {
+    const project = asProjectRecord(data.project);
+    return project ? { ...state, projects: upsertByID(state.projects, project, (item) => item.project_id) } : state;
+  }
+  if (envelope.type === "project_deleted") {
+    const projectID = typeof data.project_id === "string" ? data.project_id : "";
+    if (!projectID) return state;
+    return {
+      ...state,
+      projects: state.projects.filter((project) => project.project_id !== projectID),
+      folderItems: state.folderItems.filter((item) => item.item_type !== "project" || item.item_id !== projectID),
+    };
+  }
   if (
     envelope.type === "company_explorer_folder_created" ||
     envelope.type === "company_explorer_folder_moved" ||
@@ -260,11 +286,13 @@ function removeDeletedEntities(
     folders: state.folders.filter((folder) => !action.deletedFolderIDs.has(folder.folder_id)),
     nodes: state.nodes.filter((node) => !action.deletedNodeIDs.has(node.node_id)),
     logicGates: state.logicGates.filter((logicGate) => !action.deletedLogicGateIDs.has(logicGate.logic_gate_id)),
+    projects: state.projects.filter((project) => !action.deletedProjectIDs.has(project.project_id)),
     kanbanBoards: state.kanbanBoards.filter((board) => !action.deletedKanbanBoardIDs.has(board.board_id)),
     folderItems: state.folderItems.filter((item) =>
       !action.deletedFolderIDs.has(item.folder_id)
       && (item.item_type !== "node" || !action.deletedNodeIDs.has(item.item_id))
       && (item.item_type !== "logic_gate" || !action.deletedLogicGateIDs.has(item.item_id))
+      && (item.item_type !== "project" || !action.deletedProjectIDs.has(item.item_id))
       && (item.item_type !== "kanban" || !action.deletedKanbanBoardIDs.has(item.item_id))
     ),
   };
@@ -323,6 +351,11 @@ function asNodeRecord(value: unknown): NodeRecord | null {
 function asLogicGateApiRecord(value: unknown): LogicGateApiRecord | null {
   if (!isObjectRecord(value) || typeof value.logic_gate_id !== "string" || typeof value.header !== "string" || typeof value.created_timestamp !== "string") return null;
   return value as LogicGateApiRecord;
+}
+
+function asProjectRecord(value: unknown): ProjectRecord | null {
+  if (!isObjectRecord(value) || typeof value.project_id !== "string" || typeof value.name !== "string" || typeof value.created_timestamp !== "string") return null;
+  return value as ProjectRecord;
 }
 
 function asCompanyExplorerFolder(value: unknown): CompanyExplorerFolder | null {

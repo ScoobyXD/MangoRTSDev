@@ -46,6 +46,89 @@ export type ProjectManagementTimelineMutationResponse = {
   user_id?: string;
 };
 
+export type ProjectRecord = {
+  company_id: string;
+  project_id: string;
+  name: string;
+  status: string;
+  default_access?: string;
+  account_id?: string | null;
+  account_name?: string | null;
+  team_id?: string | null;
+  team_name?: string | null;
+  effective_access_level?: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type ProjectInformation = {
+  company_id: string;
+  project_id: string;
+  information_id: string;
+  type: string;
+  information: string;
+  author_user_id?: string;
+  created_timestamp: string;
+};
+
+export type ProjectProjection = {
+  company_id: string;
+  project_id: string;
+  information_id: string;
+  type: string;
+  information: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type ProjectRelationshipProjection = {
+  company_id: string;
+  project_id: string;
+  project_name?: string;
+  relationship_id: string;
+  resource_type: "logic_gate" | "node";
+  resource_id: string;
+  logic_gate_id?: string | null;
+  node_id?: string | null;
+  display_title: string;
+  status?: string | null;
+  status_color?: string | null;
+  position: number;
+  resource_created_timestamp: string;
+  relationship_created_timestamp: string;
+  relationship_updated_timestamp: string;
+  projection_updated_timestamp: string;
+};
+
+export type ProjectView = {
+  company_id: string;
+  project_id: string;
+  project: ProjectRecord;
+  information: ProjectInformation[];
+  projections: ProjectProjection[];
+  relationships: ProjectRelationshipProjection[];
+  information_count?: number;
+  projection_count?: number;
+  can_view?: boolean;
+  can_edit?: boolean;
+  can_admin?: boolean;
+};
+
+export type ProjectMutationResponse = {
+  project?: ProjectRecord;
+  folder_item?: {
+    folder_id: string;
+    item_type: string;
+    item_id: string;
+  };
+  deleted_id?: string;
+};
+
+export type ProjectRelationshipMutationResponse = {
+  relationship?: ProjectRelationshipProjection;
+  deleted_id?: string;
+};
+
 export async function fetchProjectManagementTimeline(companyID: string, userID: string, limit = 1000): Promise<ProjectManagementTimelineResponse> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
@@ -101,6 +184,131 @@ export async function deleteProjectManagementTimelineItem(companyID: string, ite
   return apiFetchJSON<ProjectManagementTimelineMutationResponse>(`/v1/project-management/timeline-items/${encodeURIComponent(itemID)}?${params.toString()}`, {
     method: "DELETE",
   });
+}
+
+export async function listProjects(companyID: string): Promise<{ projects: ProjectRecord[] }> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<{ projects: ProjectRecord[] }>(`/v1/projects?${params.toString()}`);
+}
+
+export async function createProject(input: {
+  companyID: string;
+  name: string;
+  status?: string;
+  accountID?: string | null;
+  teamID?: string | null;
+}): Promise<ProjectMutationResponse> {
+  return apiFetchJSON<ProjectMutationResponse>("/v1/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      name: input.name,
+      status: input.status ?? "Active",
+      account_id: input.accountID ?? null,
+      team_id: input.teamID ?? null,
+    }),
+  });
+}
+
+export async function updateProject(input: {
+  companyID: string;
+  projectID: string;
+  name: string;
+  status: string;
+  accountID?: string | null;
+  teamID?: string | null;
+}): Promise<ProjectMutationResponse> {
+  return apiFetchJSON<ProjectMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      name: input.name,
+      status: input.status,
+      account_id: input.accountID ?? null,
+      team_id: input.teamID ?? null,
+    }),
+  });
+}
+
+export async function fetchProjectView(companyID: string, projectID: string): Promise<ProjectView> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<ProjectView>(`/v1/projects/${encodeURIComponent(projectID)}?${params.toString()}`);
+}
+
+export async function addProjectInformation(input: {
+  companyID: string;
+  projectID: string;
+  informationID: string;
+  type: string;
+  information: string;
+}): Promise<{ information: ProjectInformation; projection: ProjectProjection }> {
+  return apiFetchJSON<{ information: ProjectInformation; projection: ProjectProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/information`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      information_id: input.informationID,
+      type: input.type,
+      information: input.information,
+    }),
+  });
+}
+
+export async function deleteProjectProjection(input: {
+  companyID: string;
+  projectID: string;
+  informationID: string;
+}): Promise<{ status: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", input.companyID);
+  return apiFetchJSON<{ status: string }>(`/v1/projects/${encodeURIComponent(input.projectID)}/projection/${encodeURIComponent(input.informationID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
+
+export async function upsertProjectRelationship(input: {
+  companyID: string;
+  projectID: string;
+  resourceType: "logic_gate" | "node";
+  resourceID: string;
+  relationshipID?: string;
+  position?: number;
+}): Promise<ProjectRelationshipMutationResponse> {
+  return apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      relationship_id: input.relationshipID,
+      resource_type: input.resourceType,
+      resource_id: input.resourceID,
+      position: input.position ?? 0,
+    }),
+  });
+}
+
+export async function deleteProjectRelationship(input: {
+  companyID: string;
+  projectID: string;
+  relationshipID: string;
+}): Promise<ProjectRelationshipMutationResponse> {
+  const params = new URLSearchParams();
+  params.set("company_id", input.companyID);
+  return apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships/${encodeURIComponent(input.relationshipID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listProjectRelationshipsForResource(input: {
+  companyID: string;
+  resourceType: "logic_gate" | "node";
+  resourceID: string;
+}): Promise<{ relationships: ProjectRelationshipProjection[] }> {
+  const params = new URLSearchParams();
+  params.set("company_id", input.companyID);
+  params.set("resource_type", input.resourceType);
+  params.set("resource_id", input.resourceID);
+  return apiFetchJSON<{ relationships: ProjectRelationshipProjection[] }>(`/v1/projects/relationships?${params.toString()}`);
 }
 
 export async function deleteProjectManagementNode(companyID: string, nodeID: string): Promise<{ status: string }> {
