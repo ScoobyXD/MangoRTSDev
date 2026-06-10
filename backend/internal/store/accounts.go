@@ -308,10 +308,6 @@ func (r *PostgresRepo) UpdateAccount(input AccountInput) (AccountMutationResult,
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	_, beforeKanban, beforeRacio, beforeProject, err := postgresProjectionRowsForNodesTx(ctx, tx, input.CompanyID, nodeIDs)
-	if err != nil {
-		return AccountMutationResult{}, err
-	}
 	folderID := ""
 	if input.FolderIDSet && input.FolderID != nil {
 		folderID = cleanUUIDText(*input.FolderID)
@@ -337,14 +333,10 @@ returning company_id::text, account_id::text, name, folder_id::text, position, c
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	if err := syncPostgresAccountProjectionRowsForNodesTx(ctx, tx, input.CompanyID, nodeIDs); err != nil {
-		return AccountMutationResult{}, err
-	}
-	_, afterKanban, afterRacio, afterProject, err := postgresProjectionRowsForNodesTx(ctx, tx, input.CompanyID, nodeIDs)
+	deltas, err := applyNodeProjectionDeltaDependenciesForNodesTx(ctx, tx, input.CompanyID, nodeIDs)
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	deltas := projectionDeltasForAccountNodeChange(beforeKanban, beforeRacio, beforeProject, afterKanban, afterRacio, afterProject)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
 		return AccountMutationResult{}, err
 	}
@@ -370,10 +362,6 @@ func (r *PostgresRepo) DeleteAccount(companyID, accountID, actorUserID string) (
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	_, beforeKanban, beforeRacio, beforeProject, err := postgresProjectionRowsForNodesTx(ctx, tx, companyID, nodeIDs)
-	if err != nil {
-		return AccountMutationResult{}, err
-	}
 	result, err := tx.ExecContext(ctx, `delete from accounts where company_id=$1::uuid and account_id=$2::uuid`, companyID, accountID)
 	if err != nil {
 		return AccountMutationResult{}, err
@@ -385,14 +373,10 @@ func (r *PostgresRepo) DeleteAccount(companyID, accountID, actorUserID string) (
 	if affected == 0 {
 		return AccountMutationResult{}, ErrNotFound
 	}
-	if err := syncPostgresAccountProjectionRowsForNodesTx(ctx, tx, companyID, nodeIDs); err != nil {
-		return AccountMutationResult{}, err
-	}
-	_, afterKanban, afterRacio, afterProject, err := postgresProjectionRowsForNodesTx(ctx, tx, companyID, nodeIDs)
+	deltas, err := applyNodeProjectionDeltaDependenciesForNodesTx(ctx, tx, companyID, nodeIDs)
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	deltas := projectionDeltasForAccountNodeChange(beforeKanban, beforeRacio, beforeProject, afterKanban, afterRacio, afterProject)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, actorUserID, "", deltas)); err != nil {
 		return AccountMutationResult{}, err
 	}
@@ -648,10 +632,6 @@ where n.company_id=$1::uuid and n.node_id=$2::uuid`, input.CompanyID, input.Node
 			return NodeAccountAssignmentUpdateResult{}, ErrNotFound
 		}
 	}
-	_, beforeKanban, beforeRacio, beforeProject, err := postgresProjectionRowsForNodesTx(ctx, tx, input.CompanyID, []string{input.NodeID})
-	if err != nil {
-		return NodeAccountAssignmentUpdateResult{}, err
-	}
 	if _, err := tx.ExecContext(ctx, `delete from node_account_assignments where company_id=$1::uuid and node_id=$2::uuid`, input.CompanyID, input.NodeID); err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
@@ -663,7 +643,11 @@ on conflict (company_id, node_id, account_id) do nothing`, input.CompanyID, inpu
 			return NodeAccountAssignmentUpdateResult{}, err
 		}
 	}
-	if err := syncPostgresAccountProjectionRowsForNodesTx(ctx, tx, input.CompanyID, []string{input.NodeID}); err != nil {
+	deltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: input.CompanyID,
+		NodeID:    input.NodeID,
+	})
+	if err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
 	afterNode, err := scanNode(tx.QueryRowContext(ctx, `
@@ -678,11 +662,6 @@ where n.company_id=$1::uuid and n.node_id=$2::uuid`, input.CompanyID, input.Node
 	if err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
-	_, afterKanban, afterRacio, afterProject, err := postgresProjectionRowsForNodesTx(ctx, tx, input.CompanyID, []string{input.NodeID})
-	if err != nil {
-		return NodeAccountAssignmentUpdateResult{}, err
-	}
-	deltas := projectionDeltasForAccountNodeChange(beforeKanban, beforeRacio, beforeProject, afterKanban, afterRacio, afterProject)
 	eventInput := nodeUpdatedWorkspaceEventInput(afterNode)
 	eventInput.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	eventInput.Payload["node_title"] = strings.TrimSpace(afterNode.Title)

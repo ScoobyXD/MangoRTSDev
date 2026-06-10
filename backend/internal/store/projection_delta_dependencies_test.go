@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,6 +227,292 @@ func TestProjectRelationshipCommandsUseDependencyLayerWithoutBroadMaintenance(t 
 		if strings.Contains(normalized, forbidden) {
 			t.Fatalf("postgres project command source contains broad maintenance %q", forbidden)
 		}
+	}
+}
+
+func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
+	files := map[string]string{}
+	for _, path := range []string{
+		"postgres_nodes.go",
+		"postgres_logic_gates.go",
+		"postgres_kanban.go",
+		"accounts.go",
+		"postgres_logic_gate_raci_commands.go",
+		"postgres_entity_permissions.go",
+		"postgres_projects.go",
+		"postgres_project_scoped_creates.go",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		files[path] = strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	}
+	checks := []struct {
+		name     string
+		path     string
+		required []string
+	}{
+		{
+			name: "node create update delete",
+			path: "postgres_nodes.go",
+			required: []string{
+				"applynodeprojectiondeltadependenciestx",
+				"postgresdeletenodewithprojectiondeltastx",
+				"projectiondeltaeventinputs",
+			},
+		},
+		{
+			name: "logic gate create update delete and raci set",
+			path: "postgres_logic_gates.go",
+			required: []string{
+				"applylogicgateprojectiondeltadependenciestx",
+				"postgresdeletelogicgatewithprojectiondeltastx",
+				"projectiondeltaeventinputs",
+			},
+		},
+		{
+			name: "assignment save move remove issue",
+			path: "postgres_kanban.go",
+			required: []string{
+				"applynodelogicgateassignmentprojectiondeltadependenciestx",
+				"assignnodetologicgatestatustx",
+				"movelogicgatenodeassignment",
+				"removelogicgatenodeassignment",
+				"setlogicgatenodeassignmentissue",
+			},
+		},
+		{
+			name: "node account assignments",
+			path: "accounts.go",
+			required: []string{
+				"applynodeprojectiondeltadependenciesfornodestx",
+				"applynodeprojectiondeltadependenciestx",
+				"setnodeaccountassignments",
+			},
+		},
+		{
+			name: "racio assignment commands",
+			path: "postgres_logic_gate_raci_commands.go",
+			required: []string{
+				"applylogicgateprojectiondeltadependenciestx",
+				"projectiondeltaeventinputs",
+			},
+		},
+		{
+			name: "permission mutation revoke",
+			path: "postgres_entity_permissions.go",
+			required: []string{
+				"applyresourcepermissionprojectiondeltadependenciestx",
+				"permissionchangedeventinput",
+			},
+		},
+		{
+			name: "project relationship add delete",
+			path: "postgres_projects.go",
+			required: []string{
+				"applyprojectrelationshipprojectiondeltadependenciestx",
+				"projectrelationshipprojectiondeltaeventinputs",
+			},
+		},
+		{
+			name: "project scoped create",
+			path: "postgres_project_scoped_creates.go",
+			required: []string{
+				"createnodeassociatedwithproject",
+				"createlogicgateassociatedwithproject",
+				"createnodeassociatedwithprojecttx",
+				"createlogicgateassociatedwithprojecttx",
+				"insert into project_relationships",
+				"applynodeprojectiondeltadependenciestx",
+				"applylogicgateprojectiondeltadependenciestx",
+				"applyprojectrelationshipprojectiondeltadependenciestx",
+				"appendeventrowstx",
+				"appenddomaineventstx",
+				"tx.commit",
+			},
+		},
+	}
+	for _, check := range checks {
+		source := files[check.path]
+		for _, required := range check.required {
+			if !strings.Contains(source, required) {
+				t.Fatalf("%s missing %q in %s", check.name, required, check.path)
+			}
+		}
+	}
+	for path, source := range files {
+		for _, forbidden := range []string{
+			"rebuildprojectrelationshipprojection",
+			"truncate project_relationship_projection",
+			"delete from project_relationship_projection where company_id=$1::uuid;",
+		} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s contains broad projection behavior %q", path, forbidden)
+			}
+		}
+	}
+}
+
+func TestProjectScopedCreateCommandsCommitSourceProjectionAndEvents(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999203"
+	actorID := "11111111-1111-4111-8111-111111111206"
+	repo.EnsureCompany(companyID, "Project Scoped Create Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Scoped Create Project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	initialGate, err := repo.CreateLogicGate(companyID, "Initial Assignment Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate for initial assignment: %v", err)
+	}
+	priority := 3
+
+	nodeResult, err := repo.CreateNodeAssociatedWithProject(ProjectScopedNodeCreateInput{
+		CompanyID:      companyID,
+		ProjectID:      projectResult.Project.ProjectID,
+		Title:          "Scoped project node",
+		Position:       10,
+		ActorUserID:    actorID,
+		IdempotencyKey: "node-create",
+		InitialInformation: &ProjectScopedInitialInformationInput{
+			Type:        "Text box",
+			Information: "Initial node content",
+		},
+		InitialAssignment: &ProjectScopedNodeLogicGateAssignmentInput{
+			LogicGateID: initialGate.LogicGateID,
+			Status:      LogicGateWorkStatusPending,
+			Priority:    &priority,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateNodeAssociatedWithProject: %v", err)
+	}
+	if nodeResult.Node.NodeID == "" || nodeResult.Relationship == nil || nodeResult.Relationship.NodeID == nil || *nodeResult.Relationship.NodeID != nodeResult.Node.NodeID {
+		t.Fatalf("node scoped create result = %+v", nodeResult)
+	}
+	if nodeResult.Information == nil {
+		t.Fatalf("node scoped create did not return initial information")
+	}
+	if nodeResult.Assignment == nil || nodeResult.Assignment.LogicGateID != initialGate.LogicGateID || nodeResult.Card == nil {
+		t.Fatalf("node scoped create assignment/card = %+v / %+v", nodeResult.Assignment, nodeResult.Card)
+	}
+	if nodeResult.Relationship.AssignmentID == nil || *nodeResult.Relationship.AssignmentID != nodeResult.Assignment.AssignmentID {
+		t.Fatalf("relationship assignment_id = %+v, want %s", nodeResult.Relationship.AssignmentID, nodeResult.Assignment.AssignmentID)
+	}
+	if nodeResult.Relationship.LogicGateID == nil || *nodeResult.Relationship.LogicGateID != initialGate.LogicGateID {
+		t.Fatalf("relationship logic_gate_id = %+v, want %s", nodeResult.Relationship.LogicGateID, initialGate.LogicGateID)
+	}
+	if _, err := repo.GetNode(companyID, nodeResult.Node.NodeID); err != nil {
+		t.Fatalf("GetNode after scoped create: %v", err)
+	}
+	nodeProjections, err := repo.ListNodeProjections(companyID, nodeResult.Node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections: %v", err)
+	}
+	if len(nodeProjections) != 1 || nodeProjections[0].Information != "Initial node content" {
+		t.Fatalf("node projections = %+v", nodeProjections)
+	}
+	nodeEventTypes := map[string]bool{}
+	for _, event := range nodeResult.Events {
+		nodeEventTypes[event.Type] = true
+	}
+	for _, eventType := range []string{"node_created", "project_relationship_upserted", WorkItemLogicGateAssignmentSavedEventType} {
+		if !nodeEventTypes[eventType] {
+			t.Fatalf("node scoped create events = %+v, missing %s", nodeResult.Events, eventType)
+		}
+	}
+
+	logicGateResult, err := repo.CreateLogicGateAssociatedWithProject(ProjectScopedLogicGateCreateInput{
+		CompanyID:      companyID,
+		ProjectID:      projectResult.Project.ProjectID,
+		Header:         "Scoped project gate",
+		Position:       20,
+		ActorUserID:    actorID,
+		IdempotencyKey: "gate-create",
+	})
+	if err != nil {
+		t.Fatalf("CreateLogicGateAssociatedWithProject: %v", err)
+	}
+	if logicGateResult.LogicGate.LogicGateID == "" || logicGateResult.Relationship == nil || logicGateResult.Relationship.LogicGateID == nil || *logicGateResult.Relationship.LogicGateID != logicGateResult.LogicGate.LogicGateID {
+		t.Fatalf("logic gate scoped create result = %+v", logicGateResult)
+	}
+	if len(logicGateResult.Events) != 2 {
+		t.Fatalf("logic gate scoped create events = %d, want logic_gate_created and project_relationship_upserted", len(logicGateResult.Events))
+	}
+
+	relationships, err := repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections: %v", err)
+	}
+	if len(relationships) != 2 {
+		t.Fatalf("relationships = %+v, want node and logic gate", relationships)
+	}
+	row := latestEventRowOfTypeForTest(t, repo, companyID, EventTypeProjectRelationshipProjectionDelta)
+	payload, err := DecodeProjectRelationshipProjectionDeltaEventPayload(row)
+	if err != nil {
+		t.Fatalf("DecodeProjectRelationshipProjectionDeltaEventPayload: %v", err)
+	}
+	if payload.Scope != ProjectRelationshipProjectionProjectScope(projectResult.Project.ProjectID) || len(payload.Deltas) == 0 {
+		t.Fatalf("project relationship payload = %+v, want scoped deltas", payload)
+	}
+}
+
+func TestProjectScopedCreateRollsBackSourceProjectionAndEventsTogether(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999204"
+	nodeID := "11111111-1111-4111-8111-111111111207"
+	repo.EnsureCompany(companyID, "Project Scoped Rollback Co")
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Rollback Project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	beforeRows, err := repo.ListEventRows(companyID, 100)
+	if err != nil {
+		t.Fatalf("ListEventRows before: %v", err)
+	}
+	beforeDomainEvents := len(repo.domainEvents)
+	appendErr := errors.New("append event rows failed")
+	repo.eventRowAppendErr = appendErr
+	_, err = repo.CreateNodeAssociatedWithProject(ProjectScopedNodeCreateInput{
+		CompanyID:   companyID,
+		ProjectID:   projectResult.Project.ProjectID,
+		NodeID:      nodeID,
+		Title:       "Rolled back node",
+		ActorUserID: "11111111-1111-4111-8111-111111111208",
+	})
+	repo.eventRowAppendErr = nil
+	if !errors.Is(err, appendErr) {
+		t.Fatalf("CreateNodeAssociatedWithProject error = %v, want %v", err, appendErr)
+	}
+	if _, err := repo.GetNode(companyID, nodeID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetNode after rollback error = %v, want ErrNotFound", err)
+	}
+	relationships, err := repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections after rollback: %v", err)
+	}
+	if len(relationships) != 0 {
+		t.Fatalf("relationships after rollback = %+v, want none", relationships)
+	}
+	afterRows, err := repo.ListEventRows(companyID, 100)
+	if err != nil {
+		t.Fatalf("ListEventRows after: %v", err)
+	}
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("event row count after rollback = %d, want %d", len(afterRows), len(beforeRows))
+	}
+	if len(repo.domainEvents) != beforeDomainEvents {
+		t.Fatalf("domain event count after rollback = %d, want %d", len(repo.domainEvents), beforeDomainEvents)
 	}
 }
 

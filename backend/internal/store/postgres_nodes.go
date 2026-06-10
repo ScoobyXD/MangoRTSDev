@@ -245,8 +245,18 @@ func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID s
 	}
 	defer tx.Rollback()
 
-	item, err := r.createNodeWithAssigneeTx(ctx, tx, companyID, title, assigneeUserID)
+	item, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, "", title, assigneeUserID, false, true)
 	if err != nil {
+		return domain.Node{}, err
+	}
+	projectionDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: item.CompanyID,
+		NodeID:    item.NodeID,
+	})
+	if err != nil {
+		return domain.Node{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(item.CompanyID, "", "", projectionDeltas)); err != nil {
 		return domain.Node{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -263,12 +273,22 @@ func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title,
 	}
 	defer tx.Rollback()
 
-	item, err := r.createNodeWithAssigneeTx(ctx, tx, companyID, title, assigneeUserID)
+	item, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, "", title, assigneeUserID, false, true)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	projectionDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: item.CompanyID,
+		NodeID:    item.NodeID,
+	})
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeCreatedWorkspaceEventInput(item))
 	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(item.CompanyID, "", "", projectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -330,7 +350,10 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context
 	item.LogicGateIDs = []string{}
 	item.Accounts = []domain.Account{}
 	if syncProjection {
-		if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, companyID, item.NodeID); err != nil {
+		if _, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+			CompanyID: companyID,
+			NodeID:    item.NodeID,
+		}); err != nil {
 			return domain.Node{}, err
 		}
 	}
@@ -347,6 +370,16 @@ func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
+		return domain.Node{}, err
+	}
+	projectionDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: input.CompanyID,
+		NodeID:    input.NodeID,
+	})
+	if err != nil {
+		return domain.Node{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return domain.Node{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -374,31 +407,14 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	kanbanProjectionBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	racioProjectionBefore, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	projectManagementProjectionBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID)
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	kanbanProjectionAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, input.CompanyID, input.NodeID)
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	racioProjectionAfter, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{input.NodeID}, nil)
-	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	projectManagementProjectionAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID)
+	projectionDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: input.CompanyID,
+		NodeID:    input.NodeID,
+	})
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -406,10 +422,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	racioProjectionDeltas := diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)
-	projectionDeltas = append(projectionDeltas, racioProjectionDeltas...)
-	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -495,15 +507,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if defaultAccess, err := postgresResourceDefaultAccess(ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID); err == nil {
 		item.DefaultAccess = defaultAccess
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return domain.Node{}, err
-	}
-	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return domain.Node{}, err
-	}
-	if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return domain.Node{}, err
 	}
 	return item, nil
@@ -875,7 +878,11 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 	}
 	defer tx.Rollback()
 
-	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	projectionDeltas, err := postgresDeleteNodeWithProjectionDeltasTx(ctx, tx, companyID, nodeID)
+	if err != nil {
+		return err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -889,11 +896,15 @@ func (r *PostgresRepo) DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (do
 	}
 	defer tx.Rollback()
 
-	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	projectionDeltas, err := postgresDeleteNodeWithProjectionDeltasTx(ctx, tx, companyID, nodeID)
+	if err != nil {
 		return domain.DomainEvent{}, err
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeDeletedWorkspaceEventInput(companyID, nodeID))
 	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return domain.DomainEvent{}, err
 	}
 	if err := tx.Commit(); err != nil {

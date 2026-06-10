@@ -202,14 +202,14 @@ func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
 	assignBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) assignNodeToLogicGateStatusTx")
 	moveBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
 	removeBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) RemoveLogicGateNodeAssignment")
-	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment and reread the Kanban projection")
+	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment, apply dependency deltas, and reread the Kanban projection")
 	}
-	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "syncKanbanBoardProjectionForNodeTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment and reread the Kanban projection")
+	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment, apply dependency deltas, and reread the Kanban projection")
 	}
-	if !strings.Contains(removeBody, "deleteKanbanBoardProjectionForNodeTx") || strings.Contains(removeBody, "delete from kanban_cards") {
-		t.Fatal("RemoveLogicGateNodeAssignment should delete only the Kanban projection row")
+	if !strings.Contains(removeBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || strings.Contains(removeBody, "delete from kanban_cards") {
+		t.Fatal("RemoveLogicGateNodeAssignment should apply dependency deltas without deleting legacy Kanban cards")
 	}
 }
 
@@ -222,7 +222,7 @@ func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCar
 	for _, required := range []string{
 		"updatePostgresCommunicationsEmailNodeReferenceForNodeTx",
 		"updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx",
-		"syncKanbanBoardProjectionForNodeTx",
+		"applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx",
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("MoveLogicGateNodeAssignment missing %s", required)

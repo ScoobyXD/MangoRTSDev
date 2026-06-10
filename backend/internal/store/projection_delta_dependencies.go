@@ -11,11 +11,14 @@ import (
 type NodeProjectionDeltaDependencyInput struct {
 	CompanyID string
 	NodeID    string
+	Delete    bool
 }
 
 type LogicGateProjectionDeltaDependencyInput struct {
-	CompanyID   string
-	LogicGateID string
+	CompanyID       string
+	LogicGateID     string
+	Delete          bool
+	AffectedNodeIDs []string
 }
 
 type NodeLogicGateAssignmentProjectionDeltaDependencyInput struct {
@@ -46,30 +49,198 @@ type ResourcePermissionProjectionDeltaDependencyInput struct {
 }
 
 func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	return applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
-		CompanyID: input.CompanyID,
-		NodeID:    input.NodeID,
+	companyID := cleanUUIDText(input.CompanyID)
+	nodeID := cleanUUIDText(input.NodeID)
+	if companyID == "" || nodeID == "" {
+		return nil, ErrInvalid
+	}
+	kanbanBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	racioBefore, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	projectRelationshipBefore, err := projectRelationshipProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Delete {
+		if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+		if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+	}
+
+	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:  companyID,
+		NodeID:     nodeID,
+		Delete:     input.Delete,
+		BeforeRows: projectRelationshipBefore,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	kanbanAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	racioAfter, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	if err != nil {
+		return nil, err
+	}
+	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
+	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
+	deltas = append(deltas, projectRelationshipDeltas...)
+	return deltas, nil
+}
+
+func applyNodeProjectionDeltaDependenciesForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) ([]ProjectionDelta, error) {
+	deltas := make([]ProjectionDelta, 0)
+	for _, nodeID := range cleanUUIDTextSlice(nodeIDs) {
+		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+			CompanyID: companyID,
+			NodeID:    nodeID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, nodeDeltas...)
+	}
+	return deltas, nil
 }
 
 func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input LogicGateProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	return applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
-		CompanyID:   input.CompanyID,
-		LogicGateID: input.LogicGateID,
+	companyID := cleanUUIDText(input.CompanyID)
+	logicGateID := cleanUUIDText(input.LogicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	kanbanBefore, err := postgresKanbanProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	racioBefore, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	projectRelationshipBefore, err := projectRelationshipProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Delete {
+		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return nil, err
+		}
+		if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return nil, err
+		}
+		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return nil, err
+		}
+		if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return nil, err
+		}
+	}
+
+	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateID,
+		Delete:      input.Delete,
+		BeforeRows:  projectRelationshipBefore,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	kanbanAfter, err := postgresKanbanProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	racioAfter, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+
+	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
+	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
+	deltas = append(deltas, projectRelationshipDeltas...)
+	for _, nodeID := range cleanUUIDTextSlice(input.AffectedNodeIDs) {
+		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+			CompanyID: companyID,
+			NodeID:    nodeID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, nodeDeltas...)
+	}
+	return deltas, nil
 }
 
 func applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeLogicGateAssignmentProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	if strings.TrimSpace(input.NodeID) != "" {
-		return applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
-			CompanyID: input.CompanyID,
-			NodeID:    input.NodeID,
+	companyID := cleanUUIDText(input.CompanyID)
+	nodeID := cleanUUIDText(input.NodeID)
+	assignmentID := cleanUUIDText(input.AssignmentID)
+	if companyID == "" || (nodeID == "" && assignmentID == "") {
+		return nil, ErrInvalid
+	}
+	if nodeID != "" {
+		return applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+			CompanyID: companyID,
+			NodeID:    nodeID,
 		})
 	}
-	return applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
-		CompanyID:    input.CompanyID,
-		AssignmentID: input.AssignmentID,
+	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:    companyID,
+		AssignmentID: assignmentID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return projectRelationshipDeltas, nil
 }
 
 func applyProjectProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ProjectProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
@@ -115,11 +286,25 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 
 	switch {
 	case input.Delete:
-		if relationshipID == "" {
+		switch {
+		case relationshipID != "":
+			if err := deleteProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
+				return nil, err
+			}
+		case nodeID != "":
+			if err := deleteProjectRelationshipProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+				return nil, err
+			}
+		case logicGateID != "":
+			if err := deleteProjectRelationshipProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+				return nil, err
+			}
+		case assignmentID != "":
+			if err := deleteProjectRelationshipProjectionForAssignmentTx(ctx, tx, companyID, assignmentID); err != nil {
+				return nil, err
+			}
+		default:
 			return nil, ErrInvalid
-		}
-		if err := deleteProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
-			return nil, err
 		}
 	case relationshipID != "":
 		if err := syncProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
@@ -224,6 +409,45 @@ func deleteProjectRelationshipProjectionForRelationshipTx(ctx context.Context, t
 delete from project_relationship_projection
 where company_id=$1::uuid
   and relationship_id=$2::uuid`, companyID, relationshipID)
+	return err
+}
+
+func deleteProjectRelationshipProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	companyID = cleanUUIDText(companyID)
+	nodeID = cleanUUIDText(nodeID)
+	if companyID == "" || nodeID == "" {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from project_relationship_projection
+where company_id=$1::uuid
+  and node_id=$2::uuid`, companyID, nodeID)
+	return err
+}
+
+func deleteProjectRelationshipProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from project_relationship_projection
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid`, companyID, logicGateID)
+	return err
+}
+
+func deleteProjectRelationshipProjectionForAssignmentTx(ctx context.Context, tx *sql.Tx, companyID, assignmentID string) error {
+	companyID = cleanUUIDText(companyID)
+	assignmentID = cleanUUIDText(assignmentID)
+	if companyID == "" || assignmentID == "" {
+		return ErrInvalid
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from project_relationship_projection
+where company_id=$1::uuid
+  and assignment_id=$2::uuid`, companyID, assignmentID)
 	return err
 }
 

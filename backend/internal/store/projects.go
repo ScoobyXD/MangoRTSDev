@@ -108,6 +108,99 @@ func NormalizeProjectRelationshipDeleteInput(input ProjectRelationshipDeleteInpu
 	return input, nil
 }
 
+func NormalizeProjectScopedNodeCreateInput(input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateInput, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.ProjectID = cleanUUIDText(input.ProjectID)
+	input.NodeID = cleanUUIDText(input.NodeID)
+	input.Title = strings.TrimSpace(input.Title)
+	input.AssigneeUserID = cleanUUIDText(input.AssigneeUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.ActorDisplayName = strings.TrimSpace(input.ActorDisplayName)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.ProjectID == "" || input.Title == "" {
+		return ProjectScopedNodeCreateInput{}, ErrInvalid
+	}
+	normalized, err := normalizeProjectScopedInitialInformation(input.InitialInformation)
+	if err != nil {
+		return ProjectScopedNodeCreateInput{}, err
+	}
+	input.InitialInformation = normalized
+	assignment, err := normalizeProjectScopedNodeLogicGateAssignment(input.InitialAssignment)
+	if err != nil {
+		return ProjectScopedNodeCreateInput{}, err
+	}
+	input.InitialAssignment = assignment
+	return input, nil
+}
+
+func NormalizeProjectScopedLogicGateCreateInput(input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateInput, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.ProjectID = cleanUUIDText(input.ProjectID)
+	input.LogicGateID = cleanUUIDText(input.LogicGateID)
+	input.Header = strings.TrimSpace(input.Header)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.ProjectID == "" || input.Header == "" {
+		return ProjectScopedLogicGateCreateInput{}, ErrInvalid
+	}
+	normalized, err := normalizeProjectScopedInitialInformation(input.InitialInformation)
+	if err != nil {
+		return ProjectScopedLogicGateCreateInput{}, err
+	}
+	input.InitialInformation = normalized
+	return input, nil
+}
+
+func normalizeProjectScopedInitialInformation(input *ProjectScopedInitialInformationInput) (*ProjectScopedInitialInformationInput, error) {
+	if input == nil {
+		return nil, nil
+	}
+	item := ProjectScopedInitialInformationInput{
+		Type:          strings.TrimSpace(input.Type),
+		Information:   strings.TrimSpace(input.Information),
+		InformationID: cleanUUIDText(input.InformationID),
+	}
+	if item.Type == "" && item.Information == "" && item.InformationID == "" {
+		return nil, nil
+	}
+	if item.Type == "" || item.Information == "" {
+		return nil, ErrInvalid
+	}
+	return &item, nil
+}
+
+func normalizeProjectScopedNodeLogicGateAssignment(input *ProjectScopedNodeLogicGateAssignmentInput) (*ProjectScopedNodeLogicGateAssignmentInput, error) {
+	if input == nil {
+		return nil, nil
+	}
+	item := ProjectScopedNodeLogicGateAssignmentInput{
+		LogicGateID: cleanUUIDText(input.LogicGateID),
+		Status:      strings.TrimSpace(input.Status),
+		ColumnID:    strings.TrimSpace(input.ColumnID),
+		Position:    input.Position,
+		Priority:    cloneIntPointer(input.Priority),
+		IsIssue:     cloneBoolPointer(input.IsIssue),
+	}
+	if item.LogicGateID == "" && item.Status == "" && item.ColumnID == "" && item.Priority == nil && item.IsIssue == nil {
+		return nil, nil
+	}
+	if item.LogicGateID == "" {
+		return nil, ErrInvalid
+	}
+	if item.Priority != nil && (*item.Priority < 1 || *item.Priority > 5) {
+		return nil, ErrInvalid
+	}
+	return &item, nil
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
 func cloneProject(item domain.Project) domain.Project {
 	item.AccountID = cloneStringPointer(item.AccountID)
 	item.AccountName = cloneStringPointer(item.AccountName)
