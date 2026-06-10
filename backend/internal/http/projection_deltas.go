@@ -57,6 +57,15 @@ func projectionKanbanBoardUserScope(boardID, userID string) string {
 	return prefix + "|user:" + userID
 }
 
+func projectionProjectRelationshipUserScope(projectID, userID string) string {
+	prefix := store.ProjectRelationshipProjectionProjectScope(projectID)
+	userID = strings.TrimSpace(userID)
+	if prefix == "" || userID == "" {
+		return ""
+	}
+	return prefix + "|user:" + userID
+}
+
 func projectionScopeUserID(scope string) string {
 	return strings.TrimPrefix(strings.TrimSpace(scope), "user:")
 }
@@ -267,8 +276,9 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				continue
 			}
 			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
-			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
+			projectionUserIDs := s.projectionHub.activeUserIDsForScopePrefix(delta.CompanyID, delta.Projection, projectionScope)
 			authorizedRealtimeTargets := 0
+			authorizedProjectionTargets := 0
 			for _, conn := range realtimeConnections {
 				if conn == nil {
 					continue
@@ -281,11 +291,20 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: projectionScope, connectionID: conn.id, realtime: true}
 				grouped[key] = append(grouped[key], filtered)
 			}
-			if hasProjectionSubscribers {
-				key := groupKey{companyID: delta.CompanyID, projection: delta.Projection, scope: projectionScope, sequenceScope: projectionScope}
-				grouped[key] = append(grouped[key], delta)
+			for _, userID := range projectionUserIDs {
+				scope := projectionProjectRelationshipUserScope(projectID, userID)
+				if scope == "" || !s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, scope) {
+					continue
+				}
+				filtered, ok := s.authorizedProjectRelationshipProjectionDeltaForUser(delta, userID)
+				if !ok {
+					continue
+				}
+				authorizedProjectionTargets++
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: scope, sequenceScope: projectionScope}
+				grouped[key] = append(grouped[key], filtered)
 			}
-			log.Printf("project_relationship_projection_delta_targets company_id=%s project_id=%s realtime_scope=%s realtime_subscribers=%d realtime_authorized=%d projection_subscribers=%t operation=%s relationship_id=%s resource_type=%s resource_id=%s", delta.CompanyID, projectID, realtimeScope, len(realtimeConnections), authorizedRealtimeTargets, hasProjectionSubscribers, delta.Operation, delta.RowKey.RelationshipID, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
+			log.Printf("project_relationship_projection_delta_targets company_id=%s project_id=%s realtime_scope=%s realtime_subscribers=%d realtime_authorized=%d projection_subscribers=%d projection_authorized=%d operation=%s relationship_id=%s resource_type=%s resource_id=%s", delta.CompanyID, projectID, realtimeScope, len(realtimeConnections), authorizedRealtimeTargets, len(projectionUserIDs), authorizedProjectionTargets, delta.Operation, delta.RowKey.RelationshipID, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
 		case store.ProjectionNameKanbanBoard:
 			boardID := projectionDeltaBoardID(delta)
 			scopePrefix := projectionKanbanBoardScopePrefix(boardID)
@@ -542,7 +561,13 @@ func (s *Server) authorizedProjectRelationshipProjectionDeltaForUser(delta store
 		return store.ProjectionDelta{}, false
 	}
 	if !projectAllowed {
-		return store.ProjectionDelta{}, false
+		return store.ProjectionDelta{
+			CompanyID:          delta.CompanyID,
+			Projection:         store.ProjectionNameProjectRelationship,
+			Operation:          store.ProjectionDeltaOperationDelete,
+			RowKey:             delta.RowKey,
+			ProjectedTimestamp: time.Now().UTC(),
+		}, true
 	}
 	switch delta.Operation {
 	case store.ProjectionDeltaOperationDelete:

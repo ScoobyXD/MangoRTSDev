@@ -582,17 +582,20 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 		if err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID); err != nil {
 			return nil, err
 		}
-		if _, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
+		projectionDeltas, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
 			CompanyID:    companyID,
 			ResourceType: entityType,
 			ResourceID:   entityID,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, err
 		}
+		eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
 		if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-			if _, err := r.appendEventRowTx(ctx, tx, eventInput); err != nil {
-				return nil, err
-			}
+			eventInputs = append(eventInputs, eventInput)
+		}
+		if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
+			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -713,17 +716,20 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 			return nil, err
 		}
 	}
-	if _, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
+	projectionDeltas, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
 		CompanyID:    companyID,
 		ResourceType: entityType,
 		ResourceID:   entityID,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
 	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-		if _, err := r.appendEventRowTx(ctx, tx, eventInput); err != nil {
-			return nil, err
-		}
+		eventInputs = append(eventInputs, eventInput)
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1108,6 +1114,10 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`, companyID, entityID).Scan(&exists)
 		return exists, err
+	case EntityTypeProject:
+		var exists bool
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID).Scan(&exists)
+		return exists, err
 	case EntityTypeSharedTriageFolder:
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID).Scan(&exists)
@@ -1123,6 +1133,8 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 		return postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeLogicGate:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`, companyID, entityID)
+	case EntityTypeProject:
+		return postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeSharedTriageFolder:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID)
 	default:

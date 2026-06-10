@@ -209,7 +209,7 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 		}
 		return projections[i].InformationID < projections[j].InformationID
 	})
-	relationships := r.projectRelationshipProjectionsLocked(companyID, projectID)
+	relationships := r.projectRelationshipProjectionsForViewerLocked(companyID, projectID, viewerUserID)
 	project = r.withProjectReadModelLocked(project)
 	view := domain.ProjectView{
 		CompanyID:         companyID,
@@ -428,12 +428,22 @@ func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteIn
 }
 
 func (r *MemoryRepo) ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error) {
+	return r.ListProjectRelationshipProjectionsForViewer(companyID, projectID, "")
+}
+
+func (r *MemoryRepo) ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error) {
+	companyID = strings.TrimSpace(companyID)
+	projectID = strings.TrimSpace(projectID)
+	viewerUserID = strings.TrimSpace(viewerUserID)
+	if companyID == "" || projectID == "" {
+		return nil, ErrInvalid
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if _, ok := r.projects[key(companyID, projectID)]; !ok {
 		return nil, ErrNotFound
 	}
-	return r.projectRelationshipProjectionsLocked(companyID, projectID), nil
+	return r.projectRelationshipProjectionsForViewerLocked(companyID, projectID, viewerUserID), nil
 }
 
 func (r *MemoryRepo) ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error) {
@@ -482,9 +492,21 @@ func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.P
 }
 
 func (r *MemoryRepo) projectRelationshipProjectionsLocked(companyID, projectID string) []domain.ProjectRelationshipProjection {
+	return r.projectRelationshipProjectionsForViewerLocked(companyID, projectID, "")
+}
+
+func (r *MemoryRepo) projectRelationshipProjectionsForViewerLocked(companyID, projectID, viewerUserID string) []domain.ProjectRelationshipProjection {
 	items := make([]domain.ProjectRelationshipProjection, 0)
 	for _, projection := range r.projectRelationshipProjection {
 		if projection.CompanyID == companyID && projection.ProjectID == projectID {
+			if viewerUserID != "" {
+				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projection.ProjectID, EntityPermissionView) {
+					continue
+				}
+				if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionView) {
+					continue
+				}
+			}
 			items = append(items, cloneProjectRelationshipProjection(projection))
 		}
 	}
@@ -499,6 +521,34 @@ func (r *MemoryRepo) projectRelationshipProjectionRowsForRelationshipLocked(comp
 		return nil
 	}
 	return []ProjectRelationshipProjectionRow{projectRelationshipProjectionRowFromDomain(projection)}
+}
+
+func (r *MemoryRepo) projectRelationshipPermissionProjectionDeltasLocked(companyID, resourceType, resourceID string) []ProjectionDelta {
+	rows := make([]ProjectRelationshipProjectionRow, 0)
+	for _, projection := range r.projectRelationshipProjection {
+		if projection.CompanyID != companyID {
+			continue
+		}
+		switch resourceType {
+		case EntityTypeProject:
+			if projection.ProjectID != resourceID {
+				continue
+			}
+		case EntityTypeNode:
+			if projection.ResourceType != EntityTypeNode || projection.ResourceID != resourceID {
+				continue
+			}
+		case EntityTypeLogicGate:
+			logicGateID := strings.TrimSpace(pointerStringValue(projection.LogicGateID))
+			if logicGateID != resourceID && !(projection.ResourceType == EntityTypeLogicGate && projection.ResourceID == resourceID) {
+				continue
+			}
+		default:
+			continue
+		}
+		rows = append(rows, projectRelationshipProjectionRowFromDomain(projection))
+	}
+	return ProjectRelationshipProjectionUpsertDeltas(rows)
 }
 
 func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relationshipID string) error {

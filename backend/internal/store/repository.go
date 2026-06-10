@@ -177,6 +177,7 @@ type ProjectRepository interface {
 	CreateNodeAssociatedWithProject(input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateResult, error)
 	CreateLogicGateAssociatedWithProject(input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateResult, error)
 	ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error)
+	ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
 	ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
 }
 

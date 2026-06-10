@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -378,6 +379,70 @@ func TestKanbanProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t 
 	}
 	if got := revoked.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.NodeID != node.NodeID {
 		t.Fatalf("revoked delta = %+v, want delete row key only", got)
+	}
+}
+
+func TestProjectRelationshipProjectionPermissionRevocationPublishesDeleteWithoutRowPayload(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777704"
+	repo.EnsureCompany(companyID, "Project Relationship Projection Revocation Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "project-relationship-revocation-viewer")
+	projectResult, err := repo.CreateProject(store.ProjectInput{
+		CompanyID: companyID,
+		Name:      "Revoked Relationship Project",
+		Status:    store.ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Revoked Relationship Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	relationshipID := "11111111-1111-4111-8111-111111111704"
+	if _, err := repo.UpsertProjectRelationship(store.ProjectRelationshipInput{
+		CompanyID:      companyID,
+		ProjectID:      projectResult.Project.ProjectID,
+		RelationshipID: relationshipID,
+		ResourceType:   store.EntityTypeNode,
+		ResourceID:     node.NodeID,
+		ActorUserID:    viewer.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	drainEventRowsForTest(t, repo, companyID)
+
+	server := NewServerWithOptions(repo, ServerOptions{DisableEventWorker: true})
+	defer server.Close()
+	projectScope := store.ProjectRelationshipProjectionProjectScope(projectResult.Project.ProjectID)
+	viewerScope := projectionProjectRelationshipUserScope(projectResult.Project.ProjectID, viewer.UserID)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameProjectRelationship, viewerScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameProjectRelationship, viewerScope, viewerCh)
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		ActorUserID:      viewer.UserID,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke: %v", err)
+	}
+	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
+		t.Fatalf("processAvailableEventRows processed=%d err=%v, want permission/project relationship events processed", processed, err)
+	}
+	revoked := readProjectionEnvelopeForTest(t, viewerCh)
+	if revoked.Projection != store.ProjectionNameProjectRelationship || revoked.ProjectionScope != projectScope || revoked.ProjectionSequence != 1 || len(revoked.Deltas) != 1 {
+		t.Fatalf("revoked envelope = %+v, want one project-scoped relationship delta", revoked)
+	}
+	if got := revoked.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil ||
+		got.RowKey.ProjectID != projectResult.Project.ProjectID ||
+		got.RowKey.RelationshipID != relationshipID ||
+		got.RowKey.ResourceType != store.EntityTypeNode ||
+		got.RowKey.ResourceID != node.NodeID ||
+		got.RowKey.NodeID != node.NodeID {
+		t.Fatalf("revoked delta = %+v, want delete row key only for project relationship", got)
 	}
 }
 

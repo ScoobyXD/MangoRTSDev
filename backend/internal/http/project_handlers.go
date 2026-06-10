@@ -368,7 +368,8 @@ func (s *Server) handleProjectRelationships(w http.ResponseWriter, r *http.Reque
 		if !s.requireEntityView(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 			return
 		}
-		items, err := s.repo.ListProjectRelationshipProjections(companyID, projectID)
+		viewerUserID := s.entityPermissionActorUserID(r, companyID)
+		items, err := s.repo.ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID)
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_list_project_relationships")
 			return
@@ -468,6 +469,12 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
+	if req.InitialAssignment != nil {
+		logicGateID := strings.TrimSpace(req.InitialAssignment.LogicGateID)
+		if logicGateID != "" && !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, store.EntityPermissionEdit) {
+			return
+		}
+	}
 	actor, _ := authenticatedActor(r)
 	input := store.ProjectScopedNodeCreateInput{
 		CompanyID:      companyID,
@@ -487,7 +494,7 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	}
 	if req.InitialAssignment != nil {
 		input.InitialAssignment = &store.ProjectScopedNodeLogicGateAssignmentInput{
-			LogicGateID: req.InitialAssignment.LogicGateID,
+			LogicGateID: strings.TrimSpace(req.InitialAssignment.LogicGateID),
 			Status:      req.InitialAssignment.Status,
 			ColumnID:    req.InitialAssignment.ColumnID,
 			Position:    req.InitialAssignment.Position,

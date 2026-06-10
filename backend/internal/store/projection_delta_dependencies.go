@@ -253,14 +253,28 @@ func applyProjectProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, 
 }
 
 func applyResourcePermissionProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ResourcePermissionProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	_ = ctx
-	_ = tx
 	resourceType, ok := NormalizeEntityType(input.ResourceType)
-	if cleanUUIDText(input.CompanyID) == "" || cleanUUIDText(input.ResourceID) == "" || !ok {
+	companyID := cleanUUIDText(input.CompanyID)
+	resourceID := cleanUUIDText(input.ResourceID)
+	if companyID == "" || resourceID == "" || !ok {
 		return nil, ErrInvalid
 	}
-	input.ResourceType = resourceType
-	return nil, nil
+	var rows []ProjectRelationshipProjectionRow
+	var err error
+	switch resourceType {
+	case EntityTypeNode:
+		rows, err = projectRelationshipProjectionRowsForNodeTx(ctx, tx, companyID, resourceID)
+	case EntityTypeLogicGate:
+		rows, err = projectRelationshipProjectionRowsForLogicGateTx(ctx, tx, companyID, resourceID)
+	case EntityTypeProject:
+		rows, err = projectRelationshipProjectionRowsForProjectTx(ctx, tx, companyID, resourceID)
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ProjectRelationshipProjectionUpsertDeltas(rows), nil
 }
 
 func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ProjectRelationshipProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
@@ -616,6 +630,13 @@ func projectRelationshipProjectionRowsForRelationshipTx(ctx context.Context, tx 
 where projection.company_id=$1::uuid
   and projection.relationship_id=$2::uuid
 order by projection.project_id, projection.relationship_id`, companyID, relationshipID)
+}
+
+func projectRelationshipProjectionRowsForProjectTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) ([]ProjectRelationshipProjectionRow, error) {
+	return projectRelationshipProjectionRowsForQueryTx(ctx, tx, projectRelationshipProjectionSelectSQL+`
+where projection.company_id=$1::uuid
+  and projection.project_id=$2::uuid
+order by projection.project_id, projection.relationship_id`, companyID, projectID)
 }
 
 func projectRelationshipProjectionRowsForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectRelationshipProjectionRow, error) {

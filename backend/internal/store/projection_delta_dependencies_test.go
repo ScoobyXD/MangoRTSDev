@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"miraeopus/backend/internal/domain"
 )
 
 func TestProjectRelationshipProjectionDeltaEventsUseExactRowKeys(t *testing.T) {
@@ -135,6 +137,71 @@ func TestProjectRelationshipProjectionDeleteEmitsExactDeleteDelta(t *testing.T) 
 	}
 }
 
+func TestProjectRelationshipSnapshotsFilterTargetsForViewer(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "99999999-9999-4999-8999-999999999206"
+	repo.EnsureCompany(companyID, "Project Relationship Snapshot Filter Co")
+	viewer, err := repo.UpsertAuthUser("project-relationship-snapshot-viewer", "project-relationship-snapshot-viewer@example.com", "Project Relationship Snapshot Viewer")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("project-relationship-snapshot-viewer", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID,
+		Name:      "Snapshot Filter Project",
+		Status:    ProjectDefaultStatus,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	visibleNode, err := repo.CreateNode(companyID, "Visible Snapshot Node")
+	if err != nil {
+		t.Fatalf("CreateNode visible: %v", err)
+	}
+	hiddenNode, err := repo.CreateNode(companyID, "Hidden Snapshot Node")
+	if err != nil {
+		t.Fatalf("CreateNode hidden: %v", err)
+	}
+	visibleGate, err := repo.CreateLogicGate(companyID, "Visible Snapshot Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate visible: %v", err)
+	}
+	hiddenGate, err := repo.CreateLogicGate(companyID, "Hidden Snapshot Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate hidden: %v", err)
+	}
+	projectID := projectResult.Project.ProjectID
+	upsertProjectRelationshipForStoreTest(t, repo, companyID, projectID, EntityTypeNode, visibleNode.NodeID)
+	upsertProjectRelationshipForStoreTest(t, repo, companyID, projectID, EntityTypeNode, hiddenNode.NodeID)
+	upsertProjectRelationshipForStoreTest(t, repo, companyID, projectID, EntityTypeLogicGate, visibleGate.LogicGateID)
+	upsertProjectRelationshipForStoreTest(t, repo, companyID, projectID, EntityTypeLogicGate, hiddenGate.LogicGateID)
+	hideProjectRelationshipTargetForStoreTest(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID)
+	hideProjectRelationshipTargetForStoreTest(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID)
+
+	allRelationships, err := repo.ListProjectRelationshipProjections(companyID, projectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections: %v", err)
+	}
+	if len(allRelationships) != 4 {
+		t.Fatalf("all relationships = %+v, want four unfiltered projection rows", allRelationships)
+	}
+	viewerRelationships, err := repo.ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjectionsForViewer: %v", err)
+	}
+	assertProjectRelationshipResourcesForStoreTest(t, viewerRelationships, []string{visibleNode.NodeID, visibleGate.LogicGateID})
+	view, err := repo.GetProjectView(companyID, projectID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("GetProjectView: %v", err)
+	}
+	if view.RelationshipCount != 2 {
+		t.Fatalf("project view relationship_count = %d relationships=%+v, want 2", view.RelationshipCount, view.Relationships)
+	}
+	assertProjectRelationshipResourcesForStoreTest(t, view.Relationships, []string{visibleNode.NodeID, visibleGate.LogicGateID})
+}
+
 func TestProjectRelationshipProjectionDependencyLayerUsesExactKeys(t *testing.T) {
 	raw, err := os.ReadFile("projection_delta_dependencies.go")
 	if err != nil {
@@ -168,6 +235,47 @@ func TestProjectRelationshipProjectionDependencyLayerUsesExactKeys(t *testing.T)
 	} {
 		if strings.Contains(normalized, forbidden) {
 			t.Fatalf("dependency layer contains broad projection behavior %q", forbidden)
+		}
+	}
+}
+
+func upsertProjectRelationshipForStoreTest(t *testing.T, repo *MemoryRepo, companyID, projectID, resourceType, resourceID string) {
+	t.Helper()
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    projectID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship %s %s: %v", resourceType, resourceID, err)
+	}
+}
+
+func hideProjectRelationshipTargetForStoreTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID string) {
+	t.Helper()
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       entityType,
+		EntityID:         entityID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hide %s %s: %v", entityType, entityID, err)
+	}
+}
+
+func assertProjectRelationshipResourcesForStoreTest(t *testing.T, relationships []domain.ProjectRelationshipProjection, wantResourceIDs []string) {
+	t.Helper()
+	got := make(map[string]bool, len(relationships))
+	for _, relationship := range relationships {
+		got[relationship.ResourceID] = true
+	}
+	if len(got) != len(wantResourceIDs) {
+		t.Fatalf("relationship resource IDs = %+v from %+v, want %v", got, relationships, wantResourceIDs)
+	}
+	for _, resourceID := range wantResourceIDs {
+		if !got[resourceID] {
+			t.Fatalf("relationship resource IDs = %+v from %+v, missing %s", got, relationships, resourceID)
 		}
 	}
 }

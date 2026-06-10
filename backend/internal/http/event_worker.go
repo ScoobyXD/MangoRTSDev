@@ -231,6 +231,7 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
 	case store.EntityTypeProject:
+		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.revalidateProjectRelationshipSubscriptionsForProject(row.CompanyID, entityID)
 		return nil
 	default:
