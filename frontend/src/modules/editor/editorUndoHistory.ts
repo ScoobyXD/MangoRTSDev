@@ -97,10 +97,6 @@ export function snapshotEditorDocumentHTML(html: string, selectionStart: number,
   return { html, selectionStart: start, selectionEnd: end };
 }
 
-export function snapshotEditorTextArea(target: Pick<HTMLTextAreaElement, "value" | "selectionStart" | "selectionEnd">): EditorTextSnapshot {
-  return snapshotEditorText(target.value, target.selectionStart, target.selectionEnd);
-}
-
 export function classifyEditorInputType(inputType: string | undefined): EditorTextChangeKind {
   if (!inputType) return "unknown";
   if (inputType === "insertFromPaste" || inputType === "insertFromDrop") return "paste";

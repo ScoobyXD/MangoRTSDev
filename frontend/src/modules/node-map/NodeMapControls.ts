@@ -1,6 +1,6 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from "react";
 import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
-import { NodeDirection, NodePosition, NodeRecord, PanelEdge, clamp, snapToGrid } from "./shared.js";
+import { NodeDirection, NodePosition, NodeRecord, clamp, snapToGrid } from "./shared.js";
 
 export type NodeMapScreenPoint = { x: number; y: number };
 export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY: number };
@@ -96,25 +96,6 @@ export type NodeMapMultiSelectBox = {
   additive: boolean;
 };
 
-export type NodeMapPanelDragState = {
-  pointerID: number;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-};
-
-export type NodeMapPanelResizeState = {
-  pointerID: number;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-  originW: number;
-  originH: number;
-  edges: Partial<Record<PanelEdge, true>>;
-};
-
 export type NodeMapRelationshipPath = {
   id: string;
   points: Array<{ x: number; y: number }>;
@@ -180,7 +161,6 @@ export function buildNodeMapClipboardPayload<TNode extends { node_id: string; ti
 
   return { kind: input.kind, nodes: copiedNodes, relationships: copiedRelationships };
 }
-
 export function parseNodeMapClipboardPayload(raw: string | null | undefined): NodeMapClipboardPayload | null {
   if (!raw) return null;
   try {
@@ -613,90 +593,4 @@ export function useNodeMapDeleteKeyboardControl(input: {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
-}
-
-export function useNodeMapPanelControls(input: {
-  panelDrag: NodeMapPanelDragState | null;
-  panelResize: NodeMapPanelResizeState | null;
-  panelRect: { x: number; y: number; width: number; height: number };
-  panelMinWidth: number;
-  panelMinHeight: number;
-  viewportRef: MutableRefObject<HTMLDivElement | null>;
-  setPanelDrag: Dispatch<SetStateAction<NodeMapPanelDragState | null>>;
-  setPanelResize: Dispatch<SetStateAction<NodeMapPanelResizeState | null>>;
-  setPanelRect: Dispatch<SetStateAction<{ x: number; y: number; width: number; height: number }>>;
-}) {
-  useEffect(() => {
-    if (!input.panelDrag) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== input.panelDrag?.pointerID || !input.viewportRef.current) return;
-      const dx = event.clientX - (input.panelDrag?.startX ?? 0);
-      const dy = event.clientY - (input.panelDrag?.startY ?? 0);
-      const bounds = input.viewportRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - input.panelRect.width - 8);
-      const maxY = Math.max(0, bounds.height - 56);
-      input.setPanelRect((previous) => ({ ...previous, x: clamp((input.panelDrag?.originX ?? 0) + dx, 0, maxX), y: clamp((input.panelDrag?.originY ?? 0) + dy, 8, maxY) }));
-    };
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId === input.panelDrag?.pointerID) input.setPanelDrag(null);
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [input]);
-
-  useEffect(() => {
-    if (!input.panelResize) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== input.panelResize?.pointerID || !input.viewportRef.current) return;
-      const bounds = input.viewportRef.current.getBoundingClientRect();
-      const dx = event.clientX - (input.panelResize?.startX ?? 0);
-      const dy = event.clientY - (input.panelResize?.startY ?? 0);
-      const maxX = Math.max(0, bounds.width - 8);
-      const maxY = Math.max(8, bounds.height - 8);
-
-      let nextX = input.panelResize?.originX ?? 0;
-      let nextY = input.panelResize?.originY ?? 0;
-      let nextW = input.panelResize?.originW ?? 0;
-      let nextH = input.panelResize?.originH ?? 0;
-
-      if (input.panelResize?.edges.right) nextW = (input.panelResize.originW ?? 0) + dx;
-      if (input.panelResize?.edges.bottom) nextH = (input.panelResize.originH ?? 0) + dy;
-      if (input.panelResize?.edges.left) {
-        nextX = (input.panelResize.originX ?? 0) + dx;
-        nextW = (input.panelResize.originW ?? 0) - dx;
-      }
-      if (input.panelResize?.edges.top) {
-        nextY = (input.panelResize.originY ?? 0) + dy;
-        nextH = (input.panelResize.originH ?? 0) - dy;
-      }
-
-      nextW = clamp(nextW, input.panelMinWidth, maxX);
-      nextH = clamp(nextH, input.panelMinHeight, maxY - 8);
-      nextX = clamp(nextX, 0, maxX - nextW);
-      nextY = clamp(nextY, 8, maxY - nextH);
-
-      if (input.panelResize?.edges.left) nextX = (input.panelResize.originX ?? 0) + ((input.panelResize.originW ?? 0) - nextW);
-      if (input.panelResize?.edges.top) nextY = (input.panelResize.originY ?? 0) + ((input.panelResize.originH ?? 0) - nextH);
-      nextX = clamp(nextX, 0, maxX - nextW);
-      nextY = clamp(nextY, 8, maxY - nextH);
-
-      input.setPanelRect({ x: nextX, y: nextY, width: nextW, height: nextH });
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId === input.panelResize?.pointerID) input.setPanelResize(null);
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [input]);
 }

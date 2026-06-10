@@ -264,6 +264,7 @@ func (r *MemoryRepo) AddProjectInformation(input ProjectInformationInput) (domai
 	if existing, ok := r.projectText[k][projectionID]; ok {
 		created = existing.CreatedTimestamp
 	}
+	previousProjection, hadProjection := r.projectText[k][projectionID]
 	projection := domain.ProjectProjection{
 		CompanyID:        input.CompanyID,
 		ProjectID:        input.ProjectID,
@@ -276,7 +277,17 @@ func (r *MemoryRepo) AddProjectInformation(input ProjectInformationInput) (domai
 	r.projectText[k][projectionID] = projection
 	if eventInput, ok := EditorProjectionUpsertEventInput(input.CompanyID, input.ActorUserID, "", EditorProjectionRowFromProject(projection)); ok {
 		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			delete(r.projectText[k], projectionID)
+			for index := range r.projectInfo[k] {
+				if r.projectInfo[k][index].InformationID == item.InformationID {
+					r.projectInfo[k] = append(r.projectInfo[k][:index], r.projectInfo[k][index+1:]...)
+					break
+				}
+			}
+			if hadProjection {
+				r.projectText[k][projectionID] = previousProjection
+			} else {
+				delete(r.projectText[k], projectionID)
+			}
 			return domain.ProjectInformation{}, err
 		}
 	}
@@ -313,10 +324,11 @@ func (r *MemoryRepo) DeleteProjectProjection(input ProjectProjectionDeleteInput)
 		return ErrNotFound
 	}
 	k := key(input.CompanyID, input.ProjectID)
-	if _, ok := r.projectText[k][input.InformationID]; ok {
+	if existing, ok := r.projectText[k][input.InformationID]; ok {
 		delete(r.projectText[k], input.InformationID)
 		if eventInput, ok := EditorProjectionDeleteEventInput(input.CompanyID, input.ActorUserID, "", EntityTypeProject, input.ProjectID, input.InformationID); ok {
 			if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
+				r.projectText[k][input.InformationID] = existing
 				return err
 			}
 		}

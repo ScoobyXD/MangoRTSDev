@@ -249,6 +249,9 @@ func applyProjectProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, 
 	if cleanUUIDText(input.CompanyID) == "" || cleanUUIDText(input.ProjectID) == "" {
 		return nil, ErrInvalid
 	}
+	// Project editor information writes own their source row, project_projection_table row,
+	// and editor projection event directly in the same transaction; there is no dependent
+	// projection fanout to apply here yet.
 	return nil, nil
 }
 

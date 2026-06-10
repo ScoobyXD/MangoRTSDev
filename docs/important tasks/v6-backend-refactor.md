@@ -532,7 +532,7 @@ Tasks:
 - [x] Add project relationship projection delta event payload encoding/decoding.
 - [x] Add event worker support for project relationship projection delta delivery.
 - [x] Wire project relationship create/update/delete commands through `applyProjectRelationshipProjectionDeltaDependenciesTx`.
-- [ ] Wire project editor information writes through `applyProjectProjectionDeltaDependenciesTx` if any duplicated event logic remains.
+- [x] Wire project editor information writes through `applyProjectProjectionDeltaDependenciesTx` if any duplicated event logic remains.
 - [x] Add focused tests proving project relationship projection rows are patched by exact relationship/node/Logic Gate/assignment keys.
 - [x] Add tests proving no normal product write does a broad project relationship projection rebuild.
 
@@ -655,3 +655,9 @@ Migrated node, Logic Gate, node Logic Gate assignment, node account assignment, 
 Added atomic `CreateNodeAssociatedWithProject` and `CreateLogicGateAssociatedWithProject` store commands plus `POST /v1/projects/{project_id}/nodes` and `POST /v1/projects/{project_id}/logic-gates`. The node command supports optional initial editor information and optional initial Logic Gate assignment context; the Logic Gate command supports optional initial editor information. Both commands create source rows, project relationship rows, affected projections, projection delta event rows, and workspace domain events before commit.
 
 Added Phase 2 guard, rollback, and regression tests covering migrated command wiring, project-scoped create commit/rollback behavior, project relationship add/delete deltas, optional initial assignment relationship keys, and no broad project relationship projection rebuilds in normal product writes.
+
+### 2026-06-10 - Project Editor Information Dependency Audit
+
+Audited the remaining project editor information item. Project editor information writes already insert the `project_information` source row, upsert the exact `project_projection_table` row, append the editor projection event row, and commit those writes in one transaction. Project projection deletes likewise delete the exact editor projection row and append the matching editor delete event before commit.
+
+No project_relationship-style dependency fanout exists for these editor information writes, and `project_relationship_projection` reads current project names by joining `projects` rather than storing project metadata that needs resync. `applyProjectProjectionDeltaDependenciesTx` remains a validated no-op reserved for future project dependent projections instead of wrapping the editor event contract. Added focused tests for project editor upsert/delete events, event append rollback of source/projection writes, and guards against broad `project_projection_table` rebuild/delete maintenance.

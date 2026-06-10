@@ -5,11 +5,9 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import {
-  buildAciInboxGroupsByCell,
   buildMyLogicGateGroups,
   buildMyNodeGroups,
   buildRaciRoleInboxGroupsByCell,
-  buildResponsibleInboxGroupsByCell,
   buildSharedInboxRows,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
@@ -33,7 +31,7 @@ import {
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
-import { ACI_COLUMNS, RACI_INBOX_SECTIONS, RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
+import { RACI_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {
@@ -150,7 +148,7 @@ test("shared inbox rows are stable, sorted, and nested by parent", () => {
   ]);
 });
 
-test("inbox group builders classify ACI and responsible work by role, status, and priority", () => {
+test("RACI inbox group builder classifies work by role, status, and priority", () => {
   const currentUserID = "user-1";
   const gates = new Map([
     ["gate-a", logicGate("gate-a", [{ company_id: "company-1", logic_gate_id: "gate-a", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
@@ -178,22 +176,6 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   ];
   const nodeByID = new Map(nodes.map((item) => [item.node_id, item]));
 
-  const aciGroups = buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
-  assert.deepEqual(ACI_COLUMNS.map((column) => column.role), ["accountable", "consulted", "informed"]);
-  assert.deepEqual((aciGroups.get("accountable:1") ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
-  assert.deepEqual(aciGroups.get("consulted:1")?.[0]?.nodeIDs, ["node-all"]);
-  assert.deepEqual(aciGroups.get("informed:1")?.[0]?.nodeIDs, ["node-all"]);
-  assert.equal(aciGroups.has("other:2"), false);
-  assert.equal(aciGroups.has("other:3"), false);
-  const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
-  assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
-  assert.deepEqual(responsibleGroups.get("verify:2")?.[0]?.nodeIDs, ["node-verify"]);
-  assert.deepEqual((responsibleGroups.get("pending:1") ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
-  assert.deepEqual(responsibleGroups.get("pending:0")?.[0]?.nodeIDs, ["node-r-unassigned"]);
-  assert.equal(responsibleGroups.get("pending:1")?.some((group) => group.nodeIDs.includes("node-a")), false);
-  assert.equal(responsibleGroups.get("in_progress:2")?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
-  assert.equal(responsibleGroups.has("done:1"), false);
-  assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress", "verify"]);
   assert.deepEqual(RACI_INBOX_SECTIONS.map((section) => [section.viewID, section.role]), [
     ["r-inbox", "responsible"],
     ["a-inbox", "accountable"],
@@ -201,6 +183,14 @@ test("inbox group builders classify ACI and responsible work by role, status, an
     ["i-inbox", "informed"],
     ["o-inbox", "other"],
   ]);
+  const responsibleStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "responsible");
+  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "in_progress", 2))?.[0]?.nodeIDs, ["node-r"]);
+  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "verify", 2))?.[0]?.nodeIDs, ["node-verify"]);
+  assert.deepEqual((responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
+  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 0))?.[0]?.nodeIDs, ["node-r-unassigned"]);
+  assert.equal(responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 1))?.some((group) => group.nodeIDs.includes("node-a")), false);
+  assert.equal(responsibleStatusGroups.get(raciRoleCellKey("responsible", "in_progress", 2))?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
+  assert.equal(responsibleStatusGroups.has(raciRoleCellKey("responsible", "done", 1)), false);
   const accountableStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "accountable");
   assert.deepEqual((accountableStatusGroups.get(raciRoleCellKey("accountable", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
   assert.equal(accountableStatusGroups.has(raciRoleCellKey("accountable", "in_progress", 2)), false);
