@@ -57,6 +57,7 @@ run("tree rows render a blank root when the workspace is empty", () => {
     expanded: new Set(),
     nodes: [],
     logicGates: [],
+    projects: [],
     kanbanBoards: [],
     folders: systemFolders,
     folderItems: [],
@@ -70,6 +71,7 @@ run("tree rows render root content without a synthetic Company folder", () => {
     expanded: new Set(),
     nodes: [{ company_id: "c", node_id: "node-a", title: "Alpha", created_timestamp: "1" }],
     logicGates: [],
+    projects: [],
     kanbanBoards: [],
     folders: systemFolders,
     folderItems: [],
@@ -88,6 +90,7 @@ run("automatic folders hold active node placements and due-date history", () => 
       { company_id: "c", node_id: "today", title: "Today", due_date: "2026-05-07", created_timestamp: "3" },
     ],
     logicGates: [],
+    projects: [],
     kanbanBoards: [{ company_id: "c", board_id: "board-1", title: "Launch", position: 1000, created_timestamp: "4", updated_timestamp: "4" }],
     folders: systemFolders,
     folderItems: [{ company_id: "c", folder_id: "system-active", item_type: "node", item_id: "future", position: 1000, created_timestamp: "5", updated_timestamp: "5" }],
@@ -109,6 +112,7 @@ run("root folders from different domains can be locally ordered together", () =>
     expanded: new Set(),
     nodes: [],
     logicGates: [],
+    projects: [],
     kanbanBoards: [],
     folders: [
       ...systemFolders,
@@ -164,6 +168,7 @@ run("scoped explorer rows render children under a named logic-gate root", () => 
       { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "A/R followup", title: "A/R followup", created_timestamp: "4" },
       { company_id: "c", logic_gate_id: "gate-b", node_id: "gate-b", header: "Exec review", title: "Exec review", created_timestamp: "5" },
     ],
+    projects: [],
     kanbanBoards: [],
     folders,
     folderItems: [
@@ -186,6 +191,7 @@ run("custom logic gate rows render assigned nodes when expanded", () => {
     logicGates: [
       { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
     ],
+    projects: [],
     kanbanBoards: [],
     folders: [
       ...systemFolders,
@@ -213,8 +219,10 @@ run("context creation targets nested logic gate folders", () => {
     preferredFolderParentID: "logic-folder-1",
     nodeFolderParentID: "logic-folder-1",
     logicGateFolderParentID: "logic-folder-1",
+    projectFolderParentID: "",
     nodeParentFolderID: "logic-folder-1",
     logicGateParentFolderID: "logic-folder-1",
+    projectParentFolderID: "logic-folder-1",
   });
 });
 
@@ -225,8 +233,10 @@ run("context creation defaults blank areas to root custom folders", () => {
     preferredFolderParentID: "",
     nodeFolderParentID: "",
     logicGateFolderParentID: "",
+    projectFolderParentID: "",
     nodeParentFolderID: "",
     logicGateParentFolderID: "",
+    projectParentFolderID: "",
   });
 });
 
@@ -237,8 +247,10 @@ run("context creation targets node siblings from a node row", () => {
     preferredFolderParentID: "node-folder-1",
     nodeFolderParentID: "node-folder-1",
     logicGateFolderParentID: "",
+    projectFolderParentID: "",
     nodeParentFolderID: "node-folder-1",
     logicGateParentFolderID: "node-folder-1",
+    projectParentFolderID: "node-folder-1",
   });
 });
 
@@ -277,12 +289,12 @@ run("drop targets resolve item rows to their containing folder", () => {
     { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
   );
 
-  assert.deepEqual(
+  assert.equal(
     resolveExplorerDropTarget(
       { kind: "node", folderKind: "node", folderID: "test-folder", nodeID: "node-1" },
       { kind: "logic_gate", itemType: "logic_gate", itemID: "gate-1" },
     ),
-    { folderID: "test-folder", folderKind: "node", treeID: "workspace-folder-test-folder" },
+    null,
   );
   assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
 
