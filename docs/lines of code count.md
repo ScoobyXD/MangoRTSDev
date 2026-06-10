@@ -2,6 +2,8 @@
 
 ## Count History
 
+***NOTE THAT EVERY NEW ENTRY ON THIS WILL HAVE A SNAPSHOT ON THAT DATE OF ALL THE INFORMATION OF  Non-Test Logic Lines by Area, Non-Test Logic Lines by Subcategory, AND Largest Files At Baseline***
+
 | Date | Logic lines without tests | Total logic lines | Counted files | Test logic lines | Test files |
 |---|---:|---:|---:|---:|---:|
 | 2026-06-10 | 147,604 | 179,408 | 579 | 31,804 | 127 |
@@ -67,7 +69,9 @@
 | `frontend/src/pages/account-manager` | 1 | 15 | 0.0% |
 | `frontend/src/modules/entityLabels.ts` | 1 | 13 | 0.0% |
 
-## Files Over 1,500 Logic Lines
+## Largest Files At Baseline
+
+This table is for awareness, not a hard rule. The softer guideline is to avoid growing files past roughly 2,000 lines unless there is a clear reason and a better module boundary does not exist yet.
 
 | Logic lines | File | Test file |
 |---:|---|---|
