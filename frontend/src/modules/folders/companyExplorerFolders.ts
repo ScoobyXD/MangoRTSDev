@@ -1,9 +1,9 @@
 import type { NodeRelationship as LogicGateCanvasRelationship, NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 
-export type CompanyExplorerFolderKind = "node" | "logic_gate";
+export type CompanyExplorerFolderKind = "node" | "logic_gate" | "project";
 export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
-export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "active_logic_gates" | "history";
+export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "active_logic_gates" | "active_projects" | "history";
 
 export type CompanyExplorerFolder = {
   company_id: string;
@@ -28,15 +28,15 @@ export type CompanyExplorerFolderItem = {
 };
 
 export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExplorerFolderKind {
-  return value === "node" || value === "logic_gate";
+  return value === "node" || value === "logic_gate" || value === "project";
 }
 
 export function isCompanyExplorerItemType(value: unknown): value is CompanyExplorerItemType {
-  return isCompanyExplorerFolderKind(value);
+  return isCompanyExplorerFolderKind(value) || value === "kanban";
 }
 
 export function isCompanyExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "active_nodes" || value === "active_logic_gates" || value === "history";
+  return value === "active_nodes" || value === "active_logic_gates" || value === "active_projects" || value === "history";
 }
 
 export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {

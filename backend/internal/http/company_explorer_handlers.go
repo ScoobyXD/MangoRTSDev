@@ -726,11 +726,11 @@ func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http
 				writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
 				return
 			}
-		} else if item.Kind != "node" && item.Kind != "logic_gate" && item.Kind != "kanban" {
+		} else if item.Kind != "node" && item.Kind != "logic_gate" && item.Kind != "project" && item.Kind != "kanban" {
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
 			return
 		}
-		if item.Kind == "node" || item.Kind == "logic_gate" {
+		if item.Kind == "node" || item.Kind == "logic_gate" || item.Kind == "project" {
 			if entityType, ok := companyExplorerEntityType(item.Kind); ok {
 				if !s.requireEntityView(w, r, req.CompanyID, entityType, item.ID, companyExplorerEntityNotFoundCode(item.Kind)) {
 					return
@@ -798,6 +798,8 @@ func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets 
 			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": target.ID})
 		case "logic_gate":
 			s.publishWorkspaceEvent(companyID, "logic_gate_deleted", map[string]any{"logic_gate_id": target.ID})
+		case "project":
+			s.publishWorkspaceEvent(companyID, "project_deleted", map[string]any{"project_id": target.ID})
 		case "kanban":
 			s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": target.ID})
 		}
@@ -958,11 +960,17 @@ func companyExplorerFolderItemsVersionQueries(itemType string) []store.DomainEve
 			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
 			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
 		}
+	case "project":
+		return []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("project")),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("project")),
+		}
 	default:
 		return []store.DomainEventStreamQuery{
 			workspaceEventQuery(companyExplorerFolderItemWorkspaceEventTypes...),
 			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
 			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("project")),
 		}
 	}
 }
@@ -1030,11 +1038,11 @@ func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r 
 }
 
 func isValidCompanyExplorerFolderKind(value string) bool {
-	return value == "node" || value == "logic_gate" || value == "communications"
+	return value == "node" || value == "logic_gate" || value == "project" || value == "communications"
 }
 
 func isValidCompanyExplorerItemType(value string) bool {
-	return value == "node" || value == "logic_gate"
+	return value == "node" || value == "logic_gate" || value == "project"
 }
 
 func companyExplorerItemTypeForFolderKind(folderKind string) string {
@@ -1043,6 +1051,8 @@ func companyExplorerItemTypeForFolderKind(folderKind string) string {
 		return "node"
 	case "logic_gate":
 		return "logic_gate"
+	case "project":
+		return "project"
 	default:
 		return ""
 	}

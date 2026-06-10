@@ -365,7 +365,7 @@ export default function AuthGate() {
     ? "logic-gate-arena"
     : deepLinkRoute?.kind === "racio"
       ? "home"
-      : normalizedPath === "/project-management"
+      : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
         ? "project-management"
         : normalizedPath === "/account-manager"
           ? "account-manager"

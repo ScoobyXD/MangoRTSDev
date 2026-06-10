@@ -277,7 +277,7 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		return true
 	}
 	switch resourceType {
-	case EntityTypeNode, EntityTypeLogicGate:
+	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject:
 		if accessLevel == EntityPermissionAdmin {
 			return false
 		}
@@ -315,6 +315,12 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 			return "", false
 		}
 		return defaultResourceAccessOrEdit(gate.DefaultAccess), true
+	case EntityTypeProject:
+		project, ok := r.projects[key(companyID, resourceID)]
+		if !ok {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(project.DefaultAccess), true
 	default:
 		return "", false
 	}

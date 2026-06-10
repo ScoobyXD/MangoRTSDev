@@ -31,6 +31,7 @@ type Repository interface {
 	CommunicationsRepository
 	WorkGraphRepository
 	LogicGateRepository
+	ProjectRepository
 	EntityPermissionRepository
 	EffectiveAccessRepository
 	ConsolidatedViewRepository
@@ -161,6 +162,22 @@ type LogicGateRepository interface {
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 }
 
+type ProjectRepository interface {
+	CreateProject(input ProjectInput) (ProjectMutationResult, error)
+	UpdateProject(input ProjectInput) (ProjectMutationResult, error)
+	DeleteProject(companyID, projectID, actorUserID string) (ProjectMutationResult, error)
+	GetProject(companyID, projectID string) (domain.Project, error)
+	ListProjects(companyID, viewerUserID string) ([]domain.Project, error)
+	GetProjectView(companyID, projectID, viewerUserID string) (domain.ProjectView, error)
+	AddProjectInformation(input ProjectInformationInput) (domain.ProjectInformation, error)
+	ListProjectProjections(companyID, projectID string) ([]domain.ProjectProjection, error)
+	DeleteProjectProjection(input ProjectProjectionDeleteInput) error
+	UpsertProjectRelationship(input ProjectRelationshipInput) (ProjectRelationshipMutationResult, error)
+	DeleteProjectRelationship(input ProjectRelationshipDeleteInput) (ProjectRelationshipMutationResult, error)
+	ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error)
+	ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
+}
+
 type EntityPermissionRepository interface {
 	ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error)
 	SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error)
@@ -241,6 +258,10 @@ type CompanyExplorerRepository interface {
 	ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error)
 	ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error)
 	ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error)
+	ListCompanyExplorerProjectSummaries(companyID string) ([]domain.Project, error)
+	ListVisibleCompanyExplorerProjectSummaries(companyID, userID string) ([]domain.Project, error)
+	ListCompanyExplorerProjectSummariesInFolderSubtree(companyID, folderID string) ([]domain.Project, error)
+	ListVisibleCompanyExplorerProjectSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.Project, error)
 	ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
@@ -379,40 +400,40 @@ type WorkItemLogicGateInboxItem struct {
 }
 
 type ProjectionRow struct {
-	CompanyID                  string    `json:"company_id"`
-	ItemID                     string    `json:"item_id,omitempty"`
-	UserID                     string    `json:"user_id,omitempty"`
-	ResourceType               string    `json:"resource_type,omitempty"`
-	ResourceID                 string    `json:"resource_id,omitempty"`
-	LogicGateID                *string   `json:"logic_gate_id,omitempty"`
-	DisplayTitle               string    `json:"display_title,omitempty"`
-	Status                     *string   `json:"status,omitempty"`
-	StatusColor                *string   `json:"status_color,omitempty"`
-	DueDate                    *string   `json:"due_date,omitempty"`
-	Priority                   *int      `json:"priority,omitempty"`
-	AssigneeUserID             *string   `json:"assignee_user_id,omitempty"`
-	AssigneeDisplayName        *string   `json:"assignee_display_name,omitempty"`
-	AssigneeEmail              *string   `json:"assignee_email,omitempty"`
-	ResourceCreatedTimestamp   time.Time `json:"resource_created_timestamp,omitempty"`
-	CreatedTimestamp           time.Time `json:"created_timestamp,omitempty"`
-	UpdatedTimestamp           time.Time `json:"updated_timestamp,omitempty"`
-	BoardID                    string    `json:"board_id,omitempty"`
-	CardID                     string    `json:"card_id,omitempty"`
-	ColumnID                   string    `json:"column_id,omitempty"`
-	NodeID                     string    `json:"node_id,omitempty"`
-	StartDate                  string    `json:"start_date,omitempty"`
-	EndDate                    string    `json:"end_date,omitempty"`
-	DurationDays               int       `json:"duration_days,omitempty"`
-	NodeTitle                  string    `json:"node_title,omitempty"`
-	DescriptionSnapshot        string    `json:"description_snapshot,omitempty"`
-	IsIssue                    bool      `json:"is_issue,omitempty"`
-	Position                   int       `json:"position,omitempty"`
-	NodeCreatedTimestamp       time.Time `json:"node_created_timestamp,omitempty"`
-	NodeUpdatedTimestamp       time.Time `json:"node_updated_timestamp,omitempty"`
-	AssignmentID               string    `json:"assignment_id,omitempty"`
-	AssignmentCreatedTimestamp time.Time `json:"assignment_created_timestamp,omitempty"`
-	AssignmentUpdatedTimestamp time.Time `json:"assignment_updated_timestamp,omitempty"`
-	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
+	CompanyID                  string           `json:"company_id"`
+	ItemID                     string           `json:"item_id,omitempty"`
+	UserID                     string           `json:"user_id,omitempty"`
+	ResourceType               string           `json:"resource_type,omitempty"`
+	ResourceID                 string           `json:"resource_id,omitempty"`
+	LogicGateID                *string          `json:"logic_gate_id,omitempty"`
+	DisplayTitle               string           `json:"display_title,omitempty"`
+	Status                     *string          `json:"status,omitempty"`
+	StatusColor                *string          `json:"status_color,omitempty"`
+	DueDate                    *string          `json:"due_date,omitempty"`
+	Priority                   *int             `json:"priority,omitempty"`
+	AssigneeUserID             *string          `json:"assignee_user_id,omitempty"`
+	AssigneeDisplayName        *string          `json:"assignee_display_name,omitempty"`
+	AssigneeEmail              *string          `json:"assignee_email,omitempty"`
+	ResourceCreatedTimestamp   time.Time        `json:"resource_created_timestamp,omitempty"`
+	CreatedTimestamp           time.Time        `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp           time.Time        `json:"updated_timestamp,omitempty"`
+	BoardID                    string           `json:"board_id,omitempty"`
+	CardID                     string           `json:"card_id,omitempty"`
+	ColumnID                   string           `json:"column_id,omitempty"`
+	NodeID                     string           `json:"node_id,omitempty"`
+	StartDate                  string           `json:"start_date,omitempty"`
+	EndDate                    string           `json:"end_date,omitempty"`
+	DurationDays               int              `json:"duration_days,omitempty"`
+	NodeTitle                  string           `json:"node_title,omitempty"`
+	DescriptionSnapshot        string           `json:"description_snapshot,omitempty"`
+	IsIssue                    bool             `json:"is_issue,omitempty"`
+	Position                   int              `json:"position,omitempty"`
+	NodeCreatedTimestamp       time.Time        `json:"node_created_timestamp,omitempty"`
+	NodeUpdatedTimestamp       time.Time        `json:"node_updated_timestamp,omitempty"`
+	AssignmentID               string           `json:"assignment_id,omitempty"`
+	AssignmentCreatedTimestamp time.Time        `json:"assignment_created_timestamp,omitempty"`
+	AssignmentUpdatedTimestamp time.Time        `json:"assignment_updated_timestamp,omitempty"`
+	ProjectionUpdatedTimestamp time.Time        `json:"projection_updated_timestamp,omitempty"`
 	Accounts                   []domain.Account `json:"accounts,omitempty"`
 }
 
@@ -491,21 +512,77 @@ type ProjectManagementTimelineMutationResult struct {
 	ProjectionDeltas []ProjectionDelta                       `json:"-"`
 }
 
+type ProjectInput struct {
+	CompanyID   string
+	ProjectID   string
+	Name        string
+	Status      string
+	AccountID   *string
+	AccountSet  bool
+	TeamID      *string
+	TeamSet     bool
+	ActorUserID string
+}
+
+type ProjectMutationResult struct {
+	Project    *domain.Project                   `json:"project,omitempty"`
+	DeletedID  string                            `json:"deleted_project_id,omitempty"`
+	FolderItem *domain.CompanyExplorerFolderItem `json:"folder_item,omitempty"`
+}
+
+type ProjectInformationInput struct {
+	CompanyID     string
+	ProjectID     string
+	InformationID string
+	Type          string
+	Information   string
+	ActorUserID   string
+}
+
+type ProjectProjectionDeleteInput struct {
+	CompanyID     string
+	ProjectID     string
+	InformationID string
+	ActorUserID   string
+}
+
+type ProjectRelationshipInput struct {
+	CompanyID      string
+	ProjectID      string
+	RelationshipID string
+	ResourceType   string
+	ResourceID     string
+	Position       int
+	ActorUserID    string
+}
+
+type ProjectRelationshipDeleteInput struct {
+	CompanyID      string
+	ProjectID      string
+	RelationshipID string
+	ActorUserID    string
+}
+
+type ProjectRelationshipMutationResult struct {
+	Relationship          *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
+	DeletedRelationshipID string                                `json:"deleted_relationship_id,omitempty"`
+}
+
 type AccountInput struct {
-	CompanyID    string
-	AccountID    string
-	Name         string
-	FolderID     *string
-	FolderIDSet  bool
-	Position     int
-	PositionSet  bool
-	ActorUserID  string
+	CompanyID   string
+	AccountID   string
+	Name        string
+	FolderID    *string
+	FolderIDSet bool
+	Position    int
+	PositionSet bool
+	ActorUserID string
 }
 
 type AccountMutationResult struct {
-	Account           *domain.Account   `json:"account,omitempty"`
-	DeletedAccountID  string            `json:"deleted_account_id,omitempty"`
-	ProjectionDeltas  []ProjectionDelta `json:"-"`
+	Account          *domain.Account   `json:"account,omitempty"`
+	DeletedAccountID string            `json:"deleted_account_id,omitempty"`
+	ProjectionDeltas []ProjectionDelta `json:"-"`
 }
 
 type AccountFolderInput struct {
@@ -526,10 +603,10 @@ type NodeAccountAssignmentUpdateInput struct {
 }
 
 type NodeAccountAssignmentUpdateResult struct {
-	Node              domain.Node                    `json:"node"`
-	Assignments       []domain.NodeAccountAssignment `json:"assignments"`
-	ProjectionDeltas  []ProjectionDelta              `json:"-"`
-	Events            []domain.DomainEvent           `json:"-"`
+	Node             domain.Node                    `json:"node"`
+	Assignments      []domain.NodeAccountAssignment `json:"assignments"`
+	ProjectionDeltas []ProjectionDelta              `json:"-"`
+	Events           []domain.DomainEvent           `json:"-"`
 }
 
 type ProjectionDelta struct {
@@ -549,6 +626,7 @@ const UserLogicGateShortcutBatchMaxItems = 200
 const (
 	EntityTypeNode               = "node"
 	EntityTypeLogicGate          = "logic_gate"
+	EntityTypeProject            = "project"
 	EntityTypeSharedTriageFolder = "shared_triage_folder"
 
 	EntityPermissionNoAccess = "no_access"
@@ -1358,6 +1436,8 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeNode, true
 	case EntityTypeLogicGate:
 		return EntityTypeLogicGate, true
+	case EntityTypeProject:
+		return EntityTypeProject, true
 	case EntityTypeSharedTriageFolder, "communications_folder", "shared_inbox_folder":
 		return EntityTypeSharedTriageFolder, true
 	default:

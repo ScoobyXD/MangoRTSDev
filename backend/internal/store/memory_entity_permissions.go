@@ -693,6 +693,9 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 	case EntityTypeLogicGate:
 		_, ok := r.logicGates[key(companyID, entityID)]
 		return ok
+	case EntityTypeProject:
+		_, ok := r.projects[key(companyID, entityID)]
+		return ok
 	case EntityTypeSharedTriageFolder:
 		item, ok := r.folders[key(companyID, entityID)]
 		return ok && item.FolderKind == "communications"

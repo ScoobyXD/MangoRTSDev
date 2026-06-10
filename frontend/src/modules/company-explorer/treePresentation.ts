@@ -1,12 +1,13 @@
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 
-export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "kanban";
+export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "project" | "kanban";
 
 export type ExplorerCreationContextRow = {
   id?: string;
   kind: ExplorerTreeEntityKind;
   nodeID?: string;
   logicGateID?: string;
+  projectID?: string;
   kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
@@ -59,9 +60,9 @@ export type ExplorerKeyboardNavigationResult = {
   expandedIDs?: Set<string>;
 };
 
-export type ExplorerSelectionDomain = "node" | "logic_gate" | "kanban" | "folder" | "root";
+export type ExplorerSelectionDomain = "node" | "logic_gate" | "project" | "kanban" | "folder" | "root";
 
-export type ExplorerPublishedSelectionKind = "node" | "logic_gate" | "kanban" | "folder";
+export type ExplorerPublishedSelectionKind = "node" | "logic_gate" | "project" | "kanban" | "folder";
 
 export type ExplorerPublishedSelection = {
   entityKind: ExplorerPublishedSelectionKind;
@@ -73,7 +74,7 @@ export type ExplorerPublishedSelection = {
 };
 
 export type ExplorerFindEntity = {
-  kind: "node" | "logic_gate";
+  kind: "node" | "logic_gate" | "project";
   id: string;
 };
 
@@ -95,14 +96,17 @@ export type ExplorerCreationTargets = {
   preferredFolderParentID: string;
   nodeFolderParentID: string;
   logicGateFolderParentID: string;
+  projectFolderParentID: string;
   nodeParentFolderID: string;
   logicGateParentFolderID: string;
+  projectParentFolderID: string;
 };
 
 export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
 export const EXPLORER_SYSTEM_KANBAN_FOLDER_ID = "system-folder-kanban-boards";
 export const EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID = "system-folder-active-nodes";
 export const EXPLORER_SYSTEM_ACTIVE_LOGIC_GATES_FOLDER_ID = "system-folder-active-logic-gates";
+export const EXPLORER_SYSTEM_ACTIVE_PROJECTS_FOLDER_ID = "system-folder-active-projects";
 export const EXPLORER_SYSTEM_HISTORY_FOLDER_ID = "system-folder-history";
 export const EXPLORER_SYSTEM_FOLDER_COLOR = "rgb(71, 85, 105)";
 export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
@@ -110,7 +114,7 @@ export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
 
 export function isExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "active_nodes" || value === "active_logic_gates" || value === "history";
+  return value === "active_nodes" || value === "active_logic_gates" || value === "active_projects" || value === "history";
 }
 
 export function formatExplorerFolderLabel(name: string): string {
@@ -155,6 +159,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
 
   const itemType = getExplorerDropPayloadItemType(payload);
   if (!itemType || itemType === "kanban") return null;
+  if (itemType !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -237,17 +242,21 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const containingFolderID = row?.folderID ?? "";
   const nodeParentFolderID = containingFolderID;
   const logicGateParentFolderID = containingFolderID;
+  const projectParentFolderID = containingFolderID;
   const nodeFolderParentID = nodeParentFolderID;
   const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
-  const preferredFolderKind: CompanyExplorerFolderKind = !row || row.folderKind === "logic_gate" || row.kind === "logic_gate" ? "logic_gate" : "node";
+  const projectFolderParentID = row?.folderKind === "project" ? containingFolderID : "";
+  const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind ?? (row?.kind === "project" ? "project" : row?.kind === "node" ? "node" : "logic_gate");
 
   return {
     preferredFolderKind,
-    preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : nodeParentFolderID,
+    preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : preferredFolderKind === "project" ? projectParentFolderID : nodeParentFolderID,
     nodeFolderParentID,
     logicGateFolderParentID,
+    projectFolderParentID,
     nodeParentFolderID,
     logicGateParentFolderID,
+    projectParentFolderID,
   };
 }
 
@@ -349,6 +358,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   | { kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind }
   | { kind: "node"; id: string }
   | { kind: "logic_gate"; id: string }
+  | { kind: "project"; id: string }
   | { kind: "kanban"; id: string }
   | null {
   if (!row) return null;
@@ -356,6 +366,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   if (row.kind === "folder" && row.folderID && row.folderKind) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
   if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }
@@ -370,12 +381,14 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "folder"; id: string }
   | { kind: "node"; id: string }
   | { kind: "logic_gate"; id: string }
+  | { kind: "project"; id: string }
   | null {
   if (!row) return null;
   if (row.systemKey) return null;
   if (row.kind === "folder" && row.folderID) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
   return null;
 }
 
@@ -398,6 +411,9 @@ export function resolveExplorerPublishedSelection(input: {
   } else if (treeID.startsWith("logic-gate-")) {
     entityKind = "logic_gate";
     entityID = treeID.slice("logic-gate-".length) || input.selectedLogicGateID;
+  } else if (treeID.startsWith("project-")) {
+    entityKind = "project";
+    entityID = treeID.slice("project-".length);
   } else if (treeID.startsWith("kanban-")) {
     entityKind = "kanban";
     entityID = treeID.slice("kanban-".length) || input.selectedKanbanBoardID;
@@ -503,6 +519,7 @@ export function buildExplorerFindSelection(input: {
   folderItems: CompanyExplorerFolderItem[];
   nodeIDs?: Iterable<string>;
   logicGateIDs?: Iterable<string>;
+  projectIDs?: Iterable<string>;
   currentExpandedIDs?: Iterable<string>;
 }): ExplorerFindSelection {
   const selectedTreeIDs: string[] = [];
@@ -519,6 +536,7 @@ export function buildExplorerFindSelection(input: {
 
   const knownNodeIDs = input.nodeIDs ? new Set(input.nodeIDs) : null;
   const knownLogicGateIDs = input.logicGateIDs ? new Set(input.logicGateIDs) : null;
+  const knownProjectIDs = input.projectIDs ? new Set(input.projectIDs) : null;
   let primaryEntity: ExplorerFindEntity | null = null;
 
   const expandContainingFolderPath = (folderID: string | undefined) => {
@@ -536,8 +554,9 @@ export function buildExplorerFindSelection(input: {
     if (!id) continue;
     if (entity.kind === "node" && knownNodeIDs && !knownNodeIDs.has(id)) continue;
     if (entity.kind === "logic_gate" && knownLogicGateIDs && !knownLogicGateIDs.has(id)) continue;
+    if (entity.kind === "project" && knownProjectIDs && !knownProjectIDs.has(id)) continue;
 
-    const treeID = entity.kind === "node" ? `node-${id}` : `logic-gate-${id}`;
+    const treeID = entity.kind === "node" ? `node-${id}` : entity.kind === "logic_gate" ? `logic-gate-${id}` : `project-${id}`;
     if (seenTreeIDs.has(treeID)) continue;
     seenTreeIDs.add(treeID);
     selectedTreeIDs.push(treeID);

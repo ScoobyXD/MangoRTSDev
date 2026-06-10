@@ -3,12 +3,29 @@ import { ProjectManagementContent } from "../../modules/project-management/Proje
 
 export type ProjectManagementPageProps = {
   onNodeOpen?: (nodeID: string) => void;
+  onLogicGateOpen?: (logicGateID: string) => void;
+  onProjectOpen?: (projectID: string) => void;
+  targetProjectID?: string;
+  targetProjectRequestID?: number;
 };
 
-export function ProjectManagementPage({ onNodeOpen }: ProjectManagementPageProps) {
+export function ProjectManagementPage({
+  onNodeOpen,
+  onLogicGateOpen,
+  onProjectOpen,
+  targetProjectID,
+  targetProjectRequestID,
+}: ProjectManagementPageProps) {
   return (
     <div style={pageShellStyle}>
-      <ProjectManagementContent accent="#5b8def" onNodeOpen={onNodeOpen} />
+      <ProjectManagementContent
+        accent="#5b8def"
+        onNodeOpen={onNodeOpen}
+        onLogicGateOpen={onLogicGateOpen}
+        onProjectOpen={onProjectOpen}
+        targetProjectID={targetProjectID}
+        targetProjectRequestID={targetProjectRequestID}
+      />
     </div>
   );
 }

@@ -36,6 +36,10 @@ func WorkspaceEventAccessTargets(event domain.DomainEvent) []WorkspaceEventAcces
 		add(EntityTypeLogicGate, logicGateID)
 		return targets
 	}
+	if projectID := workspaceEventPayloadText(event.Payload, "project_id"); projectID != "" {
+		add(EntityTypeProject, projectID)
+		return targets
+	}
 	if logicGateID := LogicGateIDFromKanbanBoardID(workspaceEventPayloadText(event.Payload, "board_id")); logicGateID != "" {
 		add(EntityTypeLogicGate, logicGateID)
 		return targets
@@ -47,6 +51,9 @@ func WorkspaceEventAccessTargets(event domain.DomainEvent) []WorkspaceEventAcces
 			return targets
 		case EntityTypeLogicGate:
 			add(EntityTypeLogicGate, workspaceEventPayloadText(event.Payload, "item_id"))
+			return targets
+		case EntityTypeProject:
+			add(EntityTypeProject, workspaceEventPayloadText(event.Payload, "item_id"))
 			return targets
 		}
 	}

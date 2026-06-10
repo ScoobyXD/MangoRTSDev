@@ -30,7 +30,7 @@ func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTarget
 }
 
 func validCompanyExplorerDeleteKind(kind string) bool {
-	return kind == "folder" || kind == "node" || kind == "logic_gate" || kind == "kanban"
+	return kind == "folder" || kind == "node" || kind == "logic_gate" || kind == "project" || kind == "kanban"
 }
 
 func appendCompanyExplorerDeletedTarget(targets []CompanyExplorerDeletedTarget, seen map[string]bool, kind, id, folderKind string) []CompanyExplorerDeletedTarget {

@@ -47,7 +47,7 @@ import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeC
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
-import { buildLogicGateRoute, buildNodeRoute, buildRacioRoute, racioRoleForViewID, type DeepLinkRoute, type RacioDeepLinkRoute } from "./deepLinkRoutes";
+import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, buildRacioRoute, racioRoleForViewID, type DeepLinkRoute, type RacioDeepLinkRoute } from "./deepLinkRoutes";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -95,6 +95,10 @@ type LogicGateArenaTarget = {
   suppressLegacyWorkspaceStream?: boolean;
   requestID: number;
 };
+type ProjectManagementTarget = {
+  projectID: string;
+  requestID: number;
+};
 
 function logicGateTargetFromRoute(route: DeepLinkRoute | null | undefined): LogicGateArenaTarget | null {
   if (route?.kind !== "logic_gate") return null;
@@ -112,6 +116,14 @@ function nodePopupFromRoute(route: DeepLinkRoute | null | undefined): NodeEditor
     nodeID: route.nodeID,
     nodeTitle: route.nodeID,
     focusRequestID: Date.now(),
+  };
+}
+
+function projectTargetFromRoute(route: DeepLinkRoute | null | undefined): ProjectManagementTarget | null {
+  if (route?.kind !== "project") return null;
+  return {
+    projectID: route.projectID,
+    requestID: Date.now(),
   };
 }
 
@@ -384,6 +396,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
   const [taskbarExpanded, setTaskbarExpanded] = useState(false);
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
+  const [projectManagementTarget, setProjectManagementTarget] = useState<ProjectManagementTarget | null>(() => projectTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -1024,6 +1037,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setActiveDockTabID(null);
   }, [activatePrimaryPage, deepLinkNodeID]);
 
+  const deepLinkProjectID = deepLink?.kind === "project" ? deepLink.projectID : "";
+  useEffect(() => {
+    if (!deepLinkProjectID) return;
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup(null);
+    setActiveDockTabID(null);
+    activatePrimaryPage("project-management");
+    setProjectManagementTarget((current) => (
+      current?.projectID === deepLinkProjectID
+        ? current
+        : { projectID: deepLinkProjectID, requestID: Date.now() }
+    ));
+  }, [activatePrimaryPage, deepLinkProjectID]);
+
   const racioDeepLink = deepLink?.kind === "racio" ? deepLink : null;
   const racioDeepLinkViewID: HomeSidebarView | "" = racioDeepLink?.viewID ?? "";
   useEffect(() => {
@@ -1194,8 +1221,46 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     closeMenus();
     setActiveDockTabID(null);
     routeManagedExplorerNodePopupRef.current = false;
+    if (onNavigate) {
+      onNavigate(buildNodeRoute(cleanNodeID));
+      return;
+    }
     setExplorerNodePopup({ nodeID: cleanNodeID, nodeTitle: cleanNodeID, focusRequestID: Date.now() });
-  }, [closeMenus]);
+  }, [closeMenus, onNavigate]);
+
+  const openProjectManagementLogicGate = useCallback((logicGateID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return;
+    closeMenus();
+    setExplorerNodePopup(null);
+    setActiveDockTabID(null);
+    routeManagedExplorerNodePopupRef.current = false;
+    setLogicGateArenaTarget({
+      logicGateID: cleanLogicGateID,
+      label: "Logic Gate",
+      requestID: Date.now(),
+    });
+    const ensured = activatePrimaryPage("logic-gate-arena");
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      onNavigate(buildLogicGateRoute(cleanLogicGateID));
+    }
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
+
+  const openProjectManagementProject = useCallback((projectID: string) => {
+    const cleanProjectID = projectID.trim();
+    if (!cleanProjectID) return;
+    closeMenus();
+    routeManagedExplorerNodePopupRef.current = false;
+    setExplorerNodePopup(null);
+    setActiveDockTabID(null);
+    setProjectManagementTarget({ projectID: cleanProjectID, requestID: Date.now() });
+    const ensured = activatePrimaryPage("project-management");
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      onNavigate(buildProjectRoute(cleanProjectID));
+    }
+  }, [activatePrimaryPage, closeMenus, onNavigate]);
 
   const openNotificationNodePopup = useCallback((node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => {
     const cleanNodeID = node.nodeID.trim();
@@ -1342,6 +1407,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           focusRequestID: Date.now(),
         });
         if (onNavigate && detail.suppressNavigation !== true) onNavigate(buildNodeRoute(id));
+        return;
+      }
+
+      if (detail.kind === "project") {
+        closeMenus();
+        routeManagedExplorerNodePopupRef.current = false;
+        setExplorerNodePopup(null);
+        setActiveDockTabID(null);
+        setProjectManagementTarget({ projectID: id, requestID: Date.now() });
+        const ensured = activatePrimaryPage("project-management");
+        if (onNavigate && detail.suppressNavigation !== true) {
+          saveViews(ensured.tabs, ensured.tab.id);
+          onNavigate(buildProjectRoute(id));
+        }
       }
     };
     window.addEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
@@ -1601,7 +1680,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           </React.Suspense>
         ) : isProjectManagementView ? (
           <React.Suspense fallback={fullPageFallback}>
-            <LazyProjectManagementPage onNodeOpen={openProjectManagementNodeOverlay} />
+            <LazyProjectManagementPage
+              onNodeOpen={openProjectManagementNodeOverlay}
+              onLogicGateOpen={openProjectManagementLogicGate}
+              onProjectOpen={openProjectManagementProject}
+              targetProjectID={projectManagementTarget?.projectID}
+              targetProjectRequestID={projectManagementTarget?.requestID}
+            />
           </React.Suspense>
         ) : isAccountManagerView ? (
           <React.Suspense fallback={fullPageFallback}>

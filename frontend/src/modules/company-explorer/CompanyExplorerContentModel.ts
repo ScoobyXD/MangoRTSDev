@@ -117,6 +117,7 @@ export type CompanyExplorerContentProps = {
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
   ["system-active-node-", "active_nodes"],
+  ["system-active-project-", "active_projects"],
   ["system-history-node-", "history"],
 ];
 
@@ -128,6 +129,7 @@ function getDeleteVocabulary(kind: ExplorerDeleteTarget["kind"], plural = false)
   if (kind === "folder") return plural ? "folders" : "folder";
   if (kind === "node") return plural ? "nodes" : "node";
   if (kind === "logic_gate") return plural ? "Logic Gates" : "Logic Gate";
+  if (kind === "project") return plural ? "projects" : "project";
   return plural ? "Kanban Boards" : "Kanban Board";
 }
 

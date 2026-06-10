@@ -14,7 +14,7 @@ import {
   type NodeRelationship,
 } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRaciAssignment, type LogicGateRaciRole, type LogicGateRecord } from "../logic-gate-map/shared";
-import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeEditorSequenceSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
@@ -82,6 +82,8 @@ import { subscribeWorkspaceRealtime } from "../workspace/workspaceRealtime";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
+import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
+import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { listCompanyUsers } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
@@ -244,6 +246,107 @@ function mergeAccountLists(primary: Account[], secondary: Account[]): Account[] 
 function isNodeWorkspaceHeaderInformationType(type: string): boolean {
   return type === EDITOR_TEXT_BLOCK_TYPE || type === EDITOR_TEXT_BLOCK_CHAT_TYPE || type === EDITOR_ATTACHED_EMAIL_TYPE;
 }
+
+const ProjectRelationshipsSurface: React.FC<{
+  companyID: string;
+  resourceType: "node" | "logic_gate";
+  resourceID: string;
+  resourceTitle: string;
+  scope: string;
+  topPx: number;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  ruleColor: string;
+}> = ({
+  companyID,
+  resourceType,
+  resourceID,
+  resourceTitle,
+  scope,
+  topPx,
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  ruleColor,
+}) => {
+  const [relationships, setRelationships] = useState<ProjectRelationshipProjection[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const cleanResourceID = resourceID.trim();
+    if (!companyID || !cleanResourceID) {
+      setRelationships([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    void listProjectRelationshipsForResource({ companyID, resourceType, resourceID: cleanResourceID })
+      .then((payload) => {
+        if (!cancelled) setRelationships(payload.relationships ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRelationships([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyID, resourceID, resourceType]);
+
+  const openProject = useCallback((row: ProjectRelationshipProjection) => {
+    const projectID = row.project_id.trim();
+    if (!projectID) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: `${scope}:relationships-tab`,
+      kind: "project",
+      id: projectID,
+      label: row.project_name?.trim() || projectID,
+      selectedTreeID: `project-${projectID}`,
+      changedAt: Date.now(),
+    });
+  }, [companyID, scope]);
+
+  return (
+    <div className="mango-editor-hover-highlight" style={{ position: "absolute", top: topPx, left: 12, right: 12, bottom: 12, zIndex: 2, pointerEvents: "auto", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 12, background: panelBackground, color: surfaceText, overflow: "hidden" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ruleColor}` }}>
+        <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 950 }}>Relationships</div>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 760 }}>{resourceTitle || (resourceType === "logic_gate" ? "Logic Gate" : "Node")}</div>
+        </div>
+        <span style={{ border: `1px solid ${strokeColor}`, borderRadius: 999, padding: "4px 8px", color: accent, fontSize: 11, fontWeight: 900 }}>{relationships.length} project{relationships.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="editor-document-scroll" style={{ minHeight: 0, overflow: "auto", padding: 12, display: "grid", alignContent: "start", gap: 8 }}>
+        {loading ? (
+          <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 10, padding: 12, color: surfaceText, opacity: 0.64, fontSize: 12, fontWeight: 760 }}>Loading projects</div>
+        ) : relationships.length === 0 ? (
+          <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 10, padding: 12, color: surfaceText, opacity: 0.64, fontSize: 12, fontWeight: 760 }}>No project relationships</div>
+        ) : relationships.map((row) => {
+          const projectID = row.project_id.trim();
+          const label = row.project_name?.trim() || `Project ${projectID.slice(0, 8)}`;
+          return (
+            <button
+              key={row.relationship_id}
+              type="button"
+              onClick={() => openProject(row)}
+              title={label}
+              style={{ minHeight: 40, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 9, border: `1px solid ${strokeColor}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "8px 10px", font: "inherit", textAlign: "left" }}
+            >
+              <ExplorerRowIcon kind="project" />
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 850 }}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressLegacyWorkspaceStream = false }) => {
@@ -2094,6 +2197,21 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
             relationshipAnchorCenterPx={relationshipTabAnchorCenterPx}
+          />
+        )}
+        {hasLinkedDocument && linkedEntityKind === "logic_gate" && activeTab === "relationships" && (
+          <ProjectRelationshipsSurface
+            companyID={companyID}
+            resourceType="logic_gate"
+            resourceID={linkedNodeID}
+            resourceTitle={linkedNodeTitle}
+            scope={scope}
+            topPx={documentTopPx}
+            accent={accent}
+            surfaceText={surfaceText}
+            panelBackground={panelBackground}
+            strokeColor={strokeColor}
+            ruleColor={ruleColor}
           />
         )}
         {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "permissions" && (

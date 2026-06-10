@@ -1,6 +1,6 @@
 export const EVENT_SELECTION_COORDINATOR_UPDATED = "mangorts:selection-coordinator-updated";
 
-export type SelectionEntityKind = "node" | "logic_gate" | "folder" | "kanban";
+export type SelectionEntityKind = "node" | "logic_gate" | "project" | "folder" | "kanban";
 
 export type SelectionSourceModule =
   | "company-explorer"
@@ -24,7 +24,7 @@ export type LiveSelectionChange = {
   selectedTreeID?: string;
   selectedTreeIDs?: string[];
   selectedEntityIDs?: string[];
-  folderKind?: "node" | "logic_gate";
+  folderKind?: "node" | "logic_gate" | "project";
   folderID?: string;
   folderLabel?: string;
   // "activate" lets linked editors focus their typing surface. "navigate"
@@ -43,7 +43,7 @@ export type PublishLiveSelectionInput = {
   selectedTreeID?: string;
   selectedTreeIDs?: string[];
   selectedEntityIDs?: string[];
-  folderKind?: "node" | "logic_gate";
+  folderKind?: "node" | "logic_gate" | "project";
   folderID?: string;
   folderLabel?: string;
   changedAt?: number;

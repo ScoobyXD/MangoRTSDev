@@ -13,6 +13,7 @@ import {
 } from "../node-map/nodeRelationshipStructure";
 import { createNodeFromSelectionTitle, type SelectionNodeRelationshipKind } from "../node-map/selectionNodeCreation";
 import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-map/shared";
+import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { publishLiveSelection } from "../selectionCoordinator";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
@@ -577,6 +578,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [relationshipCreatingKind, setRelationshipCreatingKind] = useState<RelationshipCreateKind | "">("");
   const [relationshipRowContextMenu, setRelationshipRowContextMenu] = useState<RelationshipRowContextMenu | null>(null);
   const [relationshipDeletingNodeID, setRelationshipDeletingNodeID] = useState("");
+  const [projectRelationshipRows, setProjectRelationshipRows] = useState<ProjectRelationshipProjection[]>([]);
+  const [projectRelationshipsLoading, setProjectRelationshipsLoading] = useState(false);
   const [relationshipGraph, setRelationshipGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
@@ -705,6 +708,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [companyID, nodeID, relationshipGraph.nodes, relationshipGraph.relationships, relationshipNodeTitle]);
   const relationshipCount = Math.max(0, relationshipRows.length - (relationshipRows.some((row) => row.nodeID === nodeID) ? 1 : 0));
+  const projectRelationshipCount = projectRelationshipRows.length;
   const relationshipRowCountLabel = `${relationshipRows.length} linked`;
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
@@ -757,6 +761,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       sourceModule: "editor",
       targetFrameIDs: [scope],
       selectionIntent: "navigate",
+    });
+  }, [companyID, scope]);
+
+  const goToProjectRelationship = useCallback((row: ProjectRelationshipProjection) => {
+    const projectID = row.project_id.trim();
+    if (!projectID) return;
+    setRelationshipMenuOpen(false);
+    setRelationshipCreateMenuOpen(false);
+    setRelationshipRowContextMenu(null);
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: `${scope}:relationships-menu`,
+      kind: "project",
+      id: projectID,
+      label: row.project_name?.trim() || projectID,
+      selectedTreeID: `project-${projectID}`,
+      changedAt: Date.now(),
     });
   }, [companyID, scope]);
 
@@ -858,6 +879,33 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [apiBase, companyID]);
 
   useEffect(() => {
+    const cleanNodeID = nodeID.trim();
+    if (!relationshipMenuOpen || !companyID || !cleanNodeID) {
+      setProjectRelationshipsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProjectRelationshipsLoading(true);
+    void listProjectRelationshipsForResource({
+      companyID,
+      resourceType: "node",
+      resourceID: cleanNodeID,
+    })
+      .then((payload) => {
+        if (!cancelled) setProjectRelationshipRows(payload.relationships ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectRelationshipRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectRelationshipsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyID, nodeID, relationshipMenuOpen]);
+
+  useEffect(() => {
     setLogicGateAssignerOpen(false);
     setRelationshipMenuOpen(false);
     setRelationshipHoveredNodeID("");
@@ -865,6 +913,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setRelationshipCreatingKind("");
     setRelationshipRowContextMenu(null);
     setRelationshipDeletingNodeID("");
+    setProjectRelationshipRows([]);
+    setProjectRelationshipsLoading(false);
     setLogicGateSearch("");
     setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
@@ -2162,10 +2212,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               }}
             >
               <ExplorerRowIcon kind="node" />
-              <span>Relationship</span>
-              {relationshipCount > 0 && (
+              <span>Relationships</span>
+              {relationshipCount + projectRelationshipCount > 0 && (
                 <span style={{ minWidth: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: "rgba(100,116,139,0.12)", color: accent, fontSize: 10, fontWeight: 900, padding: "0 5px", boxSizing: "border-box" }}>
-                  {relationshipCount}
+                  {relationshipCount + projectRelationshipCount}
                 </span>
               )}
             </button>
@@ -2196,7 +2246,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "10px 11px 8px", borderBottom: `1px solid ${ruleColor}`, background: `linear-gradient(135deg, rgba(6,182,212,0.12), rgba(255,255,255,0.72) 44%, rgba(124,58,237,0.12))` }}>
                   <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
                     <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 950 }}>
-                      Relationship
+                      Relationships
                     </div>
                     <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10, fontWeight: 760 }}>
                       {relationshipNodeTitle || "Current node"}
@@ -2204,7 +2254,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   </div>
                   <div style={{ position: "relative", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
                     <span style={{ flex: "0 0 auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 999, padding: "3px 7px", background: EDITOR_NEU_SURFACE, color: accent, fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
-                      {relationshipRowCountLabel}
+                      {relationshipRowCountLabel} · {projectRelationshipCount} project{projectRelationshipCount === 1 ? "" : "s"}
                     </span>
                     {canEdit && (
                       <div style={{ position: "relative", flex: "0 0 auto" }}>
@@ -2309,6 +2359,54 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     ["--editor-document-scroll-track" as string]: scrollbarTrack,
                   }}
                 >
+                  <div style={{ display: "grid", gap: 5, paddingBottom: projectRelationshipCount > 0 || projectRelationshipsLoading ? 6 : 0, borderBottom: projectRelationshipCount > 0 || projectRelationshipsLoading ? `1px solid ${ruleColor}` : 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: surfaceText, opacity: 0.74, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
+                      <ExplorerRowIcon kind="project" />
+                      <span>Projects</span>
+                    </div>
+                    {projectRelationshipsLoading ? (
+                      <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 9, color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 760 }}>
+                        Loading projects
+                      </div>
+                    ) : projectRelationshipCount === 0 ? (
+                      <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 9, color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 760 }}>
+                        No project relationships
+                      </div>
+                    ) : projectRelationshipRows.map((row) => {
+                      const projectID = row.project_id.trim();
+                      const label = row.project_name?.trim() || `Project ${projectID.slice(0, 8)}`;
+                      return (
+                        <button
+                          key={row.relationship_id}
+                          type="button"
+                          onClick={() => goToProjectRelationship(row)}
+                          title={label}
+                          style={{
+                            width: "100%",
+                            minHeight: 30,
+                            display: "grid",
+                            gridTemplateColumns: "18px minmax(0, 1fr)",
+                            alignItems: "center",
+                            gap: 7,
+                            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                            borderRadius: 8,
+                            background: EDITOR_NEU_SURFACE,
+                            color: surfaceText,
+                            cursor: "pointer",
+                            padding: "5px 8px",
+                            boxShadow: EDITOR_NEU_SHADOW,
+                            font: "inherit",
+                            textAlign: "left",
+                          }}
+                        >
+                          <ExplorerRowIcon kind="project" />
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                   {relationshipRows.length === 0 ? (
                     <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 760 }}>
                       No related nodes
