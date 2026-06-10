@@ -199,11 +199,11 @@ export function buildNodeRelationshipTreeRows(input: {
     if (stack.has(nodeID)) return;
     const nextStack = new Set(stack);
     nextStack.add(nodeID);
-    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, focusNodeID)) {
-      walk(peerID, depth, nextStack, "Peer");
-    }
     for (const childID of sortedNodeIDs(childrenByParent.get(nodeID) ?? [], nodeByID, focusNodeID)) {
       walk(childID, depth + 1, nextStack, "Child");
+    }
+    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, focusNodeID)) {
+      walk(peerID, depth, nextStack, "Peer");
     }
   };
 
@@ -267,11 +267,11 @@ export function buildNodeRelationshipHierarchyRows(input: {
     if (stack.has(nodeID)) return;
     const nextStack = new Set(stack);
     nextStack.add(nodeID);
-    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, "")) {
-      walk(peerID, depth, nextStack, "Peer");
-    }
     for (const childID of sortedNodeIDs(childrenByParent.get(nodeID) ?? [], nodeByID, "")) {
       walk(childID, depth + 1, nextStack, "Child");
+    }
+    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, "")) {
+      walk(peerID, depth, nextStack, "Peer");
     }
   };
 

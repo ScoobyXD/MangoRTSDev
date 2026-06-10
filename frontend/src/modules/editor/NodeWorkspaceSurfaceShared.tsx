@@ -12,6 +12,7 @@ export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 export type NodeWorkspaceSurfaceProps = {
   apiBase: string;
   companyID: string;
+  scope: string;
   nodeID: string;
   canEdit: boolean;
   nodePriorityDraft: string;

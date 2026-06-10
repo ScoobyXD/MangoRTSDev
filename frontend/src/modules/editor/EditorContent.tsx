@@ -2113,6 +2113,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <NodeWorkspaceSurface
             apiBase={apiBase}
             companyID={companyID}
+            scope={scope}
             nodeID={linkedNodeID}
             canEdit={linkedEntityCanEdit}
             nodePriorityDraft={nodePriorityDraft}
