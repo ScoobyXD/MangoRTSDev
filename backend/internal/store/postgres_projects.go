@@ -64,6 +64,7 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 	var item domain.ProjectRelationshipProjection
 	var logicGateID sql.NullString
 	var nodeID sql.NullString
+	var assignmentID sql.NullString
 	var status sql.NullString
 	var statusColor sql.NullString
 	err := row.Scan(
@@ -75,6 +76,7 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 		&item.ResourceID,
 		&logicGateID,
 		&nodeID,
+		&assignmentID,
 		&item.DisplayTitle,
 		&status,
 		&statusColor,
@@ -91,6 +93,10 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 	if nodeID.Valid && strings.TrimSpace(nodeID.String) != "" {
 		value := nodeID.String
 		item.NodeID = &value
+	}
+	if assignmentID.Valid && strings.TrimSpace(assignmentID.String) != "" {
+		value := assignmentID.String
+		item.AssignmentID = &value
 	}
 	if status.Valid {
 		value := status.String
@@ -613,11 +619,18 @@ returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.P
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
-	if err := syncProjectRelationshipProjectionTx(ctx, tx, input.CompanyID, returnedID); err != nil {
+	projectionDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:      input.CompanyID,
+		RelationshipID: returnedID,
+	})
+	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
 	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -631,7 +644,17 @@ func (r *PostgresRepo) DeleteProjectRelationship(input ProjectRelationshipDelete
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
-	result, err := r.db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	defer tx.Rollback()
+	projectionBefore, err := projectRelationshipProjectionRowsForRelationshipTx(ctx, tx, input.CompanyID, input.RelationshipID)
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	result, err := tx.ExecContext(ctx, `
 delete from project_relationships
 where company_id=$1::uuid
   and project_id=$2::uuid
@@ -645,6 +668,21 @@ where company_id=$1::uuid
 	}
 	if affected == 0 {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
+	}
+	projectionDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:      input.CompanyID,
+		RelationshipID: input.RelationshipID,
+		Delete:         true,
+		BeforeRows:     projectionBefore,
+	})
+	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProjectRelationshipMutationResult{}, err
 	}
 	return ProjectRelationshipMutationResult{DeletedRelationshipID: input.RelationshipID}, nil
 }
@@ -697,6 +735,7 @@ select
   projection.resource_id::text,
   projection.logic_gate_id::text,
   projection.node_id::text,
+  projection.assignment_id::text,
   projection.display_title,
   projection.status,
   projection.status_color,
@@ -734,106 +773,7 @@ where projection.company_id=$1::uuid
 }
 
 func syncProjectRelationshipProjectionTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string) error {
-	_, err := tx.ExecContext(ctx, `
-with source as (
-  select
-    relationship.company_id,
-    relationship.project_id,
-    relationship.relationship_id,
-    relationship.resource_type,
-    relationship.resource_id,
-    case
-      when relationship.resource_type='logic_gate' then relationship.resource_id
-      else node_assignment.logic_gate_id
-    end as logic_gate_id,
-    case when relationship.resource_type='node' then relationship.resource_id end as node_id,
-    coalesce(nullif(gate.header, ''), nullif(node_row.title, ''), relationship.resource_id::text) as display_title,
-    case when relationship.resource_type='logic_gate' then 'Logic Gate' else nullif(node_row.status, '') end as status,
-    case when relationship.resource_type='logic_gate' then '#8b5cf6' else nullif(node_row.status_color, '') end as status_color,
-    relationship.position,
-    coalesce(gate.created_timestamp, node_row.created_timestamp) as resource_created_timestamp,
-    relationship.created_timestamp as relationship_created_timestamp,
-    relationship.updated_timestamp as relationship_updated_timestamp
-  from project_relationships relationship
-  left join logic_gates gate
-    on gate.company_id=relationship.company_id
-   and gate.logic_gate_id=relationship.resource_id
-   and relationship.resource_type='logic_gate'
-  left join nodes node_row
-    on node_row.company_id=relationship.company_id
-   and node_row.node_id=relationship.resource_id
-   and relationship.resource_type='node'
-  left join lateral (
-    select assignment.logic_gate_id
-    from node_logic_gate_assignments assignment
-    where assignment.company_id=relationship.company_id
-      and assignment.node_id=relationship.resource_id
-    order by assignment.position, assignment.updated_timestamp desc, assignment.assignment_id
-    limit 1
-  ) node_assignment on relationship.resource_type='node'
-  where relationship.company_id=$1::uuid
-    and relationship.relationship_id=$2::uuid
-    and (
-      (relationship.resource_type='logic_gate' and gate.logic_gate_id is not null)
-      or (relationship.resource_type='node' and node_row.node_id is not null)
-    )
-),
-deleted_stale as (
-  delete from project_relationship_projection projection
-  where projection.company_id=$1::uuid
-    and projection.relationship_id=$2::uuid
-    and not exists (select 1 from source)
-)
-insert into project_relationship_projection (
-  company_id,
-  project_id,
-  relationship_id,
-  resource_type,
-  resource_id,
-  logic_gate_id,
-  node_id,
-  display_title,
-  status,
-  status_color,
-  position,
-  resource_created_timestamp,
-  relationship_created_timestamp,
-  relationship_updated_timestamp,
-  projection_updated_timestamp
-)
-select
-  company_id,
-  project_id,
-  relationship_id,
-  resource_type,
-  resource_id,
-  logic_gate_id,
-  node_id,
-  display_title,
-  status,
-  status_color,
-  position,
-  resource_created_timestamp,
-  relationship_created_timestamp,
-  relationship_updated_timestamp,
-  now()
-from source
-on conflict (company_id, relationship_id)
-do update set
-  project_id=excluded.project_id,
-  resource_type=excluded.resource_type,
-  resource_id=excluded.resource_id,
-  logic_gate_id=excluded.logic_gate_id,
-  node_id=excluded.node_id,
-  display_title=excluded.display_title,
-  status=excluded.status,
-  status_color=excluded.status_color,
-  position=excluded.position,
-  resource_created_timestamp=excluded.resource_created_timestamp,
-  relationship_created_timestamp=excluded.relationship_created_timestamp,
-  relationship_updated_timestamp=excluded.relationship_updated_timestamp,
-  projection_updated_timestamp=now()`, companyID, relationshipID)
-	return err
+	return syncProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID)
 }
 
 func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) error {

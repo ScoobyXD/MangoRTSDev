@@ -400,41 +400,46 @@ type WorkItemLogicGateInboxItem struct {
 }
 
 type ProjectionRow struct {
-	CompanyID                  string           `json:"company_id"`
-	ItemID                     string           `json:"item_id,omitempty"`
-	UserID                     string           `json:"user_id,omitempty"`
-	ResourceType               string           `json:"resource_type,omitempty"`
-	ResourceID                 string           `json:"resource_id,omitempty"`
-	LogicGateID                *string          `json:"logic_gate_id,omitempty"`
-	DisplayTitle               string           `json:"display_title,omitempty"`
-	Status                     *string          `json:"status,omitempty"`
-	StatusColor                *string          `json:"status_color,omitempty"`
-	DueDate                    *string          `json:"due_date,omitempty"`
-	Priority                   *int             `json:"priority,omitempty"`
-	AssigneeUserID             *string          `json:"assignee_user_id,omitempty"`
-	AssigneeDisplayName        *string          `json:"assignee_display_name,omitempty"`
-	AssigneeEmail              *string          `json:"assignee_email,omitempty"`
-	ResourceCreatedTimestamp   time.Time        `json:"resource_created_timestamp,omitempty"`
-	CreatedTimestamp           time.Time        `json:"created_timestamp,omitempty"`
-	UpdatedTimestamp           time.Time        `json:"updated_timestamp,omitempty"`
-	BoardID                    string           `json:"board_id,omitempty"`
-	CardID                     string           `json:"card_id,omitempty"`
-	ColumnID                   string           `json:"column_id,omitempty"`
-	NodeID                     string           `json:"node_id,omitempty"`
-	StartDate                  string           `json:"start_date,omitempty"`
-	EndDate                    string           `json:"end_date,omitempty"`
-	DurationDays               int              `json:"duration_days,omitempty"`
-	NodeTitle                  string           `json:"node_title,omitempty"`
-	DescriptionSnapshot        string           `json:"description_snapshot,omitempty"`
-	IsIssue                    bool             `json:"is_issue,omitempty"`
-	Position                   int              `json:"position,omitempty"`
-	NodeCreatedTimestamp       time.Time        `json:"node_created_timestamp,omitempty"`
-	NodeUpdatedTimestamp       time.Time        `json:"node_updated_timestamp,omitempty"`
-	AssignmentID               string           `json:"assignment_id,omitempty"`
-	AssignmentCreatedTimestamp time.Time        `json:"assignment_created_timestamp,omitempty"`
-	AssignmentUpdatedTimestamp time.Time        `json:"assignment_updated_timestamp,omitempty"`
-	ProjectionUpdatedTimestamp time.Time        `json:"projection_updated_timestamp,omitempty"`
-	Accounts                   []domain.Account `json:"accounts,omitempty"`
+	CompanyID                    string           `json:"company_id"`
+	ItemID                       string           `json:"item_id,omitempty"`
+	UserID                       string           `json:"user_id,omitempty"`
+	ProjectID                    string           `json:"project_id,omitempty"`
+	ProjectName                  string           `json:"project_name,omitempty"`
+	RelationshipID               string           `json:"relationship_id,omitempty"`
+	ResourceType                 string           `json:"resource_type,omitempty"`
+	ResourceID                   string           `json:"resource_id,omitempty"`
+	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
+	DisplayTitle                 string           `json:"display_title,omitempty"`
+	Status                       *string          `json:"status,omitempty"`
+	StatusColor                  *string          `json:"status_color,omitempty"`
+	DueDate                      *string          `json:"due_date,omitempty"`
+	Priority                     *int             `json:"priority,omitempty"`
+	AssigneeUserID               *string          `json:"assignee_user_id,omitempty"`
+	AssigneeDisplayName          *string          `json:"assignee_display_name,omitempty"`
+	AssigneeEmail                *string          `json:"assignee_email,omitempty"`
+	ResourceCreatedTimestamp     time.Time        `json:"resource_created_timestamp,omitempty"`
+	RelationshipCreatedTimestamp time.Time        `json:"relationship_created_timestamp,omitempty"`
+	RelationshipUpdatedTimestamp time.Time        `json:"relationship_updated_timestamp,omitempty"`
+	CreatedTimestamp             time.Time        `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp             time.Time        `json:"updated_timestamp,omitempty"`
+	BoardID                      string           `json:"board_id,omitempty"`
+	CardID                       string           `json:"card_id,omitempty"`
+	ColumnID                     string           `json:"column_id,omitempty"`
+	NodeID                       string           `json:"node_id,omitempty"`
+	StartDate                    string           `json:"start_date,omitempty"`
+	EndDate                      string           `json:"end_date,omitempty"`
+	DurationDays                 int              `json:"duration_days,omitempty"`
+	NodeTitle                    string           `json:"node_title,omitempty"`
+	DescriptionSnapshot          string           `json:"description_snapshot,omitempty"`
+	IsIssue                      bool             `json:"is_issue,omitempty"`
+	Position                     int              `json:"position,omitempty"`
+	NodeCreatedTimestamp         time.Time        `json:"node_created_timestamp,omitempty"`
+	NodeUpdatedTimestamp         time.Time        `json:"node_updated_timestamp,omitempty"`
+	AssignmentID                 string           `json:"assignment_id,omitempty"`
+	AssignmentCreatedTimestamp   time.Time        `json:"assignment_created_timestamp,omitempty"`
+	AssignmentUpdatedTimestamp   time.Time        `json:"assignment_updated_timestamp,omitempty"`
+	ProjectionUpdatedTimestamp   time.Time        `json:"projection_updated_timestamp,omitempty"`
+	Accounts                     []domain.Account `json:"accounts,omitempty"`
 }
 
 type RacioMatrixProjectionRow = ProjectionRow
@@ -443,10 +448,13 @@ type KanbanBoardProjectionRow = ProjectionRow
 
 type ProjectManagementTimelineProjectionRow = ProjectionRow
 
+type ProjectRelationshipProjectionRow = ProjectionRow
+
 const (
 	ProjectionNameRacioMatrix               = "racio_matrix"
 	ProjectionNameKanbanBoard               = "kanban_board"
 	ProjectionNameProjectManagementTimeline = "project_management_timeline"
+	ProjectionNameProjectRelationship       = "project_relationship"
 
 	ProjectionDeltaOperationUpsert = "upsert"
 	ProjectionDeltaOperationDelete = "delete"
@@ -454,14 +462,17 @@ const (
 )
 
 type ProjectionRowKey struct {
-	ItemID       string `json:"item_id,omitempty"`
-	UserID       string `json:"user_id,omitempty"`
-	ResourceType string `json:"resource_type,omitempty"`
-	ResourceID   string `json:"resource_id,omitempty"`
-	BoardID      string `json:"board_id,omitempty"`
-	LogicGateID  string `json:"logic_gate_id,omitempty"`
-	NodeID       string `json:"node_id,omitempty"`
-	CardID       string `json:"card_id,omitempty"`
+	ItemID         string `json:"item_id,omitempty"`
+	UserID         string `json:"user_id,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	RelationshipID string `json:"relationship_id,omitempty"`
+	ResourceType   string `json:"resource_type,omitempty"`
+	ResourceID     string `json:"resource_id,omitempty"`
+	BoardID        string `json:"board_id,omitempty"`
+	LogicGateID    string `json:"logic_gate_id,omitempty"`
+	NodeID         string `json:"node_id,omitempty"`
+	AssignmentID   string `json:"assignment_id,omitempty"`
+	CardID         string `json:"card_id,omitempty"`
 }
 
 const ProjectManagementTimelineDefaultLimit = 500

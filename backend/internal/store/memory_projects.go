@@ -348,6 +348,9 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 			break
 		}
 	}
+	previousRelationship, hadPreviousRelationship := r.projectRelationships[relationshipKey]
+	previousProjection, hadPreviousProjection := r.projectRelationshipProjection[relationshipKey]
+	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
 	now := time.Now().UTC()
 	existing := r.projectRelationships[relationshipKey]
 	created := now
@@ -366,6 +369,31 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	}
 	r.projectRelationships[relationshipKey] = relationship
 	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, input.RelationshipID); err != nil {
+		if hadPreviousRelationship {
+			r.projectRelationships[relationshipKey] = previousRelationship
+		} else {
+			delete(r.projectRelationships, relationshipKey)
+		}
+		if hadPreviousProjection {
+			r.projectRelationshipProjection[relationshipKey] = previousProjection
+		} else {
+			delete(r.projectRelationshipProjection, relationshipKey)
+		}
+		return ProjectRelationshipMutationResult{}, err
+	}
+	after := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
+	deltas := diffProjectRelationshipProjectionRows(before, after)
+	if _, err := r.appendEventRowsLocked(ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
+		if hadPreviousRelationship {
+			r.projectRelationships[relationshipKey] = previousRelationship
+		} else {
+			delete(r.projectRelationships, relationshipKey)
+		}
+		if hadPreviousProjection {
+			r.projectRelationshipProjection[relationshipKey] = previousProjection
+		} else {
+			delete(r.projectRelationshipProjection, relationshipKey)
+		}
 		return ProjectRelationshipMutationResult{}, err
 	}
 	projection := r.projectRelationshipProjection[relationshipKey]
@@ -384,8 +412,18 @@ func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteIn
 	if !ok || relationship.ProjectID != input.ProjectID {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
+	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
+	previousProjection, hadPreviousProjection := r.projectRelationshipProjection[relationshipKey]
 	delete(r.projectRelationships, relationshipKey)
 	delete(r.projectRelationshipProjection, relationshipKey)
+	deltas := diffProjectRelationshipProjectionRows(before, nil)
+	if _, err := r.appendEventRowsLocked(ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
+		r.projectRelationships[relationshipKey] = relationship
+		if hadPreviousProjection {
+			r.projectRelationshipProjection[relationshipKey] = previousProjection
+		}
+		return ProjectRelationshipMutationResult{}, err
+	}
 	return ProjectRelationshipMutationResult{DeletedRelationshipID: input.RelationshipID}, nil
 }
 
@@ -454,6 +492,15 @@ func (r *MemoryRepo) projectRelationshipProjectionsLocked(companyID, projectID s
 	return items
 }
 
+func (r *MemoryRepo) projectRelationshipProjectionRowsForRelationshipLocked(companyID, relationshipID string) []ProjectRelationshipProjectionRow {
+	relationshipKey := projectRelationshipKey(companyID, relationshipID)
+	projection, ok := r.projectRelationshipProjection[relationshipKey]
+	if !ok {
+		return nil
+	}
+	return []ProjectRelationshipProjectionRow{projectRelationshipProjectionRowFromDomain(projection)}
+}
+
 func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relationshipID string) error {
 	relationshipKey := projectRelationshipKey(companyID, relationshipID)
 	relationship, ok := r.projectRelationships[relationshipKey]
@@ -500,9 +547,11 @@ func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relation
 		node = r.withNodeReadModelLocked(node)
 		nodeID := node.NodeID
 		row.NodeID = &nodeID
-		if len(node.LogicGateIDs) > 0 {
-			logicGateID := node.LogicGateIDs[0]
+		if assignment, ok := r.nodeLogicGateAssignmentLocked(relationship.CompanyID, relationship.ResourceID, ""); ok {
+			logicGateID := assignment.LogicGateID
 			row.LogicGateID = &logicGateID
+			assignmentID := assignment.AssignmentID
+			row.AssignmentID = &assignmentID
 		}
 		row.DisplayTitle = node.Title
 		row.Status = cloneStringPointer(node.Status)

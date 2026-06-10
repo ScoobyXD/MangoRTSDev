@@ -90,6 +90,7 @@ create table if not exists project_relationship_projection (
   resource_id uuid not null,
   logic_gate_id uuid,
   node_id uuid,
+  assignment_id uuid,
   display_title text not null,
   status text,
   status_color text,
@@ -101,7 +102,7 @@ create table if not exists project_relationship_projection (
   constraint project_relationship_projection_resource_type_chk check (resource_type in ('logic_gate', 'node')),
   constraint project_relationship_projection_title_chk check (btrim(display_title) <> ''),
   constraint project_relationship_projection_target_chk check (
-    (resource_type='logic_gate' and logic_gate_id is not null and node_id is null and resource_id=logic_gate_id)
+    (resource_type='logic_gate' and logic_gate_id is not null and node_id is null and assignment_id is null and resource_id=logic_gate_id)
     or (resource_type='node' and node_id is not null and resource_id=node_id)
   ),
   primary key (company_id, relationship_id),
@@ -111,11 +112,36 @@ create table if not exists project_relationship_projection (
   foreign key (company_id, node_id) references nodes(company_id, node_id) on delete cascade
 );
 
+alter table project_relationship_projection
+  add column if not exists assignment_id uuid;
+
+alter table project_relationship_projection
+  drop constraint if exists project_relationship_projection_target_chk;
+
+alter table project_relationship_projection
+  add constraint project_relationship_projection_target_chk check (
+    (resource_type='logic_gate' and logic_gate_id is not null and node_id is null and assignment_id is null and resource_id=logic_gate_id)
+    or (resource_type='node' and node_id is not null and resource_id=node_id)
+  );
+
 create index if not exists idx_project_relationship_projection_project
   on project_relationship_projection(company_id, project_id, position, lower(display_title), relationship_id);
 
+create index if not exists idx_project_relationship_projection_relationship
+  on project_relationship_projection(company_id, relationship_id);
+
+drop index if exists idx_project_relationship_projection_resource;
 create index if not exists idx_project_relationship_projection_resource
-  on project_relationship_projection(company_id, resource_type, resource_id, project_id);
+  on project_relationship_projection(company_id, resource_type, resource_id);
+
+create index if not exists idx_project_relationship_projection_node
+  on project_relationship_projection(company_id, node_id);
+
+create index if not exists idx_project_relationship_projection_logic_gate
+  on project_relationship_projection(company_id, logic_gate_id);
+
+create index if not exists idx_project_relationship_projection_assignment
+  on project_relationship_projection(company_id, assignment_id);
 
 alter table resource_raci_assignments drop constraint if exists resource_raci_assignments_resource_type_chk;
 alter table resource_raci_assignments add constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder'));
