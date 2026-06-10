@@ -1089,6 +1089,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	}
 
 	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
+	projectionDeltas := make([]ProjectionDelta, 0)
 	seenDeleted := map[string]bool{}
 	appendSorted := func(kind string, ids map[string]bool) {
 		values := make([]string, 0, len(ids))
@@ -1118,9 +1119,11 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 	}
 	for logicGateID := range logicGateIDs {
-		if err := postgresDeleteLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		deltas, err := postgresDeleteLogicGateWithProjectionDeltasTx(ctx, tx, companyID, logicGateID)
+		if err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
+		projectionDeltas = append(projectionDeltas, deltas...)
 	}
 	for boardID := range kanbanBoardIDs {
 		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
@@ -1133,9 +1136,11 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 	}
 	for nodeID := range nodeIDs {
-		if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		deltas, err := postgresDeleteNodeWithProjectionDeltasTx(ctx, tx, companyID, nodeID)
+		if err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
+		projectionDeltas = append(projectionDeltas, deltas...)
 	}
 	if len(folderIDs) > 0 {
 		grantFolderIDs := make([]string, 0, len(folderIDs))
@@ -1159,6 +1164,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerDeleteResult{}, err
@@ -1172,6 +1180,28 @@ func postgresTxExists(ctx context.Context, tx *sql.Tx, query string, args ...any
 		return false, err
 	}
 	return exists, nil
+}
+
+func postgresDeleteNodeWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	deltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		CompanyID: companyID,
+		NodeID:    nodeID,
+		Delete:    true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from project_relationships
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid`, companyID, nodeID); err != nil {
+		return nil, err
+	}
+	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return nil, err
+	}
+	return deltas, nil
 }
 
 func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
@@ -1263,6 +1293,42 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 		return ErrNotFound
 	}
 	return nil
+}
+
+func postgresDeleteLogicGateWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]ProjectionDelta, error) {
+	affectedNodeIDs, err := nodeIDsAssignedToLogicGatesTx(ctx, tx, companyID, []string{logicGateID})
+	if err != nil {
+		return nil, err
+	}
+	deltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateID,
+		Delete:      true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from project_relationships
+where company_id=$1::uuid
+  and resource_type='logic_gate'
+  and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
+		return nil, err
+	}
+	if err := postgresDeleteLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		return nil, err
+	}
+	for _, nodeID := range affectedNodeIDs {
+		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+			CompanyID: companyID,
+			NodeID:    nodeID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, nodeDeltas...)
+	}
+	return deltas, nil
 }
 
 func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {

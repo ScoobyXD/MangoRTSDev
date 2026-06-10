@@ -167,7 +167,10 @@ where company_id=$1::uuid
 	assignments := cloneLogicGateRaciAssignments(assignmentsByGate[logicGateID])
 	projectionDeltas := []ProjectionDelta{}
 	if changed {
-		deltas, err := syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, before, assignments)
+		deltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+			CompanyID:   companyID,
+			LogicGateID: logicGateID,
+		})
 		if err != nil {
 			return LogicGateRaciAssignmentCommandResult{}, err
 		}
@@ -189,7 +192,7 @@ where company_id=$1::uuid
 			return LogicGateRaciAssignmentCommandResult{}, err
 		}
 		result.Events = []domain.DomainEvent{event}
-		if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
+		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
 			return LogicGateRaciAssignmentCommandResult{}, err
 		}
 	}

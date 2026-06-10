@@ -31,6 +31,39 @@ type projectRelationshipRequest struct {
 	Position       int    `json:"position"`
 }
 
+type projectInitialInformationRequest struct {
+	Type          string `json:"type"`
+	Information   string `json:"information"`
+	InformationID string `json:"information_id"`
+}
+
+type projectScopedNodeCreateRequest struct {
+	CompanyID          string                            `json:"company_id"`
+	NodeID             string                            `json:"node_id"`
+	Title              string                            `json:"title"`
+	AssigneeUserID     string                            `json:"assignee_user_id"`
+	Position           int                               `json:"position"`
+	InitialInformation *projectInitialInformationRequest `json:"initial_information"`
+	InitialAssignment  *projectInitialAssignmentRequest  `json:"initial_assignment"`
+}
+
+type projectScopedLogicGateCreateRequest struct {
+	CompanyID          string                            `json:"company_id"`
+	LogicGateID        string                            `json:"logic_gate_id"`
+	Header             string                            `json:"header"`
+	Position           int                               `json:"position"`
+	InitialInformation *projectInitialInformationRequest `json:"initial_information"`
+}
+
+type projectInitialAssignmentRequest struct {
+	LogicGateID string `json:"logic_gate_id"`
+	Status      string `json:"status"`
+	ColumnID    string `json:"column_id"`
+	Position    int    `json:"position"`
+	Priority    *int   `json:"priority"`
+	IsIssue     *bool  `json:"is_issue"`
+}
+
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/v1/projects" {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -152,6 +185,18 @@ func (s *Server) handleProjectSubresource(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found")
+	case "nodes":
+		if len(parts) != 2 {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		s.handleProjectScopedNodeCreate(w, r, projectID)
+	case "logic-gates":
+		if len(parts) != 2 {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		s.handleProjectScopedLogicGateCreate(w, r, projectID)
 	default:
 		writeError(w, http.StatusNotFound, "not_found")
 	}
@@ -403,6 +448,103 @@ func (s *Server) handleProjectRelationshipByID(w http.ResponseWriter, r *http.Re
 	}
 	s.publishWorkspaceEvent(companyID, "project_relationship_deleted", map[string]any{"project_id": projectID, "relationship_id": relationshipID})
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Request, projectID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req projectScopedNodeCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	companyID := strings.TrimSpace(req.CompanyID)
+	if companyID == "" || strings.TrimSpace(req.Title) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_title_required")
+		return
+	}
+	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
+		return
+	}
+	actor, _ := authenticatedActor(r)
+	input := store.ProjectScopedNodeCreateInput{
+		CompanyID:      companyID,
+		ProjectID:      projectID,
+		NodeID:         req.NodeID,
+		Title:          req.Title,
+		AssigneeUserID: req.AssigneeUserID,
+		Position:       req.Position,
+		ActorUserID:    actor.User.UserID,
+	}
+	if req.InitialInformation != nil {
+		input.InitialInformation = &store.ProjectScopedInitialInformationInput{
+			Type:          req.InitialInformation.Type,
+			Information:   req.InitialInformation.Information,
+			InformationID: req.InitialInformation.InformationID,
+		}
+	}
+	if req.InitialAssignment != nil {
+		input.InitialAssignment = &store.ProjectScopedNodeLogicGateAssignmentInput{
+			LogicGateID: req.InitialAssignment.LogicGateID,
+			Status:      req.InitialAssignment.Status,
+			ColumnID:    req.InitialAssignment.ColumnID,
+			Position:    req.InitialAssignment.Position,
+			Priority:    req.InitialAssignment.Priority,
+			IsIssue:     req.InitialAssignment.IsIssue,
+		}
+	}
+	result, err := s.repo.CreateNodeAssociatedWithProject(input)
+	if err != nil {
+		s.writeProjectMutationError(w, err, "failed_to_create_project_node")
+		return
+	}
+	s.publishCommittedWorkspaceEvents(result.Events)
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) handleProjectScopedLogicGateCreate(w http.ResponseWriter, r *http.Request, projectID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req projectScopedLogicGateCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	companyID := strings.TrimSpace(req.CompanyID)
+	if companyID == "" || strings.TrimSpace(req.Header) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
+		return
+	}
+	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
+		return
+	}
+	actor, _ := authenticatedActor(r)
+	input := store.ProjectScopedLogicGateCreateInput{
+		CompanyID:   companyID,
+		ProjectID:   projectID,
+		LogicGateID: req.LogicGateID,
+		Header:      req.Header,
+		Position:    req.Position,
+		ActorUserID: actor.User.UserID,
+	}
+	if req.InitialInformation != nil {
+		input.InitialInformation = &store.ProjectScopedInitialInformationInput{
+			Type:          req.InitialInformation.Type,
+			Information:   req.InitialInformation.Information,
+			InformationID: req.InitialInformation.InformationID,
+		}
+	}
+	result, err := s.repo.CreateLogicGateAssociatedWithProject(input)
+	if err != nil {
+		s.writeProjectMutationError(w, err, "failed_to_create_project_logic_gate")
+		return
+	}
+	s.publishCommittedWorkspaceEvents(result.Events)
+	writeJSON(w, http.StatusCreated, result)
 }
 
 func (s *Server) handleProjectRelationshipsForResource(w http.ResponseWriter, r *http.Request) {

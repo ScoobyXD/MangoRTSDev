@@ -155,6 +155,16 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
+	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+		CompanyID:   item.CompanyID,
+		LogicGateID: item.LogicGateID,
+	})
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(item.CompanyID, "", "", projectionDeltas)); err != nil {
+		return domain.LogicGate{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -173,10 +183,6 @@ func (r *PostgresRepo) UpdateLogicGateHeader(companyID, logicGateID, header stri
 	}
 	defer tx.Rollback()
 
-	projectManagementProjectionBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
-	if err != nil {
-		return domain.LogicGate{}, err
-	}
 	const q = `
 UPDATE logic_gates
 SET header = $3
@@ -190,17 +196,13 @@ RETURNING company_id, logic_gate_id, header, created_timestamp
 		}
 		return domain.LogicGate{}, err
 	}
-	if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return domain.LogicGate{}, err
-	}
-	if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return domain.LogicGate{}, err
-	}
-	projectManagementProjectionAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
+	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateID,
+	})
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
-	projectionDeltas := diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -624,12 +626,6 @@ func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignment
 	} else if err != nil {
 		return nil, err
 	}
-	beforeByGate, err := listLogicGateRaciAssignmentsTx(ctx, tx, companyID, []string{logicGateID})
-	if err != nil {
-		return nil, err
-	}
-	before := cloneLogicGateRaciAssignments(beforeByGate[logicGateID])
-
 	type normalizedAssignment struct {
 		role   string
 		userID string
@@ -695,7 +691,14 @@ on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
 		return nil, err
 	}
 	assignments := cloneLogicGateRaciAssignments(assignmentsByGate[logicGateID])
-	if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, assignments); err != nil {
+	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGateID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -723,114 +726,12 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	defer tx.Rollback()
 
-	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
-		return err
-	}
-	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
-	if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from project_management_timeline_items
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_relationships
-		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	boardID := LogicGateKanbanBoardID(logicGateID)
-	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1
-		   and item_type='kanban'
-		   and item_id=$2`,
-		companyID, boardID,
-	); err != nil {
-		return err
-	}
-	if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_information
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_raci_assignments
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		if !isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
-			return err
-		}
-	}
-	// Projection rows reference logic gates directly, so remove them before the gate.
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_projection_table
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_map_positions
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from resource_access_grants
-		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
-		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from resource_permissions
-		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
-		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
-		return err
-	}
-
-	deleted, err := tx.ExecContext(ctx,
-		`delete from logic_gates
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	)
+	projectionDeltas, err := postgresDeleteLogicGateWithProjectionDeltasTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
-	affected, err := deleted.RowsAffected()
-	if err != nil {
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
 	}
 	return tx.Commit()
 }

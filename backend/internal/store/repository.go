@@ -174,6 +174,8 @@ type ProjectRepository interface {
 	DeleteProjectProjection(input ProjectProjectionDeleteInput) error
 	UpsertProjectRelationship(input ProjectRelationshipInput) (ProjectRelationshipMutationResult, error)
 	DeleteProjectRelationship(input ProjectRelationshipDeleteInput) (ProjectRelationshipMutationResult, error)
+	CreateNodeAssociatedWithProject(input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateResult, error)
+	CreateLogicGateAssociatedWithProject(input ProjectScopedLogicGateCreateInput) (ProjectScopedLogicGateCreateResult, error)
 	ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error)
 	ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
 }
@@ -577,6 +579,64 @@ type ProjectRelationshipDeleteInput struct {
 type ProjectRelationshipMutationResult struct {
 	Relationship          *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
 	DeletedRelationshipID string                                `json:"deleted_relationship_id,omitempty"`
+}
+
+type ProjectScopedInitialInformationInput struct {
+	Type          string
+	Information   string
+	InformationID string
+}
+
+type ProjectScopedNodeCreateInput struct {
+	CompanyID          string
+	ProjectID          string
+	NodeID             string
+	Title              string
+	AssigneeUserID     string
+	Position           int
+	InitialInformation *ProjectScopedInitialInformationInput
+	InitialAssignment  *ProjectScopedNodeLogicGateAssignmentInput
+	ActorUserID        string
+	ActorDisplayName   string
+	IdempotencyKey     string
+}
+
+type ProjectScopedNodeLogicGateAssignmentInput struct {
+	LogicGateID string
+	Status      string
+	ColumnID    string
+	Position    int
+	Priority    *int
+	IsIssue     *bool
+}
+
+type ProjectScopedNodeCreateResult struct {
+	Node             domain.Node                           `json:"node"`
+	Relationship     *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
+	Information      *domain.NodeInformation               `json:"information,omitempty"`
+	Assignment       *domain.NodeLogicGateAssignment       `json:"assignment,omitempty"`
+	Card             *domain.KanbanCard                    `json:"card,omitempty"`
+	Events           []domain.DomainEvent                  `json:"-"`
+	ProjectionDeltas []ProjectionDelta                     `json:"-"`
+}
+
+type ProjectScopedLogicGateCreateInput struct {
+	CompanyID          string
+	ProjectID          string
+	LogicGateID        string
+	Header             string
+	Position           int
+	InitialInformation *ProjectScopedInitialInformationInput
+	ActorUserID        string
+	IdempotencyKey     string
+}
+
+type ProjectScopedLogicGateCreateResult struct {
+	LogicGate        domain.LogicGate                      `json:"logic_gate"`
+	Relationship     *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
+	Information      *domain.LogicGateInformation          `json:"information,omitempty"`
+	Events           []domain.DomainEvent                  `json:"-"`
+	ProjectionDeltas []ProjectionDelta                     `json:"-"`
 }
 
 type AccountInput struct {

@@ -553,23 +553,23 @@ Remove scattered projection side-effect knowledge from source mutation commands 
 
 Tasks:
 
-- [ ] Update node create/update/delete paths to call `applyNodeProjectionDeltaDependenciesTx`.
-- [ ] Update node information/editor paths only where editor projection event logic is duplicated or inconsistent.
-- [ ] Update Logic Gate create/update/delete paths to call `applyLogicGateProjectionDeltaDependenciesTx`.
-- [ ] Update Logic Gate information/editor paths only where editor projection event logic is duplicated or inconsistent.
-- [ ] Update assign/move/remove/toggle node Logic Gate assignment paths to call `applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx`.
-- [ ] Update node account assignment paths to call the node dependency helper instead of hand-assembling every affected projection.
-- [ ] Update RACIO assignment paths to call the Logic Gate dependency helper where source changes affect shared read surfaces.
-- [ ] Update permission mutation paths to call `applyResourcePermissionProjectionDeltaDependenciesTx`.
-- [ ] Add `CreateNodeAssociatedWithProject` as an atomic store command.
-- [ ] Add `CreateLogicGateAssociatedWithProject` as an atomic store command.
-- [ ] Add HTTP/API routes or command endpoints for project-scoped node and Logic Gate creation.
-- [ ] Ensure project-scoped create commands append all node, Logic Gate, assignment, editor, project relationship, workspace, and projection delta event rows before commit.
-- [ ] Keep existing Kanban, RACIO, editor, and project management delta event contracts stable unless the dependency helper requires an additive event shape.
-- [ ] Delete or privatize old ad hoc projection sync callsites once their behavior is covered by dependency helpers.
-- [ ] Add guard tests for representative commands showing source write, projection writes, and event rows happen in one transaction.
-- [ ] Add rollback tests proving failed projection dependency application rolls back the source write.
-- [ ] Add regression tests for node rename, Logic Gate rename, assignment move, project relationship add/delete, project-scoped create, and permission revoke.
+- [x] Update node create/update/delete paths to call `applyNodeProjectionDeltaDependenciesTx`.
+- [x] Update node information/editor paths only where editor projection event logic is duplicated or inconsistent.
+- [x] Update Logic Gate create/update/delete paths to call `applyLogicGateProjectionDeltaDependenciesTx`.
+- [x] Update Logic Gate information/editor paths only where editor projection event logic is duplicated or inconsistent.
+- [x] Update assign/move/remove/toggle node Logic Gate assignment paths to call `applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx`.
+- [x] Update node account assignment paths to call the node dependency helper instead of hand-assembling every affected projection.
+- [x] Update RACIO assignment paths to call the Logic Gate dependency helper where source changes affect shared read surfaces.
+- [x] Update permission mutation paths to call `applyResourcePermissionProjectionDeltaDependenciesTx`.
+- [x] Add `CreateNodeAssociatedWithProject` as an atomic store command.
+- [x] Add `CreateLogicGateAssociatedWithProject` as an atomic store command.
+- [x] Add HTTP/API routes or command endpoints for project-scoped node and Logic Gate creation.
+- [x] Ensure project-scoped create commands append all node, Logic Gate, assignment, editor, project relationship, workspace, and projection delta event rows before commit.
+- [x] Keep existing Kanban, RACIO, editor, and project management delta event contracts stable unless the dependency helper requires an additive event shape.
+- [x] Delete or privatize old ad hoc projection sync callsites once their behavior is covered by dependency helpers.
+- [x] Add guard tests for representative commands showing source write, projection writes, and event rows happen in one transaction.
+- [x] Add rollback tests proving failed projection dependency application rolls back the source write.
+- [x] Add regression tests for node rename, Logic Gate rename, assignment move, project relationship add/delete, project-scoped create, and permission revoke.
 
 Success criteria:
 
@@ -647,3 +647,11 @@ Implemented the Phase 1 project relationship projection dependency layer. Added 
 Project relationship create/update/delete now route through `applyProjectRelationshipProjectionDeltaDependenciesTx` and append durable project relationship projection delta event rows in the same transaction as the source write. Focused tests cover exact row keys, assignment IDs, delete deltas, schema indexes, dependency helper names, and no broad project relationship projection maintenance.
 
 The conditional project editor information wiring remains unchanged in this pass; existing project editor event writes are still direct editor projection events and were not part of the requested project relationship projection Phase 1 scope.
+
+### 2026-06-10 - Phase 2 Source Mutation Migration
+
+Migrated node, Logic Gate, node Logic Gate assignment, node account assignment, RACIO assignment, permission, and delete paths onto the projection dependency helpers. The dependency layer now owns Kanban, RACIO, Project Management, and Project relationship projection fanout for those source mutation classes and returns mixed projection deltas for durable event row writes in the same transaction.
+
+Added atomic `CreateNodeAssociatedWithProject` and `CreateLogicGateAssociatedWithProject` store commands plus `POST /v1/projects/{project_id}/nodes` and `POST /v1/projects/{project_id}/logic-gates`. The node command supports optional initial editor information and optional initial Logic Gate assignment context; the Logic Gate command supports optional initial editor information. Both commands create source rows, project relationship rows, affected projections, projection delta event rows, and workspace domain events before commit.
+
+Added Phase 2 guard, rollback, and regression tests covering migrated command wiring, project-scoped create commit/rollback behavior, project relationship add/delete deltas, optional initial assignment relationship keys, and no broad project relationship projection rebuilds in normal product writes.
