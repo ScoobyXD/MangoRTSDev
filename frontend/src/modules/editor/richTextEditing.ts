@@ -18,6 +18,8 @@ export const EDITOR_TABLE_ATTRIBUTE = "data-mango-editor-table";
 export const EDITOR_TABLE_CELL_ATTRIBUTE = "data-mango-editor-table-cell";
 export const EDITOR_TABLE_COLUMNS_ATTRIBUTE = "data-mango-editor-table-columns";
 
+const EDITOR_TABLE_DEFAULT_ROWS = 3;
+const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
 const EDITOR_TABLE_MAX_ROWS = 20;
 const EDITOR_TABLE_MAX_COLUMNS = 8;
 const EDITOR_TABLE_MAX_CELL_TEXT_LENGTH = 2000;
@@ -112,34 +114,30 @@ function directEditorGridTableCells(element: HTMLElement): HTMLElement[] {
 function editorPlainTextTableLinesFromCells(rowCells: string[][], rows: number, columns: number): string[] {
   const safeRows = clampEditorTableSize(rows, 1, EDITOR_TABLE_MAX_ROWS);
   const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
-  const emptyRow = `| ${Array.from({ length: safeColumns }, () => " ").join(" | ")} |`;
-  const separatorRow = `|${Array.from({ length: safeColumns }, () => "---").join("|")}|`;
   const lines: string[] = [];
   for (let rowIndex = 0; rowIndex < safeRows; rowIndex += 1) {
     const cells = Array.from({ length: safeColumns }, (_, columnIndex) => rowCells[rowIndex]?.[columnIndex]?.trim() ?? "");
-    const line = `| ${cells.map((cell) => cell || " ").join(" | ")} |`;
-    lines.push(line === emptyRow ? emptyRow : line);
-    if (rowIndex === 0) lines.push(separatorRow);
+    lines.push(`| ${cells.map((cell) => cell || " ").join(" | ")} |`);
   }
   return lines;
 }
 
-function appendEditorPlainTextLines(target: Node, ownerDocument: Document, lines: string[]) {
-  if (lines.length > 0 && target.lastChild && target.lastChild.nodeName !== "BR") {
-    target.appendChild(ownerDocument.createElement("br"));
-  }
-  lines.forEach((line, index) => {
-    if (index > 0) target.appendChild(ownerDocument.createElement("br"));
-    target.appendChild(ownerDocument.createTextNode(line));
-  });
-}
-
-export function createEditorPlainTextTableFragment(ownerDocument: Document, rows = 3, columns = 3): DocumentFragment {
+export function createEditorTableElement(ownerDocument: Document, rows = EDITOR_TABLE_DEFAULT_ROWS, columns = EDITOR_TABLE_DEFAULT_COLUMNS): HTMLTableElement {
   const safeRows = clampEditorTableSize(rows, 1, EDITOR_TABLE_MAX_ROWS);
   const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
-  const fragment = ownerDocument.createDocumentFragment();
-  appendEditorPlainTextLines(fragment, ownerDocument, editorPlainTextTableLinesFromCells([], safeRows, safeColumns));
-  return fragment;
+  const table = ownerDocument.createElement("table");
+  const body = ownerDocument.createElement("tbody");
+  table.setAttribute(EDITOR_TABLE_ATTRIBUTE, "true");
+  table.setAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE, String(safeColumns));
+  for (let rowIndex = 0; rowIndex < safeRows; rowIndex += 1) {
+    const row = ownerDocument.createElement("tr");
+    for (let columnIndex = 0; columnIndex < safeColumns; columnIndex += 1) {
+      row.appendChild(createEditorTableCell(ownerDocument));
+    }
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  return table;
 }
 
 function normalizeNativeTableCellText(value: string): string {
@@ -151,7 +149,51 @@ function normalizeNativeTableCellText(value: string): string {
     .slice(0, EDITOR_TABLE_MAX_CELL_TEXT_LENGTH);
 }
 
-function appendNativeTableAsPlainTextTable(source: HTMLElement, target: Node, ownerDocument: Document) {
+function createEditorTableCell(ownerDocument: Document): HTMLTableCellElement {
+  const cell = ownerDocument.createElement("td");
+  cell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
+  cell.appendChild(ownerDocument.createElement("br"));
+  return cell;
+}
+
+function ensureEditableTableCellContent(cell: HTMLTableCellElement) {
+  if (cell.childNodes.length > 0) return;
+  cell.appendChild(cell.ownerDocument.createElement("br"));
+}
+
+function sanitizeEditorTableCellContent(source: HTMLElement, target: HTMLTableCellElement, ownerDocument: Document) {
+  source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
+  while (target.firstChild?.nodeType === Node.TEXT_NODE && !(target.firstChild.textContent ?? "").trim()) {
+    target.firstChild.remove();
+  }
+  while (target.lastChild?.nodeType === Node.TEXT_NODE && !(target.lastChild.textContent ?? "").trim()) {
+    target.lastChild.remove();
+  }
+  ensureEditableTableCellContent(target);
+}
+
+function createSanitizedEditorTableFromCells(sourceRows: HTMLElement[][], ownerDocument: Document): HTMLTableElement {
+  const safeRows = clampEditorTableSize(Math.max(1, sourceRows.length), 1, EDITOR_TABLE_MAX_ROWS);
+  const inferredColumns = Math.max(0, ...sourceRows.map((row) => row.length));
+  const safeColumns = clampEditorTableSize(inferredColumns || EDITOR_TABLE_DEFAULT_COLUMNS, 1, EDITOR_TABLE_MAX_COLUMNS);
+  const table = createEditorTableElement(ownerDocument, safeRows, safeColumns);
+  const rows = Array.from(table.querySelectorAll("tr"));
+  for (let rowIndex = 0; rowIndex < safeRows; rowIndex += 1) {
+    const cells = Array.from(rows[rowIndex]?.children ?? []).filter((child): child is HTMLTableCellElement => (
+      child instanceof HTMLTableCellElement
+    ));
+    for (let columnIndex = 0; columnIndex < safeColumns; columnIndex += 1) {
+      const targetCell = cells[columnIndex];
+      const sourceCell = sourceRows[rowIndex]?.[columnIndex];
+      if (!targetCell || !sourceCell) continue;
+      targetCell.replaceChildren();
+      sanitizeEditorTableCellContent(sourceCell, targetCell, ownerDocument);
+    }
+  }
+  return table;
+}
+
+function appendNativeTableAsEditorTable(source: HTMLElement, target: Node, ownerDocument: Document) {
   const sourceRows = Array.from(source.querySelectorAll("tr")).slice(0, EDITOR_TABLE_MAX_ROWS);
   const rowCells = sourceRows.map((row) => (
     Array.from(row.children)
@@ -159,25 +201,22 @@ function appendNativeTableAsPlainTextTable(source: HTMLElement, target: Node, ow
         child instanceof HTMLElement && (child.tagName === "TD" || child.tagName === "TH")
       ))
       .slice(0, EDITOR_TABLE_MAX_COLUMNS)
-      .map((cell) => normalizeNativeTableCellText(cell.textContent ?? ""))
   ));
-  const columns = clampEditorTableSize(Math.max(1, ...rowCells.map((cells) => cells.length)), 1, EDITOR_TABLE_MAX_COLUMNS);
-  const rows = clampEditorTableSize(Math.max(1, rowCells.length), 1, EDITOR_TABLE_MAX_ROWS);
-  appendEditorPlainTextLines(target, ownerDocument, editorPlainTextTableLinesFromCells(rowCells, rows, columns));
+  target.appendChild(createSanitizedEditorTableFromCells(rowCells, ownerDocument));
 }
 
-function appendSanitizedEditorGridTableAsPlainText(source: HTMLElement, target: Node, ownerDocument: Document) {
+function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
   const requestedColumns = readEditorGridTableColumns(source);
   const sourceCells = directEditorGridTableCells(source).slice(0, EDITOR_TABLE_MAX_ROWS * EDITOR_TABLE_MAX_COLUMNS);
   const rows = clampEditorTableSize(Math.max(1, Math.ceil(Math.max(1, sourceCells.length) / requestedColumns)), 1, EDITOR_TABLE_MAX_ROWS);
-  const rowCells = Array.from({ length: rows }, () => Array.from({ length: requestedColumns }, () => ""));
+  const rowCells = Array.from({ length: rows }, () => Array.from<HTMLElement | null>({ length: requestedColumns }).fill(null));
   sourceCells.forEach((sourceCell, index) => {
     const rowIndex = Math.floor(index / requestedColumns);
     const columnIndex = index % requestedColumns;
     if (!rowCells[rowIndex]) return;
-    rowCells[rowIndex][columnIndex] = normalizeNativeTableCellText(sourceCell.textContent ?? "");
+    rowCells[rowIndex][columnIndex] = sourceCell;
   });
-  appendEditorPlainTextLines(target, ownerDocument, editorPlainTextTableLinesFromCells(rowCells, rows, requestedColumns));
+  target.appendChild(createSanitizedEditorTableFromCells(rowCells.map((row) => row.filter((cell): cell is HTMLElement => cell !== null)), ownerDocument));
 }
 
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
@@ -193,9 +232,8 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
-  if (element.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true") {
-    appendSanitizedEditorGridTableAsPlainText(element, target, ownerDocument);
-    target.appendChild(ownerDocument.createElement("br"));
+  if (element.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true" && tagName !== "table") {
+    appendSanitizedEditorGridTable(element, target, ownerDocument);
     return;
   }
 
@@ -266,8 +304,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   }
 
   if (tagName === "table") {
-    appendNativeTableAsPlainTextTable(element, target, ownerDocument);
-    target.appendChild(ownerDocument.createElement("br"));
+    appendNativeTableAsEditorTable(element, target, ownerDocument);
     return;
   }
 
@@ -282,10 +319,9 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
         child instanceof HTMLElement && (child.tagName === "TD" || child.tagName === "TH")
       ))
       .slice(0, EDITOR_TABLE_MAX_COLUMNS)
-      .map((cell) => normalizeNativeTableCellText(cell.textContent ?? ""));
+      .map((cell) => cell);
     if (rowCells.length > 0) {
-      appendEditorPlainTextLines(target, ownerDocument, [`| ${rowCells.map((cell) => cell || " ").join(" | ")} |`]);
-      target.appendChild(ownerDocument.createElement("br"));
+      target.appendChild(createSanitizedEditorTableFromCells([rowCells], ownerDocument));
       return;
     }
     appendSanitizedChildren(element, target, ownerDocument);

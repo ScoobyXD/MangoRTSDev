@@ -534,6 +534,38 @@ button, input, textarea, select {
   outline-offset: 2px;
 }
 
+.editor-document-scroll table[data-mango-editor-table="true"] {
+  width: 100%;
+  max-width: 100%;
+  margin: 8px 0 10px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  clear: both;
+}
+
+.editor-document-scroll table[data-mango-editor-table="true"] td,
+.editor-document-scroll table[data-mango-editor-table="true"] th,
+.editor-document-scroll [data-mango-editor-table-cell="true"] {
+  min-width: 72px;
+  min-height: 28px;
+  border: 1px solid rgba(100, 116, 139, 0.38);
+  padding: 6px 8px;
+  vertical-align: top;
+  background: rgba(255, 255, 255, 0.54);
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.editor-document-scroll table[data-mango-editor-table="true"] td:focus,
+.editor-document-scroll table[data-mango-editor-table="true"] th:focus,
+.editor-document-scroll [data-mango-editor-table-cell="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--editor-document-scroll-accent);
+}
+
 .editor-document-scroll br[data-mango-editor-image-clear="true"] {
   clear: both;
 }
