@@ -149,6 +149,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
+  const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -776,12 +777,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               const collapsed = collapsedGateRelationshipIDs.has(group.gate.relationship_id);
               return (
                 <div key={group.gate.relationship_id} style={gateGroupStyle(collapsed)}>
-                  <div
-                    style={logicGateCardHeaderStyle}
-                    onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
-                  >
+                  <div style={logicGateCardHeaderStyle}>
                     <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-                    <span style={logicGateCardTitleStyle}>{group.gate.display_title}</span>
+                    <span
+                      title={group.gate.logic_gate_id ? "Double-click to open logic gate" : undefined}
+                      style={logicGateCardTitleStyle}
+                      onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
+                    >
+                      {group.gate.display_title}
+                    </span>
                     <button
                       type="button"
                       aria-label={collapsed ? "Expand logic gate" : "Collapse logic gate"}
@@ -803,7 +807,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         <button
                           key={node.relationship_id}
                           type="button"
-                          style={logicGateNodeRowStyle}
+                          style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id)}
+                          onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
+                          onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
                           onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
                         >
                           <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
@@ -823,7 +829,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   <button
                     key={node.relationship_id}
                     type="button"
-                    style={logicGateNodeRowStyle}
+                    style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id)}
+                    onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
+                    onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
                     onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
                   >
                     <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
@@ -1417,6 +1425,7 @@ const logicGateCardTitleStyle: React.CSSProperties = {
   fontSize: 12,
   lineHeight: 1.2,
   fontWeight: 850,
+  cursor: "pointer",
   overflow: "hidden",
   display: "-webkit-box",
   WebkitLineClamp: 2,
@@ -1445,19 +1454,23 @@ const logicGateNodeListStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const logicGateNodeRowStyle: React.CSSProperties = {
-  minHeight: 22,
-  border: 0,
-  background: "transparent",
-  color: "#0f172a",
+const logicGateNodeRowStyle = (hovered: boolean): React.CSSProperties => ({
+  minHeight: 24,
+  minWidth: 0,
+  border: `1px solid ${hovered ? "#19a8ff" : "transparent"}`,
+  borderRadius: 6,
+  background: hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
+  color: "#111827",
   display: "grid",
   gridTemplateColumns: "16px minmax(0, 1fr) auto",
   alignItems: "center",
-  gap: 7,
-  padding: 0,
+  gap: 4,
+  padding: "3px 5px",
   textAlign: "left",
-  cursor: "pointer",
-};
+  cursor: "grab",
+  boxShadow: hovered ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "none",
+  transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+});
 
 const relationshipNodeIconStyle: React.CSSProperties = {
   width: 16,
@@ -1470,8 +1483,8 @@ const relationshipNodeIconStyle: React.CSSProperties = {
 
 const relationshipNodeTitleStyle: React.CSSProperties = {
   minWidth: 0,
-  fontSize: 12,
-  fontWeight: 780,
+  fontSize: 11,
+  fontWeight: 600,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
