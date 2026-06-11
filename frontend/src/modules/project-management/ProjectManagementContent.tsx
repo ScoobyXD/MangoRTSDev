@@ -1046,9 +1046,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   if (activeProjectID) {
     return (
       <ProjectSummaryContent
-        key={`${activeProjectID}:${projectSummaryReloadKey}`}
         projectID={activeProjectID}
         accent={accent}
+        refreshToken={projectSummaryReloadKey}
         workspace={workspace}
         onBack={() => setActiveProjectID("")}
         onNodeOpen={onNodeOpen}
