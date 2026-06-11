@@ -1012,6 +1012,13 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         }}
         onSelect={documentSurfaceHandlers.onSelect}
         onClick={documentSurfaceHandlers.onClick}
+        onContextMenu={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onContextMenu(event);
+        }}
         onPointerDown={(event) => {
           setSelectionDraft(null);
           if (!editable) {

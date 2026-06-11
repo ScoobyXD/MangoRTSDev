@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -52,6 +52,15 @@ test("editor sanitizer preserves image clear breaks", () => {
   const html = sanitizeEditorDocumentHTML(`<br ${EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE}="true" style="clear: both;">after`);
 
   assert.match(html, new RegExp(`<br ${EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE}="true"(?: clear="all")? style="clear: both;?">after`));
+});
+
+test("editor table width normalization keeps columns bounded and proportional", () => {
+  const exact = normalizeEditorTableColumnWidths([20, 30, 50], 3);
+  const squeezed = normalizeEditorTableColumnWidths([1, 1, 98], 3);
+
+  assert.deepEqual(exact.map((value) => Math.round(value)), [20, 30, 50]);
+  assert.equal(Math.round(squeezed.reduce((sum, value) => sum + value, 0)), 100);
+  assert.ok(squeezed.every((value) => value >= 4));
 });
 
 test("editor image source sanitizer only accepts raster data images", () => {
