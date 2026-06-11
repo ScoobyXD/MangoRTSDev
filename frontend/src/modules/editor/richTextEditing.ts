@@ -17,12 +17,18 @@ export const EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE = "data-mango-editor-image-clear
 export const EDITOR_TABLE_ATTRIBUTE = "data-mango-editor-table";
 export const EDITOR_TABLE_CELL_ATTRIBUTE = "data-mango-editor-table-cell";
 export const EDITOR_TABLE_COLUMNS_ATTRIBUTE = "data-mango-editor-table-columns";
+export const EDITOR_TABLE_HEADER_ATTRIBUTE = "data-mango-editor-table-header";
+export const EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE = "data-mango-editor-table-column-widths";
+export const EDITOR_TABLE_WIDTH_ATTRIBUTE = "data-mango-editor-table-width";
+export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
 
-const EDITOR_TABLE_DEFAULT_ROWS = 3;
-const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
-const EDITOR_TABLE_MAX_ROWS = 20;
-const EDITOR_TABLE_MAX_COLUMNS = 8;
+export const EDITOR_TABLE_DEFAULT_ROWS = 3;
+export const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
+export const EDITOR_TABLE_MAX_ROWS = 20;
+export const EDITOR_TABLE_MAX_COLUMNS = 8;
 const EDITOR_TABLE_MAX_CELL_TEXT_LENGTH = 2000;
+const EDITOR_TABLE_MIN_COLUMN_WIDTH_PERCENT = 5;
+const EDITOR_TABLE_MIN_WIDTH_PERCENT = 18;
 
 const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
 const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
@@ -100,6 +106,99 @@ function clampEditorTableSize(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+function clampEditorTablePercent(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatEditorTablePercent(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function equalEditorTableColumnWidths(columns: number): number[] {
+  const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
+  return Array.from({ length: safeColumns }, () => 100 / safeColumns);
+}
+
+export function normalizeEditorTableColumnWidths(widths: number[], columns: number): number[] {
+  const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
+  if (widths.length !== safeColumns) return equalEditorTableColumnWidths(safeColumns);
+  const positiveWidths = widths.map((value) => Number.isFinite(value) && value > 0 ? value : 0);
+  const total = positiveWidths.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return equalEditorTableColumnWidths(safeColumns);
+  const minWidth = Math.min(EDITOR_TABLE_MIN_COLUMN_WIDTH_PERCENT, (100 / safeColumns) * 0.72);
+  const normalized = positiveWidths.map((value) => Math.max(minWidth, (value / total) * 100));
+  const adjustedTotal = normalized.reduce((sum, value) => sum + value, 0);
+  return adjustedTotal > 0 ? normalized.map((value) => (value / adjustedTotal) * 100) : equalEditorTableColumnWidths(safeColumns);
+}
+
+function parseEditorTablePercentList(value: string | null): number[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((part) => Number.parseFloat(part.trim().replace(/%$/, "")))
+    .filter((part) => Number.isFinite(part));
+}
+
+function directEditorTableColWidths(element: HTMLElement): number[] {
+  const colGroup = Array.from(element.children).find((child) => child instanceof HTMLElement && child.tagName === "COLGROUP");
+  if (!(colGroup instanceof HTMLElement)) return [];
+  return Array.from(colGroup.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName === "COL")
+    .map((col) => Number.parseFloat(col.style.width.trim().replace(/%$/, "")))
+    .filter((width) => Number.isFinite(width) && width > 0);
+}
+
+export function readEditorTableColumnWidths(element: HTMLElement, columns: number): number[] {
+  const safeColumns = clampEditorTableSize(columns, 1, EDITOR_TABLE_MAX_COLUMNS);
+  const attributeWidths = parseEditorTablePercentList(element.getAttribute(EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE));
+  if (attributeWidths.length === safeColumns) return normalizeEditorTableColumnWidths(attributeWidths, safeColumns);
+  const colWidths = directEditorTableColWidths(element);
+  if (colWidths.length === safeColumns) return normalizeEditorTableColumnWidths(colWidths, safeColumns);
+  return equalEditorTableColumnWidths(safeColumns);
+}
+
+export function applyEditorTableColumnWidths(table: HTMLTableElement, widths: number[]): number[] {
+  const normalizedWidths = normalizeEditorTableColumnWidths(widths, widths.length || readEditorGridTableColumns(table));
+  Array.from(table.children).forEach((child) => {
+    if (child instanceof HTMLElement && child.tagName === "COLGROUP") child.remove();
+  });
+  const colGroup = table.ownerDocument.createElement("colgroup");
+  normalizedWidths.forEach((width) => {
+    const col = table.ownerDocument.createElement("col");
+    col.style.width = `${formatEditorTablePercent(width)}%`;
+    colGroup.appendChild(col);
+  });
+  table.insertBefore(colGroup, table.firstChild);
+  table.setAttribute(EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE, normalizedWidths.map(formatEditorTablePercent).join(","));
+  return normalizedWidths;
+}
+
+function readEditorTablePercentAttribute(element: HTMLElement, attribute: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseFloat(element.getAttribute(attribute) ?? "");
+  return clampEditorTablePercent(Number.isFinite(parsed) ? parsed : fallback, min, max);
+}
+
+export function readEditorTableWidthPercent(table: HTMLTableElement): number {
+  return readEditorTablePercentAttribute(table, EDITOR_TABLE_WIDTH_ATTRIBUTE, 100, EDITOR_TABLE_MIN_WIDTH_PERCENT, 100);
+}
+
+export function readEditorTableOffsetPercent(table: HTMLTableElement, widthPercent = readEditorTableWidthPercent(table)): number {
+  return readEditorTablePercentAttribute(table, EDITOR_TABLE_OFFSET_ATTRIBUTE, 0, 0, Math.max(0, 100 - widthPercent));
+}
+
+export function applyEditorTableLayout(table: HTMLTableElement, widthPercent = 100, offsetPercent = 0): { widthPercent: number; offsetPercent: number } {
+  const safeWidth = clampEditorTablePercent(widthPercent, EDITOR_TABLE_MIN_WIDTH_PERCENT, 100);
+  const safeOffset = clampEditorTablePercent(offsetPercent, 0, Math.max(0, 100 - safeWidth));
+  table.setAttribute(EDITOR_TABLE_WIDTH_ATTRIBUTE, formatEditorTablePercent(safeWidth));
+  table.setAttribute(EDITOR_TABLE_OFFSET_ATTRIBUTE, formatEditorTablePercent(safeOffset));
+  table.style.width = `${formatEditorTablePercent(safeWidth)}%`;
+  table.style.marginLeft = safeOffset > 0 ? `${formatEditorTablePercent(safeOffset)}%` : "";
+  table.style.maxWidth = `${formatEditorTablePercent(100 - safeOffset)}%`;
+  return { widthPercent: safeWidth, offsetPercent: safeOffset };
+}
+
 function readEditorGridTableColumns(element: HTMLElement, fallback = 3): number {
   const raw = Number.parseInt(element.getAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE) ?? "", 10);
   return clampEditorTableSize(raw || fallback, 1, EDITOR_TABLE_MAX_COLUMNS);
@@ -132,11 +231,13 @@ export function createEditorTableElement(ownerDocument: Document, rows = EDITOR_
   for (let rowIndex = 0; rowIndex < safeRows; rowIndex += 1) {
     const row = ownerDocument.createElement("tr");
     for (let columnIndex = 0; columnIndex < safeColumns; columnIndex += 1) {
-      row.appendChild(createEditorTableCell(ownerDocument));
+      row.appendChild(createEditorTableCell(ownerDocument, rowIndex, columnIndex));
     }
     body.appendChild(row);
   }
   table.appendChild(body);
+  applyEditorTableColumnWidths(table, equalEditorTableColumnWidths(safeColumns));
+  applyEditorTableLayout(table, 100, 0);
   return table;
 }
 
@@ -149,9 +250,13 @@ function normalizeNativeTableCellText(value: string): string {
     .slice(0, EDITOR_TABLE_MAX_CELL_TEXT_LENGTH);
 }
 
-function createEditorTableCell(ownerDocument: Document): HTMLTableCellElement {
-  const cell = ownerDocument.createElement("td");
+function createEditorTableCell(ownerDocument: Document, rowIndex: number, columnIndex: number): HTMLTableCellElement {
+  const isHeader = rowIndex === 0 || columnIndex === 0;
+  const cell = ownerDocument.createElement(isHeader ? "th" : "td") as HTMLTableCellElement;
   cell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
+  if (isHeader) {
+    cell.setAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE, rowIndex === 0 && columnIndex === 0 ? "corner" : rowIndex === 0 ? "column" : "row");
+  }
   cell.appendChild(ownerDocument.createElement("br"));
   return cell;
 }
@@ -172,7 +277,7 @@ function sanitizeEditorTableCellContent(source: HTMLElement, target: HTMLTableCe
   ensureEditableTableCellContent(target);
 }
 
-function createSanitizedEditorTableFromCells(sourceRows: HTMLElement[][], ownerDocument: Document): HTMLTableElement {
+function createSanitizedEditorTableFromCells(sourceRows: HTMLElement[][], ownerDocument: Document, sourceTable?: HTMLElement | null): HTMLTableElement {
   const safeRows = clampEditorTableSize(Math.max(1, sourceRows.length), 1, EDITOR_TABLE_MAX_ROWS);
   const inferredColumns = Math.max(0, ...sourceRows.map((row) => row.length));
   const safeColumns = clampEditorTableSize(inferredColumns || EDITOR_TABLE_DEFAULT_COLUMNS, 1, EDITOR_TABLE_MAX_COLUMNS);
@@ -190,6 +295,10 @@ function createSanitizedEditorTableFromCells(sourceRows: HTMLElement[][], ownerD
       sanitizeEditorTableCellContent(sourceCell, targetCell, ownerDocument);
     }
   }
+  if (sourceTable) {
+    applyEditorTableColumnWidths(table, readEditorTableColumnWidths(sourceTable, safeColumns));
+    applyEditorTableLayout(table, readEditorTablePercentAttribute(sourceTable, EDITOR_TABLE_WIDTH_ATTRIBUTE, 100, EDITOR_TABLE_MIN_WIDTH_PERCENT, 100), readEditorTablePercentAttribute(sourceTable, EDITOR_TABLE_OFFSET_ATTRIBUTE, 0, 0, 100));
+  }
   return table;
 }
 
@@ -202,7 +311,7 @@ function appendNativeTableAsEditorTable(source: HTMLElement, target: Node, owner
       ))
       .slice(0, EDITOR_TABLE_MAX_COLUMNS)
   ));
-  target.appendChild(createSanitizedEditorTableFromCells(rowCells, ownerDocument));
+  target.appendChild(createSanitizedEditorTableFromCells(rowCells, ownerDocument, source));
 }
 
 function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, ownerDocument: Document) {
@@ -216,7 +325,7 @@ function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, owner
     if (!rowCells[rowIndex]) return;
     rowCells[rowIndex][columnIndex] = sourceCell;
   });
-  target.appendChild(createSanitizedEditorTableFromCells(rowCells.map((row) => row.filter((cell): cell is HTMLElement => cell !== null)), ownerDocument));
+  target.appendChild(createSanitizedEditorTableFromCells(rowCells.map((row) => row.filter((cell): cell is HTMLElement => cell !== null)), ownerDocument, source));
 }
 
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {

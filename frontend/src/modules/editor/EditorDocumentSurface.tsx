@@ -28,6 +28,7 @@ export type EditorDocumentSurfaceProps = {
   onInput: React.FormEventHandler<HTMLDivElement>;
   onSelect: React.ReactEventHandler<HTMLDivElement>;
   onClick: React.MouseEventHandler<HTMLDivElement>;
+  onContextMenu: React.MouseEventHandler<HTMLDivElement>;
   onPointerDown: React.PointerEventHandler<HTMLDivElement>;
   onPointerMove: React.PointerEventHandler<HTMLDivElement>;
   onKeyUp: React.KeyboardEventHandler<HTMLDivElement>;
@@ -61,6 +62,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onInput,
   onSelect,
   onClick,
+  onContextMenu,
   onPointerDown,
   onPointerMove,
   onKeyUp,
@@ -154,6 +156,13 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       }}
       onSelect={onSelect}
       onClick={onClick}
+      onContextMenu={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onContextMenu(event);
+      }}
       onPointerDown={(event) => {
         if (!documentIsEditable) {
           documentRef.current?.blur();
