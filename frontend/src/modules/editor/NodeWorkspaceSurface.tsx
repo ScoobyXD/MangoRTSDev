@@ -43,7 +43,6 @@ import { serializeEditorDocumentHTML } from "./richTextEditing";
 
 import {
   AttachedEmailOrganizerPane,
-  AttachmentCountDropdown,
   ChatPane,
   DeleteTextBlockConfirmationModal,
   EmailCountDropdown,
@@ -53,7 +52,6 @@ import {
   TextBlockActionsMenu,
   TimelineCell,
   type EmailHighlightRemovalRequest,
-  type TextBlockAttachmentListItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
   CHAT_ATTACHMENT_MAX_BYTES,
@@ -609,13 +607,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return Array.from(byMessageID.values());
   }, [attachedEmails]);
-  const nodeTextBlockAttachments = useMemo<TextBlockAttachmentListItem[]>(() => (
-    blocks.flatMap((block) => (block.attachments ?? []).map((attachment) => ({
-      blockID: block.id,
-      blockTitle: block.title,
-      attachment,
-    })))
-  ), [blocks]);
   const compact = width > 0 && width < 720;
   const textCommunicationContentWidth = Math.max(
     TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX,
@@ -1262,14 +1253,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_read_attachment");
     }
   }, [canEdit, onError, updateTextBlockContent]);
-
-  const removeTextBlockAttachment = useCallback((blockID: string, attachmentID: string) => {
-    if (!canEdit || !attachmentID.trim()) return;
-    const existing = contentByBlockRef.current.get(blockID);
-    if (!existing) return;
-    const nextAttachments = (existing.attachments ?? []).filter((attachment) => attachment.id !== attachmentID);
-    updateTextBlockContent(blockID, { attachments: nextAttachments });
-  }, [canEdit, updateTextBlockContent]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -2104,14 +2087,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             align="left"
             onOpenEmail={openAttachedEmailFromHeader}
           />
-          <AttachmentCountDropdown
-            items={nodeTextBlockAttachments}
-            accent={accent}
-            surfaceText={surfaceText}
-            align="left"
-            editable={canEdit}
-            onRemove={removeTextBlockAttachment}
-          />
           {canEdit && (
             <button
               type="button"
@@ -2622,14 +2597,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               endOffset: activeChatMessage.selectionEnd ?? 0,
             }
             : null;
-          const blockAttachmentItems: TextBlockAttachmentListItem[] = (block.attachments ?? []).map((attachment) => ({
-            blockID: block.id,
-            blockTitle: block.title,
-            attachment,
-          }));
           const blockHeaderGridTemplateColumns = canEdit
-            ? "minmax(0, 1fr) 26px 42px 26px 26px 26px 26px"
-            : "minmax(0, 1fr) 42px 26px 26px 26px";
+            ? "minmax(0, 1fr) 26px 26px 26px 26px 26px"
+            : "minmax(0, 1fr) 26px 26px 26px";
           const blockEmailPane = (
             <AttachedEmailOrganizerPane
               emails={blockEmails}
@@ -2782,14 +2752,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         />
                       </label>
                     )}
-                    <AttachmentCountDropdown
-                      items={blockAttachmentItems}
-                      accent={accent}
-                      surfaceText={surfaceText}
-                      compact
-                      editable={canEdit}
-                      onRemove={removeTextBlockAttachment}
-                    />
                     {canEdit && (
                       <button
                         type="button"
