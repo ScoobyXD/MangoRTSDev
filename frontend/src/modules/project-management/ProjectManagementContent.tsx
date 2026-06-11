@@ -536,7 +536,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("timeline");
+  const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("list");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
   const [projectSummaryReloadKey, setProjectSummaryReloadKey] = useState(0);
@@ -751,7 +751,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => {
     const cleanProjectID = targetProjectID?.trim() ?? "";
-    if (!cleanProjectID) return;
+    if (!cleanProjectID) {
+      setActiveProjectID("");
+      setViewMode("list");
+      return;
+    }
     setActiveProjectID(cleanProjectID);
     setViewMode("list");
   }, [targetProjectID, targetProjectRequestID]);
@@ -1045,6 +1049,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         key={`${activeProjectID}:${projectSummaryReloadKey}`}
         projectID={activeProjectID}
         accent={accent}
+        workspace={workspace}
         onBack={() => setActiveProjectID("")}
         onNodeOpen={onNodeOpen}
         onLogicGateOpen={onLogicGateOpen}
@@ -1188,8 +1193,10 @@ function ProjectListTable({
               onDoubleClick={() => onProjectOpen(project.project_id)}
             >
               <td style={projectNameCellStyle}>
-                <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
-                <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
+                <span style={projectNameCellInnerStyle}>
+                  <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
+                  <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
+                </span>
               </td>
               <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
               <td style={projectCellStyle}>{project.account_name || "Unassigned"}</td>
@@ -1713,15 +1720,22 @@ const projectCellStyle: React.CSSProperties = {
   fontWeight: 700,
   color: "#334155",
   whiteSpace: "nowrap",
+  verticalAlign: "middle",
 };
 
 const projectNameCellStyle: React.CSSProperties = {
   ...projectCellStyle,
-  display: "flex",
-  alignItems: "center",
-  gap: 9,
   color: "#0f172a",
   fontWeight: 900,
+};
+
+const projectNameCellInnerStyle: React.CSSProperties = {
+  minHeight: 48,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 9,
+  maxWidth: "100%",
+  verticalAlign: "middle",
 };
 
 const projectIconCellStyle: React.CSSProperties = {
