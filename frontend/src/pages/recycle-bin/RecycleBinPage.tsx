@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
+import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
 import {
   listRecycleBinItems,
@@ -237,8 +238,11 @@ function RecycleIcon(): React.ReactElement {
 }
 
 function ObjectKindIcon({ kind }: { kind: RecycleBinObjectKind }): React.ReactElement {
-  const color = kind === "project" ? "#f97316" : kind === "logic_gate" ? "#7c3aed" : kind === "node" ? "#0284c7" : "#475569";
-  return <span aria-hidden="true" style={{ ...objectKindDotStyle, background: color }} />;
+  return (
+    <span aria-hidden="true" style={recycleObjectIconStyle}>
+      <ExplorerRowIcon kind={kind} />
+    </span>
+  );
 }
 
 function recyclePageStyle(embedded: boolean): React.CSSProperties {
@@ -385,10 +389,11 @@ const recycleObjectCellStyle: React.CSSProperties = {
   gap: 8,
 };
 
-const objectKindDotStyle: React.CSSProperties = {
-  width: 9,
-  height: 9,
-  borderRadius: 3,
+const recycleObjectIconStyle: React.CSSProperties = {
+  width: 18,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
   flex: "0 0 auto",
 };
 
