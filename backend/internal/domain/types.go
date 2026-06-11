@@ -219,6 +219,18 @@ type EmailMessageSnapshot struct {
 	FolderIDs []string               `json:"folder_ids,omitempty"`
 }
 
+type CommunicationsMessageReadStatus struct {
+	UserID               string    `json:"-"`
+	MessageID            string    `json:"message_id,omitempty"`
+	ThreadID             string    `json:"thread_id,omitempty"`
+	Status               string    `json:"status"`
+	SignalCount          int       `json:"signal_count,omitempty"`
+	FirstSignalTimestamp time.Time `json:"first_signal_timestamp"`
+	LastSignalTimestamp  time.Time `json:"last_signal_timestamp"`
+	CreatedTimestamp     time.Time `json:"created_timestamp,omitempty"`
+	UpdatedTimestamp     time.Time `json:"updated_timestamp,omitempty"`
+}
+
 type CommunicationsTriageItem struct {
 	UserID           string               `json:"user_id"`
 	MessageID        string               `json:"message_id"`

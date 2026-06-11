@@ -39,6 +39,15 @@ export type EmailAttachment = {
   size?: number;
 };
 
+export type EmailReadStatus = {
+  message_id?: string;
+  thread_id?: string;
+  status: "read" | "likely_read";
+  signal_count?: number;
+  first_signal_timestamp?: string;
+  last_signal_timestamp?: string;
+};
+
 export type EmailFolder = {
   id: string;
   name: string;
@@ -68,6 +77,7 @@ export type EmailMessage = {
   folder_ids?: string[];
   logic_gate_ids?: string[];
   logic_gate_count?: number;
+  read_status?: EmailReadStatus;
   local_replies?: EmailMessage[];
 };
 
@@ -1592,6 +1602,7 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     folder_ids: message.folder_ids ? [...message.folder_ids] : undefined,
     logic_gate_ids: message.logic_gate_ids ? [...message.logic_gate_ids] : undefined,
     logic_gate_count: message.logic_gate_count,
+    read_status: message.read_status ? { ...message.read_status } : undefined,
     local_replies: message.local_replies ? message.local_replies.map((reply) => cloneMessage(reply)) : undefined,
   };
 }

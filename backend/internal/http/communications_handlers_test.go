@@ -386,6 +386,9 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
 		t.Fatalf("sent = %+v, want normalized send request", nylas.sent)
 	}
+	if nylas.sent.TrackingOptions == nil || !nylas.sent.TrackingOptions.Opens {
+		t.Fatalf("tracking options = %+v, want opens enabled", nylas.sent.TrackingOptions)
+	}
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "application/octet-stream" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
 		t.Fatalf("attachments = %+v, want normalized attachment", nylas.sent.Attachments)
 	}
@@ -1197,6 +1200,30 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 		t.Fatalf("duplicate webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
 	}
 	client.assertNoMessage(t)
+
+	openedBody := `{"type":"message.opened","time":"2026-06-09T21:14:00Z","data":{"object":{"message_id":"message-1","thread_id":"thread-1","grant_id":"grant-1","count":2}}}`
+	openedReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(openedBody))
+	openedReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", openedBody))
+	openedRec := httptest.NewRecorder()
+	handler.ServeHTTP(openedRec, openedReq)
+	if openedRec.Code != http.StatusOK {
+		t.Fatalf("opened webhook status = %d body=%s", openedRec.Code, openedRec.Body.String())
+	}
+	statuses, err := repo.ListCommunicationsMessageReadStatuses(user.UserID, []string{"message-1"})
+	if err != nil {
+		t.Fatalf("ListCommunicationsMessageReadStatuses: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Status != "likely_read" || statuses[0].MessageID != "message-1" || statuses[0].ThreadID != "thread-1" || statuses[0].SignalCount != 2 {
+		t.Fatalf("read statuses = %+v, want likely_read count 2", statuses)
+	}
+	if got := statuses[0].LastSignalTimestamp.Format(time.RFC3339); got != "2026-06-09T21:14:00Z" {
+		t.Fatalf("last signal timestamp = %s", got)
+	}
+	openedMessage := client.readJSON(t)
+	openedEvent := openedMessage["event"].(map[string]any)
+	if openedEvent["user_id"] != user.UserID || openedEvent["type"] != "mailbox_changed" || openedEvent["trigger"] != "message.opened" || openedEvent["message_id"] != "message-1" {
+		t.Fatalf("opened communications event = %+v", openedEvent)
+	}
 
 	badReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	badReq.Header.Set("X-Nylas-Signature", "bad")

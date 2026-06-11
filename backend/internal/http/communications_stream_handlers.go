@@ -12,6 +12,7 @@ import (
 	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,9 +26,12 @@ type communicationsEventEnvelope struct {
 }
 
 type nylasWebhookChange struct {
-	Trigger   string
-	GrantID   string
-	MessageID string
+	Trigger     string
+	GrantID     string
+	MessageID   string
+	ThreadID    string
+	OccurredAt  time.Time
+	SignalCount int
 }
 
 func (s *Server) handleNylasWebhook(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +95,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		if !isCommunicationsMailboxTrigger(change.Trigger) || grantID == "" {
 			continue
 		}
+		normalizedTrigger := normalizedNylasMailboxTrigger(change.Trigger)
 		changeKey := nylasWebhookChangeKey(grantID, change)
 		if _, processed := processedChanges[changeKey]; processed {
 			continue
@@ -113,6 +118,24 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			}
 			userID = connection.UserID
 			grantUserIDs[grantID] = userID
+		}
+		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) != "" {
+			signalAt := change.OccurredAt.UTC()
+			if signalAt.IsZero() {
+				signalAt = time.Now().UTC()
+			}
+			if _, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
+				UserID:          userID,
+				MessageID:       change.MessageID,
+				ThreadID:        change.ThreadID,
+				Status:          "likely_read",
+				SignalTimestamp: signalAt,
+				SignalCount:     change.SignalCount,
+			}); err != nil {
+				s.nylasWebhooks.forget(receiptKey)
+				writeError(w, http.StatusInternalServerError, "failed_to_store_message_read_status")
+				return
+			}
 		}
 		s.applyNylasWebhookCacheInvalidation(userID, change)
 		s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
@@ -160,18 +183,24 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 		for _, delta := range deltas {
 			if deltaMap, ok := delta.(map[string]any); ok {
 				changes = append(changes, nylasWebhookChange{
-					Trigger:   firstStringValue(deltaMap, "type", "trigger_type", "event"),
-					GrantID:   findStringField(deltaMap, "grant_id"),
-					MessageID: findNylasMessageID(deltaMap),
+					Trigger:     firstStringValue(deltaMap, "type", "trigger_type", "event"),
+					GrantID:     findStringField(deltaMap, "grant_id"),
+					MessageID:   findNylasMessageID(deltaMap),
+					ThreadID:    findStringField(deltaMap, "thread_id"),
+					OccurredAt:  findNylasWebhookTimestamp(deltaMap),
+					SignalCount: findNylasWebhookSignalCount(deltaMap),
 				})
 			}
 		}
 		return changes, nil
 	}
 	return []nylasWebhookChange{{
-		Trigger:   firstStringValue(rootMap, "type", "trigger_type", "event"),
-		GrantID:   findStringField(rootMap, "grant_id"),
-		MessageID: findNylasMessageID(rootMap),
+		Trigger:     firstStringValue(rootMap, "type", "trigger_type", "event"),
+		GrantID:     findStringField(rootMap, "grant_id"),
+		MessageID:   findNylasMessageID(rootMap),
+		ThreadID:    findStringField(rootMap, "thread_id"),
+		OccurredAt:  findNylasWebhookTimestamp(rootMap),
+		SignalCount: findNylasWebhookSignalCount(rootMap),
 	}}, nil
 }
 
@@ -196,6 +225,8 @@ func normalizedNylasMailboxTrigger(trigger string) string {
 		return "message.updated"
 	case strings.HasPrefix(trigger, "message.deleted"):
 		return "message.deleted"
+	case strings.HasPrefix(trigger, "message.opened"):
+		return "message.opened"
 	case strings.HasPrefix(trigger, "folder.created"):
 		return "folder.created"
 	case strings.HasPrefix(trigger, "folder.updated"):
@@ -214,6 +245,8 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasW
 		s.commCache.invalidateFolders(userID)
 	case strings.HasPrefix(trigger, "message.created"):
 		return
+	case strings.HasPrefix(trigger, "message.opened"):
+		s.commCache.invalidateMessage(userID, change.MessageID)
 	case strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
 		s.commCache.invalidateMessage(userID, change.MessageID)
 	default:
@@ -309,6 +342,24 @@ func findNylasMessageID(value any) string {
 	return ""
 }
 
+func findNylasWebhookSignalCount(value any) int {
+	for _, key := range []string{"signal_count", "open_count", "count"} {
+		if count := findIntField(value, key); count > 0 {
+			return count
+		}
+	}
+	return 0
+}
+
+func findNylasWebhookTimestamp(value any) time.Time {
+	for _, key := range []string{"time", "timestamp", "created_at", "created_timestamp"} {
+		if ts := findTimeField(value, key); !ts.IsZero() {
+			return ts
+		}
+	}
+	return time.Time{}
+}
+
 func findMessageIDInPreferredShapes(value any) string {
 	root, ok := value.(map[string]any)
 	if !ok {
@@ -322,6 +373,9 @@ func findMessageIDInPreferredShapes(value any) string {
 			return id
 		}
 		if object, ok := data["object"].(map[string]any); ok {
+			if id := stringField(object, "message_id"); id != "" {
+				return id
+			}
 			if id := stringField(object, "id"); id != "" {
 				return id
 			}
@@ -336,6 +390,106 @@ func findMessageIDInPreferredShapes(value any) string {
 		}
 	}
 	return ""
+}
+
+func findIntField(value any, field string) int {
+	switch typed := value.(type) {
+	case map[string]any:
+		if count := intValue(typed[field]); count > 0 {
+			return count
+		}
+		for _, child := range typed {
+			if found := findIntField(child, field); found > 0 {
+				return found
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if found := findIntField(child, field); found > 0 {
+				return found
+			}
+		}
+	}
+	return 0
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil && parsed > 0 {
+			return int(parsed)
+		}
+	case float64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case int:
+		if typed > 0 {
+			return typed
+		}
+	}
+	return 0
+}
+
+func findTimeField(value any, field string) time.Time {
+	switch typed := value.(type) {
+	case map[string]any:
+		if ts := timeValue(typed[field]); !ts.IsZero() {
+			return ts
+		}
+		for _, child := range typed {
+			if found := findTimeField(child, field); !found.IsZero() {
+				return found
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if found := findTimeField(child, field); !found.IsZero() {
+				return found
+			}
+		}
+	}
+	return time.Time{}
+}
+
+func timeValue(value any) time.Time {
+	switch typed := value.(type) {
+	case string:
+		return parseNylasWebhookTime(typed)
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return unixWebhookTime(parsed)
+		}
+	case float64:
+		return unixWebhookTime(int64(typed))
+	}
+	return time.Time{}
+}
+
+func parseNylasWebhookTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC()
+		}
+	}
+	if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return unixWebhookTime(parsed)
+	}
+	return time.Time{}
+}
+
+func unixWebhookTime(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
+	if value > 1_000_000_000_000 {
+		return time.UnixMilli(value).UTC()
+	}
+	return time.Unix(value, 0).UTC()
 }
 
 func stringField(values map[string]any, key string) string {

@@ -96,7 +96,7 @@ Then create a Nylas webhook destination using the `nylas_webhook_url` Terraform 
 https://api.dev.<domain>/nylas/webhook
 ```
 
-Subscribe the webhook to these triggers: `message.created`, `message.updated`, `message.deleted`, `folder.created`, `folder.updated`, and `folder.deleted`. Nylas sends update suffixes such as `.truncated` or `.transformed` without subscribing to those suffixes separately; the backend accepts them by prefix.
+Subscribe the webhook to these triggers: `message.created`, `message.updated`, `message.deleted`, `message.opened`, `folder.created`, `folder.updated`, and `folder.deleted`. Nylas sends update suffixes such as `.truncated` or `.transformed` without subscribing to those suffixes separately; the backend accepts them by prefix.
 
 If using the Nylas API instead of the dashboard, create the webhook after the first deploy:
 
@@ -105,7 +105,7 @@ curl --request POST `
   --url "https://api.us.nylas.com/v3/webhooks/" `
   --header "Content-Type: application/json" `
   --header "Authorization: Bearer <nylas-api-key>" `
-  --data '{ "trigger_types": ["message.created", "message.updated", "message.deleted", "folder.created", "folder.updated", "folder.deleted"], "description": "MangoRTS dev communications", "webhook_url": "https://api.dev.<domain>/nylas/webhook", "notification_email_addresses": ["ops@example.com"] }'
+  --data '{ "trigger_types": ["message.created", "message.updated", "message.deleted", "message.opened", "folder.created", "folder.updated", "folder.deleted"], "description": "MangoRTS dev communications", "webhook_url": "https://api.dev.<domain>/nylas/webhook", "notification_email_addresses": ["ops@example.com"] }'
 ```
 
 Store the returned `webhook_secret` in Secrets Manager, set `TF_NYLAS_WEBHOOK_SECRET_ARN`, and redeploy:

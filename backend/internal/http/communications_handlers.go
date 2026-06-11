@@ -738,6 +738,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 		return
 	}
+	req.TrackingOptions = defaultCommunicationsTrackingOptions()
 	if len(req.To) == 0 && len(req.Cc) == 0 && len(req.Bcc) == 0 {
 		writeError(w, http.StatusBadRequest, "email_recipients_required")
 		return
@@ -761,6 +762,10 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	s.commCache.invalidateMessage(connection.UserID, message.ID)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
+}
+
+func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
+	return &NylasTrackingOptions{Opens: true}
 }
 
 func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -1021,7 +1026,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	cacheQuery.Refresh = false
 	if !query.Refresh {
 		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL, now); ok {
-			return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
+			return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
 		}
 	}
 
@@ -1040,18 +1045,18 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, cached), nil
+				return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, cached), nil
 			}
 		}
 		return NylasMessagePage{}, err
 	}
 	s.commCache.setMessagePage(connection.UserID, cacheQuery, page, now)
-	return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
+	return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
 }
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
 	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok {
-		return message, nil
+		return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
 	}
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
@@ -1066,13 +1071,13 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return cached, nil
+				return s.enrichCommunicationsMessageReadStatus(connection.UserID, cached), nil
 			}
 		}
 		return NylasMessage{}, err
 	}
 	s.commCache.setMessage(connection.UserID, message, now)
-	return message, nil
+	return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
 }
 
 func shouldServeStaleCommunicationsCache(err error) bool {
@@ -1084,6 +1089,58 @@ func (s *Server) enrichCommunicationsMessagePagePlacements(userID, companyID str
 	page = cloneNylasMessagePage(page)
 	page.Messages = s.enrichCommunicationsMessagesPlacements(userID, companyID, page.Messages)
 	return page
+}
+
+func (s *Server) enrichCommunicationsMessagePage(userID, companyID string, page NylasMessagePage) NylasMessagePage {
+	page = cloneNylasMessagePage(page)
+	page.Messages = s.enrichCommunicationsMessagesReadStatuses(userID, page.Messages)
+	page.Messages = s.enrichCommunicationsMessagesPlacements(userID, companyID, page.Messages)
+	return page
+}
+
+func (s *Server) enrichCommunicationsMessageReadStatus(userID string, message NylasMessage) NylasMessage {
+	messages := s.enrichCommunicationsMessagesReadStatuses(userID, []NylasMessage{message})
+	if len(messages) == 0 {
+		return message
+	}
+	return messages[0]
+}
+
+func (s *Server) enrichCommunicationsMessagesReadStatuses(userID string, messages []NylasMessage) []NylasMessage {
+	if s == nil || s.repo == nil || strings.TrimSpace(userID) == "" || len(messages) == 0 {
+		return messages
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if strings.TrimSpace(message.ID) != "" {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	messageIDs = cleanStringList(messageIDs)
+	if len(messageIDs) == 0 {
+		return messages
+	}
+	statuses, err := s.repo.ListCommunicationsMessageReadStatuses(userID, messageIDs)
+	if err != nil {
+		log.Printf("failed to load communications message read statuses user_id=%s message_count=%d: %v", userID, len(messageIDs), err)
+		return messages
+	}
+	readStatusByMessageID := make(map[string]domain.CommunicationsMessageReadStatus, len(statuses))
+	for _, status := range statuses {
+		messageID := strings.TrimSpace(status.MessageID)
+		if messageID != "" {
+			readStatusByMessageID[messageID] = status
+		}
+	}
+	for i := range messages {
+		status, ok := readStatusByMessageID[strings.TrimSpace(messages[i].ID)]
+		if !ok {
+			messages[i].ReadStatus = nil
+			continue
+		}
+		messages[i].ReadStatus = &status
+	}
+	return messages
 }
 
 func (s *Server) enrichCommunicationsMessagePlacements(userID, companyID string, message NylasMessage) NylasMessage {

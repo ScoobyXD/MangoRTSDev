@@ -1,4 +1,4 @@
-import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox, EmailMessage, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox, EmailMessage, EmailReadStatus, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
@@ -968,6 +968,29 @@ export function formatMessageDate(epochSeconds?: number): string {
   const date = new Date(epochSeconds * 1000);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function messageReadStatusLabel(status?: EmailReadStatus): string {
+  if (!status) return "";
+  if (status.status === "read") return "Read";
+  if (status.status === "likely_read") return "Likely read";
+  return "";
+}
+
+export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
+  const raw = status?.last_signal_timestamp || status?.first_signal_timestamp || "";
+  if (!raw.trim()) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function messageReadStatusTitle(status?: EmailReadStatus): string {
+  const label = messageReadStatusLabel(status);
+  if (!label) return "";
+  const timestamp = messageReadStatusTimestamp(status);
+  const count = typeof status?.signal_count === "number" && status.signal_count > 1 ? ` (${Math.floor(status.signal_count)} signals)` : "";
+  return timestamp ? `${label} ${timestamp}${count}` : `${label}${count}`;
 }
 
 function emailFolderTotalCount(folder: EmailFolder | undefined): number | undefined {

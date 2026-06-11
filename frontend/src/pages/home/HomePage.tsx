@@ -352,6 +352,7 @@ export function HomePage({
   const prefetchMessageFilterKeyRef = useRef("");
   const prefetchMessagePromiseRef = useRef<Promise<void> | null>(null);
   const selectedMessageIDRef = useRef("");
+  const selectedMessageRef = useRef<EmailMessage | null>(null);
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
   const pendingAutoArchiveMessageIDsRef = useRef<Set<string>>(new Set());
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
@@ -549,6 +550,9 @@ export function HomePage({
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
   }, [selectedMessageID]);
+  useEffect(() => {
+    selectedMessageRef.current = selectedMessage;
+  }, [selectedMessage]);
   useEffect(() => {
     activeViewIDRef.current = activeViewID;
   }, [activeViewID]);
@@ -1391,13 +1395,14 @@ export function HomePage({
         const params = currentMessageListParams();
         const visible = messagesRef.current.some((message) => message.id === messageID);
         const selected = selectedMessageIDRef.current === messageID;
+        const selectedLocalReply = selectedMessageRef.current?.local_replies?.some((reply) => reply.id === messageID) ?? false;
         const shouldFetchCreated = trigger.startsWith("message.created") && emailMessageMatchesListFilters({
           id: messageID,
           subject: "",
           unread: true,
           starred: false,
         }, params);
-        if (!visible && !selected && !shouldFetchCreated) return;
+        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) return;
         void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
           .then((message) => {
             primeEmailMessageCache(message);
