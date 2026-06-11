@@ -22,14 +22,12 @@ import {
 } from "../editor/editorProjection.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import {
-  AttachmentCountDropdown,
   AttachedEmailOrganizerPane,
   ChatPane,
   EmailPickerModal,
   NodeTextBlockEditor,
   TextBlockActionsMenu,
   TimelineCell,
-  type TextBlockAttachmentListItem,
 } from "../editor/NodeWorkspaceSurfaceParts.js";
 import {
   CHAT_ATTACHMENT_MAX_BYTES,
@@ -326,14 +324,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [saveTextBlock]);
 
-  const removeTextBlockAttachment = useCallback((blockID: string, attachmentID: string) => {
-    const block = blocks.find((item) => item.id === blockID);
-    if (!block) return;
-    const nextAttachments = block.attachments.filter((attachment) => attachment.id !== attachmentID);
-    setBlocks((current) => current.map((item) => item.id === blockID ? { ...item, attachments: nextAttachments } : item));
-    void saveTextBlock(block, { attachments: nextAttachments });
-  }, [blocks, saveTextBlock]);
-
   const submitChatMessage = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
@@ -587,14 +577,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                           }}
                         />
                       </label>
-                      <AttachmentCountDropdown
-                        items={textBlockAttachmentItems(block)}
-                        accent={accent}
-                        surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                        compact
-                        editable
-                        onRemove={removeTextBlockAttachment}
-                      />
                       <button
                         type="button"
                         title="Insert table"
@@ -908,14 +890,6 @@ function mergeProjectRelationships(
     byID.set(relationship.relationship_id, relationship);
   }
   return Array.from(byID.values()).sort(compareRelationshipProjection);
-}
-
-function textBlockAttachmentItems(block: ProjectTextBlockDraft): TextBlockAttachmentListItem[] {
-  return block.attachments.map((attachment) => ({
-    blockID: block.id,
-    blockTitle: block.title || "Project Summary",
-    attachment,
-  }));
 }
 
 function toggleSetValue(current: Set<string>, value: string): Set<string> {

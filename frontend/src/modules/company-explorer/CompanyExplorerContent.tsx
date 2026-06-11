@@ -2531,6 +2531,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       id: cleanID,
       label: row.label,
       selectedTreeID: row.id,
+      suppressNavigation: kind === "node",
       changedAt: Date.now(),
     });
   }, [companyID, scope]);
