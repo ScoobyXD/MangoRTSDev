@@ -318,6 +318,9 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.Events = events
+		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
@@ -407,10 +410,7 @@ values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28),
 		if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, nodeID, input.LogicGateID)
+		card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
@@ -435,7 +435,18 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
+		projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+			CompanyID:    input.CompanyID,
+			AssignmentID: assignment.AssignmentID,
+			NodeID:       nodeID,
+		})
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)
+		if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, nodeID, input.LogicGateID); err == nil {
+			card = projectedCard
+		} else {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
@@ -470,6 +481,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		return CommunicationsTriageConversionResult{}, err
 	}
 	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
@@ -505,6 +519,20 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Prior
 		Board:     board,
 	}
 	result.Target.Header = logicGate.Header
+	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+		CompanyID:    input.CompanyID,
+		AssignmentID: assignment.AssignmentID,
+		NodeID:       input.NodeID,
+	})
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)
+	if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID); err == nil {
+		card = projectedCard
+	} else {
+		return CommunicationsTriageConversionResult{}, err
+	}
 	for _, messageID := range input.MessageIDs {
 		var rawMessage []byte
 		if err := tx.QueryRowContext(ctx, `

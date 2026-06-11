@@ -1094,6 +1094,7 @@ type CommunicationsTriageConversionResult struct {
 	FolderItems       []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
 	DeletedMessageIDs []string                                  `json:"deleted_message_ids"`
 	Events            []domain.DomainEvent                      `json:"-"`
+	ProjectionDeltas  []ProjectionDelta                         `json:"-"`
 }
 
 type CommunicationsTriageRevertInput struct {

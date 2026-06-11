@@ -213,6 +213,32 @@ func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
 	}
 }
 
+func TestPostgresCommunicationsTriageConversionAppliesProjectionDependencyDeltas(t *testing.T) {
+	raw, err := os.ReadFile("postgres_communications_triage.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_communications_triage.go: %v", err)
+	}
+	source := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	convertBody := postgresKanbanFunctionBodyForTest(t, source, "func (r *PostgresRepo) ConvertCommunicationsTriageItems")
+	attachBody := postgresKanbanFunctionBodyForTest(t, source, "func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx")
+
+	for _, needle := range []string{
+		"applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx",
+		"result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)",
+		"kanbanBoardProjectionCardByNodeTx",
+	} {
+		if !strings.Contains(convertBody, needle) {
+			t.Fatalf("ConvertCommunicationsTriageItems missing new-node projection dependency step %q", needle)
+		}
+		if !strings.Contains(attachBody, needle) {
+			t.Fatalf("attachCommunicationsTriageItemsToExistingNodeTx missing existing-node projection dependency step %q", needle)
+		}
+	}
+	if count := strings.Count(convertBody, "ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)"); count < 2 {
+		t.Fatalf("ConvertCommunicationsTriageItems should emit projection delta event rows for both conversion exits, found %d", count)
+	}
+}
+
 func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCards(t *testing.T) {
 	raw, err := os.ReadFile("postgres_kanban.go")
 	if err != nil {
