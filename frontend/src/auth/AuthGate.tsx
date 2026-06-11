@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { preloadAccountManagerSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../app/preloadDashboardModules";
-import { HeaderSettingsIcon } from "../app/HeaderIcons";
+import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
@@ -23,6 +23,7 @@ import {
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
 import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
+import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
@@ -398,6 +399,10 @@ export default function AuthGate() {
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
+  }
+
+  if (normalizedPath === "/recycle-bin") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} overrideContent={<RecycleBinPage embedded />} /></React.Suspense>;
   }
 
   if (normalizedPath === "/connect-google") {
@@ -1699,6 +1704,11 @@ function AuthPanel({ error, children }: { title: string; error?: string; childre
 
 function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (path: string) => void }) {
   const displayName = me.user.display_name?.trim() || me.user.email;
+  const shellStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  };
   const navButtonStyle: React.CSSProperties = {
     width: 30,
     height: 30,
@@ -1714,15 +1724,26 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
     padding: 0,
   };
   return (
-    <button
-      type="button"
-      aria-label={`Settings for ${displayName}`}
-      title="Settings"
-      style={navButtonStyle}
-      onClick={() => onNavigate("/settings")}
-    >
-      <HeaderSettingsIcon />
-    </button>
+    <div style={shellStyle}>
+      <button
+        type="button"
+        aria-label="Recycle Bin"
+        title="Recycle Bin"
+        style={navButtonStyle}
+        onClick={() => onNavigate("/recycle-bin")}
+      >
+        <HeaderRecycleBinIcon />
+      </button>
+      <button
+        type="button"
+        aria-label={`Settings for ${displayName}`}
+        title="Settings"
+        style={navButtonStyle}
+        onClick={() => onNavigate("/settings")}
+      >
+        <HeaderSettingsIcon />
+      </button>
+    </div>
   );
 }
 

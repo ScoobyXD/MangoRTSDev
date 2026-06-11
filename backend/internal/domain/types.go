@@ -589,6 +589,17 @@ type CompanyExplorerFolderShare struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type RecycleBinItem struct {
+	CompanyID        string    `json:"company_id"`
+	RecycleBinItemID string    `json:"recycle_bin_item_id"`
+	ObjectKind       string    `json:"object_kind"`
+	ObjectID         string    `json:"object_id"`
+	ObjectLabel      string    `json:"object_label"`
+	ObjectFolderKind string    `json:"object_folder_kind,omitempty"`
+	DeletedByUserID  string    `json:"deleted_by_user_id,omitempty"`
+	DeletedTimestamp time.Time `json:"deleted_timestamp"`
+}
+
 type NodeMapPosition struct {
 	CompanyID        string    `json:"company_id"`
 	NodeID           string    `json:"node_id"`

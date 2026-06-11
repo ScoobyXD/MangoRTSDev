@@ -914,8 +914,10 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	directProjectIDs := map[string]bool{}
 	kanbanBoardIDs := map[string]bool{}
 	directKanbanBoardIDs := map[string]bool{}
+	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
 	for _, target := range targets {
+		targetScope := newCompanyExplorerRecycleScope()
 		switch target.Kind {
 		case "folder":
 			rows, err := tx.QueryContext(ctx,
@@ -951,6 +953,8 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 				}
 				folderIDs[folderID] = true
 				folderKinds[folderID] = folderKind
+				targetScope.FolderIDs[folderID] = true
+				targetScope.FolderKinds[folderID] = folderKind
 			}
 			if err := rows.Err(); err != nil {
 				rows.Close()
@@ -971,6 +975,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			}
 			nodeIDs[target.ID] = true
 			directNodeIDs[target.ID] = true
+			targetScope.NodeIDs[target.ID] = true
 		case "logic_gate":
 			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`, companyID, target.ID)
 			if err != nil {
@@ -981,6 +986,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			}
 			logicGateIDs[target.ID] = true
 			directLogicGateIDs[target.ID] = true
+			targetScope.LogicGateIDs[target.ID] = true
 		case "project":
 			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1 and project_id=$2)`, companyID, target.ID)
 			if err != nil {
@@ -991,6 +997,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			}
 			projectIDs[target.ID] = true
 			directProjectIDs[target.ID] = true
+			targetScope.ProjectIDs[target.ID] = true
 		case "kanban":
 			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, target.ID)
 			if err != nil {
@@ -1001,7 +1008,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			}
 			kanbanBoardIDs[target.ID] = true
 			directKanbanBoardIDs[target.ID] = true
+			targetScope.KanbanBoardIDs[target.ID] = true
 		}
+		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
 	}
 
 	for folderID := range folderIDs {
@@ -1035,6 +1044,14 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			return CompanyExplorerDeleteResult{}, err
 		}
 		rows.Close()
+	}
+	for index := range recycleRoots {
+		if len(recycleRoots[index].Scope.FolderIDs) == 0 {
+			continue
+		}
+		if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, &recycleRoots[index].Scope); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
 	}
 
 	for nodeID := range nodeIDs {
@@ -1110,6 +1127,13 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
+
+	for index := range recycleRoots {
+		recycleRoots[index].Scope.addLogicGateBoards()
+	}
+	if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, recycleRoots); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
 
 	for folderID := range folderIDs {
 		if folderKinds[folderID] == "communications" {

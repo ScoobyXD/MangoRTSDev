@@ -261,7 +261,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
-			event, err := s.repo.DeleteNodeAndWorkspaceEvent(companyID, nodeID)
+			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}})
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
@@ -269,8 +269,8 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
 				return
 			}
-			s.publishCommittedWorkspaceEvent(event)
-			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return
 		}
 		if r.Method != http.MethodGet {

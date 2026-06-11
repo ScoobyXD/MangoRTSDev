@@ -197,6 +197,70 @@ func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(
 	}
 }
 
+func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	repo.EnsureCompany(companyID, "Recycle Company")
+
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder failed: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Restorable node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem failed: %v", err)
+	}
+
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: node.NodeID}}); err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets failed: %v", err)
+	}
+	if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetNode after recycle delete err = %v, want ErrNotFound", err)
+	}
+	items, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("recycle item count = %d, want 1", len(items))
+	}
+	if items[0].ObjectKind != "node" || items[0].ObjectID != node.NodeID || items[0].ObjectLabel != "Restorable node" {
+		t.Fatalf("recycle item = %+v, want deleted node metadata", items[0])
+	}
+
+	result, err := repo.RestoreRecycleBinItems(companyID, []string{items[0].RecycleBinItemID})
+	if err != nil {
+		t.Fatalf("RestoreRecycleBinItems failed: %v", err)
+	}
+	if len(result.Targets) != 1 || result.Targets[0].Kind != "node" || result.Targets[0].ID != node.NodeID {
+		t.Fatalf("restore targets = %+v, want restored node target", result.Targets)
+	}
+	restored, err := repo.GetNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode after restore failed: %v", err)
+	}
+	if restored.Title != "Restorable node" {
+		t.Fatalf("restored title = %q, want original", restored.Title)
+	}
+	folderItems, err := repo.ListCompanyExplorerFolderItems(companyID, folder.FolderID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolderItems failed: %v", err)
+	}
+	if len(folderItems) != 1 || folderItems[0].ItemID != node.NodeID {
+		t.Fatalf("folder items after restore = %+v, want restored placement", folderItems)
+	}
+	remaining, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems after restore failed: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("recycle items after restore = %+v, want empty", remaining)
+	}
+}
+
 func TestMemoryRepo_NodeContentChangesCollapseAutosavesSinceLastSeen(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

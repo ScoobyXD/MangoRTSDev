@@ -174,15 +174,16 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
-			if err := s.repo.DeleteLogicGate(companyID, logicGateID); errors.Is(err, store.ErrNotFound) {
+			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "logic_gate", ID: logicGateID}})
+			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")
 				return
 			} else if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate")
 				return
 			}
-			s.publishWorkspaceEvent(companyID, "logic_gate_deleted", map[string]any{"logic_gate_id": logicGateID})
-			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return
 		}
 		if r.Method != http.MethodGet {
