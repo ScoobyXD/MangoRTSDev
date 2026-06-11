@@ -1044,6 +1044,7 @@ export function HomeMailWorkspace({
   onOpenStarredMailbox,
   onEmailSignatureChange,
   onSaveEmailSignature,
+  onSaveComposeDraft,
   onCreateMessageNode,
   onSearchDraftChange,
   onSelectMessage,
@@ -1114,6 +1115,7 @@ export function HomeMailWorkspace({
   onOpenStarredMailbox: () => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: () => void;
+  onSaveComposeDraft: () => void;
   onCreateMessageNode: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
@@ -1317,6 +1319,17 @@ export function HomeMailWorkspace({
               <button
                 className="mango-elevated-action"
                 type="button"
+                style={mailArchiveActionButtonStyle(mailbox === "drafts")}
+                title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
+                onClick={() => {
+                  if (mailbox !== "drafts") onOpenDraftsMailbox();
+                }}
+              >
+                <MailboxActionContent label="My Drafts" count={draftCount} />
+              </button>
+              <button
+                className="mango-elevated-action"
+                type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "all")}
                 onClick={() => {
                   if (mailbox !== "all") onOpenAllMailbox();
@@ -1329,17 +1342,6 @@ export function HomeMailWorkspace({
           {isArchivableListView && (
             <div style={mailComposeSentActionsStyle}>
               <button className="mango-elevated-action" style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
-              <button
-                className="mango-elevated-action"
-                type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "drafts")}
-                title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
-                onClick={() => {
-                  if (mailbox !== "drafts") onOpenDraftsMailbox();
-                }}
-              >
-                <MailboxActionContent label="My Drafts" count={draftCount} />
-              </button>
               <button
                 className="mango-elevated-action"
                 type="button"
@@ -1550,11 +1552,13 @@ export function HomeMailWorkspace({
             busy={busy === "send"}
             replyMessage={selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null}
             emailSignature={emailSignature}
+            companyUsers={companyUsers}
             onChange={onComposeChange}
             onCancel={onCancelCompose}
             onSubmit={onSubmitCompose}
             onEmailSignatureChange={onEmailSignatureChange}
             onSaveEmailSignature={onSaveEmailSignature}
+            onSaveDraft={onSaveComposeDraft}
           />
         ) : selectedMessage ? (
           <MessageDetail

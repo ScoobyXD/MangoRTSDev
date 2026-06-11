@@ -117,6 +117,32 @@ export type HomeSendMailCommandResult = {
   sentToConnectedAccount: boolean;
 };
 
+function escapeEmailBodyHTML(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function linkifyEmailBodyLine(value: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let output = "";
+  let cursor = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const matchText = match[0] ?? "";
+    const index = match.index ?? 0;
+    if (index > cursor) output += escapeEmailBodyHTML(value.slice(cursor, index));
+    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
+    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
+    output += `<a href="${escapeEmailBodyHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;">${escapeEmailBodyHTML(cleanURL)}</a>${escapeEmailBodyHTML(trailingPunctuation)}`;
+    cursor = index + matchText.length;
+  }
+  return output + escapeEmailBodyHTML(value.slice(cursor));
+}
+
+function plainTextEmailBodyToHTML(value: string): string {
+  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">${lines.map(linkifyEmailBodyLine).join("<br>")}</div>`;
+}
+
 export type HomeSharedInboxCommandResult = {
   folder: CommunicationsSharedInbox;
   viewID?: HomeViewID;
@@ -275,7 +301,7 @@ export async function sendHomeMailComposeCommand(args: {
     throw new Error("Add at least one recipient.");
   }
   const subject = args.compose.subject.trim();
-  const body = args.compose.body.trim();
+  const bodyText = args.compose.body.trim();
   const attachments = (args.compose.attachments ?? [])
     .map((attachment) => ({
       filename: attachment.filename.trim() || "attachment",
@@ -284,7 +310,7 @@ export async function sendHomeMailComposeCommand(args: {
       size: attachment.size,
     }))
     .filter((attachment) => attachment.content.trim());
-  if (!subject && !body && attachments.length === 0) {
+  if (!subject && !bodyText && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
   const input: SendEmailInput = {
@@ -292,7 +318,7 @@ export async function sendHomeMailComposeCommand(args: {
     cc,
     bcc,
     subject,
-    body,
+    body: bodyText ? plainTextEmailBodyToHTML(bodyText) : "",
     attachments,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };
