@@ -788,7 +788,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       aria-expanded={!collapsed}
                       title={collapsed ? "Expand logic gate" : "Collapse logic gate"}
                       style={logicGateDisclosureButtonStyle}
-                      onClick={() => toggleGateCollapsed(group.gate.relationship_id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleGateCollapsed(group.gate.relationship_id);
+                      }}
+                      onDoubleClick={(event) => event.stopPropagation()}
                     >
                       <ExplorerDisclosureIcon open={!collapsed} color="rgba(15, 23, 42, 0.62)" />
                     </button>
@@ -1387,7 +1391,7 @@ const logicGateCardHeaderStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 40,
   display: "grid",
-  gridTemplateColumns: "28px minmax(0, 1fr) 22px",
+  gridTemplateColumns: "28px minmax(0, 1fr) 42px",
   alignItems: "center",
   gap: 8,
   padding: 0,
@@ -1420,9 +1424,10 @@ const logicGateCardTitleStyle: React.CSSProperties = {
 };
 
 const logicGateDisclosureButtonStyle: React.CSSProperties = {
-  width: 22,
-  height: 22,
+  width: 42,
+  height: 40,
   border: "none",
+  borderRadius: 8,
   background: "transparent",
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
