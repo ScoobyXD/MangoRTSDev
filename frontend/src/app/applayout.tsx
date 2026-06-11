@@ -978,6 +978,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [tabs]);
 
   const selectPrimaryPage = useCallback((page: PrimaryPage) => {
+    if (page === "project-management") setProjectManagementTarget(null);
     const ensured = activatePrimaryPage(page);
     closeMenus();
     if (onNavigate) {
