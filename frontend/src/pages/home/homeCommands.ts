@@ -262,7 +262,7 @@ export async function updateHomeMailMessageCommand(args: {
 }
 
 export async function sendHomeMailComposeCommand(args: {
-  compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "replyToMessageID">;
+  compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "attachments" | "replyToMessageID">;
   companyID?: string;
   sharedInboxID?: string;
   connectedAccountEmail?: string;
@@ -276,7 +276,15 @@ export async function sendHomeMailComposeCommand(args: {
   }
   const subject = args.compose.subject.trim();
   const body = args.compose.body.trim();
-  if (!subject && !body) {
+  const attachments = (args.compose.attachments ?? [])
+    .map((attachment) => ({
+      filename: attachment.filename.trim() || "attachment",
+      content_type: attachment.contentType.trim() || "application/octet-stream",
+      content: attachment.content,
+      size: attachment.size,
+    }))
+    .filter((attachment) => attachment.content.trim());
+  if (!subject && !body && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
   const input: SendEmailInput = {
@@ -285,6 +293,7 @@ export async function sendHomeMailComposeCommand(args: {
     bcc,
     subject,
     body,
+    attachments,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };
   const cleanCompanyID = args.companyID?.trim() ?? "";

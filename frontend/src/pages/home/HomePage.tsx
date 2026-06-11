@@ -75,6 +75,7 @@ import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
+import { composeHasDraftContent, deleteHomeMailDraft, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
@@ -87,6 +88,27 @@ function sharedInboxIDForHomeView(viewID: HomeViewID): string {
 
 function isTriageMailViewID(viewID: HomeViewID): boolean {
   return viewID === "my-triage" || viewID === "shared-root" || viewID.startsWith("shared:");
+}
+
+function homeMessageIsDraft(message: EmailMessage): boolean {
+  return (message.folders ?? []).some((folder) => {
+    const value = folder.trim().toLowerCase();
+    return value === "draft" || value === "drafts";
+  });
+}
+
+function homeMailDraftMatchesSearch(draft: HomeMailDraft, query: string): boolean {
+  const cleanQuery = query.trim().toLowerCase();
+  if (!cleanQuery) return true;
+  return [
+    draft.to,
+    draft.cc,
+    draft.bcc,
+    draft.subject,
+    draft.body,
+    draft.accountEmail,
+    ...draft.attachments.map((attachment) => attachment.filename),
+  ].some((value) => value.toLowerCase().includes(cleanQuery));
 }
 
 type HomeNoticeResourceAction =
@@ -269,6 +291,8 @@ export function HomePage({
   const [loadedMessageListKey, setLoadedMessageListKey] = useState("");
   const [newSharedInboxName, setNewSharedInboxName] = useState("");
   const [compose, setCompose] = useState<ComposeState>(emptyCompose);
+  const [mailDrafts, setMailDrafts] = useState<HomeMailDraft[]>([]);
+  const [emailSignature, setEmailSignature] = useState("");
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
@@ -366,6 +390,17 @@ export function HomePage({
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeRacioMatrixUserID = isInboxMatrixView ? (racioMatrixTargetUserID.trim() || currentUserID) : currentUserID;
+  useEffect(() => {
+    setMailDrafts(readHomeMailDrafts(companyID, currentUserID));
+    setEmailSignature(readHomeMailSignature(companyID, currentUserID));
+  }, [companyID, currentUserID]);
+  const draftMessages = useMemo(() => (
+    unreadOnly
+      ? []
+      : mailDrafts
+        .filter((draft) => homeMailDraftMatchesSearch(draft, searchQuery))
+        .map(homeMailDraftToMessage)
+  ), [mailDrafts, searchQuery, unreadOnly]);
   useEffect(() => {
     setRacioMatrixTargetUserID(currentUserID);
   }, [companyID, currentUserID]);
@@ -910,6 +945,25 @@ export function HomePage({
       clearPrefetchedMessagePage();
       return;
     }
+    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+    messageListFilterKeyRef.current = requestKey;
+    if (mailbox === "drafts") {
+      messageRequestKeyRef.current = "";
+      setLoadedMessageListKey(requestKey);
+      clearPrefetchedMessagePage();
+      setLoadingMessages(false);
+      setNextPageToken("");
+      setMessages(draftMessages);
+      const currentSelectedMessageID = selectedMessageIDRef.current;
+      const currentSelectionStillVisible = !!currentSelectedMessageID && draftMessages.some((message) => message.id === currentSelectedMessageID);
+      if (!currentSelectionStillVisible && currentSelectedMessageID) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+        setSelectedMessageIDs(new Set());
+        setSelectionAnchorMessageID("");
+      }
+      return;
+    }
     if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail) {
       setLoadedMessageListKey("");
       setMessages([]);
@@ -923,8 +977,6 @@ export function HomePage({
       clearPrefetchedMessagePage();
       return;
     }
-    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
-    messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
       pendingMessageRefreshRef.current = pendingMessageRefreshRef.current || options.refresh === true;
@@ -986,7 +1038,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
   const appendPrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): string | null => {
     const prefetched = prefetchedMessagePageRef.current;
     if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
@@ -1009,7 +1061,7 @@ export function HomePage({
     return page.next_page_token ?? "";
   }, []);
   const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
-    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
+    if (!status?.connected || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
     const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1047,7 +1099,7 @@ export function HomePage({
     await request;
   }, [companyID, currentMessageFilterKey, handleEmailAccessExpired, status?.connected]);
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1542,6 +1594,10 @@ export function HomePage({
   }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleWorkspacePanelReload]);
   useEffect(() => {
     if (!selectedMessageID) return;
+    if (mailbox === "drafts" || selectedMessageID.startsWith("draft:")) {
+      setLoadingDetail(false);
+      return;
+    }
     let cancelled = false;
     setLoadingDetail(true);
     setError("");
@@ -1570,7 +1626,7 @@ export function HomePage({
         if (!cancelled) setLoadingDetail(false);
     });
     return () => { cancelled = true; };
-  }, [activeViewID, companyID, handleEmailAccessExpired, selectedMessageID]);
+  }, [activeViewID, companyID, handleEmailAccessExpired, mailbox, selectedMessageID]);
   const startConnection = async (provider: "google" | "microsoft") => {
     setBusy(provider);
     setError("");
@@ -1821,24 +1877,52 @@ export function HomePage({
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
     else await archiveMessages([selectedMessage.id]);
   };
+  const saveCurrentComposeDraft = useCallback((options?: { quiet?: boolean }) => {
+    if (!compose.open) return;
+    const shouldSave = composeHasDraftContent(compose, emailSignature);
+    const nextDrafts = saveHomeMailDraftFromCompose(companyID, currentUserID, compose, emailSignature);
+    setMailDrafts(nextDrafts);
+    if (shouldSave && !options?.quiet) setNotice("Draft saved.");
+  }, [companyID, compose, currentUserID, emailSignature]);
   const openPendingMailbox = useCallback(() => {
+    saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("primary");
-  }, [selectMailbox]);
+  }, [saveCurrentComposeDraft, selectMailbox]);
   const openStarredMailbox = useCallback(() => {
+    saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("starred");
-  }, [selectMailbox]);
+  }, [saveCurrentComposeDraft, selectMailbox]);
+  const openDraftsMailbox = useCallback(() => {
+    saveCurrentComposeDraft({ quiet: true });
+    setCompose(emptyCompose);
+    selectMailbox("drafts");
+  }, [saveCurrentComposeDraft, selectMailbox]);
   const openSentMailbox = useCallback(() => {
+    saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("sent");
-  }, [selectMailbox]);
+  }, [saveCurrentComposeDraft, selectMailbox]);
   const openAllMailbox = useCallback(() => {
+    saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("all");
-  }, [selectMailbox]);
-  const currentMailComposeError = () => {
-    if (activeViewID === "shared-root") return "Select a Shared Triage inbox before composing.";
+  }, [saveCurrentComposeDraft, selectMailbox]);
+  const currentMailComposeError = (targetSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current)) => {
+    const cleanSharedInboxID = targetSharedInboxID.trim();
+    if (activeViewID === "shared-root" && !cleanSharedInboxID) return "Select a Shared Triage inbox before composing.";
+    if (cleanSharedInboxID) {
+      const targetSharedInbox = sharedInboxes.find((folder) => folder.folder_id === cleanSharedInboxID) ?? null;
+      if (!targetSharedInbox) return "Shared Triage inbox is unavailable.";
+      const targetIsParent = sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === targetSharedInbox.folder_id);
+      if (targetIsParent) return "Parent folders cannot have emails assigned.";
+      if (!sharedInboxTreeUserCanManageMail(sharedInboxes, cleanSharedInboxID, currentUserID, currentUserHasFullSharedInboxAccess)) {
+        return "You need edit access to compose from this inbox.";
+      }
+      if (!(targetSharedInbox.account_email ?? "").trim()) return "Assign an email to this Shared Triage inbox before composing.";
+      return "";
+    }
     if (!canMutateCurrentMailView) return "You need edit access to compose from this inbox.";
     return "";
   };
@@ -1848,7 +1932,14 @@ export function HomePage({
       setError(composeError);
       return;
     }
-    setCompose({ ...emptyCompose, open: true });
+    saveCurrentComposeDraft({ quiet: true });
+    setCompose({
+      ...emptyCompose,
+      open: true,
+      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
+      accountEmail: (activeMailAccountEmail ?? "").trim(),
+      body: emailSignature.trim(),
+    });
   };
   const openReply = () => {
     if (!selectedMessage) return;
@@ -1857,14 +1948,16 @@ export function HomePage({
       setError(composeError);
       return;
     }
+    saveCurrentComposeDraft({ quiet: true });
     setCompose({
+      ...emptyCompose,
       open: true,
+      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
+      accountEmail: (activeMailAccountEmail ?? "").trim(),
       replyToMessageID: selectedMessage.id,
       to: formatAddressList(selectedMessage.from),
-      cc: "",
-      bcc: "",
       subject: selectedMessage.subject?.toLowerCase().startsWith("re:") ? selectedMessage.subject : `Re: ${selectedMessage.subject || ""}`.trim(),
-      body: "",
+      body: emailSignature.trim(),
     });
   };
   const submitCompose = async (event: React.FormEvent) => {
@@ -1872,16 +1965,19 @@ export function HomePage({
     setBusy("send");
     setError("");
     try {
-      const composeError = currentMailComposeError();
+      const targetSharedInboxID = compose.sharedInboxID.trim() || sharedInboxIDForHomeView(activeViewIDRef.current);
+      const composeError = currentMailComposeError(targetSharedInboxID);
       if (composeError) {
         setError(composeError);
         return;
       }
-      const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
-      const currentSharedInbox = sharedInboxID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxID) ?? null : null;
-      const connectedAccountEmail = (currentSharedInbox?.account_email ?? connection?.account_email ?? "").trim();
+      const currentSharedInbox = targetSharedInboxID ? sharedInboxes.find((folder) => folder.folder_id === targetSharedInboxID) ?? null : null;
+      const connectedAccountEmail = (compose.accountEmail || currentSharedInbox?.account_email || connection?.account_email || "").trim();
       const submittedCompose = compose;
-      const result = await sendHomeMailComposeCommand({ companyID, sharedInboxID, compose, connectedAccountEmail });
+      const result = await sendHomeMailComposeCommand({ companyID, sharedInboxID: targetSharedInboxID, compose, connectedAccountEmail });
+      if (submittedCompose.draftID.trim()) {
+        setMailDrafts(deleteHomeMailDraft(companyID, currentUserID, submittedCompose.draftID));
+      }
       setCompose(emptyCompose);
       setNotice("Message sent.");
       const replyToMessageID = submittedCompose.replyToMessageID.trim();
@@ -2302,8 +2398,14 @@ export function HomePage({
     setSelectionAnchorMessageID(next.anchorID);
     setSelectedMessageID(primaryID);
     setMessageContextMenu(null);
+    if (mailboxRef.current === "drafts" || homeMessageIsDraft(primaryMessage)) {
+      const draft = mailDrafts.find((item) => item.id === primaryID);
+      setSelectedMessage(primaryMessage);
+      if (draft) setCompose(homeMailDraftToCompose(draft));
+      return;
+    }
     markMessageReadFromListSelection(primaryMessage);
-  }, [markMessageReadFromListSelection, messages, selectedMessageIDs, selectionAnchorMessageID]);
+  }, [mailDrafts, markMessageReadFromListSelection, messages, selectedMessageIDs, selectionAnchorMessageID]);
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();
     activeDeleteSelectionKindRef.current = "message";
@@ -3328,6 +3430,14 @@ export function HomePage({
     : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
+  const closeCompose = useCallback(() => {
+    saveCurrentComposeDraft();
+    setCompose(emptyCompose);
+  }, [saveCurrentComposeDraft]);
+  const handleSaveEmailSignature = useCallback(() => {
+    saveHomeMailSignature(companyID, currentUserID, emailSignature);
+    setNotice("Signature saved.");
+  }, [companyID, currentUserID, emailSignature]);
   const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
   const baseMailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
   const currentMailboxCountKey = mailCountKey(companyID, activeViewID);
@@ -3568,6 +3678,8 @@ export function HomePage({
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
             compose={compose}
+            draftCount={mailDrafts.length}
+            emailSignature={emailSignature}
             error={error}
             isArchivableListView={isArchivableListView}
             isArchiveMailbox={isArchiveMailbox}
@@ -3609,7 +3721,7 @@ export function HomePage({
             onArchiveSelected={archiveSelected}
             onAttachMessageToNode={attachMessagesToNode}
             onAutoArchiveMessages={autoArchiveScrolledMessages}
-            onCancelCompose={() => setCompose(emptyCompose)}
+            onCancelCompose={closeCompose}
             onColumnResizeStart={startColumnResize}
             onComposeChange={setCompose}
             onDeleteSelected={deleteSelected}
@@ -3619,10 +3731,13 @@ export function HomePage({
             onOpenAllMailbox={openAllMailbox}
             onOpenContextMenu={openMessageContextMenu}
             onOpenNewCompose={openNewCompose}
+            onOpenDraftsMailbox={openDraftsMailbox}
             onOpenPendingMailbox={openPendingMailbox}
             onOpenReply={openReply}
             onOpenSentMailbox={openSentMailbox}
             onOpenStarredMailbox={openStarredMailbox}
+            onEmailSignatureChange={setEmailSignature}
+            onSaveEmailSignature={handleSaveEmailSignature}
             onCreateMessageNode={convertMessagesToLogicGate}
             onSearchDraftChange={setSearchDraft}
             onSelectMessage={selectMessageRow}

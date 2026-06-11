@@ -137,6 +137,13 @@ function SendPointerIcon() {
   );
 }
 
+function isDraftMessage(message: EmailMessage): boolean {
+  return (message.folders ?? []).some((folder) => {
+    const value = folder.trim().toLowerCase();
+    return value === "draft" || value === "drafts";
+  });
+}
+
 type MailNodeMenuState = {
   messageID: string;
   x: number;
@@ -984,6 +991,8 @@ export function HomeMailWorkspace({
   archiveLabel,
   busy,
   compose,
+  draftCount,
+  emailSignature,
   error,
   isArchivableListView,
   isArchiveMailbox,
@@ -1028,10 +1037,13 @@ export function HomeMailWorkspace({
   onOpenAllMailbox,
   onOpenContextMenu,
   onOpenNewCompose,
+  onOpenDraftsMailbox,
   onOpenPendingMailbox,
   onOpenReply,
   onOpenSentMailbox,
   onOpenStarredMailbox,
+  onEmailSignatureChange,
+  onSaveEmailSignature,
   onCreateMessageNode,
   onSearchDraftChange,
   onSelectMessage,
@@ -1049,6 +1061,8 @@ export function HomeMailWorkspace({
   archiveLabel: string;
   busy: string;
   compose: ComposeState;
+  draftCount: number;
+  emailSignature: string;
   error: string;
   isArchivableListView: boolean;
   isArchiveMailbox: boolean;
@@ -1093,10 +1107,13 @@ export function HomeMailWorkspace({
   onOpenAllMailbox: () => void;
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
   onOpenNewCompose: () => void;
+  onOpenDraftsMailbox: () => void;
   onOpenPendingMailbox: () => void;
   onOpenReply: () => void;
   onOpenSentMailbox: () => void;
   onOpenStarredMailbox: () => void;
+  onEmailSignatureChange: (value: string) => void;
+  onSaveEmailSignature: () => void;
   onCreateMessageNode: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
@@ -1315,13 +1332,24 @@ export function HomeMailWorkspace({
               <button
                 className="mango-elevated-action"
                 type="button"
+                style={mailArchiveActionButtonStyle(mailbox === "drafts")}
+                title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
+                onClick={() => {
+                  if (mailbox !== "drafts") onOpenDraftsMailbox();
+                }}
+              >
+                <MailboxActionContent label="My Drafts" count={draftCount} />
+              </button>
+              <button
+                className="mango-elevated-action"
+                type="button"
                 style={mailArchiveActionButtonStyle(mailbox === "sent")}
                 onClick={() => {
                   if (mailbox !== "sent") onOpenSentMailbox();
                 }}
               >
-                <SendPointerIcon />
                 <span style={mailArchiveActionLabelStyle}>Sent</span>
+                <SendPointerIcon />
               </button>
             </div>
           )}
@@ -1398,12 +1426,13 @@ export function HomeMailWorkspace({
             }}
           >
             {messages.length === 0 && !loadingMessages ? (
-              <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
+              <div style={emptyStateStyle}>{mailbox === "drafts" ? "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
             ) : messages.map((message) => {
               const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
               const hovered = hoveredMessageID === message.id;
               const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
-              const draggable = triageView && canDragTriageMessageFromMailbox(mailbox);
+              const draftRow = mailbox === "drafts" || isDraftMessage(message);
+              const draggable = triageView && !draftRow && canDragTriageMessageFromMailbox(mailbox);
               const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === message.id;
@@ -1412,6 +1441,7 @@ export function HomeMailWorkspace({
               const nodeLinked = (message.logic_gate_count ?? message.logic_gate_ids?.length ?? 0) > 0;
               const nodeBusy = busy === "triage-convert" || busy === "triage-attach";
               const nodeButtonTitle = nodeLinked ? "Attach email to node" : "Create or attach node from email";
+              const rowAddressLabel = draftRow ? (formatAddressList(message.to) || "Draft") : (formatAddressList(message.from) || "Unknown sender");
               return (
                 <div
                   key={message.id}
@@ -1436,56 +1466,60 @@ export function HomeMailWorkspace({
                     event.preventDefault();
                     onSelectMessage(message, event);
                   }}
-                  onContextMenu={(event) => onOpenContextMenu(message, event)}
+                  onContextMenu={(event) => {
+                    if (!draftRow) onOpenContextMenu(message, event);
+                  }}
                   onDragStart={(event) => onStartMessageDrag(message, event)}
                 >
                   {isArchivableListView ? (
                     <>
                       <MessagePlacementIcon message={message} active={active} />
                       <span style={triageMessageContentStyle}>
-                        <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <strong style={triageSenderStyle}>{rowAddressLabel}</strong>
                         <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
                         <span style={snippetStyle}>{message.snippet || ""}</span>
                       </span>
                       <span style={triageMessageMetaStyle}>
                         <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
-                        <span style={triageMessageActionRowStyle}>
-                          <button
-                            type="button"
-                            aria-label={message.starred ? "Remove star" : "Star message"}
-                            title={message.starred ? "Remove star" : "Star message"}
-                            draggable={false}
-                            style={messageStarButtonStyle(starHighlighted, starHovered, false)}
-                            disabled={busy === "message" || pendingStarred}
-                            onPointerEnter={() => setHoveredStarMessageID(message.id)}
-                            onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onToggleMessageStar(message);
-                            }}
-                          >
-                            <StarIcon filled={starHighlighted} />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={nodeButtonTitle}
-                            title={nodeButtonTitle}
-                            draggable={false}
-                            style={messageNodeButtonStyle(nodeLinked || nodeHovered, nodeHovered, nodeBusy)}
-                            disabled={nodeBusy}
-                            onPointerEnter={() => setHoveredNodeMessageID(message.id)}
-                            onPointerLeave={() => setHoveredNodeMessageID((current) => current === message.id ? "" : current)}
-                            onClick={(event) => openNodeMenu(message.id, event)}
-                          >
-                            <ExplorerRowIcon kind="node" />
-                          </button>
-                        </span>
+                        {!draftRow && (
+                          <span style={triageMessageActionRowStyle}>
+                            <button
+                              type="button"
+                              aria-label={message.starred ? "Remove star" : "Star message"}
+                              title={message.starred ? "Remove star" : "Star message"}
+                              draggable={false}
+                              style={messageStarButtonStyle(starHighlighted, starHovered, false)}
+                              disabled={busy === "message" || pendingStarred}
+                              onPointerEnter={() => setHoveredStarMessageID(message.id)}
+                              onPointerLeave={() => setHoveredStarMessageID((current) => current === message.id ? "" : current)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onToggleMessageStar(message);
+                              }}
+                            >
+                              <StarIcon filled={starHighlighted} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={nodeButtonTitle}
+                              title={nodeButtonTitle}
+                              draggable={false}
+                              style={messageNodeButtonStyle(nodeLinked || nodeHovered, nodeHovered, nodeBusy)}
+                              disabled={nodeBusy}
+                              onPointerEnter={() => setHoveredNodeMessageID(message.id)}
+                              onPointerLeave={() => setHoveredNodeMessageID((current) => current === message.id ? "" : current)}
+                              onClick={(event) => openNodeMenu(message.id, event)}
+                            >
+                              <ExplorerRowIcon kind="node" />
+                            </button>
+                          </span>
+                        )}
                       </span>
                     </>
                   ) : (
                     <>
                       <span style={messageRowTopStyle}>
-                        <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span>{formatMessageDate(message.date)}</span>
                       </span>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
@@ -1514,9 +1548,13 @@ export function HomeMailWorkspace({
           <ComposePanel
             compose={compose}
             busy={busy === "send"}
+            replyMessage={selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null}
+            emailSignature={emailSignature}
             onChange={onComposeChange}
             onCancel={onCancelCompose}
             onSubmit={onSubmitCompose}
+            onEmailSignatureChange={onEmailSignatureChange}
+            onSaveEmailSignature={onSaveEmailSignature}
           />
         ) : selectedMessage ? (
           <MessageDetail

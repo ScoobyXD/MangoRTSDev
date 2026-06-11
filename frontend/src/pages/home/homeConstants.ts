@@ -2,6 +2,7 @@ import type { MailboxOption, RaciInboxRole, RaciInboxViewID, ResponsibleInboxSta
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Inbox" },
+  { value: "drafts", label: "My Drafts" },
   { value: "starred", label: "Starred" },
   { value: "sent", label: "Sent mail" },
   { value: "archive", label: "Archived" },
