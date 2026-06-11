@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveCompanyID } from "../auth/currentCompany";
+import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderAccountManagerIcon, HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
@@ -9,7 +10,7 @@ import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import { TREE_BASE_LEFT_PX, TREE_INDENT_PX, TREE_TOGGLE_SLOT_PX } from "../modules/company-explorer/companyExplorerDragDrop";
-import type { CompanyExplorerSearchResultSummary, CompanyExplorerSearchSelectionRequest } from "../modules/company-explorer/CompanyExplorerContentModel";
+import type { CompanyExplorerSearchResultSummary, CompanyExplorerSearchSelectionRequest, CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
@@ -27,9 +28,11 @@ import {
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { deleteNotification, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
-import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
+import { INBOX_PRIORITIES, RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
+import { convertMessagesToLogicGateCommand } from "../pages/home/homeCommands";
 import {
   buildSharedInboxRows,
+  cleanIDList,
   collectSharedInboxSubtreeIDs,
   getSharedInboxChildPosition,
   getSharedInboxSiblingPosition,
@@ -146,6 +149,13 @@ type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
   error: string;
   items: NotificationItem[];
   seenNotificationIDs: string[];
+};
+
+type SidebarExplorerTriagePriorityMenuState = {
+  x: number;
+  y: number;
+  target: Parameters<CompanyExplorerTriageMessageDropHandler>[0];
+  messageIDs: string[];
 };
 
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
@@ -293,6 +303,8 @@ export function AppSidebar({
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
+  const [explorerTriagePriorityMenu, setExplorerTriagePriorityMenu] = useState<SidebarExplorerTriagePriorityMenuState | null>(null);
+  const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchResults, setExplorerSearchResults] = useState<CompanyExplorerSearchResultSummary[]>([]);
@@ -362,6 +374,35 @@ export function AppSidebar({
       requestID: (current?.requestID ?? 0) + 1,
     }));
   }, []);
+
+  const requestExplorerTriageMessageDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setExplorerTriagePriorityMenu({ target, messageIDs: ids, x: point.x, y: point.y });
+  }, []);
+
+  const pickExplorerTriagePriority = useCallback(async (priority: number) => {
+    const menu = explorerTriagePriorityMenu;
+    const cleanCompanyID = companyID.trim();
+    if (!menu || explorerTriageBusy || !cleanCompanyID) return;
+    setExplorerTriagePriorityMenu(null);
+    setExplorerTriageBusy(true);
+    try {
+      await convertMessagesToLogicGateCommand({
+        apiBase: readAuthConfig().apiBase,
+        companyID: cleanCompanyID,
+        logicGateID: menu.target.logicGateID,
+        nodeID: menu.target.kind === "node" ? menu.target.nodeID : undefined,
+        messageIDs: menu.messageIDs,
+        priority,
+      });
+    } catch (error) {
+      console.error("Failed to assign triage email from sidebar Explorer", error);
+      window.alert(error instanceof Error ? error.message : "Failed to assign email.");
+    } finally {
+      setExplorerTriageBusy(false);
+    }
+  }, [companyID, explorerTriageBusy, explorerTriagePriorityMenu]);
 
   const toggleExplorerSearchResultBranch = useCallback((treeID: string) => {
     setCollapsedExplorerSearchTreeIDs((previous) => {
@@ -1359,12 +1400,32 @@ export function AppSidebar({
         explorerSearchSelectionRequest={explorerSearchSelectionRequest}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
         onExplorerSearchResultsChange={handleExplorerSearchResultsChange}
+        onTriageMessagesDrop={requestExplorerTriageMessageDrop}
       />
 
       {WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
           v{WORKTREE_VERSION}
         </div>
+      )}
+      {explorerTriagePriorityMenu && (
+        <FrameRightClickMenu x={explorerTriagePriorityMenu.x} y={explorerTriagePriorityMenu.y} onClose={() => setExplorerTriagePriorityMenu(null)}>
+          <div style={appSidebarPriorityMenuTitleStyle}>Priority</div>
+          <div style={appSidebarPriorityMenuTargetStyle}>
+            {explorerTriagePriorityMenu.target.kind === "node" ? "Attach to" : "Create in"} {explorerTriagePriorityMenu.target.label}
+          </div>
+          {INBOX_PRIORITIES.map((priority) => (
+            <button
+              key={priority.value}
+              type="button"
+              style={appSidebarContextMenuButtonStyle}
+              disabled={explorerTriageBusy}
+              onClick={() => void pickExplorerTriagePriority(priority.value)}
+            >
+              {priority.label.replace(/\u00A0/g, " ")}
+            </button>
+          ))}
+        </FrameRightClickMenu>
       )}
       {sharedContextMenu && (() => {
         const contextFolder = sharedContextMenu.folder;
@@ -1457,12 +1518,14 @@ function AppSidebarCompanyExplorerSection({
   explorerSearchSelectionRequest,
   onExplorerSearchQueryChange,
   onExplorerSearchResultsChange,
+  onTriageMessagesDrop,
 }: {
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
   explorerSearchSelectionRequest: CompanyExplorerSearchSelectionRequest | null;
   onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
   onExplorerSearchResultsChange: (results: CompanyExplorerSearchResultSummary[]) => void;
+  onTriageMessagesDrop: CompanyExplorerTriageMessageDropHandler;
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
@@ -1480,6 +1543,7 @@ function AppSidebarCompanyExplorerSection({
             onExplorerSearchQueryChange("");
             onExplorerSearchResultsChange([]);
           }}
+          onTriageMessagesDrop={onTriageMessagesDrop}
         />
       </React.Suspense>
     </section>
@@ -2584,6 +2648,24 @@ const appSidebarContextMenuButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   textAlign: "left",
   padding: "0 12px",
+};
+
+const appSidebarPriorityMenuTitleStyle: React.CSSProperties = {
+  padding: "7px 12px 1px",
+  color: "#111827",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const appSidebarPriorityMenuTargetStyle: React.CSSProperties = {
+  maxWidth: 240,
+  padding: "0 12px 6px",
+  color: "rgba(15, 23, 42, 0.58)",
+  fontSize: 11,
+  fontWeight: 650,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const appSidebarPinListStyle: React.CSSProperties = {

@@ -4,7 +4,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-e
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, hasTriageMessageDrag, logicGateHasRaciRole, logicGateTitle, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, nodeTitle, readTriageMessageIDs } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, logicGateHasRaciRole, logicGateTitle, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, nodeTitle } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
   accountEmailStyle,
@@ -155,10 +155,8 @@ function isDraftMessage(message: EmailMessage): boolean {
 
 type MailNodeMenuState = {
   messageID: string;
-  messageIDs?: string[];
   x: number;
   y: number;
-  mode?: "click" | "drag";
 };
 
 type MailNodeTarget =
@@ -414,16 +412,6 @@ function mailNodePriorityMenuPosition(mainLeft: number, mainTop: number): { left
     ? rightSide
     : mainLeft - MAIL_NODE_PRIORITY_MENU_WIDTH - 8;
   return mailNodeMenuPosition(left, mainTop, MAIL_NODE_PRIORITY_MENU_WIDTH);
-}
-
-function mailNodeDragMenuPosition(): { x: number; y: number } {
-  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? 720 : window.innerHeight;
-  const menuHeight = Math.min(520, Math.max(180, viewportHeight - 28));
-  return {
-    x: Math.max(8, viewportWidth - MAIL_NODE_MENU_WIDTH - 18),
-    y: Math.max(8, viewportHeight - menuHeight - 18),
-  };
 }
 
 function cleanMailNodeID(value: string | null | undefined): string {
@@ -817,11 +805,8 @@ function MailNodeAttachmentMenu({
   logicGates,
   nodes,
   selectedTarget,
-  showPriorityMenu = true,
   onClose,
   onSelectTarget,
-  onDropTargetPreview,
-  onDropMessagesOnTarget,
   onPickPriority,
 }: {
   menu: MailNodeMenuState;
@@ -832,11 +817,8 @@ function MailNodeAttachmentMenu({
   logicGates: LogicGateRecord[];
   nodes: NodeRecord[];
   selectedTarget: MailNodeTarget | null;
-  showPriorityMenu?: boolean;
   onClose: () => void;
   onSelectTarget: (target: MailNodeTarget | null) => void;
-  onDropTargetPreview?: (target: MailNodeTarget | null) => void;
-  onDropMessagesOnTarget?: (target: MailNodeTarget, messageIDs: string[]) => void;
   onPickPriority: (target: MailNodeTarget, priority: number) => void;
 }) {
   const menuRef = React.useRef<HTMLDivElement | null>(null);
@@ -960,10 +942,6 @@ function MailNodeAttachmentMenu({
         </div>
         <div
           style={mailNodeRowsStyle}
-          onDragLeave={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) return;
-            onDropTargetPreview?.(null);
-          }}
         >
           {visibleRows.length === 0 ? (
             <div style={mailNodeEmptyStyle}>{explorerSearchQuery.trim() ? "No matches" : "No Logic Gates"}</div>
@@ -972,7 +950,6 @@ function MailNodeAttachmentMenu({
             const selected = rowTarget ? isSameMailNodeTarget(selectedTarget, rowTarget) : false;
             const rowOpen = mailNodeRowIsOpen(expanded, row.id);
             const disabled = row.kind === "node" && !row.parentLogicGateID;
-            const acceptsTriageDrop = Boolean(rowTarget) && !disabled;
             return (
               <button
                 key={row.id}
@@ -982,26 +959,6 @@ function MailNodeAttachmentMenu({
                 style={mailNodeExplorerRowStyle(row, selected, disabled)}
                 title={disabled ? "This node is not inside a Logic Gate" : row.label}
                 onClick={() => selectRow(row)}
-                onDragEnter={(event) => {
-                  if (!acceptsTriageDrop || !rowTarget || !hasTriageMessageDrag(event.dataTransfer)) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "copy";
-                  onDropTargetPreview?.(rowTarget);
-                }}
-                onDragOver={(event) => {
-                  if (!acceptsTriageDrop || !rowTarget || !hasTriageMessageDrag(event.dataTransfer)) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "copy";
-                  onDropTargetPreview?.(rowTarget);
-                }}
-                onDrop={(event) => {
-                  if (!acceptsTriageDrop || !rowTarget) return;
-                  const messageIDs = readTriageMessageIDs(event.dataTransfer);
-                  if (messageIDs.length === 0) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onDropMessagesOnTarget?.(rowTarget, messageIDs);
-                }}
               >
                 <span
                   aria-hidden="true"
@@ -1021,7 +978,7 @@ function MailNodeAttachmentMenu({
           })}
         </div>
       </div>
-      {selectedTarget && showPriorityMenu && (
+      {selectedTarget && (
         <div ref={priorityRef} style={{ ...mailNodePriorityMenuStyle, left: priorityPosition.left, top: priorityPosition.top }}>
           {MAIL_NODE_PRIORITY_OPTIONS.map((option) => (
             <button
@@ -1188,75 +1145,31 @@ export function HomeMailWorkspace({
   const [hoveredNodeMessageID, setHoveredNodeMessageID] = React.useState("");
   const [nodeMenu, setNodeMenu] = React.useState<MailNodeMenuState | null>(null);
   const [nodeMenuTarget, setNodeMenuTarget] = React.useState<MailNodeTarget | null>(null);
-  const [nodeMenuPriorityOpen, setNodeMenuPriorityOpen] = React.useState(false);
   const [archiveGuideTop, setArchiveGuideTop] = React.useState(ARCHIVE_GUIDE_FALLBACK_TOP);
   const [archiveTailSpacerHeight, setArchiveTailSpacerHeight] = React.useState(ARCHIVE_TAIL_SPACER_MIN_HEIGHT);
   const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
   const archiveVisualFrameRef = React.useRef<number | null>(null);
-  const nodeMenuPriorityOpenRef = React.useRef(false);
   const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
-
-  const updateNodeMenuPriorityOpen = React.useCallback((open: boolean) => {
-    nodeMenuPriorityOpenRef.current = open;
-    setNodeMenuPriorityOpen(open);
-  }, []);
 
   const closeNodeMenu = React.useCallback(() => {
     setNodeMenu(null);
     setNodeMenuTarget(null);
-    updateNodeMenuPriorityOpen(false);
-  }, [updateNodeMenuPriorityOpen]);
+  }, []);
 
   const openNodeMenu = React.useCallback((messageID: string, event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
-    setNodeMenu({ messageID, messageIDs: [messageID], x: rect.right + 8, y: rect.top, mode: "click" });
+    setNodeMenu({ messageID, x: rect.right + 8, y: rect.top });
     setNodeMenuTarget(null);
-    updateNodeMenuPriorityOpen(false);
-  }, [updateNodeMenuPriorityOpen]);
-
-  const openDraggedNodeMenu = React.useCallback((messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    const position = mailNodeDragMenuPosition();
-    setNodeMenu({ messageID: ids[0], messageIDs: ids, x: position.x, y: position.y, mode: "drag" });
-    setNodeMenuTarget(null);
-    updateNodeMenuPriorityOpen(false);
-  }, [updateNodeMenuPriorityOpen]);
-
-  const selectNodeMenuTarget = React.useCallback((target: MailNodeTarget | null) => {
-    setNodeMenuTarget(target);
-    updateNodeMenuPriorityOpen(Boolean(target));
-  }, [updateNodeMenuPriorityOpen]);
-
-  const previewNodeDropTarget = React.useCallback((target: MailNodeTarget | null) => {
-    setNodeMenuTarget(target);
-    updateNodeMenuPriorityOpen(false);
-  }, [updateNodeMenuPriorityOpen]);
-
-  const dropMessagesOnNodeTarget = React.useCallback((target: MailNodeTarget, messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    const position = mailNodeDragMenuPosition();
-    setNodeMenu((current) => ({
-      messageID: ids[0],
-      messageIDs: ids,
-      x: current?.x ?? position.x,
-      y: current?.y ?? position.y,
-      mode: "drag",
-    }));
-    setNodeMenuTarget(target);
-    updateNodeMenuPriorityOpen(true);
-  }, [updateNodeMenuPriorityOpen]);
+  }, []);
 
   const pickNodeMenuPriority = React.useCallback((target: MailNodeTarget, priority: number) => {
     const messageID = nodeMenu?.messageID.trim() ?? "";
-    const messageIDs = cleanIDList(nodeMenu?.messageIDs ?? [messageID]);
-    if (messageIDs.length === 0) return;
+    if (!messageID) return;
     closeNodeMenu();
-    if (target.kind === "logic_gate") onCreateMessageNode(target.logicGateID, messageIDs, priority);
-    else onAttachMessageToNode(target.logicGateID, target.nodeID, messageIDs, priority);
+    if (target.kind === "logic_gate") onCreateMessageNode(target.logicGateID, [messageID], priority);
+    else onAttachMessageToNode(target.logicGateID, target.nodeID, [messageID], priority);
   }, [closeNodeMenu, nodeMenu, onAttachMessageToNode, onCreateMessageNode]);
 
   const updateArchiveVisuals = React.useCallback(() => {
@@ -1572,19 +1485,7 @@ export function HomeMailWorkspace({
                   onContextMenu={(event) => {
                     onOpenContextMenu(message, event);
                   }}
-                  onDragStart={(event) => {
-                    onStartMessageDrag(message, event);
-                    if (!draggable) return;
-                    const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
-                    openDraggedNodeMenu(messageIDs);
-                  }}
-                  onDragEnd={() => {
-                    window.setTimeout(() => {
-                      if (nodeMenuPriorityOpenRef.current) return;
-                      setNodeMenu((current) => current?.mode === "drag" ? null : current);
-                      setNodeMenuTarget(null);
-                    }, 0);
-                  }}
+                  onDragStart={(event) => onStartMessageDrag(message, event)}
                 >
                   {isArchivableListView ? (
                     <>
@@ -1707,11 +1608,8 @@ export function HomeMailWorkspace({
           logicGates={logicGates}
           nodes={nodes}
           selectedTarget={nodeMenuTarget}
-          showPriorityMenu={nodeMenuPriorityOpen}
           onClose={closeNodeMenu}
-          onSelectTarget={selectNodeMenuTarget}
-          onDropTargetPreview={previewNodeDropTarget}
-          onDropMessagesOnTarget={dropMessagesOnNodeTarget}
+          onSelectTarget={setNodeMenuTarget}
           onPickPriority={pickNodeMenuPriority}
         />
       )}
