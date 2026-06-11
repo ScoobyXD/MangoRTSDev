@@ -9,6 +9,7 @@ import type {
   ExplorerTreeNode,
   ExplorerVirtualizedTree,
 } from "./companyExplorerTypes";
+import type { CompanyExplorerTriageMessageDropHandler } from "./CompanyExplorerContentModel";
 
 type CompanyExplorerTreeProps = {
   error: string;
@@ -41,6 +42,7 @@ type CompanyExplorerTreeProps = {
   dragOverTreeID: string;
   dragOverPlacement: ExplorerRowDropPlacement | null;
   dragPayload: ExplorerDragPayload | null;
+  triageDropTreeID: string;
   renaming: ExplorerRenameDraft | null;
   renameInputRef: React.RefObject<HTMLInputElement>;
   cancelRenameOnBlurRef: React.MutableRefObject<boolean>;
@@ -58,6 +60,8 @@ type CompanyExplorerTreeProps = {
   onSetDragOverTreeID: React.Dispatch<React.SetStateAction<string>>;
   onSetDragOverPlacement: React.Dispatch<React.SetStateAction<ExplorerRowDropPlacement | null>>;
   onSetDragPayload: React.Dispatch<React.SetStateAction<ExplorerDragPayload | null>>;
+  onSetTriageDropTreeID: React.Dispatch<React.SetStateAction<string>>;
+  onTriageMessagesDrop?: CompanyExplorerTriageMessageDropHandler;
   getKanbanDragItemsForRow: (row: ExplorerTreeNode) => ExplorerEntityDragItem[];
   getExplorerItemRowsForPayload: (payload: ExplorerDragPayload | null) => ExplorerTreeNode[];
   getReorderRowsForTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode) => ExplorerTreeNode[];
@@ -113,6 +117,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   dragOverTreeID,
   dragOverPlacement,
   dragPayload,
+  triageDropTreeID,
   renaming,
   renameInputRef,
   cancelRenameOnBlurRef,
@@ -130,6 +135,8 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   onSetDragOverTreeID,
   onSetDragOverPlacement,
   onSetDragPayload,
+  onSetTriageDropTreeID,
+  onTriageMessagesDrop,
   getKanbanDragItemsForRow,
   getExplorerItemRowsForPayload,
   getReorderRowsForTarget,
@@ -270,6 +277,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
           dragOverTreeID={dragOverTreeID}
           dragOverPlacement={dragOverPlacement}
           dragPayload={dragPayload}
+          triageDropTreeID={triageDropTreeID}
           renaming={renaming}
           renameInputRef={renameInputRef}
           cancelRenameOnBlurRef={cancelRenameOnBlurRef}
@@ -293,6 +301,8 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
           onSetDragOverTreeID={onSetDragOverTreeID}
           onSetDragOverPlacement={onSetDragOverPlacement}
           onSetDragPayload={onSetDragPayload}
+          onSetTriageDropTreeID={onSetTriageDropTreeID}
+          onTriageMessagesDrop={onTriageMessagesDrop}
           getKanbanDragItemsForRow={getKanbanDragItemsForRow}
           getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
           getReorderRowsForTarget={getReorderRowsForTarget}

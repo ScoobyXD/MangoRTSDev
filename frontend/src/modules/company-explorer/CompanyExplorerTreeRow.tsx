@@ -8,6 +8,7 @@ import {
   type ExplorerEntityDragItem,
 } from "../kanban/shared";
 import type { SelectionIntent } from "../selectionCoordinator";
+import { hasTriageMessageDrag, readTriageMessageIDs } from "../../pages/home/homeUtils";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "./CompanyExplorerIcons";
 import {
   EXPLORER_DRAG_MIME,
@@ -25,6 +26,7 @@ import type {
   ExplorerRowDropPlacement,
   ExplorerTreeNode,
 } from "./companyExplorerTypes";
+import type { CompanyExplorerTriageMessageDropHandler, CompanyExplorerTriageMessageDropTarget } from "./CompanyExplorerContentModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
 import {
   getExplorerDropPayloadItemType,
@@ -42,6 +44,7 @@ type CompanyExplorerTreeRowProps = {
   dragOverTreeID: string;
   dragOverPlacement: ExplorerRowDropPlacement | null;
   dragPayload: ExplorerDragPayload | null;
+  triageDropTreeID: string;
   renaming: ExplorerRenameDraft | null;
   renameInputRef: React.RefObject<HTMLInputElement>;
   cancelRenameOnBlurRef: React.MutableRefObject<boolean>;
@@ -65,6 +68,8 @@ type CompanyExplorerTreeRowProps = {
   onSetDragOverTreeID: React.Dispatch<React.SetStateAction<string>>;
   onSetDragOverPlacement: React.Dispatch<React.SetStateAction<ExplorerRowDropPlacement | null>>;
   onSetDragPayload: React.Dispatch<React.SetStateAction<ExplorerDragPayload | null>>;
+  onSetTriageDropTreeID: React.Dispatch<React.SetStateAction<string>>;
+  onTriageMessagesDrop?: CompanyExplorerTriageMessageDropHandler;
   getKanbanDragItemsForRow: (row: ExplorerTreeNode) => ExplorerEntityDragItem[];
   getExplorerItemRowsForPayload: (payload: ExplorerDragPayload | null) => ExplorerTreeNode[];
   getReorderRowsForTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode) => ExplorerTreeNode[];
@@ -79,6 +84,19 @@ type CompanyExplorerTreeRowProps = {
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
+function getTriageMessageDropTarget(row: ExplorerTreeNode): CompanyExplorerTriageMessageDropTarget | null {
+  if (row.kind === "logic_gate") {
+    const logicGateID = row.logicGateID?.trim() ?? "";
+    return logicGateID ? { kind: "logic_gate", logicGateID, label: row.label } : null;
+  }
+  if (row.kind === "node") {
+    const logicGateID = row.parentLogicGateID?.trim() ?? "";
+    const nodeID = row.nodeID?.trim() ?? "";
+    return logicGateID && nodeID ? { kind: "node", logicGateID, nodeID, label: row.label } : null;
+  }
+  return null;
+}
+
 export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   row,
   treeRows,
@@ -89,6 +107,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   dragOverTreeID,
   dragOverPlacement,
   dragPayload,
+  triageDropTreeID,
   renaming,
   renameInputRef,
   cancelRenameOnBlurRef,
@@ -112,6 +131,8 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   onSetDragOverTreeID,
   onSetDragOverPlacement,
   onSetDragPayload,
+  onSetTriageDropTreeID,
+  onTriageMessagesDrop,
   getKanbanDragItemsForRow,
   getExplorerItemRowsForPayload,
   getReorderRowsForTarget,
@@ -132,13 +153,17 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const suppressModifiedClickRef = React.useRef(false);
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
-  const isDropTarget = dragOverTreeID === row.id;
+  const triageDropTarget = onTriageMessagesDrop ? getTriageMessageDropTarget(row) : null;
+  const isExplorerDropTarget = dragOverTreeID === row.id;
+  const isTriageDropTarget = triageDropTreeID === row.id;
   const rowFrameGradient = "linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86))";
   const selectedFrameSurface = isDarkTheme
     ? "linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.78) 46%, rgba(58, 44, 92, 0.72))"
     : "linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(228, 251, 255, 0.64) 46%, rgba(247, 240, 255, 0.72))";
-  const rowBackground = isDropTarget ? dropRowBackground : undefined;
-  const rowBoxShadow = isDropTarget && dragOverPlacement
+  const rowBackground = isTriageDropTarget ? "linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(168, 85, 247, 0.12))" : isExplorerDropTarget ? dropRowBackground : undefined;
+  const rowBoxShadow = isTriageDropTarget
+    ? `inset 0 0 0 1px rgba(14, 165, 233, 0.38), inset 3px 0 0 ${accent}, 0 0 16px rgba(14, 165, 233, 0.16)`
+    : isExplorerDropTarget && dragOverPlacement
     ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
     : `inset 0 -1px 0 ${rowRuleColor}`;
   const rowPillStyle: React.CSSProperties = {
@@ -158,6 +183,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
       : "none",
     overflow: "hidden",
     transition: "background 120ms ease, box-shadow 140ms ease, transform 140ms ease",
+    transform: isTriageDropTarget ? "translateX(1px)" : "none",
   };
 
   return (
@@ -218,8 +244,23 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         onSetDragOverTreeID("");
         onSetDragOverPlacement(null);
         onSetDragPayload(null);
+        onSetTriageDropTreeID("");
+      }}
+      onDragEnter={(event) => {
+        if (!triageDropTarget || !hasTriageMessageDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+        onSetTriageDropTreeID(row.id);
       }}
       onDragOver={(event) => {
+        if (triageDropTarget && hasTriageMessageDrag(event.dataTransfer)) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          onSetTriageDropTreeID(row.id);
+          return;
+        }
         const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
         const sourceRow = treeRows.find((item) => item.id === draggingTreeID);
         const placement = row.kind === "folder" ? getExplorerDropIntent(event) : getExplorerRowReorderPlacement(event);
@@ -260,11 +301,25 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         onSetDragOverTreeID(row.id);
         onSetDragOverPlacement(null);
       }}
-      onDragLeave={() => {
+      onDragLeave={(event) => {
+        if (triageDropTarget && hasTriageMessageDrag(event.dataTransfer)) {
+          onSetTriageDropTreeID((current) => (current === row.id ? "" : current));
+          return;
+        }
         onSetDragOverTreeID((current) => (current === row.id ? "" : current));
         onSetDragOverPlacement(null);
       }}
       onDrop={(event) => {
+        if (triageDropTarget) {
+          const messageIDs = readTriageMessageIDs(event.dataTransfer);
+          if (messageIDs.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            onSetTriageDropTreeID("");
+            onTriageMessagesDrop?.(triageDropTarget, messageIDs, { x: event.clientX, y: event.clientY });
+            return;
+          }
+        }
         const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
         const sourceRow = treeRows.find((item) => item.id === draggingTreeID);
         const placement = dragOverPlacement ?? (row.kind === "folder" ? getExplorerDropIntent(event) : getExplorerRowReorderPlacement(event));

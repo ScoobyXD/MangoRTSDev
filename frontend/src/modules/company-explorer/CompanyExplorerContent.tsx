@@ -1257,6 +1257,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   externalSearchSelectionRequest,
   onSearchResultsChange,
   onSearchResultSelect,
+  onTriageMessagesDrop,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -1299,6 +1300,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [dragOverTreeID, setDragOverTreeID] = useState("");
   const [dragOverPlacement, setDragOverPlacement] = useState<ExplorerRowDropPlacement | null>(null);
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
+  const [triageDropTreeID, setTriageDropTreeID] = useState("");
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
@@ -3325,6 +3327,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         dragOverTreeID={dragOverTreeID}
         dragOverPlacement={dragOverPlacement}
         dragPayload={dragPayload}
+        triageDropTreeID={triageDropTreeID}
         renaming={renaming}
         renameInputRef={renameInputRef}
         cancelRenameOnBlurRef={cancelRenameOnBlurRef}
@@ -3342,6 +3345,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onSetDragOverTreeID={setDragOverTreeID}
         onSetDragOverPlacement={setDragOverPlacement}
         onSetDragPayload={setDragPayload}
+        onSetTriageDropTreeID={setTriageDropTreeID}
+        onTriageMessagesDrop={onTriageMessagesDrop}
         getKanbanDragItemsForRow={getKanbanDragItemsForRow}
         getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
         getReorderRowsForTarget={getReorderRowsForTarget}

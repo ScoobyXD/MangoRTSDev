@@ -100,6 +100,16 @@ export type CompanyExplorerSearchSelectionRequest = {
   requestID: number;
 };
 
+export type CompanyExplorerTriageMessageDropTarget =
+  | { kind: "logic_gate"; logicGateID: string; label: string }
+  | { kind: "node"; logicGateID: string; nodeID: string; label: string };
+
+export type CompanyExplorerTriageMessageDropHandler = (
+  target: CompanyExplorerTriageMessageDropTarget,
+  messageIDs: string[],
+  point: { x: number; y: number },
+) => void;
+
 export type CompanyExplorerContentProps = {
   accent: string;
   widgetId?: string;
@@ -113,6 +123,7 @@ export type CompanyExplorerContentProps = {
   externalSearchSelectionRequest?: CompanyExplorerSearchSelectionRequest | null;
   onSearchResultsChange?: (results: CompanyExplorerSearchResultSummary[]) => void;
   onSearchResultSelect?: () => void;
+  onTriageMessagesDrop?: CompanyExplorerTriageMessageDropHandler;
 };
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
