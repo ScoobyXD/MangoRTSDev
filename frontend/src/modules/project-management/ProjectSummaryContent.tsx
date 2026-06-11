@@ -65,6 +65,7 @@ import {
 type ProjectSummaryContentProps = {
   projectID: string;
   accent: string;
+  refreshToken?: number;
   onBack: () => void;
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
@@ -112,6 +113,7 @@ const PROJECT_SUMMARY_SPLIT_MAX = 74;
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
   accent,
+  refreshToken = 0,
   onBack,
   onNodeOpen,
   onLogicGateOpen,
@@ -119,6 +121,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 }) => {
   const companyID = getActiveCompanyID();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const refreshTokenRef = useRef(refreshToken);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [blocks, setBlocks] = useState<ProjectTextBlockDraft[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
@@ -129,8 +132,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [loading, setLoading] = useState(true);
   const [savingID, setSavingID] = useState("");
   const [error, setError] = useState("");
-  const [gateIDDraft, setGateIDDraft] = useState("");
-  const [nodeIDDraft, setNodeIDDraft] = useState("");
   const [summarySplitPct, setSummarySplitPct] = useState(58);
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
@@ -149,10 +150,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
-  const loadProject = useCallback(async () => {
+  const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const cleanProjectID = projectID.trim();
     if (!companyID || !cleanProjectID) return;
-    setLoading(true);
+    if (options.showLoading !== false) setLoading(true);
     setError("");
     try {
       const [view, current, users] = await Promise.all([
@@ -170,13 +171,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load project");
     } finally {
-      setLoading(false);
+      if (options.showLoading !== false) setLoading(false);
     }
   }, [companyID, projectID]);
 
   useEffect(() => {
-    void loadProject();
+    setLoading(true);
+    void loadProject({ showLoading: true });
   }, [loadProject]);
+
+  useEffect(() => {
+    if (refreshToken === refreshTokenRef.current) return;
+    refreshTokenRef.current = refreshToken;
+    void loadProject({ showLoading: false });
+  }, [loadProject, refreshToken]);
 
   useEffect(() => {
     if (!splitResizeState) return undefined;
@@ -386,7 +394,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       await deleteProjectProjection({ companyID, projectID, informationID: messageID });
     } catch (chatError) {
       setError(chatError instanceof Error ? chatError.message : "Failed to delete chat message");
-      await loadProject();
+      await loadProject({ showLoading: false });
     }
   }, [companyID, loadProject, projectID]);
 
@@ -442,29 +450,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       await deleteProjectProjection({ companyID, projectID, informationID: emailID });
     } catch (emailError) {
       setError(emailError instanceof Error ? emailError.message : "Failed to remove email");
-      await loadProject();
+      await loadProject({ showLoading: false });
     }
   }, [companyID, loadProject, projectID]);
-
-  const addRelationship = useCallback(async (resourceType: "logic_gate" | "node", value: string) => {
-    const resourceID = value.trim();
-    if (!resourceID) return;
-    setError("");
-    try {
-      await upsertProjectRelationship({
-        companyID,
-        projectID,
-        resourceType,
-        resourceID,
-        position: relationships.length + 1,
-      });
-      if (resourceType === "logic_gate") setGateIDDraft("");
-      else setNodeIDDraft("");
-      await loadProject();
-    } catch (relationshipError) {
-      setError(relationshipError instanceof Error ? relationshipError.message : "Failed to add relationship");
-    }
-  }, [companyID, loadProject, projectID, relationships.length]);
 
   const addRelationshipTargets = useCallback(async (targets: ProjectRelationshipDropTarget[]) => {
     const existing = new Set(relationships.map((item) => `${item.resource_type}:${item.resource_id}`));
@@ -479,14 +467,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     if (uniqueTargets.length === 0) return;
     setError("");
     try {
-      await Promise.all(uniqueTargets.map((target, index) => upsertProjectRelationship({
+      const results = await Promise.all(uniqueTargets.map((target, index) => upsertProjectRelationship({
         companyID,
         projectID,
         resourceType: target.resourceType,
         resourceID: target.resourceID,
         position: relationships.length + index + 1,
       })));
-      await loadProject();
+      const nextRelationships = results.map((result) => result.relationship).filter((item): item is ProjectRelationshipProjection => Boolean(item));
+      if (nextRelationships.length > 0) {
+        setRelationships((current) => mergeProjectRelationships(current, nextRelationships));
+      } else {
+        await loadProject({ showLoading: false });
+      }
     } catch (relationshipError) {
       setError(relationshipError instanceof Error ? relationshipError.message : "Failed to add relationships");
     }
@@ -748,22 +741,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <div style={columnToolbarStyle}>
             <div style={columnTitleStyle}>Logic Gates / Nodes</div>
           </div>
-          <div style={relationshipInputsStyle}>
-            <input
-              value={gateIDDraft}
-              onChange={(event) => setGateIDDraft(event.currentTarget.value)}
-              placeholder="Logic gate ID"
-              style={relationshipInputStyle}
-            />
-            <button type="button" style={secondaryActionButtonStyle} onClick={() => void addRelationship("logic_gate", gateIDDraft)}>Add Gate</button>
-            <input
-              value={nodeIDDraft}
-              onChange={(event) => setNodeIDDraft(event.currentTarget.value)}
-              placeholder="Node ID"
-              style={relationshipInputStyle}
-            />
-            <button type="button" style={secondaryActionButtonStyle} onClick={() => void addRelationship("node", nodeIDDraft)}>Add Node</button>
-          </div>
           <div
             className="kanban-board-scroll"
             style={relationshipScrollStyle(relationshipDropActive)}
@@ -789,23 +766,23 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div key={group.gate.relationship_id} style={gateGroupStyle}>
                 <button
                   type="button"
-                  style={logicGateBoxStyle}
+                  style={logicGateCardHeaderStyle}
                   onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
                 >
-                  <span style={relationshipIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-                  <span style={relationshipTitleStyle}>{group.gate.display_title}</span>
-                  <span style={relationshipStatusStyle}>{group.gate.status || "Logic Gate"}</span>
+                  <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+                  <span style={logicGateCardTitleStyle}>{group.gate.display_title}</span>
+                  <span aria-hidden="true" style={logicGateChevronStyle}>v</span>
                 </button>
-                <div style={nestedNodesStyle}>
+                <div style={logicGateNodeListStyle}>
                   {group.nodes.map((node) => (
                     <button
                       key={node.relationship_id}
                       type="button"
-                      style={nestedNodeStyle}
+                      style={logicGateNodeRowStyle}
                       onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
                     >
-                      <span style={relationshipIconStyle}><ExplorerRowIcon kind="node" /></span>
-                      <span style={relationshipTitleStyle}>{node.display_title}</span>
+                      <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
+                      <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
                       {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
                     </button>
                   ))}
@@ -815,19 +792,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             {ungroupedNodes.length > 0 ? (
               <div style={gateGroupStyle}>
                 <div style={ungroupedHeaderStyle}>Nodes</div>
-                <div style={nestedNodesStyle}>
-                  {ungroupedNodes.map((node) => (
-                    <button
-                      key={node.relationship_id}
-                      type="button"
-                      style={nestedNodeStyle}
-                      onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
-                    >
-                      <span style={relationshipIconStyle}><ExplorerRowIcon kind="node" /></span>
-                      <span style={relationshipTitleStyle}>{node.display_title}</span>
-                    </button>
-                  ))}
-                </div>
+                {ungroupedNodes.map((node) => (
+                  <button
+                    key={node.relationship_id}
+                    type="button"
+                    style={logicGateNodeRowStyle}
+                    onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
+                  >
+                    <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
+                    <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                    {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
+                  </button>
+                ))}
               </div>
             ) : null}
             {relationshipGroups.length === 0 && ungroupedNodes.length === 0 ? (
@@ -888,6 +864,17 @@ function buildRelationshipGroups(relationships: ProjectRelationshipProjection[])
   }));
 }
 
+function mergeProjectRelationships(
+  current: ProjectRelationshipProjection[],
+  incoming: ProjectRelationshipProjection[],
+): ProjectRelationshipProjection[] {
+  const byID = new Map(current.map((relationship) => [relationship.relationship_id, relationship]));
+  for (const relationship of incoming) {
+    byID.set(relationship.relationship_id, relationship);
+  }
+  return Array.from(byID.values()).sort(compareRelationshipProjection);
+}
+
 function textBlockAttachmentItems(block: ProjectTextBlockDraft): TextBlockAttachmentListItem[] {
   return block.attachments.map((attachment) => ({
     blockID: block.id,
@@ -927,24 +914,27 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
 function resolveProjectRelationshipDropTargets(payload: ExplorerDropPayload | null, workspace?: ProjectSummaryWorkspaceSnapshot): ProjectRelationshipDropTarget[] {
   if (!payload) return [];
   const itemType = getExplorerDropPayloadItemType(payload);
+  let targets: ProjectRelationshipDropTarget[] = [];
   if (payload.kind === "batch") {
     if (itemType !== "logic_gate" && itemType !== "node") return [];
-    return getExplorerDropPayloadItems(payload).map((item) => ({
+    targets = getExplorerDropPayloadItems(payload).map((item) => ({
       resourceType: itemType,
       resourceID: item.itemID,
     }));
+    return expandLogicGateRelationshipTargets(targets, workspace);
   }
   if ((payload.itemType === "logic_gate" || payload.itemType === "node") && payload.itemID) {
-    return [{ resourceType: payload.itemType, resourceID: payload.itemID }];
+    return expandLogicGateRelationshipTargets([{ resourceType: payload.itemType, resourceID: payload.itemID }], workspace);
   }
   if (payload.kind !== "folder" || !workspace) return [];
   if (payload.folderKind === "logic_gate") {
-    return Array.from(getScopedItemIDs({
+    targets = Array.from(getScopedItemIDs({
       folders: workspace.logicGateFolders,
       folderItems: workspace.logicGateFolderItems,
       folderID: payload.folderID ?? "",
       itemType: "logic_gate",
     })).map((resourceID) => ({ resourceType: "logic_gate", resourceID }));
+    return expandLogicGateRelationshipTargets(targets, workspace);
   }
   if (payload.folderKind === "node") {
     return Array.from(getScopedItemIDs({
@@ -955,6 +945,38 @@ function resolveProjectRelationshipDropTargets(payload: ExplorerDropPayload | nu
     })).map((resourceID) => ({ resourceType: "node", resourceID }));
   }
   return [];
+}
+
+function expandLogicGateRelationshipTargets(
+  targets: ProjectRelationshipDropTarget[],
+  workspace?: ProjectSummaryWorkspaceSnapshot,
+): ProjectRelationshipDropTarget[] {
+  if (!workspace) return targets;
+  const expanded: ProjectRelationshipDropTarget[] = [];
+  const seen = new Set<string>();
+  const addTarget = (target: ProjectRelationshipDropTarget) => {
+    const cleanResourceID = target.resourceID.trim();
+    if (!cleanResourceID) return;
+    const key = `${target.resourceType}:${cleanResourceID}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    expanded.push({ resourceType: target.resourceType, resourceID: cleanResourceID });
+  };
+  for (const target of targets) {
+    addTarget(target);
+    if (target.resourceType !== "logic_gate") continue;
+    const gateID = target.resourceID.trim();
+    const childNodes = workspace.nodes
+      .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim() === gateID))
+      .sort((left, right) => (
+        (left.title || left.node_id).localeCompare(right.title || right.node_id, undefined, { numeric: true, sensitivity: "base" })
+        || left.node_id.localeCompare(right.node_id)
+      ));
+    for (const node of childNodes) {
+      addTarget({ resourceType: "node", resourceID: node.node_id });
+    }
+  }
+  return expanded;
 }
 
 const summaryShellStyle: React.CSSProperties = {
@@ -1308,44 +1330,16 @@ const emptyTextButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const relationshipInputsStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  gap: 8,
-  padding: "6px 0 12px",
-  flexShrink: 0,
-};
-
-const relationshipInputStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 34,
-  border: "1px solid rgba(148, 163, 184, 0.45)",
-  borderRadius: 7,
-  padding: "0 10px",
-  color: "#0f172a",
-  background: "#ffffff",
-};
-
-const secondaryActionButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  border: "1px solid rgba(15, 23, 42, 0.12)",
-  borderRadius: 7,
-  background: "#ffffff",
-  color: "#0f172a",
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 10px",
-};
-
 const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   minHeight: 0,
   flex: "1 1 auto",
   overflow: "auto",
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
+  gridAutoRows: "minmax(190px, auto)",
   alignContent: "start",
   gap: 12,
-  padding: 10,
+  padding: 12,
   border: dropActive ? "1px dashed rgba(91, 141, 239, 0.58)" : "1px dashed rgba(148, 163, 184, 0.34)",
   borderRadius: 8,
   background: dropActive ? "rgba(239, 246, 255, 0.76)" : "rgba(255, 255, 255, 0.54)",
@@ -1354,76 +1348,108 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
 const gateGroupStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 8,
+  gap: 10,
   minWidth: 0,
-};
-
-const logicGateBoxStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  border: "1px solid rgba(16, 185, 129, 0.36)",
-  borderRadius: 8,
-  background: "#f3fff8",
-  color: "#065f46",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  padding: 12,
-  textAlign: "left",
-  cursor: "pointer",
-};
-
-const nestedNodesStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  paddingLeft: 0,
-  minWidth: 0,
-};
-
-const nestedNodeStyle: React.CSSProperties = {
-  minHeight: 40,
-  border: "1px solid rgba(14, 165, 233, 0.24)",
+  minHeight: 190,
+  border: "1px solid rgba(226, 232, 240, 0.92)",
   borderRadius: 8,
   background: "#ffffff",
   color: "#0f172a",
+  padding: 12,
+  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.05)",
+};
+
+const logicGateCardHeaderStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 40,
+  border: 0,
+  background: "transparent",
   display: "grid",
-  gridTemplateColumns: "18px minmax(0, 1fr) auto",
-  alignItems: "center",
+  gridTemplateColumns: "28px minmax(0, 1fr) 18px",
+  alignItems: "start",
   gap: 8,
-  padding: "0 10px",
+  padding: 0,
   textAlign: "left",
   cursor: "pointer",
 };
 
-const relationshipIconStyle: React.CSSProperties = {
-  width: 18,
-  height: 18,
+const logicGateIconBadgeStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 7,
+  border: "1px solid rgba(34, 197, 94, 0.68)",
+  background: "#f0fdf4",
+  color: "#16a34a",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
 };
 
-const relationshipTitleStyle: React.CSSProperties = {
+const logicGateCardTitleStyle: React.CSSProperties = {
   minWidth: 0,
+  color: "#0f172a",
+  fontSize: 12,
+  lineHeight: 1.2,
   fontWeight: 850,
+  overflow: "hidden",
+  display: "-webkit-box",
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: "vertical",
+};
+
+const logicGateChevronStyle: React.CSSProperties = {
+  justifySelf: "end",
+  color: "#334155",
+  fontSize: 13,
+  fontWeight: 900,
+  lineHeight: 1,
+};
+
+const logicGateNodeListStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  paddingTop: 2,
+  minWidth: 0,
+};
+
+const logicGateNodeRowStyle: React.CSSProperties = {
+  minHeight: 22,
+  border: 0,
+  background: "transparent",
+  color: "#0f172a",
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 7,
+  padding: 0,
+  textAlign: "left",
+  cursor: "pointer",
+};
+
+const relationshipNodeIconStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#38bdf8",
+};
+
+const relationshipNodeTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  fontSize: 12,
+  fontWeight: 780,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
 
-const relationshipStatusStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "#047857",
-  fontWeight: 800,
-};
-
 const nodeStatusDotStyle = (color?: string | null): React.CSSProperties => ({
-  width: 9,
-  height: 9,
+  width: 8,
+  height: 8,
   borderRadius: 999,
-  background: color || "#38bdf8",
+  background: color || "#22c55e",
 });
 
 const ungroupedHeaderStyle: React.CSSProperties = {
