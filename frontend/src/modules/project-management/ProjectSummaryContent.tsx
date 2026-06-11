@@ -3,7 +3,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { listCompanyUsers, type CompanyUser } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
-import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import {
   buildEditorAttachedEmailPayload,
@@ -148,6 +148,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
+  const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -490,6 +491,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return resolveProjectRelationshipDropTargets(payload, workspace);
   }, [workspace]);
 
+  const toggleGateCollapsed = useCallback((relationshipID: string) => {
+    setCollapsedGateRelationshipIDs((current) => {
+      const next = new Set(current);
+      if (next.has(relationshipID)) next.delete(relationshipID);
+      else next.add(relationshipID);
+      return next;
+    });
+  }, []);
+
   const startSummarySplitResize = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = bodyRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -762,35 +772,48 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               void addRelationshipTargets(targets);
             }}
           >
-            {relationshipGroups.map((group) => (
-              <div key={group.gate.relationship_id} style={gateGroupStyle}>
-                <button
-                  type="button"
-                  style={logicGateCardHeaderStyle}
-                  onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
-                >
-                  <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-                  <span style={logicGateCardTitleStyle}>{group.gate.display_title}</span>
-                  <span aria-hidden="true" style={logicGateChevronStyle}>v</span>
-                </button>
-                <div style={logicGateNodeListStyle}>
-                  {group.nodes.map((node) => (
+            {relationshipGroups.map((group) => {
+              const collapsed = collapsedGateRelationshipIDs.has(group.gate.relationship_id);
+              return (
+                <div key={group.gate.relationship_id} style={gateGroupStyle(collapsed)}>
+                  <div
+                    style={logicGateCardHeaderStyle}
+                    onDoubleClick={() => group.gate.logic_gate_id && onLogicGateOpen?.(group.gate.logic_gate_id)}
+                  >
+                    <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+                    <span style={logicGateCardTitleStyle}>{group.gate.display_title}</span>
                     <button
-                      key={node.relationship_id}
                       type="button"
-                      style={logicGateNodeRowStyle}
-                      onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
+                      aria-label={collapsed ? "Expand logic gate" : "Collapse logic gate"}
+                      aria-expanded={!collapsed}
+                      title={collapsed ? "Expand logic gate" : "Collapse logic gate"}
+                      style={logicGateDisclosureButtonStyle}
+                      onClick={() => toggleGateCollapsed(group.gate.relationship_id)}
                     >
-                      <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
-                      <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
-                      {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
+                      <ExplorerDisclosureIcon open={!collapsed} color="rgba(15, 23, 42, 0.62)" />
                     </button>
-                  ))}
+                  </div>
+                  {!collapsed ? (
+                    <div style={logicGateNodeListStyle}>
+                      {group.nodes.map((node) => (
+                        <button
+                          key={node.relationship_id}
+                          type="button"
+                          style={logicGateNodeRowStyle}
+                          onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
+                        >
+                          <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
+                          <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                          {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {ungroupedNodes.length > 0 ? (
-              <div style={gateGroupStyle}>
+              <div style={gateGroupStyle(false)}>
                 <div style={ungroupedHeaderStyle}>Nodes</div>
                 {ungroupedNodes.map((node) => (
                   <button
@@ -1336,7 +1359,7 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   overflow: "auto",
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
-  gridAutoRows: "minmax(190px, auto)",
+  gridAutoRows: "auto",
   alignContent: "start",
   gap: 12,
   padding: 12,
@@ -1345,32 +1368,31 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   background: dropActive ? "rgba(239, 246, 255, 0.76)" : "rgba(255, 255, 255, 0.54)",
 });
 
-const gateGroupStyle: React.CSSProperties = {
+const gateGroupStyle = (collapsed: boolean): React.CSSProperties => ({
   display: "flex",
   flexDirection: "column",
-  gap: 10,
+  gap: collapsed ? 0 : 10,
   minWidth: 0,
-  minHeight: 190,
+  minHeight: collapsed ? 52 : 190,
   border: "1px solid rgba(226, 232, 240, 0.92)",
   borderRadius: 8,
   background: "#ffffff",
   color: "#0f172a",
-  padding: 12,
+  padding: collapsed ? "10px 12px" : 12,
   boxShadow: "0 8px 18px rgba(15, 23, 42, 0.05)",
-};
+  alignSelf: "start",
+});
 
 const logicGateCardHeaderStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 40,
-  border: 0,
-  background: "transparent",
   display: "grid",
-  gridTemplateColumns: "28px minmax(0, 1fr) 18px",
-  alignItems: "start",
+  gridTemplateColumns: "28px minmax(0, 1fr) 22px",
+  alignItems: "center",
   gap: 8,
   padding: 0,
   textAlign: "left",
-  cursor: "pointer",
+  cursor: "default",
 };
 
 const logicGateIconBadgeStyle: React.CSSProperties = {
@@ -1397,12 +1419,17 @@ const logicGateCardTitleStyle: React.CSSProperties = {
   WebkitBoxOrient: "vertical",
 };
 
-const logicGateChevronStyle: React.CSSProperties = {
+const logicGateDisclosureButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  border: "none",
+  background: "transparent",
+  color: "rgba(15, 23, 42, 0.62)",
+  cursor: "pointer",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
   justifySelf: "end",
-  color: "#334155",
-  fontSize: 13,
-  fontWeight: 900,
-  lineHeight: 1,
 };
 
 const logicGateNodeListStyle: React.CSSProperties = {
