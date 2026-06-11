@@ -38,7 +38,7 @@ function signatureStorageKey(companyID: string, userID: string): string {
   return `${HOME_MAIL_SIGNATURE_STORAGE_PREFIX}:${storagePart(companyID, "global")}:${storagePart(userID, "anonymous")}`;
 }
 
-function createDraftID(): string {
+export function createHomeMailDraftID(): string {
   return `draft:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -129,7 +129,7 @@ export function saveHomeMailDraftFromCompose(
   const drafts = readHomeMailDrafts(companyID, userID);
   const existing = compose.draftID ? drafts.find((draft) => draft.id === compose.draftID) : null;
   const draft: HomeMailDraft = {
-    id: existing?.id ?? (compose.draftID.trim() || createDraftID()),
+    id: existing?.id ?? (compose.draftID.trim() || createHomeMailDraftID()),
     userID: userID.trim(),
     companyID: companyID.trim(),
     sharedInboxID: compose.sharedInboxID.trim(),

@@ -4673,21 +4673,199 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function ComposePanel({ compose, busy, replyMessage, emailSignature, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature }: {
+type ComposeRecipientField = "to" | "cc";
+
+const recipientSuggestionsStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  marginTop: -4,
+  marginBottom: 2,
+  padding: 6,
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.9)",
+  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.08)",
+};
+
+const recipientSuggestionButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  minHeight: 30,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  justifyItems: "start",
+  textAlign: "left",
+  boxShadow: "none",
+};
+
+const editableMessageStyle: React.CSSProperties = {
+  ...mailPanelTextareaStyle,
+  minHeight: 280,
+  overflow: "auto",
+  whiteSpace: "pre-wrap",
+  outline: "none",
+  cursor: "text",
+};
+
+function escapeEditableHTML(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function linkifyEditableLine(value: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let output = "";
+  let cursor = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const matchText = match[0] ?? "";
+    const index = match.index ?? 0;
+    if (index > cursor) output += escapeEditableHTML(value.slice(cursor, index));
+    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
+    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
+    output += `<a href="${escapeEditableHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;">${escapeEditableHTML(cleanURL)}</a>${escapeEditableHTML(trailingPunctuation)}`;
+    cursor = index + matchText.length;
+  }
+  return output + escapeEditableHTML(value.slice(cursor));
+}
+
+function editableMessageHTML(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map(linkifyEditableLine).join("<br>");
+}
+
+function editableTextFromElement(element: HTMLElement): string {
+  return element.innerText.replace(/\u00a0/g, " ").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function placeCaretAtEnd(element: HTMLElement): void {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function recipientQuery(value: string): string {
+  const parts = value.split(/[;,]/);
+  return (parts[parts.length - 1] ?? "").trim().toLowerCase();
+}
+
+function recipientValue(user: CompanyUser): string {
+  const email = user.email?.trim() ?? "";
+  const displayName = user.display_name?.trim() ?? "";
+  return displayName ? `${displayName} <${email}>` : email;
+}
+
+function replaceRecipientTail(value: string, recipient: string): string {
+  const parts = value.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+  if (value.trim() && !/[;,]\s*$/.test(value) && parts.length > 0) parts.pop();
+  parts.push(recipient);
+  return parts.join(", ");
+}
+
+function matchingCompanyUsers(users: CompanyUser[], value: string): CompanyUser[] {
+  const query = recipientQuery(value);
+  if (query.length < 1) return [];
+  return users
+    .filter((user) => {
+      const email = user.email?.trim() ?? "";
+      if (!email) return false;
+      const displayName = user.display_name?.trim() ?? "";
+      return email.toLowerCase().includes(query) || displayName.toLowerCase().includes(query);
+    })
+    .slice(0, 6);
+}
+
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
   compose: ComposeState;
   busy: boolean;
   replyMessage?: EmailMessage | null;
   emailSignature: string;
+  companyUsers: CompanyUser[];
   onChange: (next: ComposeState) => void;
   onCancel: () => void;
   onSubmit: (event: React.FormEvent) => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: () => void;
+  onSaveDraft: () => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const bodyEditorRef = React.useRef<HTMLDivElement | null>(null);
   const [attachmentError, setAttachmentError] = React.useState("");
+  const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
+  const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
+  React.useEffect(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) return;
+    if (editor.dataset.rawValue === compose.body) return;
+    editor.innerHTML = editableMessageHTML(compose.body);
+    editor.dataset.rawValue = compose.body;
+  }, [compose.body]);
+  const syncBodyFromEditor = (options?: { relink?: boolean }) => {
+    const editor = bodyEditorRef.current;
+    if (!editor) return;
+    const nextBody = editableTextFromElement(editor);
+    editor.dataset.rawValue = nextBody;
+    update({ body: nextBody });
+    if (options?.relink) {
+      editor.innerHTML = editableMessageHTML(nextBody);
+      editor.dataset.rawValue = nextBody;
+      placeCaretAtEnd(editor);
+    }
+  };
+  const updateRecipientField = (field: ComposeRecipientField, value: string) => {
+    if (field === "to") update({ to: value });
+    else update({ cc: value });
+  };
+  const pickRecipient = (field: ComposeRecipientField, user: CompanyUser) => {
+    updateRecipientField(field, replaceRecipientTail(compose[field], recipientValue(user)));
+    setActiveRecipientField("");
+  };
+  const renderRecipientInput = (field: ComposeRecipientField, placeholder: string) => {
+    const value = compose[field];
+    const suggestions = activeRecipientField === field ? matchingCompanyUsers(companyUsers, value) : [];
+    return (
+      <div style={{ display: "grid", gap: 6 }}>
+        <input
+          style={mailPanelInputStyle}
+          value={value}
+          onFocus={() => setActiveRecipientField(field)}
+          onBlur={() => {
+            window.setTimeout(() => {
+              setActiveRecipientField((current) => current === field ? "" : current);
+            }, 120);
+          }}
+          onChange={(event) => {
+            setActiveRecipientField(field);
+            updateRecipientField(field, event.target.value);
+          }}
+          placeholder={placeholder}
+        />
+        {suggestions.length > 0 && (
+          <div style={recipientSuggestionsStyle}>
+            {suggestions.map((user) => (
+              <button
+                key={user.user_id || user.email}
+                type="button"
+                style={recipientSuggestionButtonStyle}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  pickRecipient(field, user);
+                }}
+              >
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user.display_name?.trim() || user.email?.trim() || "User"}
+                </span>
+                {user.display_name?.trim() && <span style={mutedSmallStyle}>{user.email?.trim() ?? ""}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
   const attachFiles = async (files: FileList | null) => {
     const selectedFiles = Array.from(files ?? []);
     if (selectedFiles.length === 0) return;
@@ -4718,13 +4896,16 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, onCh
     if (!signature) return;
     const body = compose.body.trimEnd();
     if (body.endsWith(signature)) return;
-    update({ body: body ? `${body}\n\n${signature}` : signature });
+    update({ body: body ? `${body}\n\n\n${signature}` : `\n\n\n${signature}` });
   };
   return (
     <form style={composeStyle} onSubmit={onSubmit}>
       <div style={panelHeaderStyle}>
         <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
-        <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveDraft}>Save to My Drafts</button>
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
+        </div>
       </div>
       {replyMessage && (
         <div style={mailComposeOriginalStyle}>
@@ -4734,10 +4915,28 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, onCh
           <iframe title="Original email" sandbox="" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={mailComposeOriginalFrameStyle} />
         </div>
       )}
-      <input style={mailPanelInputStyle} value={compose.to} onChange={(event) => update({ to: event.target.value })} placeholder="To" />
-      <input style={mailPanelInputStyle} value={compose.cc} onChange={(event) => update({ cc: event.target.value })} placeholder="Cc" />
+      {renderRecipientInput("to", "To")}
+      {renderRecipientInput("cc", "Cc")}
       <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
-      <textarea style={mailPanelTextareaStyle} value={compose.body} onChange={(event) => update({ body: event.target.value })} placeholder="Message" />
+      <div
+        ref={bodyEditorRef}
+        role="textbox"
+        aria-label="Message"
+        contentEditable
+        suppressContentEditableWarning
+        style={editableMessageStyle}
+        onInput={() => syncBodyFromEditor()}
+        onBlur={() => syncBodyFromEditor({ relink: true })}
+        onKeyUp={(event) => {
+          if (event.key === "Enter") syncBodyFromEditor({ relink: true });
+        }}
+        onPaste={(event) => {
+          event.preventDefault();
+          const text = event.clipboardData.getData("text/plain");
+          document.execCommand("insertText", false, text);
+          window.setTimeout(() => syncBodyFromEditor({ relink: true }), 0);
+        }}
+      />
       <div style={mailComposeAttachmentRowStyle}>
         <input
           ref={fileInputRef}
@@ -4750,6 +4949,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, onCh
           }}
         />
         <button type="button" style={mailPanelSmallButtonStyle} onClick={() => fileInputRef.current?.click()}>Attach files</button>
+        <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
+          {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
+        </button>
         {compose.attachments.map((attachment) => (
           <span key={attachment.id} style={mailComposeAttachmentChipStyle} title={attachment.filename}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.filename}</span>
@@ -4759,20 +4961,23 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, onCh
         ))}
         {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
       </div>
-      <div style={mailComposeSignatureBoxStyle}>
-        <textarea
-          style={mailComposeSignatureTextareaStyle}
-          value={emailSignature}
-          onChange={(event) => onEmailSignatureChange(event.target.value)}
-          placeholder="Email signature"
-        />
-        <div style={mailComposeActionsRowStyle}>
+      {signatureEditorOpen && (
+        <div style={mailComposeSignatureBoxStyle}>
+          <textarea
+            style={mailComposeSignatureTextareaStyle}
+            value={emailSignature}
+            onChange={(event) => onEmailSignatureChange(event.target.value)}
+            placeholder="Email signature"
+          />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveEmailSignature}>Save signature</button>
             <button type="button" style={mailPanelSmallButtonStyle} onClick={insertSignature} disabled={!emailSignature.trim()}>Insert signature</button>
           </div>
-          <button style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
         </div>
+      )}
+      <div style={mailComposeActionsRowStyle}>
+        <span style={mutedSmallStyle}>{compose.draftID ? "Saved in My Drafts" : ""}</span>
+        <button style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
       </div>
     </form>
   );

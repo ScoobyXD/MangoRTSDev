@@ -75,7 +75,7 @@ import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
-import { composeHasDraftContent, deleteHomeMailDraft, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
+import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
@@ -109,6 +109,11 @@ function homeMailDraftMatchesSearch(draft: HomeMailDraft, query: string): boolea
     draft.accountEmail,
     ...draft.attachments.map((attachment) => attachment.filename),
   ].some((value) => value.toLowerCase().includes(cleanQuery));
+}
+
+function composeBodyWithSignature(signature: string): string {
+  const cleanSignature = signature.trim();
+  return cleanSignature ? `\n\n\n${cleanSignature}` : "";
 }
 
 type HomeNoticeResourceAction =
@@ -1877,12 +1882,21 @@ export function HomePage({
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
     else await archiveMessages([selectedMessage.id]);
   };
-  const saveCurrentComposeDraft = useCallback((options?: { quiet?: boolean }) => {
-    if (!compose.open) return;
+  const saveCurrentComposeDraft = useCallback((options?: { quiet?: boolean; keepOpen?: boolean }) => {
+    if (!compose.open) return false;
     const shouldSave = composeHasDraftContent(compose, emailSignature);
-    const nextDrafts = saveHomeMailDraftFromCompose(companyID, currentUserID, compose, emailSignature);
+    const composeForSave = shouldSave && !compose.draftID.trim()
+      ? { ...compose, draftID: createHomeMailDraftID() }
+      : compose;
+    const nextDrafts = saveHomeMailDraftFromCompose(companyID, currentUserID, composeForSave, emailSignature);
     setMailDrafts(nextDrafts);
+    if (options?.keepOpen && composeForSave.draftID !== compose.draftID) {
+      setCompose(composeForSave);
+    } else if (options?.keepOpen && !shouldSave && compose.draftID) {
+      setCompose({ ...compose, draftID: "" });
+    }
     if (shouldSave && !options?.quiet) setNotice("Draft saved.");
+    return shouldSave;
   }, [companyID, compose, currentUserID, emailSignature]);
   const openPendingMailbox = useCallback(() => {
     saveCurrentComposeDraft({ quiet: true });
@@ -1938,7 +1952,7 @@ export function HomePage({
       open: true,
       sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
       accountEmail: (activeMailAccountEmail ?? "").trim(),
-      body: emailSignature.trim(),
+      body: composeBodyWithSignature(emailSignature),
     });
   };
   const openReply = () => {
@@ -1957,7 +1971,7 @@ export function HomePage({
       replyToMessageID: selectedMessage.id,
       to: formatAddressList(selectedMessage.from),
       subject: selectedMessage.subject?.toLowerCase().startsWith("re:") ? selectedMessage.subject : `Re: ${selectedMessage.subject || ""}`.trim(),
-      body: emailSignature.trim(),
+      body: composeBodyWithSignature(emailSignature),
     });
   };
   const submitCompose = async (event: React.FormEvent) => {
@@ -3434,6 +3448,9 @@ export function HomePage({
     saveCurrentComposeDraft();
     setCompose(emptyCompose);
   }, [saveCurrentComposeDraft]);
+  const saveComposeAndStayOpen = useCallback(() => {
+    saveCurrentComposeDraft({ keepOpen: true });
+  }, [saveCurrentComposeDraft]);
   const handleSaveEmailSignature = useCallback(() => {
     saveHomeMailSignature(companyID, currentUserID, emailSignature);
     setNotice("Signature saved.");
@@ -3738,6 +3755,7 @@ export function HomePage({
             onOpenStarredMailbox={openStarredMailbox}
             onEmailSignatureChange={setEmailSignature}
             onSaveEmailSignature={handleSaveEmailSignature}
+            onSaveComposeDraft={saveComposeAndStayOpen}
             onCreateMessageNode={convertMessagesToLogicGate}
             onSearchDraftChange={setSearchDraft}
             onSelectMessage={selectMessageRow}
