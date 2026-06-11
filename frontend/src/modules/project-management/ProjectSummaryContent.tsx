@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
+import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { listCompanyUsers, type CompanyUser } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
+import { createRequestJSON } from "../api/requestJSON.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
@@ -50,6 +51,7 @@ import { useEditorPreferences } from "../editor/useEditorPreferences.js";
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
+import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
 import {
   addProjectInformation,
   deleteProjectProjection,
@@ -118,6 +120,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   workspace,
 }) => {
   const companyID = getActiveCompanyID();
+  const permissionsRequestJSON = useMemo(() => createRequestJSON(readAuthConfig().apiBase), []);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
   const [project, setProject] = useState<ProjectRecord | null>(null);
@@ -145,6 +148,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatNavigationRequests, setChatNavigationRequests] = useState<Record<string, { anchorMessageID: string; requestID: number }>>({});
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
@@ -511,11 +515,25 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <h2 style={summaryTitleStyle}>{project?.name || projectID}</h2>
         </div>
         <div style={summaryMetaPillsStyle}>
+          <button type="button" style={summaryPermissionButtonStyle} onClick={() => setPermissionsOpen(true)}>
+            Permissions
+          </button>
           <span style={statusPillStyle(accent)}>{project?.status || "Active"}</span>
           {project?.account_name ? <span style={plainPillStyle}>{project.account_name}</span> : null}
           {project?.team_name ? <span style={plainPillStyle}>{project.team_name}</span> : null}
         </div>
       </div>
+      {permissionsOpen && (
+        <EntityPermissionsDialog
+          requestJSON={permissionsRequestJSON}
+          companyID={companyID}
+          entityType="project"
+          entityID={projectID}
+          title={project?.name || projectID}
+          onClose={() => setPermissionsOpen(false)}
+          onSaved={() => void loadProject({ showLoading: false })}
+        />
+      )}
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
       <div ref={bodyRef} style={summaryBodyStyle}>
         <section style={textColumnStyle(summarySplitPct)}>
@@ -1060,6 +1078,18 @@ const summaryMetaPillsStyle: React.CSSProperties = {
   gap: 8,
   flexWrap: "wrap",
   justifyContent: "flex-end",
+};
+
+const summaryPermissionButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  border: "1px solid rgba(91, 141, 239, 0.34)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#1d4ed8",
+  fontSize: 12,
+  fontWeight: 850,
+  cursor: "pointer",
+  padding: "0 12px",
 };
 
 const statusPillStyle = (accent: string): React.CSSProperties => ({

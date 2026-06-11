@@ -4,6 +4,7 @@ import type { CompanyExplorerFolderKind } from "../folders/companyExplorerFolder
 import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../kanban/shared";
 import type {
   CompanyExplorerContextMenuState,
+  CompanyExplorerFolderPermissionsTarget,
   CompanyExplorerShareTarget,
   ExplorerDeleteTargetWithLabel,
   ExplorerFindTarget,
@@ -21,6 +22,7 @@ type CompanyExplorerContextMenuProps = {
   onFindTarget: (target: ExplorerFindTarget) => void;
   onPinTarget: (target: ExplorerPinTarget) => void;
   onShareFolder: (target: CompanyExplorerShareTarget) => void;
+  onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
 };
@@ -35,6 +37,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onFindTarget,
   onPinTarget,
   onShareFolder,
+  onOpenFolderPermissions,
   onRenameTarget,
   onDeleteTargets,
 }) => {
@@ -45,7 +48,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   if (!menu) return null;
   const hasCreateAction = menu.canCreateFolder || menu.canCreateNode || menu.canCreateLogicGate;
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
-  if (!hasCreateAction && !menu.findTarget && !menu.pinTarget && !menu.shareTarget && !menu.renameTarget && !hasDeleteAction) return null;
+  if (!hasCreateAction && !menu.findTarget && !menu.pinTarget && !menu.shareTarget && !menu.permissionsTarget && !menu.renameTarget && !hasDeleteAction) return null;
   const createNodeNeedsPriority = menu.canCreateNode && Boolean(menu.createNodeLogicGateID);
   const priorityOptions = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0");
   const submenuSide = menu.x + 420 > window.innerWidth ? "left" : "right";
@@ -173,6 +176,11 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       {menu.shareTarget && (
         <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onShareFolder(menu.shareTarget!)}>
           Share Folder
+        </button>
+      )}
+      {menu.permissionsTarget && (
+        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onOpenFolderPermissions(menu.permissionsTarget!)}>
+          Folder Permissions
         </button>
       )}
       {menu.renameTarget && (

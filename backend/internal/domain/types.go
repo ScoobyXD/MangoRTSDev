@@ -546,6 +546,7 @@ type CompanyExplorerFolder struct {
 	FolderKind       string                      `json:"folder_kind"`
 	SystemKey        *string                     `json:"system_key,omitempty"`
 	Name             string                      `json:"name"`
+	DefaultAccess    string                      `json:"default_access,omitempty"`
 	AccountEmail     *string                     `json:"account_email,omitempty"`
 	Position         int                         `json:"position"`
 	RaciAssignments  []SharedInboxRaciAssignment `json:"raci_assignments,omitempty"`

@@ -434,6 +434,64 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) GetCompanyExplorerFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+	ctx := context.Background()
+	var item domain.CompanyExplorerFolder
+	var parent sql.NullString
+	var systemKey sql.NullString
+	var accountEmail sql.NullString
+	err := r.db.QueryRowContext(ctx, `
+select company_id::text,
+       folder_id::text,
+       parent_folder_id::text,
+       folder_kind,
+       system_key,
+       name,
+       coalesce(default_access, $3),
+       account_email,
+       position,
+       created_timestamp,
+       updated_timestamp
+from company_explorer_folders
+where company_id=$1::uuid
+  and folder_id=$2::uuid`,
+		companyID, folderID, ResourceDefaultAccessEdit,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parent,
+		&item.FolderKind,
+		&systemKey,
+		&item.Name,
+		&item.DefaultAccess,
+		&accountEmail,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if parent.Valid {
+		item.ParentFolderID = &parent.String
+	}
+	if systemKey.Valid {
+		item.SystemKey = &systemKey.String
+	}
+	if accountEmail.Valid {
+		item.AccountEmail = &accountEmail.String
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, companyID, folderKind, userID string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
 	companyID = cleanUUIDText(companyID)
 	userID = cleanUUIDText(userID)
@@ -1140,6 +1198,10 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
 				return CompanyExplorerDeleteResult{}, err
 			}
+		} else {
+			if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
 		}
 	}
 	for logicGateID := range logicGateIDs {
@@ -1176,6 +1238,13 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			 where company_id=$1 and resource_type=$2 and resource_id = any(string_to_array($3, ',')::uuid[])`,
 			companyID, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
 		); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`delete from resource_permissions
+			 where company_id=$1 and resource_type=$2 and resource_id = any(string_to_array($3, ',')::uuid[])`,
+			companyID, EntityTypeCompanyExplorerFolder, strings.Join(grantFolderIDs, ","),
+		); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}

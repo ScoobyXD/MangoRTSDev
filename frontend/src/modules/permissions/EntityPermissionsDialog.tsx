@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { BoundRequestJSON } from "../api/requestJSON";
 import { listCompanyUsers } from "../communications/communicationsApi";
 
-type PermissionEntityType = "node" | "logic_gate" | "shared_triage_folder";
+type PermissionEntityType = "node" | "logic_gate" | "project" | "company_explorer_folder" | "shared_triage_folder";
 type PermissionSubjectType = "user" | "group";
 type ResourceAccessLevel = "no_access" | "view" | "edit" | "admin";
 
@@ -252,7 +252,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const assignmentCount = accessBySubject.size;
   const effectiveReadOnly = readOnly || !serverCanEditPermissions;
   const controlsDisabled = busy || effectiveReadOnly;
-  const usesDefaultAccessPolicy = entityType === "node" || entityType === "logic_gate";
+  const usesDefaultAccessPolicy = entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder";
   const defaultExceptionAccessLevel = oppositeDefaultAccess(defaultAccess);
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
@@ -517,6 +517,10 @@ function permissionsPathFor(entityType: PermissionEntityType, entityID: string):
       return `/v1/nodes/${encodeURIComponent(entityID)}/permissions`;
     case "logic_gate":
       return `/v1/logic-gates/${encodeURIComponent(entityID)}/permissions`;
+    case "project":
+      return `/v1/projects/${encodeURIComponent(entityID)}/permissions`;
+    case "company_explorer_folder":
+      return `/v1/company-explorer/folders/${encodeURIComponent(entityID)}/permissions`;
     case "shared_triage_folder":
       return `/v1/communications/shared-inboxes/${encodeURIComponent(entityID)}/access`;
   }
@@ -556,7 +560,7 @@ function companyUserRoleLabel(role: string | undefined): string {
 
 function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType, defaultAccess: "edit" | "no_access"): string {
   if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
-  if (entityType === "node" || entityType === "logic_gate") {
+  if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder") {
     const defaultLabel = defaultAccess === "edit" ? "Default edit" : "Default no access";
     if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} exception users. Dev admins and company admins always keep admin access.`;
     return `${defaultLabel}. No exception users. Dev admins and company admins always keep admin access.`;

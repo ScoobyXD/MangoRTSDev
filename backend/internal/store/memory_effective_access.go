@@ -277,7 +277,7 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		return true
 	}
 	switch resourceType {
-	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject:
+	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder:
 		if accessLevel == EntityPermissionAdmin {
 			return false
 		}
@@ -321,6 +321,12 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 			return "", false
 		}
 		return defaultResourceAccessOrEdit(project.DefaultAccess), true
+	case EntityTypeCompanyExplorerFolder:
+		folder, ok := r.folders[key(companyID, resourceID)]
+		if !ok || folder.FolderKind == "communications" {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(folder.DefaultAccess), true
 	default:
 		return "", false
 	}

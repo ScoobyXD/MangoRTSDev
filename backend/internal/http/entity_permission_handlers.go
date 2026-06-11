@@ -679,6 +679,16 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		payload["node_id"] = entityID
 	} else if entityType == store.EntityTypeLogicGate {
 		payload["logic_gate_id"] = entityID
+	} else if entityType == store.EntityTypeProject {
+		payload["project_id"] = entityID
+	} else if entityType == store.EntityTypeCompanyExplorerFolder {
+		folder, err := s.companyExplorerFolderForPermissions(req.CompanyID, entityID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_company_explorer_folder")
+			return
+		}
+		payload["folder_id"] = entityID
+		payload["folder_kind"] = folder.FolderKind
 	}
 	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
 	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
@@ -702,7 +712,7 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 	if err != nil {
 		return nil, err
 	}
-	if entityType == store.EntityTypeNode || entityType == store.EntityTypeLogicGate {
+	if entityType == store.EntityTypeNode || entityType == store.EntityTypeLogicGate || entityType == store.EntityTypeProject || entityType == store.EntityTypeCompanyExplorerFolder {
 		out := make([]map[string]string, 0, len(users))
 		for _, user := range users {
 			userID := strings.TrimSpace(user.UserID)
@@ -771,11 +781,49 @@ func (s *Server) entityDefaultAccess(companyID, entityType, entityID string) (st
 			return "", err
 		}
 		return defaultAccessOrEdit(logicGate.DefaultAccess), nil
+	case store.EntityTypeProject:
+		project, err := s.repo.GetProject(companyID, entityID)
+		if err != nil {
+			return "", err
+		}
+		return defaultAccessOrEdit(project.DefaultAccess), nil
+	case store.EntityTypeCompanyExplorerFolder:
+		folder, err := s.companyExplorerFolderForPermissions(companyID, entityID)
+		if err != nil {
+			return "", err
+		}
+		return defaultAccessOrEdit(folder.DefaultAccess), nil
 	case store.EntityTypeSharedTriageFolder:
 		return store.EntityPermissionNoAccess, nil
 	default:
 		return "", store.ErrInvalid
 	}
+}
+
+func (s *Server) companyExplorerFolderForPermissions(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
+	folderID = strings.TrimSpace(folderID)
+	if repo, ok := s.repo.(interface {
+		GetCompanyExplorerFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error)
+	}); ok {
+		folder, err := repo.GetCompanyExplorerFolder(companyID, folderID)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+		if folder.FolderKind == "communications" {
+			return domain.CompanyExplorerFolder{}, store.ErrNotFound
+		}
+		return folder, nil
+	}
+	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "")
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	for _, folder := range folders {
+		if strings.TrimSpace(folder.FolderID) == folderID && folder.FolderKind != "communications" {
+			return folder, nil
+		}
+	}
+	return domain.CompanyExplorerFolder{}, store.ErrNotFound
 }
 
 func defaultAccessOrEdit(access string) string {

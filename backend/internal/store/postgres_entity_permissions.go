@@ -1118,6 +1118,10 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID).Scan(&exists)
 		return exists, err
+	case EntityTypeCompanyExplorerFolder:
+		var exists bool
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID).Scan(&exists)
+		return exists, err
 	case EntityTypeSharedTriageFolder:
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID).Scan(&exists)
@@ -1135,6 +1139,8 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 		return postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeProject:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID)
+	case EntityTypeCompanyExplorerFolder:
+		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID)
 	case EntityTypeSharedTriageFolder:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID)
 	default:
