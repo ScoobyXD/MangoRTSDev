@@ -18,7 +18,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailPanelInputStyle, mailPanelPrimaryButtonStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailComposeActionsRowStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -4651,26 +4651,129 @@ export function LogicGateInboxNodeRow({
   );
 }
 
-export function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
+const COMPOSE_ATTACHMENT_MAX_TOTAL_BYTES = 2_000_000;
+
+function formatComposeAttachmentSize(size: number): string {
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size >= 1_000_000) return `${(size / 1_000_000).toFixed(1)} MB`;
+  if (size >= 1_000) return `${Math.ceil(size / 1_000)} KB`;
+  return `${size} B`;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Failed to read attachment."));
+    reader.onload = () => {
+      const value = String(reader.result ?? "");
+      const commaIndex = value.indexOf(",");
+      resolve(commaIndex >= 0 ? value.slice(commaIndex + 1) : value);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature }: {
   compose: ComposeState;
   busy: boolean;
+  replyMessage?: EmailMessage | null;
+  emailSignature: string;
   onChange: (next: ComposeState) => void;
   onCancel: () => void;
   onSubmit: (event: React.FormEvent) => void;
+  onEmailSignatureChange: (value: string) => void;
+  onSaveEmailSignature: () => void;
 }) {
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [attachmentError, setAttachmentError] = React.useState("");
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
+  const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
+  const attachFiles = async (files: FileList | null) => {
+    const selectedFiles = Array.from(files ?? []);
+    if (selectedFiles.length === 0) return;
+    setAttachmentError("");
+    const selectedBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalAttachmentBytes + selectedBytes > COMPOSE_ATTACHMENT_MAX_TOTAL_BYTES) {
+      setAttachmentError("Attachments are limited to 2 MB total.");
+      return;
+    }
+    try {
+      const additions = await Promise.all(selectedFiles.map(async (file) => ({
+        id: `attachment:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
+        filename: file.name || "attachment",
+        contentType: file.type || "application/octet-stream",
+        size: file.size,
+        content: await readFileAsBase64(file),
+      })));
+      update({ attachments: [...compose.attachments, ...additions] });
+    } catch (attachError) {
+      setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to read attachment.");
+    }
+  };
+  const removeAttachment = (attachmentID: string) => {
+    update({ attachments: compose.attachments.filter((attachment) => attachment.id !== attachmentID) });
+  };
+  const insertSignature = () => {
+    const signature = emailSignature.trim();
+    if (!signature) return;
+    const body = compose.body.trimEnd();
+    if (body.endsWith(signature)) return;
+    update({ body: body ? `${body}\n\n${signature}` : signature });
+  };
   return (
     <form style={composeStyle} onSubmit={onSubmit}>
       <div style={panelHeaderStyle}>
-        <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : "New Message"}</h2>
+        <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
         <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
       </div>
+      {replyMessage && (
+        <div style={mailComposeOriginalStyle}>
+          <div style={mutedSmallStyle}>
+            Original from {formatAddressList(replyMessage.from) || "Unknown sender"} to {formatAddressList(replyMessage.to) || "me"}
+          </div>
+          <iframe title="Original email" sandbox="" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={mailComposeOriginalFrameStyle} />
+        </div>
+      )}
       <input style={mailPanelInputStyle} value={compose.to} onChange={(event) => update({ to: event.target.value })} placeholder="To" />
       <input style={mailPanelInputStyle} value={compose.cc} onChange={(event) => update({ cc: event.target.value })} placeholder="Cc" />
-      <input style={mailPanelInputStyle} value={compose.bcc} onChange={(event) => update({ bcc: event.target.value })} placeholder="Bcc" />
       <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
       <textarea style={mailPanelTextareaStyle} value={compose.body} onChange={(event) => update({ body: event.target.value })} placeholder="Message" />
-      <button style={mailPanelPrimaryButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
+      <div style={mailComposeAttachmentRowStyle}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(event) => {
+            void attachFiles(event.currentTarget.files);
+            event.currentTarget.value = "";
+          }}
+        />
+        <button type="button" style={mailPanelSmallButtonStyle} onClick={() => fileInputRef.current?.click()}>Attach files</button>
+        {compose.attachments.map((attachment) => (
+          <span key={attachment.id} style={mailComposeAttachmentChipStyle} title={attachment.filename}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.filename}</span>
+            {formatComposeAttachmentSize(attachment.size) && <span>{formatComposeAttachmentSize(attachment.size)}</span>}
+            <button type="button" style={mailComposeAttachmentRemoveStyle} onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.filename}`}>x</button>
+          </span>
+        ))}
+        {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
+      </div>
+      <div style={mailComposeSignatureBoxStyle}>
+        <textarea
+          style={mailComposeSignatureTextareaStyle}
+          value={emailSignature}
+          onChange={(event) => onEmailSignatureChange(event.target.value)}
+          placeholder="Email signature"
+        />
+        <div style={mailComposeActionsRowStyle}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveEmailSignature}>Save signature</button>
+            <button type="button" style={mailPanelSmallButtonStyle} onClick={insertSignature} disabled={!emailSignature.trim()}>Insert signature</button>
+          </div>
+          <button style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
+        </div>
+      </div>
     </form>
   );
 }

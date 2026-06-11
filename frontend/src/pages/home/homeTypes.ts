@@ -15,26 +15,42 @@ export type HomePageProps = {
 
 export type ComposeState = {
   open: boolean;
+  draftID: string;
+  sharedInboxID: string;
+  accountEmail: string;
   replyToMessageID: string;
   to: string;
   cc: string;
   bcc: string;
   subject: string;
   body: string;
+  attachments: ComposeAttachment[];
+};
+
+export type ComposeAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  content: string;
 };
 
 export const emptyCompose: ComposeState = {
   open: false,
+  draftID: "",
+  sharedInboxID: "",
+  accountEmail: "",
   replyToMessageID: "",
   to: "",
   cc: "",
   bcc: "",
   subject: "",
   body: "",
+  attachments: [],
 };
 
 export type MailboxOption = {
-  value: "primary" | "sent" | "starred" | "all" | "archive";
+  value: "primary" | "drafts" | "sent" | "starred" | "all" | "archive";
   label: string;
 };
 

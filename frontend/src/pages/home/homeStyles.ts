@@ -1555,6 +1555,76 @@ export const mailPanelTextareaStyle: React.CSSProperties = {
   lineHeight: 1.45,
 };
 
+export const mailComposeActionsRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+export const mailComposeSendButtonStyle: React.CSSProperties = {
+  ...mailPanelPrimaryButtonStyle,
+  minWidth: 104,
+  minHeight: 34,
+  padding: "0 16px",
+};
+
+export const mailComposeAttachmentRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+export const mailComposeAttachmentChipStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: "100%",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: HOME_KEY_SURFACE,
+  boxShadow: HOME_KEY_SHADOW,
+  padding: "5px 8px",
+  fontSize: 11,
+  fontWeight: 650,
+  color: "#334155",
+};
+
+export const mailComposeAttachmentRemoveStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#64748b",
+  cursor: "pointer",
+  font: "inherit",
+  fontWeight: 800,
+  padding: 0,
+};
+
+export const mailComposeSignatureBoxStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  padding: 8,
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: "rgba(255, 255, 255, 0.72)",
+};
+
+export const mailComposeSignatureTextareaStyle: React.CSSProperties = {
+  ...mailPanelTextareaStyle,
+  height: 78,
+  minHeight: 66,
+};
+
+export const mailComposeOriginalStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  paddingBottom: 10,
+  borderBottom: "1px solid rgba(148, 163, 184, 0.32)",
+};
+
 export const mailListToolbarStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -1636,7 +1706,7 @@ export const mailArchiveActionsStyle: React.CSSProperties = {
 
 export const mailComposeSentActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
   gap: 6,
   alignItems: "center",
 };
@@ -2040,6 +2110,13 @@ export const iframeStyle: React.CSSProperties = {
   borderRadius: HOME_KEY_ELEVATED_RADIUS,
   background: "#ffffff",
   boxShadow: HOME_KEY_SHADOW,
+};
+
+export const mailComposeOriginalFrameStyle: React.CSSProperties = {
+  ...iframeStyle,
+  minHeight: 180,
+  height: 180,
+  boxShadow: "none",
 };
 
 export const composeStyle: React.CSSProperties = {

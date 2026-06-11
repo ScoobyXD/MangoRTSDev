@@ -236,6 +236,7 @@ type NylasMessage struct {
 	Cc             []NylasEmailAddress `json:"cc,omitempty"`
 	Bcc            []NylasEmailAddress `json:"bcc,omitempty"`
 	ReplyTo        []NylasEmailAddress `json:"reply_to,omitempty"`
+	Attachments    []NylasAttachment   `json:"attachments,omitempty"`
 	Folders        []string            `json:"folders,omitempty"`
 	FolderIDs      []string            `json:"folder_ids,omitempty"`
 	LogicGateIDs   []string            `json:"logic_gate_ids,omitempty"`
@@ -304,7 +305,19 @@ type NylasSendMessageRequest struct {
 	Bcc              []NylasEmailAddress `json:"bcc,omitempty"`
 	Subject          string              `json:"subject"`
 	Body             string              `json:"body"`
+	Attachments      []NylasAttachment   `json:"attachments,omitempty"`
 	ReplyToMessageID string              `json:"reply_to_message_id,omitempty"`
+}
+
+type NylasAttachment struct {
+	ID                 string `json:"id,omitempty"`
+	Filename           string `json:"filename"`
+	ContentType        string `json:"content_type,omitempty"`
+	Content            string `json:"content,omitempty"`
+	ContentID          string `json:"content_id,omitempty"`
+	ContentDisposition string `json:"content_disposition,omitempty"`
+	IsInline           bool   `json:"is_inline,omitempty"`
+	Size               int64  `json:"size,omitempty"`
 }
 
 func (c *NylasRESTClient) ExchangeCode(ctx context.Context, code, redirectURI string) (NylasGrant, error) {

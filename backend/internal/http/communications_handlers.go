@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -731,11 +732,17 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	req.To = cleanEmailAddresses(req.To)
 	req.Cc = cleanEmailAddresses(req.Cc)
 	req.Bcc = cleanEmailAddresses(req.Bcc)
+	var attachmentsOK bool
+	req.Attachments, attachmentsOK = cleanNylasAttachments(req.Attachments)
+	if !attachmentsOK {
+		writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+		return
+	}
 	if len(req.To) == 0 && len(req.Cc) == 0 && len(req.Bcc) == 0 {
 		writeError(w, http.StatusBadRequest, "email_recipients_required")
 		return
 	}
-	if req.Subject == "" && req.Body == "" {
+	if req.Subject == "" && req.Body == "" && len(req.Attachments) == 0 {
 		writeError(w, http.StatusBadRequest, "email_content_required")
 		return
 	}
@@ -1380,6 +1387,46 @@ func cleanEmailAddresses(items []NylasEmailAddress) []NylasEmailAddress {
 		})
 	}
 	return cleaned
+}
+
+func cleanNylasAttachments(items []NylasAttachment) ([]NylasAttachment, bool) {
+	if len(items) == 0 {
+		return nil, true
+	}
+	cleaned := make([]NylasAttachment, 0, len(items))
+	for _, item := range items {
+		filename := strings.TrimSpace(item.Filename)
+		content := strings.TrimSpace(item.Content)
+		if filename == "" && content == "" {
+			continue
+		}
+		if filename == "" || content == "" {
+			return nil, false
+		}
+		decoded, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return nil, false
+		}
+		contentType := strings.TrimSpace(item.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		size := item.Size
+		if size <= 0 {
+			size = int64(len(decoded))
+		}
+		cleaned = append(cleaned, NylasAttachment{
+			ID:                 strings.TrimSpace(item.ID),
+			Filename:           filename,
+			ContentType:        contentType,
+			Content:            content,
+			ContentID:          strings.TrimSpace(item.ContentID),
+			ContentDisposition: strings.TrimSpace(item.ContentDisposition),
+			IsInline:           item.IsInline,
+			Size:               size,
+		})
+	}
+	return cleaned, true
 }
 
 func cleanStringList(items []string) []string {

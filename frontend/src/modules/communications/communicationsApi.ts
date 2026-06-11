@@ -28,6 +28,17 @@ export type EmailAddress = {
   email: string;
 };
 
+export type EmailAttachment = {
+  id?: string;
+  filename: string;
+  content_type?: string;
+  content?: string;
+  content_id?: string;
+  content_disposition?: string;
+  is_inline?: boolean;
+  size?: number;
+};
+
 export type EmailFolder = {
   id: string;
   name: string;
@@ -52,6 +63,7 @@ export type EmailMessage = {
   cc?: EmailAddress[];
   bcc?: EmailAddress[];
   reply_to?: EmailAddress[];
+  attachments?: EmailAttachment[];
   folders?: string[];
   folder_ids?: string[];
   logic_gate_ids?: string[];
@@ -88,7 +100,7 @@ export type ListMessagesParams = {
   refresh?: boolean;
 };
 
-export type EmailMailbox = "primary" | "sent" | "starred" | "all" | "archive";
+export type EmailMailbox = "primary" | "drafts" | "sent" | "starred" | "all" | "archive";
 
 export type ListEmailFoldersParams = {
   companyID?: string;
@@ -230,6 +242,7 @@ export type SendEmailInput = {
   bcc?: EmailAddress[];
   subject: string;
   body: string;
+  attachments?: EmailAttachment[];
   reply_to_message_id?: string;
   company_id?: string;
   shared_inbox_id?: string;
@@ -1574,6 +1587,7 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     cc: cloneEmailAddresses(message.cc),
     bcc: cloneEmailAddresses(message.bcc),
     reply_to: cloneEmailAddresses(message.reply_to),
+    attachments: message.attachments ? message.attachments.map((attachment) => ({ ...attachment })) : undefined,
     folders: message.folders ? [...message.folders] : undefined,
     folder_ids: message.folder_ids ? [...message.folder_ids] : undefined,
     logic_gate_ids: message.logic_gate_ids ? [...message.logic_gate_ids] : undefined,
@@ -1691,12 +1705,13 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
 }
 
 function normalizeMailbox(value: string | undefined): EmailMailbox | undefined {
-  if (value === "primary" || value === "sent" || value === "starred" || value === "all" || value === "archive") return value;
+  if (value === "primary" || value === "drafts" || value === "sent" || value === "starred" || value === "all" || value === "archive") return value;
   return undefined;
 }
 
 function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): boolean {
   if (mailbox === "all") return true;
+  if (mailbox === "drafts") return messageHasAnyFolder(message, ["draft", "drafts", "\\draft", "\\drafts"]);
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);

@@ -382,9 +382,12 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
 	}
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body"}`, token, http.StatusCreated)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"note.txt","content":"aGVsbG8="}]}`, token, http.StatusCreated)
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
 		t.Fatalf("sent = %+v, want normalized send request", nylas.sent)
+	}
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "application/octet-stream" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
+		t.Fatalf("attachments = %+v, want normalized attachment", nylas.sent.Attachments)
 	}
 	assertJSONStatus(t, handler, http.MethodDelete, "/v1/communications/messages/message-1", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)

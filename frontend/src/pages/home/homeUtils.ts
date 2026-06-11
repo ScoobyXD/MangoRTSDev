@@ -999,10 +999,31 @@ function normalizeEmailFolderToken(value: string | undefined): string {
   return token;
 }
 
+function escapeHTMLAttribute(value: string): string {
+  return escapeHTML(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function linkifyPlainText(value: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let output = "";
+  let cursor = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const matchText = match[0] ?? "";
+    const index = match.index ?? 0;
+    if (index > cursor) output += escapeHTML(value.slice(cursor, index));
+    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
+    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
+    output += `<a href="${escapeHTMLAttribute(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(cleanURL)}</a>${escapeHTML(trailingPunctuation)}`;
+    cursor = index + matchText.length;
+  }
+  return output + escapeHTML(value.slice(cursor));
+}
+
 export function messageDocument(body: string): string {
   const value = body.trim();
-  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}</style></head><body>${content}</body></html>`;
+  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${linkifyPlainText(value)}</pre>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}a{color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
 }
 
 export function escapeHTML(value: string): string {
