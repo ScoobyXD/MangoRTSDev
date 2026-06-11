@@ -1469,7 +1469,7 @@ export function HomeMailWorkspace({
                     onSelectMessage(message, event);
                   }}
                   onContextMenu={(event) => {
-                    if (!draftRow) onOpenContextMenu(message, event);
+                    onOpenContextMenu(message, event);
                   }}
                   onDragStart={(event) => onStartMessageDrag(message, event)}
                 >
@@ -1600,6 +1600,7 @@ export function HomeMailWorkspace({
 export function HomeMailOverlays({
   busy,
   isArchiveMailbox,
+  isDraftMailbox,
   mailboxActionBusy,
   mailMutationAvailable,
   messageContextMenu,
@@ -1608,11 +1609,13 @@ export function HomeMailOverlays({
   onCancelDelete,
   onCloseContextMenu,
   onConfirmDelete,
+  onRequestDeleteDrafts,
   onRequestDeleteMessages,
   onUnarchiveMessages,
 }: {
   busy: string;
   isArchiveMailbox: boolean;
+  isDraftMailbox: boolean;
   mailboxActionBusy: boolean;
   mailMutationAvailable: boolean;
   messageContextMenu: { x: number; y: number; messageIDs: string[] } | null;
@@ -1621,6 +1624,7 @@ export function HomeMailOverlays({
   onCancelDelete: () => void;
   onCloseContextMenu: () => void;
   onConfirmDelete: (ids: string[]) => void;
+  onRequestDeleteDrafts: (ids: string[]) => void;
   onRequestDeleteMessages: (ids: string[]) => void;
   onUnarchiveMessages: (ids: string[]) => void;
 }) {
@@ -1631,24 +1635,36 @@ export function HomeMailOverlays({
           style={{ ...messageContextMenuStyle, left: messageContextMenu.x, top: messageContextMenu.y }}
           onMouseLeave={onCloseContextMenu}
         >
-          <button
-            style={contextMenuActionStyle}
-            disabled={mailboxActionBusy || !mailMutationAvailable}
-            onClick={() => {
-              if (!mailMutationAvailable) return;
-              if (isArchiveMailbox) onUnarchiveMessages(messageContextMenu.messageIDs);
-              else onArchiveMessages(messageContextMenu.messageIDs);
-            }}
-          >
-            {isArchiveMailbox ? "Unarchive" : "Archive"}
-          </button>
-          <button
-            style={{ ...contextMenuActionStyle, color: "#334155" }}
-            disabled={busy === "delete" || !mailMutationAvailable}
-            onClick={() => onRequestDeleteMessages(messageContextMenu.messageIDs)}
-          >
-            Delete
-          </button>
+          {isDraftMailbox ? (
+            <button
+              style={{ ...contextMenuActionStyle, color: "#334155" }}
+              disabled={busy === "delete"}
+              onClick={() => onRequestDeleteDrafts(messageContextMenu.messageIDs)}
+            >
+              Delete draft
+            </button>
+          ) : (
+            <>
+              <button
+                style={contextMenuActionStyle}
+                disabled={mailboxActionBusy || !mailMutationAvailable}
+                onClick={() => {
+                  if (!mailMutationAvailable) return;
+                  if (isArchiveMailbox) onUnarchiveMessages(messageContextMenu.messageIDs);
+                  else onArchiveMessages(messageContextMenu.messageIDs);
+                }}
+              >
+                {isArchiveMailbox ? "Unarchive" : "Archive"}
+              </button>
+              <button
+                style={{ ...contextMenuActionStyle, color: "#334155" }}
+                disabled={busy === "delete" || !mailMutationAvailable}
+                onClick={() => onRequestDeleteMessages(messageContextMenu.messageIDs)}
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       )}
       {deleteConfirmation && (

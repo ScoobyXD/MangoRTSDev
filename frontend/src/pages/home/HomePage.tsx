@@ -75,7 +75,7 @@ import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
-import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
+import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
@@ -2452,6 +2452,20 @@ export function HomePage({
     setMessageContextMenu(null);
     setDeleteConfirmation({ messageIDs: ids });
   }, [canMutateCurrentMailView]);
+  const deleteDraftMessages = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setError("");
+    setMailDrafts(deleteHomeMailDrafts(companyID, currentUserID, ids));
+    removeMessagesFromVisibleMailList(ids);
+    if (compose.open && compose.draftID.trim() && ids.includes(compose.draftID.trim())) {
+      setCompose(emptyCompose);
+    }
+    setSelectedMessageIDs(new Set());
+    setSelectionAnchorMessageID("");
+    setMessageContextMenu(null);
+    setNotice(ids.length === 1 ? "Draft deleted." : `${ids.length} drafts deleted.`);
+  }, [companyID, compose.draftID, compose.open, currentUserID, removeMessagesFromVisibleMailList]);
   const requestDeleteSelection = useCallback(() => {
     requestDeleteMessages(getSelectedMessageIDsForAction());
   }, [getSelectedMessageIDsForAction, requestDeleteMessages]);
@@ -3807,6 +3821,7 @@ export function HomePage({
           <HomeMailOverlays
             busy={busy}
             isArchiveMailbox={isArchiveMailbox}
+            isDraftMailbox={mailbox === "drafts"}
             mailboxActionBusy={mailboxActionBusy}
             mailMutationAvailable={canMutateCurrentMailView}
             messageContextMenu={messageContextMenu}
@@ -3818,6 +3833,7 @@ export function HomePage({
               setDeleteConfirmation(null);
               void deleteMessages(ids);
             }}
+            onRequestDeleteDrafts={deleteDraftMessages}
             onRequestDeleteMessages={requestDeleteMessages}
             onUnarchiveMessages={(ids) => { void unarchiveMessages(ids); }}
           />
