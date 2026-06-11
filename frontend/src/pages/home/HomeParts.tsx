@@ -5,7 +5,7 @@ import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
-import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CommunicationsSharedInboxRaciSubjectType, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import { parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRaciRole, type CommunicationsSharedInboxRaciSubjectType, type CompanyUser, type EmailAddress, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
@@ -4678,7 +4678,7 @@ type ComposeRecipientField = "to" | "cc";
 const recipientSuggestionsStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  marginTop: -4,
+  marginTop: 4,
   marginBottom: 2,
   padding: 6,
   border: "1px solid rgba(148, 163, 184, 0.24)",
@@ -4695,6 +4695,91 @@ const recipientSuggestionButtonStyle: React.CSSProperties = {
   justifyItems: "start",
   textAlign: "left",
   boxShadow: "none",
+};
+
+const recipientFieldShellStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+const recipientFieldStyle: React.CSSProperties = {
+  ...mailPanelInputStyle,
+  minHeight: 40,
+  height: "auto",
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  flexWrap: "wrap",
+  padding: "4px 8px",
+  cursor: "text",
+};
+
+const recipientFieldLabelStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  color: "#475569",
+  fontSize: 13,
+  fontWeight: 650,
+  padding: "0 2px",
+};
+
+const recipientChipStyle: React.CSSProperties = {
+  maxWidth: "min(100%, 360px)",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  minHeight: 28,
+  border: "1px solid rgba(100, 116, 139, 0.42)",
+  borderRadius: 999,
+  background: "rgba(255, 255, 255, 0.78)",
+  color: "#111827",
+  fontSize: 13,
+  fontWeight: 650,
+  padding: "2px 8px 2px 3px",
+};
+
+const recipientChipAvatarStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  borderRadius: 999,
+  display: "inline-grid",
+  placeItems: "center",
+  background: "#0f766e",
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 800,
+  flexShrink: 0,
+};
+
+const recipientChipTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const recipientChipRemoveStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#475569",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 18,
+  lineHeight: 1,
+  padding: 0,
+};
+
+const recipientDraftInputStyle: React.CSSProperties = {
+  minWidth: 120,
+  flex: "1 1 160px",
+  border: "none",
+  outline: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  fontSize: 13,
+  minHeight: 28,
+  padding: 0,
 };
 
 const composeMessageEditorShellStyle: React.CSSProperties = {
@@ -4735,8 +4820,7 @@ const composeMessageLinkStyle: React.CSSProperties = {
 };
 
 function recipientQuery(value: string): string {
-  const parts = value.split(/[;,]/);
-  return (parts[parts.length - 1] ?? "").trim().toLowerCase();
+  return value.trim().toLowerCase();
 }
 
 function renderComposePreviewLine(value: string, lineKey: string): React.ReactNode[] {
@@ -4775,26 +4859,53 @@ function renderComposeMessagePreview(value: string): React.ReactNode {
   ));
 }
 
-function recipientValue(user: CompanyUser): string {
-  const email = user.email?.trim() ?? "";
-  const displayName = user.display_name?.trim() ?? "";
-  return displayName ? `${displayName} <${email}>` : email;
+function companyUserRecipient(user: CompanyUser): EmailAddress | null {
+  const email = user.email?.trim().toLowerCase() ?? "";
+  if (!email) return null;
+  const name = user.display_name?.trim() ?? "";
+  return name ? { name, email } : { email };
 }
 
-function replaceRecipientTail(value: string, recipient: string): string {
-  const parts = value.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
-  if (value.trim() && !/[;,]\s*$/.test(value) && parts.length > 0) parts.pop();
-  parts.push(recipient);
-  return parts.join(", ");
+function serializeRecipient(address: EmailAddress): string {
+  const email = address.email.trim();
+  const name = address.name?.trim() ?? "";
+  return name ? `${name} <${email}>` : email;
 }
 
-function matchingCompanyUsers(users: CompanyUser[], value: string): CompanyUser[] {
+function serializeRecipients(addresses: EmailAddress[]): string {
+  return addresses.map(serializeRecipient).join(", ");
+}
+
+function recipientChipLabel(address: EmailAddress): string {
+  const email = address.email.trim();
+  const name = address.name?.trim() ?? "";
+  return name ? `${name} (${email})` : email;
+}
+
+function recipientChipInitial(address: EmailAddress): string {
+  const label = (address.name?.trim() || address.email.trim()).trim();
+  return (label[0] ?? "?").toUpperCase();
+}
+
+function recipientKey(address: EmailAddress): string {
+  return address.email.trim().toLowerCase();
+}
+
+function appendRecipient(addresses: EmailAddress[], address: EmailAddress): EmailAddress[] {
+  const key = recipientKey(address);
+  if (!key) return addresses;
+  return addresses.some((item) => recipientKey(item) === key) ? addresses : [...addresses, address];
+}
+
+function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecipients: EmailAddress[]): CompanyUser[] {
   const query = recipientQuery(value);
+  const existingEmails = new Set(existingRecipients.map(recipientKey));
   if (query.length < 1) return [];
   return users
     .filter((user) => {
       const email = user.email?.trim() ?? "";
       if (!email) return false;
+      if (existingEmails.has(email.toLowerCase())) return false;
       const displayName = user.display_name?.trim() ?? "";
       return email.toLowerCase().includes(query) || displayName.toLowerCase().includes(query);
     })
@@ -4816,39 +4927,123 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const bodyPreviewRef = React.useRef<HTMLDivElement | null>(null);
+  const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null });
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
+  const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "" });
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
-  const updateRecipientField = (field: ComposeRecipientField, value: string) => {
+  const focusRecipientInput = (field: ComposeRecipientField) => {
+    window.requestAnimationFrame(() => {
+      const input = recipientInputRefs.current[field];
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
+  const updateRecipientField = (field: ComposeRecipientField, recipients: EmailAddress[]) => {
+    const value = serializeRecipients(recipients);
     if (field === "to") update({ to: value });
     else update({ cc: value });
   };
+  const addRecipient = (field: ComposeRecipientField, recipient: EmailAddress) => {
+    updateRecipientField(field, appendRecipient(parseEmailAddressList(compose[field]), recipient));
+    setRecipientDrafts((current) => ({ ...current, [field]: "" }));
+    setActiveRecipientField(field);
+    focusRecipientInput(field);
+  };
   const pickRecipient = (field: ComposeRecipientField, user: CompanyUser) => {
-    updateRecipientField(field, replaceRecipientTail(compose[field], recipientValue(user)));
-    setActiveRecipientField("");
+    const recipient = companyUserRecipient(user);
+    if (!recipient) return;
+    addRecipient(field, recipient);
+  };
+  const commitRecipientDraft = (field: ComposeRecipientField, suggestions: CompanyUser[], options?: { forceRaw?: boolean }) => {
+    const draft = recipientDrafts[field].trim();
+    if (suggestions.length > 0 && !options?.forceRaw) {
+      pickRecipient(field, suggestions[0]);
+      return true;
+    }
+    const parsed = parseEmailAddressList(draft);
+    if (parsed.length === 0) return false;
+    updateRecipientField(field, parsed.reduce(appendRecipient, parseEmailAddressList(compose[field])));
+    setRecipientDrafts((current) => ({ ...current, [field]: "" }));
+    setActiveRecipientField(field);
+    focusRecipientInput(field);
+    return true;
+  };
+  const removeRecipient = (field: ComposeRecipientField, address: EmailAddress) => {
+    updateRecipientField(field, parseEmailAddressList(compose[field]).filter((item) => recipientKey(item) !== recipientKey(address)));
+    setActiveRecipientField(field);
+    focusRecipientInput(field);
   };
   const renderRecipientInput = (field: ComposeRecipientField, placeholder: string) => {
-    const value = compose[field];
-    const suggestions = activeRecipientField === field ? matchingCompanyUsers(companyUsers, value) : [];
+    const recipients = parseEmailAddressList(compose[field]);
+    const draft = recipientDrafts[field];
+    const suggestions = activeRecipientField === field ? matchingCompanyUsers(companyUsers, draft, recipients) : [];
     return (
-      <div style={{ display: "grid", gap: 6 }}>
-        <input
-          style={mailPanelInputStyle}
-          value={value}
-          onFocus={() => setActiveRecipientField(field)}
-          onBlur={() => {
-            window.setTimeout(() => {
-              setActiveRecipientField((current) => current === field ? "" : current);
-            }, 120);
+      <div style={recipientFieldShellStyle}>
+        <div
+          style={recipientFieldStyle}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) event.preventDefault();
+            focusRecipientInput(field);
           }}
-          onChange={(event) => {
-            setActiveRecipientField(field);
-            updateRecipientField(field, event.target.value);
-          }}
-          placeholder={placeholder}
-        />
+        >
+          <span style={recipientFieldLabelStyle}>{placeholder}</span>
+          {recipients.map((recipient) => (
+            <span key={recipientKey(recipient)} style={recipientChipStyle} title={serializeRecipient(recipient)}>
+              <span style={recipientChipAvatarStyle}>{recipientChipInitial(recipient)}</span>
+              <span style={recipientChipTextStyle}>{recipientChipLabel(recipient)}</span>
+              <button
+                type="button"
+                style={recipientChipRemoveStyle}
+                aria-label={`Remove ${recipientChipLabel(recipient)}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => removeRecipient(field, recipient)}
+              >
+                x
+              </button>
+            </span>
+          ))}
+          <input
+            ref={(element) => { recipientInputRefs.current[field] = element; }}
+            style={recipientDraftInputStyle}
+            value={draft}
+            onFocus={() => setActiveRecipientField(field)}
+            onBlur={() => {
+              window.setTimeout(() => {
+                setActiveRecipientField((current) => current === field ? "" : current);
+              }, 120);
+            }}
+            onChange={(event) => {
+              setActiveRecipientField(field);
+              setRecipientDrafts((current) => ({ ...current, [field]: event.target.value }));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Tab") {
+                if (!commitRecipientDraft(field, suggestions)) return;
+                event.preventDefault();
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitRecipientDraft(field, suggestions);
+                return;
+              }
+              if (event.key === "," || event.key === ";") {
+                event.preventDefault();
+                commitRecipientDraft(field, suggestions, { forceRaw: parseEmailAddressList(draft).length > 0 });
+                return;
+              }
+              if (event.key === "Backspace" && draft.length === 0 && recipients.length > 0) {
+                event.preventDefault();
+                updateRecipientField(field, recipients.slice(0, -1));
+                focusRecipientInput(field);
+              }
+            }}
+          />
+        </div>
         {suggestions.length > 0 && (
           <div style={recipientSuggestionsStyle}>
             {suggestions.map((user) => (
