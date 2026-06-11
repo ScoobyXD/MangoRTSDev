@@ -669,7 +669,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
     cc: [],
     bcc: [{ email: "teammate@example.test" }],
     subject: "Subject",
-    body: "Body",
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">Body</div>',
     attachments: [],
     reply_to_message_id: "message-1",
   }]);
@@ -693,7 +693,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
     cc: [],
     bcc: [],
     subject: "Shared",
-    body: "Reply",
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">Reply</div>',
     attachments: [],
     reply_to_message_id: undefined,
     company_id: "company-1",
