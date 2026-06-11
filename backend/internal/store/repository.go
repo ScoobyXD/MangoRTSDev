@@ -98,6 +98,8 @@ type CommunicationsRepository interface {
 	ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error)
 	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
 	DeleteCommunicationsTriageItem(userID, messageID string) error
+	UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
+	ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error)
 	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
@@ -1052,6 +1054,15 @@ type CommunicationsTriageConversionTarget struct {
 	LogicGateID string `json:"logic_gate_id,omitempty"`
 	NodeID      string `json:"node_id,omitempty"`
 	Header      string `json:"header,omitempty"`
+}
+
+type CommunicationsMessageReadStatusInput struct {
+	UserID          string
+	MessageID       string
+	ThreadID        string
+	Status          string
+	SignalTimestamp time.Time
+	SignalCount     int
 }
 
 type CommunicationsEmailConversionProvenance struct {

@@ -137,6 +137,88 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 	return nil
 }
 
+func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+	userID := strings.TrimSpace(input.UserID)
+	messageID := strings.TrimSpace(input.MessageID)
+	threadID := strings.TrimSpace(input.ThreadID)
+	status := normalizeCommunicationsMessageReadStatus(input.Status)
+	if userID == "" || messageID == "" || status == "" {
+		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
+	}
+
+	signalAt := input.SignalTimestamp.UTC()
+	if signalAt.IsZero() {
+		signalAt = time.Now().UTC()
+	}
+	signalCount := input.SignalCount
+	if signalCount < 0 {
+		signalCount = 0
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.userIDExistsLocked(userID) {
+		return domain.CommunicationsMessageReadStatus{}, ErrNotFound
+	}
+
+	now := time.Now().UTC()
+	key := communicationsMessageReadStatusKey(userID, messageID)
+	next := r.messageReadStatuses[key]
+	if next.CreatedTimestamp.IsZero() {
+		next.CreatedTimestamp = now
+		next.FirstSignalTimestamp = signalAt
+		next.SignalCount = 1
+	}
+	if next.FirstSignalTimestamp.IsZero() || signalAt.Before(next.FirstSignalTimestamp) {
+		next.FirstSignalTimestamp = signalAt
+	}
+	if next.LastSignalTimestamp.IsZero() || signalAt.After(next.LastSignalTimestamp) {
+		next.LastSignalTimestamp = signalAt
+	}
+	if signalCount > 0 {
+		if signalCount > next.SignalCount {
+			next.SignalCount = signalCount
+		}
+	} else {
+		next.SignalCount++
+	}
+	if next.SignalCount <= 0 {
+		next.SignalCount = 1
+	}
+	if threadID != "" {
+		next.ThreadID = threadID
+	}
+	next.UserID = userID
+	next.MessageID = messageID
+	next.Status = strongestCommunicationsMessageReadStatus(next.Status, status)
+	next.UpdatedTimestamp = now
+	r.messageReadStatuses[key] = next
+	return next, nil
+}
+
+func (r *MemoryRepo) ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrInvalid
+	}
+	ids := normalizeUniqueStrings(messageIDs, 0)
+	if len(ids) == 0 {
+		return []domain.CommunicationsMessageReadStatus{}, nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	statuses := make([]domain.CommunicationsMessageReadStatus, 0, len(ids))
+	for _, messageID := range ids {
+		if status, ok := r.messageReadStatuses[communicationsMessageReadStatusKey(userID, messageID)]; ok {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses, nil
+}
+
 func (r *MemoryRepo) userIDExistsLocked(userID string) bool {
 	for _, user := range r.users {
 		if user.UserID == userID {
@@ -155,6 +237,28 @@ func normalizeEmailProvider(provider string) string {
 	default:
 		return ""
 	}
+}
+
+func communicationsMessageReadStatusKey(userID, messageID string) string {
+	return strings.TrimSpace(userID) + ":" + strings.TrimSpace(messageID)
+}
+
+func normalizeCommunicationsMessageReadStatus(status string) string {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "", "likely_read", "opened", "open":
+		return "likely_read"
+	case "read":
+		return "read"
+	default:
+		return ""
+	}
+}
+
+func strongestCommunicationsMessageReadStatus(current, next string) string {
+	if normalizeCommunicationsMessageReadStatus(current) == "read" || normalizeCommunicationsMessageReadStatus(next) == "read" {
+		return "read"
+	}
+	return "likely_read"
 }
 
 func normalizeEmailConnectionStatus(status string) string {

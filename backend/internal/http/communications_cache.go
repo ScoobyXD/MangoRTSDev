@@ -690,6 +690,10 @@ func cloneNylasMessage(message NylasMessage) NylasMessage {
 	message.Folders = cloneStringSlice(message.Folders)
 	message.FolderIDs = cloneStringSlice(message.FolderIDs)
 	message.LogicGateIDs = cloneStringSlice(message.LogicGateIDs)
+	if message.ReadStatus != nil {
+		status := *message.ReadStatus
+		message.ReadStatus = &status
+	}
 	return message
 }
 

@@ -4,7 +4,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-e
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, hasTriageMessageDrag, logicGateHasRaciRole, logicGateTitle, mailboxLabel, nodeTitle, readTriageMessageIDs } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, cleanIDList, formatAddressList, formatMessageDate, hasTriageMessageDrag, logicGateHasRaciRole, logicGateTitle, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, nodeTitle, readTriageMessageIDs } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
   accountEmailStyle,
@@ -39,10 +39,12 @@ import {
   mailViewerPanelStyle,
   messageContextMenuStyle,
   messageListStyle,
+  messageReadStatusStyle,
   messageRowStyle,
   messageNodeButtonStyle,
   messageRowTopStyle,
   messageStarButtonStyle,
+  messageTimestampStatusRowStyle,
   panelTitleStyle,
   searchRowStyle,
   selectedCountStyle,
@@ -135,6 +137,13 @@ function SendPointerIcon() {
       <path d="M8.2 8H3.65" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
     </svg>
   );
+}
+
+function MessageReadStatusText({ message }: { message: EmailMessage }) {
+  const label = messageReadStatusLabel(message.read_status);
+  if (!label) return null;
+  const title = messageReadStatusTitle(message.read_status) || label;
+  return <span style={messageReadStatusStyle} title={title}>{label}</span>;
 }
 
 function isDraftMessage(message: EmailMessage): boolean {
@@ -1535,6 +1544,7 @@ export function HomeMailWorkspace({
               const nodeBusy = busy === "triage-convert" || busy === "triage-attach";
               const nodeButtonTitle = nodeLinked ? "Attach email to node" : "Create or attach node from email";
               const rowAddressLabel = draftRow ? (formatAddressList(message.to) || "Draft") : (formatAddressList(message.from) || "Unknown sender");
+              const showReadStatus = mailbox === "sent" && !draftRow;
               return (
                 <div
                   key={message.id}
@@ -1585,7 +1595,10 @@ export function HomeMailWorkspace({
                         <span style={snippetStyle}>{message.snippet || ""}</span>
                       </span>
                       <span style={triageMessageMetaStyle}>
-                        <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                        <span style={messageTimestampStatusRowStyle}>
+                          {showReadStatus && <MessageReadStatusText message={message} />}
+                          <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                        </span>
                         {!draftRow && (
                           <span style={triageMessageActionRowStyle}>
                             <button
@@ -1625,7 +1638,10 @@ export function HomeMailWorkspace({
                     <>
                       <span style={messageRowTopStyle}>
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
-                        <span>{formatMessageDate(message.date)}</span>
+                        <span style={messageTimestampStatusRowStyle}>
+                          {showReadStatus && <MessageReadStatusText message={message} />}
+                          <span>{formatMessageDate(message.date)}</span>
+                        </span>
                       </span>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
                       <span style={snippetStyle}>{message.snippet || ""}</span>

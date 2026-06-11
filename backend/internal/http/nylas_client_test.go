@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,5 +69,39 @@ func TestNylasRESTClientUpdateMessageRequestsListShapedResponse(t *testing.T) {
 	}
 	if gotSelect != nylasMessageListSelect {
 		t.Fatalf("select = %q, want %q", gotSelect, nylasMessageListSelect)
+	}
+}
+
+func TestNylasRESTClientSendMessageIncludesTrackingOptions(t *testing.T) {
+	t.Parallel()
+
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/grants/grant-1/messages/send" {
+			t.Fatalf("path = %q, want /v3/grants/grant-1/messages/send", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"id":"sent-1","subject":"Hello","unread":false,"starred":false}}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	if _, err := client.SendMessage(context.Background(), "grant-1", NylasSendMessageRequest{
+		To:              []NylasEmailAddress{{Email: "friend@example.com"}},
+		Subject:         "Hello",
+		Body:            "<p>Hello</p>",
+		TrackingOptions: &NylasTrackingOptions{Opens: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tracking, ok := gotBody["tracking_options"].(map[string]any)
+	if !ok || tracking["opens"] != true {
+		t.Fatalf("tracking_options = %+v, want opens true", gotBody["tracking_options"])
 	}
 }

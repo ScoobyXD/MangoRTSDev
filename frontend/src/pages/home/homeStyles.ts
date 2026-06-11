@@ -1998,6 +1998,22 @@ export const triageDateStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+export const messageReadStatusStyle: React.CSSProperties = {
+  color: "#15803d",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+export const messageTimestampStatusRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 6,
+  whiteSpace: "nowrap",
+};
+
 export const triageMessageMetaStyle: React.CSSProperties = {
   display: "grid",
   justifyItems: "end",
