@@ -3,6 +3,7 @@ package store
 import "strings"
 
 const CompanyExplorerDeleteBatchMaxItems = CompanyExplorerFolderItemBatchMaxItems
+const RecycleBinBatchMaxItems = CompanyExplorerFolderItemBatchMaxItems
 
 func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTargetInput) []CompanyExplorerDeleteTargetInput {
 	out := make([]CompanyExplorerDeleteTargetInput, 0, len(targets))
@@ -47,4 +48,21 @@ func appendCompanyExplorerDeletedTarget(targets []CompanyExplorerDeletedTarget, 
 		ID:         id,
 		FolderKind: folderKind,
 	})
+}
+
+func normalizeRecycleBinItemIDs(itemIDs []string) []string {
+	out := make([]string, 0, len(itemIDs))
+	seen := map[string]bool{}
+	for _, itemID := range itemIDs {
+		itemID = strings.TrimSpace(itemID)
+		if itemID == "" || seen[itemID] {
+			continue
+		}
+		seen[itemID] = true
+		out = append(out, itemID)
+		if len(out) >= RecycleBinBatchMaxItems {
+			break
+		}
+	}
+	return out
 }

@@ -38,6 +38,7 @@ type Repository interface {
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
+	RecycleBinRepository
 	MapLayoutRepository
 	WorkspaceEntityCommandRepository
 	KanbanRepository
@@ -1027,6 +1028,17 @@ type CompanyExplorerRelationshipDeleteResult struct {
 	ItemType        string   `json:"item_type"`
 	ItemID          string   `json:"item_id"`
 	RelationshipIDs []string `json:"relationship_ids"`
+}
+
+type RecycleBinRestoreResult struct {
+	Items   []domain.RecycleBinItem        `json:"items"`
+	Targets []CompanyExplorerDeletedTarget `json:"targets"`
+}
+
+type RecycleBinRepository interface {
+	ListRecycleBinItems(companyID string) ([]domain.RecycleBinItem, error)
+	RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error)
+	PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error
 }
 
 const (

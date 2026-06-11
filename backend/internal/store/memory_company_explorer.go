@@ -691,6 +691,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	recycleSnapshot := r.snapshotRecycleStateLocked()
 
 	folderIDs := map[string]bool{}
 	folderKinds := map[string]string{}
@@ -813,6 +814,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
+	r.createRecycleBinItemsLocked(companyID, result.Targets, recycleSnapshot)
 
 	for folderID := range folderIDs {
 		if folderKinds[folderID] == "communications" {

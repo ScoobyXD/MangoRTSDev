@@ -265,14 +265,13 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 		if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 			return
 		}
-		actor, _ := authenticatedActor(r)
-		result, err := s.repo.DeleteProject(companyID, projectID, actor.User.UserID)
+		result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "project", ID: projectID}})
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_delete_project")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "project_deleted", map[string]any{"project_id": projectID})
-		writeJSON(w, http.StatusOK, result)
+		s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+		writeJSON(w, http.StatusOK, map[string]any{"deleted_project_id": projectID, "targets": result.Targets})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}

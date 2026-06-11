@@ -63,6 +63,7 @@ type MemoryRepo struct {
 	eventRowAppendErr             error
 	notificationCheckpoints       map[string]NotificationDomainEventCheckpoint
 	notifications                 map[string]domain.Notification
+	recycleBin                    map[string]memoryRecycleBinItem
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -119,6 +120,7 @@ func NewMemoryRepo() *MemoryRepo {
 		projectionSequences:           map[string]int64{},
 		notificationCheckpoints:       map[string]NotificationDomainEventCheckpoint{},
 		notifications:                 map[string]domain.Notification{},
+		recycleBin:                    map[string]memoryRecycleBinItem{},
 	}
 }
 
