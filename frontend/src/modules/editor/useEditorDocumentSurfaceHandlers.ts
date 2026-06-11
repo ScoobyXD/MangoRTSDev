@@ -1117,6 +1117,12 @@ function insertEditorTable(
   const undoBefore = snapshotEditorDocumentRoot(root);
   removeEditorTerminalBreaks(root);
   const table = createEditorTableElement(root.ownerDocument);
+  const rootMetrics = getEditorRootContentMetrics(root);
+  const defaultTableWidthPercent = Math.max(
+    EDITOR_TABLE_DEFAULT_INSERT_MIN_WIDTH_PERCENT,
+    Math.min(EDITOR_TABLE_DEFAULT_INSERT_MAX_WIDTH_PERCENT, (EDITOR_TABLE_DEFAULT_INSERT_WIDTH_PX / Math.max(1, rootMetrics.width)) * 100),
+  );
+  applyEditorTableLayout(table, defaultTableWidthPercent, 0);
   const beforeTable = root.ownerDocument.createElement("br");
   const afterTable = root.ownerDocument.createElement("br");
   const fragment = root.ownerDocument.createDocumentFragment();
@@ -1482,6 +1488,9 @@ const EDITOR_TABLE_MIN_COLUMN_WIDTH_PX = 56;
 const EDITOR_TABLE_MIN_WIDTH_PX = 160;
 const EDITOR_TABLE_EXTEND_COLUMN_STEP_PX = 74;
 const EDITOR_TABLE_EXTEND_ROW_STEP_PX = 32;
+const EDITOR_TABLE_DEFAULT_INSERT_WIDTH_PX = 560;
+const EDITOR_TABLE_DEFAULT_INSERT_MIN_WIDTH_PERCENT = 36;
+const EDITOR_TABLE_DEFAULT_INSERT_MAX_WIDTH_PERCENT = 68;
 
 type EditorTablePointerInteraction =
   | { kind: "resize-column"; table: HTMLTableElement; dividerColumnIndex: number }
@@ -1505,6 +1514,34 @@ function getEditorTableCellNearPoint(table: HTMLTableElement, clientX: number, c
   return null;
 }
 
+function getEditorTableDividerColumnNearPoint(table: HTMLTableElement, clientX: number, clientY: number): number | null {
+  const tableRect = table.getBoundingClientRect();
+  if (
+    clientY < tableRect.top - EDITOR_TABLE_POINTER_EDGE_PX
+    || clientY > tableRect.bottom + EDITOR_TABLE_POINTER_EDGE_PX
+  ) {
+    return null;
+  }
+
+  let closestColumnIndex: number | null = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  const columns = getEditorTableColumnCount(table);
+  for (const row of getEditorTableRows(table)) {
+    getEditorTableCells(row).forEach((cell, columnIndex) => {
+      if (columnIndex >= columns - 1) return;
+      const cellRect = cell.getBoundingClientRect();
+      const distance = Math.abs(clientX - cellRect.right);
+      if (distance > EDITOR_TABLE_POINTER_EDGE_PX) return;
+      if (distance < closestDistance) {
+        closestColumnIndex = columnIndex;
+        closestDistance = distance;
+      }
+    });
+  }
+
+  return closestColumnIndex;
+}
+
 function getEditorTablePointerInteraction(root: HTMLElement, target: EventTarget | null, clientX: number, clientY: number): EditorTablePointerInteraction | null {
   const table = getClosestEditorTable(root, target);
   if (!table) return null;
@@ -1520,6 +1557,8 @@ function getEditorTablePointerInteraction(root: HTMLElement, target: EventTarget
   if (clientX >= tableRect.right - EDITOR_TABLE_EXTEND_HANDLE_PX && clientY >= tableRect.bottom - EDITOR_TABLE_EXTEND_HANDLE_PX) {
     return { kind: "extend", table };
   }
+  const dividerColumnIndex = getEditorTableDividerColumnNearPoint(table, clientX, clientY);
+  if (dividerColumnIndex !== null) return { kind: "resize-column", table, dividerColumnIndex };
   if (Math.abs(clientX - tableRect.left) <= EDITOR_TABLE_POINTER_EDGE_PX) return { kind: "resize-table", table, edge: "left" };
   if (Math.abs(clientX - tableRect.right) <= EDITOR_TABLE_POINTER_EDGE_PX) return { kind: "resize-table", table, edge: "right" };
 

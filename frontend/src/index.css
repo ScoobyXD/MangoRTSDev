@@ -573,7 +573,6 @@ button, input, textarea, select {
 .editor-document-scroll table[data-mango-editor-table="true"] th[data-mango-editor-table-header="column"],
 .editor-document-scroll table[data-mango-editor-table="true"] th[data-mango-editor-table-header="row"],
 .editor-document-scroll table[data-mango-editor-table="true"] th[data-mango-editor-table-header="corner"] {
-  cursor: pointer;
   user-select: none;
 }
 
