@@ -1123,10 +1123,9 @@ function insertEditorTable(
     Math.min(EDITOR_TABLE_DEFAULT_INSERT_MAX_WIDTH_PERCENT, (EDITOR_TABLE_DEFAULT_INSERT_WIDTH_PX / Math.max(1, rootMetrics.width)) * 100),
   );
   applyEditorTableLayout(table, defaultTableWidthPercent, 0);
-  const beforeTable = root.ownerDocument.createElement("br");
   const afterTable = root.ownerDocument.createElement("br");
   const fragment = root.ownerDocument.createDocumentFragment();
-  fragment.append(beforeTable, table, afterTable);
+  fragment.append(table, afterTable);
   range.deleteContents();
   range.insertNode(fragment);
   const firstCell = table.querySelector(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"]`);
@@ -1676,7 +1675,7 @@ function startEditorTablePointerInteraction(
       return;
     }
 
-    const desiredColumns = Math.min(EDITOR_TABLE_MAX_COLUMNS, start.columns + Math.max(0, Math.floor((start.x - event.clientX) / EDITOR_TABLE_EXTEND_COLUMN_STEP_PX)));
+    const desiredColumns = Math.min(EDITOR_TABLE_MAX_COLUMNS, start.columns + Math.max(0, Math.floor((event.clientX - start.x) / EDITOR_TABLE_EXTEND_COLUMN_STEP_PX)));
     const desiredRows = Math.min(EDITOR_TABLE_MAX_ROWS, start.rows + Math.max(0, Math.floor(dy / EDITOR_TABLE_EXTEND_ROW_STEP_PX)));
     if (ensureEditorTablePreviewSize(table, desiredRows, desiredColumns, start.rows, start.columns)) moved = true;
   };
