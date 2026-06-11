@@ -32,6 +32,16 @@ where company_id=$1::uuid and node_id=$2::uuid`, companyID, resourceID, Resource
 select coalesce(default_access, $3)
 from logic_gates
 where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
+	case EntityTypeProject:
+		err = q.QueryRowContext(ctx, `
+select coalesce(default_access, $3)
+from projects
+where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
+	case EntityTypeCompanyExplorerFolder:
+		err = q.QueryRowContext(ctx, `
+select coalesce(default_access, $3)
+from company_explorer_folders
+where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
 	default:
 		return "", ErrInvalid
 	}
@@ -65,6 +75,16 @@ where company_id=$1::uuid and node_id=$2::uuid`, companyID, resourceID, defaultA
 update logic_gates
 set default_access=$3
 where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, resourceID, defaultAccess)
+	case EntityTypeProject:
+		res, err = tx.ExecContext(ctx, `
+update projects
+set default_access=$3
+where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, defaultAccess)
+	case EntityTypeCompanyExplorerFolder:
+		res, err = tx.ExecContext(ctx, `
+update company_explorer_folders
+set default_access=$3
+where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, defaultAccess)
 	default:
 		return ErrInvalid
 	}
@@ -271,6 +291,13 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 		return err
 	}
 	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, entityType, entityID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_access_grants
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid`, companyID, entityType, entityID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
 	for _, userID := range overrideUserIDs {

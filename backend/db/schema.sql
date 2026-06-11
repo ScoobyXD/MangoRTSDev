@@ -571,7 +571,7 @@ create table if not exists entity_access_permissions (
   subject_id uuid not null,
   permission text not null default 'view',
   created_timestamp timestamptz not null default now(),
-  constraint entity_access_permissions_entity_type_chk check (entity_type in ('node', 'logic_gate', 'project')),
+  constraint entity_access_permissions_entity_type_chk check (entity_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')),
   constraint entity_access_permissions_subject_type_chk check (subject_type in ('user', 'group')),
   constraint entity_access_permissions_permission_chk check (permission = 'view'),
   primary key (company_id, entity_type, entity_id, subject_type, subject_id, permission),
@@ -593,7 +593,7 @@ create table if not exists resource_access_grants (
   principal_id uuid not null,
   access_level text not null default 'view',
   created_timestamp timestamptz not null default now(),
-  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder')),
+  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder')),
   constraint resource_access_grants_principal_type_chk check (principal_type in ('user', 'group')),
   constraint resource_access_grants_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   primary key (company_id, resource_type, resource_id, principal_type, principal_id),
@@ -613,7 +613,7 @@ create table if not exists resource_permissions (
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project')),
+  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')),
   primary key (company_id, resource_type, resource_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
@@ -678,6 +678,13 @@ returns boolean as $$
     where normalized.resource_type='project'
       and project.company_id=p_company_id
       and project.project_id=p_resource_id
+    union all
+    select coalesce(folder.default_access, 'edit')
+    from company_explorer_folders folder, normalized_resource normalized
+    where normalized.resource_type='company_explorer_folder'
+      and folder.company_id=p_company_id
+      and folder.folder_id=p_resource_id
+      and folder.folder_kind <> 'communications'
   ),
   direct_override(exists_override) as (
     select exists (
@@ -761,9 +768,9 @@ returns boolean as $$
   )
   select case
     when requested.required_rank = 0 then false
-    when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'shared_triage_folder') then false
+    when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder') then false
     when (select allowed from role_admin_actor) then true
-    when normalized_resource.resource_type in ('node', 'logic_gate', 'project')
+    when normalized_resource.resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')
       and exists (
         select 1
         from company_memberships membership
@@ -1261,11 +1268,13 @@ create table if not exists company_explorer_folders (
   folder_kind text not null,
   system_key text,
   name text not null,
+  default_access text not null default 'edit',
   account_email text,
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project', 'communications')),
+  constraint company_explorer_folders_default_access_chk check (default_access in ('edit', 'no_access')),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_account_email_chk check (
     account_email is null or (
@@ -1665,6 +1674,7 @@ begin
     'company_explorer_folder_created',
     'company_explorer_folder_updated',
     'company_explorer_folder_deleted',
+    'company_explorer_folder_permissions_updated',
     'communications_shared_inbox_raci_updated',
     'shared_triage_access_updated'
   ]::text[]) then

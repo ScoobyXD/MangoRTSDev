@@ -325,6 +325,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		ParentFolderID:   parent,
 		FolderKind:       folderKind,
 		Name:             name,
+		DefaultAccess:    ResourceDefaultAccessEdit,
 		Position:         nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, folderKind, parentFolderID),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
@@ -377,6 +378,23 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 		return items[i].Position < items[j].Position
 	})
 	return items, nil
+}
+
+func (r *MemoryRepo) GetCompanyExplorerFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	if companyID == "" || folderID == "" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	item, ok := r.folders[key(companyID, folderID)]
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	return r.withSharedInboxRaciLocked(item), nil
 }
 
 func (r *MemoryRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
@@ -821,6 +839,10 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
 				return CompanyExplorerDeleteResult{}, err
 			}
+		} else {
+			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
 		}
 	}
 	for logicGateID := range logicGateIDs {
@@ -851,7 +873,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		delete(r.sharedInboxRaci, sharedInboxRaciKey(companyID, folderID))
 	}
 	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedTriageFolder && folderIDs[permission.EntityID] {
+		if permission.CompanyID == companyID &&
+			(permission.EntityType == EntityTypeSharedTriageFolder || permission.EntityType == EntityTypeCompanyExplorerFolder) &&
+			folderIDs[permission.EntityID] {
 			delete(r.entityPermissions, permissionKey)
 		}
 	}

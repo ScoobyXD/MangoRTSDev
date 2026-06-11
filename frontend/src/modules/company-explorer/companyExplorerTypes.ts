@@ -41,6 +41,7 @@ export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number }
 export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string } | { kind: "project"; id: string };
 export type ExplorerPinTarget = { kind: "node" | "logic_gate"; id: string; label: string };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
+export type CompanyExplorerFolderPermissionsTarget = { folderID: string; label: string };
 export type CompanyExplorerFindRequestDetail = {
   companyID?: string;
   sourceFrameID?: string;
@@ -59,6 +60,7 @@ export type CompanyExplorerContextMenuState = {
   findTarget: ExplorerFindTarget | null;
   pinTarget: ExplorerPinTarget | null;
   shareTarget: CompanyExplorerShareTarget | null;
+  permissionsTarget: CompanyExplorerFolderPermissionsTarget | null;
   renameTreeID: string;
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;

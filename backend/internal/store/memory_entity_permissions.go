@@ -175,6 +175,14 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			gate := r.logicGates[key(companyID, resource.entityID)]
 			gate.DefaultAccess = ResourceDefaultAccessEdit
 			r.logicGates[key(companyID, resource.entityID)] = gate
+		case EntityTypeProject:
+			project := r.projects[key(companyID, resource.entityID)]
+			project.DefaultAccess = ResourceDefaultAccessEdit
+			r.projects[key(companyID, resource.entityID)] = project
+		case EntityTypeCompanyExplorerFolder:
+			folder := r.folders[key(companyID, resource.entityID)]
+			folder.DefaultAccess = ResourceDefaultAccessEdit
+			r.folders[key(companyID, resource.entityID)] = folder
 		}
 	}
 	for raciKey, assignments := range r.sharedInboxRaci {
@@ -484,12 +492,16 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
+	projectsSnapshot := cloneMemoryMap(r.projects)
+	foldersSnapshot := cloneMemoryMap(r.folders)
 	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	restore := func() {
 		r.entityPermissions = permissionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		r.nodes = nodesSnapshot
 		r.logicGates = logicGatesSnapshot
+		r.projects = projectsSnapshot
+		r.folders = foldersSnapshot
 		r.eventRows = eventRowsSnapshot
 	}
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
@@ -524,6 +536,14 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			gate := r.logicGates[key(companyID, entityID)]
 			gate.DefaultAccess = defaultAccess
 			r.logicGates[key(companyID, entityID)] = gate
+		case EntityTypeProject:
+			project := r.projects[key(companyID, entityID)]
+			project.DefaultAccess = defaultAccess
+			r.projects[key(companyID, entityID)] = project
+		case EntityTypeCompanyExplorerFolder:
+			folder := r.folders[key(companyID, entityID)]
+			folder.DefaultAccess = defaultAccess
+			r.folders[key(companyID, entityID)] = folder
 		}
 	}
 
@@ -700,6 +720,9 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 	case EntityTypeProject:
 		_, ok := r.projects[key(companyID, entityID)]
 		return ok
+	case EntityTypeCompanyExplorerFolder:
+		item, ok := r.folders[key(companyID, entityID)]
+		return ok && item.FolderKind != "communications"
 	case EntityTypeSharedTriageFolder:
 		item, ok := r.folders[key(companyID, entityID)]
 		return ok && item.FolderKind == "communications"

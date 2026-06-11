@@ -699,10 +699,11 @@ const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
 
 const (
-	EntityTypeNode               = "node"
-	EntityTypeLogicGate          = "logic_gate"
-	EntityTypeProject            = "project"
-	EntityTypeSharedTriageFolder = "shared_triage_folder"
+	EntityTypeNode                  = "node"
+	EntityTypeLogicGate             = "logic_gate"
+	EntityTypeProject               = "project"
+	EntityTypeCompanyExplorerFolder = "company_explorer_folder"
+	EntityTypeSharedTriageFolder    = "shared_triage_folder"
 
 	EntityPermissionNoAccess = "no_access"
 	EntityPermissionView     = "view"
@@ -1533,6 +1534,8 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeLogicGate, true
 	case EntityTypeProject:
 		return EntityTypeProject, true
+	case EntityTypeCompanyExplorerFolder, "folder", "company_folder":
+		return EntityTypeCompanyExplorerFolder, true
 	case EntityTypeSharedTriageFolder, "communications_folder", "shared_inbox_folder":
 		return EntityTypeSharedTriageFolder, true
 	default:

@@ -32,6 +32,7 @@ import {
 } from "./companyExplorerDragDrop";
 import {
   type CompanyExplorerContextMenuState,
+  type CompanyExplorerFolderPermissionsTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerFindTarget,
@@ -48,6 +49,7 @@ import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
 import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
+import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
@@ -1302,6 +1304,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
   const [triageDropTreeID, setTriageDropTreeID] = useState("");
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
+  const [folderPermissionsTarget, setFolderPermissionsTarget] = useState<CompanyExplorerFolderPermissionsTarget | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
@@ -1347,6 +1350,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         // The next normal Explorer refresh still goes through the bounded snapshot cache.
       });
   }, [apiBase, companyID]);
+
+  const refreshCompanyExplorerSnapshot = useCallback(async () => {
+    const result = await fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer", force: true });
+    if (result.payload) applyCompanyExplorerSnapshot(result.payload as CompanyExplorerSnapshotPayload);
+  }, [apiBase, applyCompanyExplorerSnapshot, companyID]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3062,6 +3070,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const shareTarget = !protectedRaciRow && row?.kind === "folder" && row.folderID && !row.systemKey
       ? { folderID: row.folderID, label: row.label }
       : null;
+    const permissionsTarget = !protectedRaciRow && row?.kind === "folder" && row.folderID && !row.systemKey
+      ? { folderID: row.folderID, label: row.label }
+      : null;
     const pinTarget: ExplorerPinTarget | null = row?.kind === "node" && row.nodeID
       ? { kind: "node", id: row.nodeID, label: row.label }
       : row?.kind === "logic_gate" && row.logicGateID
@@ -3077,6 +3088,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       findTarget: getExplorerFindTarget(row ?? null),
       pinTarget,
       shareTarget,
+      permissionsTarget,
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -3389,6 +3401,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           setExplorerContextMenu(null);
           openFolderShareDialog(target);
         }}
+        onOpenFolderPermissions={(target) => {
+          setExplorerContextMenu(null);
+          setFolderPermissionsTarget(target);
+        }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);
           cancelRenameOnBlurRef.current = false;
@@ -3411,6 +3427,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           onRemoveShare={(share) => void removeFolderShare(share)}
           onClose={closeFolderShareDialog}
           onRefresh={refreshFolderShares}
+        />
+      )}
+
+      {folderPermissionsTarget && (
+        <EntityPermissionsDialog
+          requestJSON={requestJSON}
+          companyID={companyID}
+          entityType="company_explorer_folder"
+          entityID={folderPermissionsTarget.folderID}
+          title={folderPermissionsTarget.label}
+          onClose={() => setFolderPermissionsTarget(null)}
+          onSaved={() => void refreshCompanyExplorerSnapshot()}
         />
       )}
 
