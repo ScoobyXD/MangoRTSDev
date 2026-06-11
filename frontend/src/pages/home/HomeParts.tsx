@@ -18,7 +18,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailComposeActionsRowStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -4697,57 +4697,82 @@ const recipientSuggestionButtonStyle: React.CSSProperties = {
   boxShadow: "none",
 };
 
-const editableMessageStyle: React.CSSProperties = {
-  ...mailPanelTextareaStyle,
-  minHeight: 280,
-  overflow: "auto",
-  whiteSpace: "pre-wrap",
-  outline: "none",
-  cursor: "text",
+const composeMessageEditorShellStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
 };
 
-function escapeEditableHTML(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+const composeMessagePreviewStyle: React.CSSProperties = {
+  ...mailPanelTextareaStyle,
+  position: "absolute",
+  inset: 0,
+  overflow: "hidden",
+  resize: "none",
+  pointerEvents: "none",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  color: "#1f2937",
+  borderColor: "transparent",
+  boxShadow: "none",
+};
 
-function linkifyEditableLine(value: string): string {
-  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
-  let output = "";
-  let cursor = 0;
-  for (const match of value.matchAll(urlPattern)) {
-    const matchText = match[0] ?? "";
-    const index = match.index ?? 0;
-    if (index > cursor) output += escapeEditableHTML(value.slice(cursor, index));
-    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
-    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
-    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
-    output += `<a href="${escapeEditableHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;">${escapeEditableHTML(cleanURL)}</a>${escapeEditableHTML(trailingPunctuation)}`;
-    cursor = index + matchText.length;
-  }
-  return output + escapeEditableHTML(value.slice(cursor));
-}
+const composeMessageTextareaStyle: React.CSSProperties = {
+  ...mailPanelTextareaStyle,
+  position: "relative",
+  zIndex: 1,
+  background: "transparent",
+  color: "transparent",
+  caretColor: "#0f172a",
+  overflowWrap: "anywhere",
+};
 
-function editableMessageHTML(value: string): string {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map(linkifyEditableLine).join("<br>");
-}
-
-function editableTextFromElement(element: HTMLElement): string {
-  return element.innerText.replace(/\u00a0/g, " ").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
-function placeCaretAtEnd(element: HTMLElement): void {
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
+const composeMessageLinkStyle: React.CSSProperties = {
+  color: "#0369a1",
+  textDecoration: "underline",
+  textDecorationThickness: 1.5,
+  textUnderlineOffset: 2,
+  fontWeight: 650,
+};
 
 function recipientQuery(value: string): string {
   const parts = value.split(/[;,]/);
   return (parts[parts.length - 1] ?? "").trim().toLowerCase();
+}
+
+function renderComposePreviewLine(value: string, lineKey: string): React.ReactNode[] {
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  const output: React.ReactNode[] = [];
+  let cursor = 0;
+  let indexKey = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const matchText = match[0] ?? "";
+    const matchIndex = match.index ?? 0;
+    if (matchIndex > cursor) output.push(value.slice(cursor, matchIndex));
+    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
+    output.push(
+      <span key={`${lineKey}:link:${indexKey}`} style={composeMessageLinkStyle}>
+        {cleanURL}
+      </span>,
+    );
+    if (trailingPunctuation) output.push(trailingPunctuation);
+    cursor = matchIndex + matchText.length;
+    indexKey += 1;
+  }
+  if (cursor < value.length) output.push(value.slice(cursor));
+  return output;
+}
+
+function renderComposeMessagePreview(value: string): React.ReactNode {
+  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized) return <span style={{ color: "#94a3b8" }}>Message</span>;
+  const lines = normalized.split("\n");
+  return lines.map((line, lineIndex) => (
+    <React.Fragment key={`line:${lineIndex}`}>
+      {renderComposePreviewLine(line, `line:${lineIndex}`)}
+      {lineIndex < lines.length - 1 ? "\n" : ""}
+    </React.Fragment>
+  ));
 }
 
 function recipientValue(user: CompanyUser): string {
@@ -4790,31 +4815,12 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   onSaveDraft: () => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const bodyEditorRef = React.useRef<HTMLDivElement | null>(null);
+  const bodyPreviewRef = React.useRef<HTMLDivElement | null>(null);
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
-  React.useEffect(() => {
-    const editor = bodyEditorRef.current;
-    if (!editor) return;
-    if (editor.dataset.rawValue === compose.body) return;
-    editor.innerHTML = editableMessageHTML(compose.body);
-    editor.dataset.rawValue = compose.body;
-  }, [compose.body]);
-  const syncBodyFromEditor = (options?: { relink?: boolean }) => {
-    const editor = bodyEditorRef.current;
-    if (!editor) return;
-    const nextBody = editableTextFromElement(editor);
-    editor.dataset.rawValue = nextBody;
-    update({ body: nextBody });
-    if (options?.relink) {
-      editor.innerHTML = editableMessageHTML(nextBody);
-      editor.dataset.rawValue = nextBody;
-      placeCaretAtEnd(editor);
-    }
-  };
   const updateRecipientField = (field: ComposeRecipientField, value: string) => {
     if (field === "to") update({ to: value });
     else update({ cc: value });
@@ -4918,25 +4924,22 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
       {renderRecipientInput("to", "To")}
       {renderRecipientInput("cc", "Cc")}
       <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
-      <div
-        ref={bodyEditorRef}
-        role="textbox"
-        aria-label="Message"
-        contentEditable
-        suppressContentEditableWarning
-        style={editableMessageStyle}
-        onInput={() => syncBodyFromEditor()}
-        onBlur={() => syncBodyFromEditor({ relink: true })}
-        onKeyUp={(event) => {
-          if (event.key === "Enter") syncBodyFromEditor({ relink: true });
-        }}
-        onPaste={(event) => {
-          event.preventDefault();
-          const text = event.clipboardData.getData("text/plain");
-          document.execCommand("insertText", false, text);
-          window.setTimeout(() => syncBodyFromEditor({ relink: true }), 0);
-        }}
-      />
+      <div style={composeMessageEditorShellStyle}>
+        <div ref={bodyPreviewRef} aria-hidden="true" style={composeMessagePreviewStyle}>
+          {renderComposeMessagePreview(compose.body)}
+        </div>
+        <textarea
+          aria-label="Message"
+          style={composeMessageTextareaStyle}
+          value={compose.body}
+          onChange={(event) => update({ body: event.target.value })}
+          onScroll={(event) => {
+            if (!bodyPreviewRef.current) return;
+            bodyPreviewRef.current.scrollTop = event.currentTarget.scrollTop;
+            bodyPreviewRef.current.scrollLeft = event.currentTarget.scrollLeft;
+          }}
+        />
+      </div>
       <div style={mailComposeAttachmentRowStyle}>
         <input
           ref={fileInputRef}
@@ -4960,6 +4963,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           </span>
         ))}
         {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
+        {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
+        <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
+        <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
       </div>
       {signatureEditorOpen && (
         <div style={mailComposeSignatureBoxStyle}>
@@ -4975,10 +4981,6 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           </div>
         </div>
       )}
-      <div style={mailComposeActionsRowStyle}>
-        <span style={mutedSmallStyle}>{compose.draftID ? "Saved in My Drafts" : ""}</span>
-        <button style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
-      </div>
     </form>
   );
 }

@@ -102,6 +102,13 @@ export function deleteHomeMailDraft(companyID: string, userID: string, draftID: 
   return writeHomeMailDrafts(companyID, userID, drafts);
 }
 
+export function deleteHomeMailDrafts(companyID: string, userID: string, draftIDs: string[]): HomeMailDraft[] {
+  const cleanIDs = new Set(draftIDs.map((draftID) => draftID.trim()).filter(Boolean));
+  if (cleanIDs.size === 0) return readHomeMailDrafts(companyID, userID);
+  const drafts = readHomeMailDrafts(companyID, userID).filter((draft) => !cleanIDs.has(draft.id));
+  return writeHomeMailDrafts(companyID, userID, drafts);
+}
+
 export function composeHasDraftContent(compose: ComposeState, signature: string): boolean {
   const signatureBody = signature.trim();
   const body = compose.body.trim();
