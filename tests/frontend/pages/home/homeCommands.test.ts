@@ -655,6 +655,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
       bcc: " teammate@example.test ",
       subject: " Subject ",
       body: " Body ",
+      attachments: [],
       replyToMessageID: "message-1",
     },
     connectedAccountEmail: "owner@example.test",
@@ -669,6 +670,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
     bcc: [{ email: "teammate@example.test" }],
     subject: "Subject",
     body: "Body",
+    attachments: [],
     reply_to_message_id: "message-1",
   }]);
   await sendHomeMailComposeCommand({
@@ -680,6 +682,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
       bcc: "",
       subject: " Shared ",
       body: " Reply ",
+      attachments: [],
       replyToMessageID: "",
     },
     connectedAccountEmail: "support@example.test",
@@ -691,12 +694,13 @@ test("Home compose command validates and normalizes send payloads", async () => 
     bcc: [],
     subject: "Shared",
     body: "Reply",
+    attachments: [],
     reply_to_message_id: undefined,
     company_id: "company-1",
     shared_inbox_id: "shared-1",
   });
   await assert.rejects(
-    () => sendHomeMailComposeCommand({ compose: { to: "", cc: "", bcc: "", subject: "", body: "Body", replyToMessageID: "" }, sendEmail }),
+    () => sendHomeMailComposeCommand({ compose: { to: "", cc: "", bcc: "", subject: "", body: "Body", attachments: [], replyToMessageID: "" }, sendEmail }),
     /Add at least one recipient\./,
   );
 });
