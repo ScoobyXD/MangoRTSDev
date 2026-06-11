@@ -1613,6 +1613,30 @@ function ensureEditorTablePreviewSize(table: HTMLTableElement, rows: number, col
   return changed;
 }
 
+function applyEditorTableExtendedColumnWidths(
+  table: HTMLTableElement,
+  startColumnWidths: number[],
+  startWidthPercent: number,
+  nextWidthPercent: number,
+  rootWidth: number,
+  columns: number,
+) {
+  if (columns <= startColumnWidths.length) {
+    applyEditorTableColumnWidths(table, startColumnWidths.slice(0, columns));
+    return;
+  }
+
+  const startTableWidthPx = Math.max(1, (startWidthPercent / 100) * rootWidth);
+  const nextTableWidthPx = Math.max(startTableWidthPx, (nextWidthPercent / 100) * rootWidth);
+  const addedColumns = columns - startColumnWidths.length;
+  const extraWidthPx = Math.max(0, nextTableWidthPx - startTableWidthPx);
+  const addedColumnWidthPx = Math.max(EDITOR_TABLE_MIN_COLUMN_WIDTH_PX, extraWidthPx / Math.max(1, addedColumns));
+  const pixelWidths = startColumnWidths.map((width) => (width / 100) * startTableWidthPx);
+  while (pixelWidths.length < columns) pixelWidths.push(addedColumnWidthPx);
+  const totalWidthPx = pixelWidths.reduce((sum, width) => sum + width, 0);
+  applyEditorTableColumnWidths(table, pixelWidths.map((width) => (width / Math.max(1, totalWidthPx)) * 100));
+}
+
 function startEditorTablePointerInteraction(
   root: HTMLElement,
   interaction: EditorTablePointerInteraction,
@@ -1675,9 +1699,15 @@ function startEditorTablePointerInteraction(
       return;
     }
 
-    const desiredColumns = Math.min(EDITOR_TABLE_MAX_COLUMNS, start.columns + Math.max(0, Math.floor((event.clientX - start.x) / EDITOR_TABLE_EXTEND_COLUMN_STEP_PX)));
+    const positiveDx = Math.max(0, dx);
+    const nextWidthPercent = Math.min(100 - start.offsetPercent, Math.max(start.widthPercent, start.widthPercent + (positiveDx / start.rootWidth) * 100));
+    const nextLayout = applyEditorTableLayout(table, nextWidthPercent, start.offsetPercent);
+    if (Math.abs(nextLayout.widthPercent - start.widthPercent) > 0.01) moved = true;
+
+    const desiredColumns = Math.min(EDITOR_TABLE_MAX_COLUMNS, start.columns + Math.max(0, Math.floor(positiveDx / EDITOR_TABLE_EXTEND_COLUMN_STEP_PX)));
     const desiredRows = Math.min(EDITOR_TABLE_MAX_ROWS, start.rows + Math.max(0, Math.floor(dy / EDITOR_TABLE_EXTEND_ROW_STEP_PX)));
     if (ensureEditorTablePreviewSize(table, desiredRows, desiredColumns, start.rows, start.columns)) moved = true;
+    applyEditorTableExtendedColumnWidths(table, startColumnWidths, start.widthPercent, nextLayout.widthPercent, start.rootWidth, getEditorTableColumnCount(table));
   };
 
   const restoreStartState = () => {
@@ -1702,7 +1732,9 @@ function startEditorTablePointerInteraction(
 
     if (interaction.kind === "extend") {
       const hasFinalExtension = getEditorTableRows(table).length !== start.rows || getEditorTableColumnCount(table) !== start.columns;
-      if (!hasFinalExtension) {
+      const hasFinalLayoutChange = Math.abs(readEditorTableWidthPercent(table) - start.widthPercent) > 0.01
+        || Math.abs(readEditorTableOffsetPercent(table) - start.offsetPercent) > 0.01;
+      if (!hasFinalExtension && !hasFinalLayoutChange) {
         restoreStartState();
         return;
       }
