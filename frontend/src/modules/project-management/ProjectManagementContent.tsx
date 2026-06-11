@@ -38,6 +38,7 @@ import {
 import {
   createProject,
   createProjectManagementTimelineItem,
+  deleteProject,
   deleteProjectManagementNode,
   deleteProjectManagementTimelineItem,
   fetchProjectManagementTimeline,
@@ -97,6 +98,12 @@ type BarInteraction = {
 
 type TimelineContextMenuState = {
   item: ProjectManagementTimelineRow;
+  x: number;
+  y: number;
+};
+
+type ProjectContextMenuState = {
+  project: ProjectRecord;
   x: number;
   y: number;
 };
@@ -552,6 +559,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [barInteraction, setBarInteraction] = useState<BarInteraction | null>(null);
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
+  const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
+  const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<ProjectRecord | null>(null);
   const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
 
   const loadWorkspacePanel = useCallback(async () => {
@@ -879,6 +888,22 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     };
   }, [timelineContextMenu]);
 
+  useEffect(() => {
+    if (!projectContextMenu) return undefined;
+    const close = () => setProjectContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [projectContextMenu]);
+
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
   const workspaceNodeByID = useMemo(() => new Map(workspace.nodes.map((node) => [node.node_id, node])), [workspace.nodes]);
@@ -1015,6 +1040,25 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     onProjectOpen?.(cleanProjectID);
   }, [onProjectOpen]);
 
+  const confirmDeleteProject = useCallback(async (project: ProjectRecord) => {
+    const projectID = project.project_id.trim();
+    if (!companyID.trim() || !projectID) return;
+    setProjectDeleteConfirmation(null);
+    setProjectContextMenu(null);
+    setError("");
+    const previousProjects = projects;
+    setProjects((current) => current.filter((item) => item.project_id !== projectID));
+    try {
+      await deleteProject(companyID, projectID);
+      scheduleProjectListReload();
+      scheduleWorkspacePanelReload();
+    } catch (deleteError) {
+      setProjects(previousProjects);
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project");
+      void loadProjectList();
+    }
+  }, [companyID, loadProjectList, projects, scheduleProjectListReload, scheduleWorkspacePanelReload]);
+
   const createNewProject = useCallback(async () => {
     setError("");
     try {
@@ -1065,10 +1109,12 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <h2 style={surfaceTitleStyle}>Project Management</h2>
             <div style={surfaceMetaStyle}>{viewMode === "timeline" ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}` : `${projects.length} projects`}</div>
           </div>
-          <div style={viewToggleStyle}>
+          <div role="group" aria-label="Project management view" style={viewToggleStyle}>
+            <span aria-hidden="true" style={viewToggleThumbStyle(viewMode)} />
             <button type="button" style={viewToggleButtonStyle(viewMode === "list")} onClick={() => setViewMode("list")}>List View</button>
             <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>
           </div>
+          <div style={surfaceHeaderActionsStyle}>
           {viewMode === "timeline" ? (
             <>
               <CompanyPerspectiveSelector
@@ -1098,6 +1144,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           ) : (
             <button type="button" style={primaryProjectButtonStyle(accent)} onClick={() => void createNewProject()}>New Project</button>
           )}
+          </div>
         </div>
         <div style={timelineMessageSlotStyle}>
           {error && <div style={errorStyle}>{error}</div>}
@@ -1124,6 +1171,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             projects={projects}
             loading={projectsLoading}
             onProjectOpen={openProject}
+            onProjectContextMenu={(project, event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setProjectContextMenu({ project, x: event.clientX, y: event.clientY });
+            }}
           />
         )}
       </section>
@@ -1150,6 +1202,50 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           </section>
         </>
       )}
+      {projectContextMenu ? (
+        <div
+          role="menu"
+          style={projectContextMenuStyle(projectContextMenu.x, projectContextMenu.y)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            style={{ ...projectContextMenuButtonStyle, color: "#b91c1c" }}
+            onClick={() => {
+              setProjectDeleteConfirmation(projectContextMenu.project);
+              setProjectContextMenu(null);
+            }}
+          >
+            Delete project
+          </button>
+        </div>
+      ) : null}
+      {projectDeleteConfirmation ? (
+        <div
+          role="presentation"
+          style={projectDeleteBackdropStyle}
+          onPointerDown={() => setProjectDeleteConfirmation(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-delete-title"
+            style={projectDeleteDialogStyle}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <h3 id="project-delete-title" style={projectDeleteTitleStyle}>Delete project?</h3>
+            <p style={projectDeleteMessageStyle}>
+              Are you sure you want to delete {projectDeleteConfirmation.name || "this project"}?
+            </p>
+            <div style={projectDeleteActionsStyle}>
+              <button type="button" style={projectDeleteCancelButtonStyle} onClick={() => setProjectDeleteConfirmation(null)}>Cancel</button>
+              <button type="button" style={projectDeleteYesButtonStyle} onClick={() => void confirmDeleteProject(projectDeleteConfirmation)}>Yes, delete</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
     </div>
   );
@@ -1159,11 +1255,14 @@ function ProjectListTable({
   projects,
   loading,
   onProjectOpen,
+  onProjectContextMenu,
 }: {
   projects: ProjectRecord[];
   loading: boolean;
   onProjectOpen: (projectID: string) => void;
+  onProjectContextMenu: (project: ProjectRecord, event: React.MouseEvent<HTMLTableRowElement>) => void;
 }) {
+  const [hoveredProjectID, setHoveredProjectID] = useState("");
   const sortedProjects = useMemo(() => [...projects].sort((left, right) => (
     left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
     left.project_id.localeCompare(right.project_id)
@@ -1188,9 +1287,12 @@ function ProjectListTable({
           {sortedProjects.map((project) => (
             <tr
               key={project.project_id}
-              style={projectRowStyle}
+              style={projectRowStyle(hoveredProjectID === project.project_id)}
+              onPointerEnter={() => setHoveredProjectID(project.project_id)}
+              onPointerLeave={() => setHoveredProjectID((current) => current === project.project_id ? "" : current)}
               onClick={() => onProjectOpen(project.project_id)}
               onDoubleClick={() => onProjectOpen(project.project_id)}
+              onContextMenu={(event) => onProjectContextMenu(project, event)}
             >
               <td style={projectNameCellStyle}>
                 <span style={projectNameCellInnerStyle}>
@@ -1637,34 +1739,63 @@ const bottomExplorerStyle: React.CSSProperties = {
 
 const surfaceHeaderStyle: React.CSSProperties = {
   minHeight: 38,
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "minmax(150px, 1fr) 224px minmax(220px, 1fr)",
   alignItems: "center",
-  justifyContent: "space-between",
   gap: 12,
-  flexWrap: "wrap",
 };
 
 const viewToggleStyle: React.CSSProperties = {
-  display: "inline-flex",
+  position: "relative",
+  width: 224,
+  height: 34,
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
   alignItems: "center",
   padding: 3,
   borderRadius: 999,
   background: "#e2e8f0",
-  gap: 2,
+  overflow: "hidden",
+  boxSizing: "border-box",
 };
 
+const viewToggleThumbStyle = (viewMode: ProjectManagementViewMode): React.CSSProperties => ({
+  position: "absolute",
+  left: 3,
+  top: 3,
+  width: "calc((100% - 6px) / 2)",
+  height: 28,
+  borderRadius: 999,
+  background: "#ffffff",
+  boxShadow: "0 1px 4px rgba(15, 23, 42, 0.10)",
+  transform: viewMode === "timeline" ? "translateX(100%)" : "translateX(0)",
+  transition: "transform 190ms cubic-bezier(0.2, 0, 0, 1)",
+  pointerEvents: "none",
+});
+
 const viewToggleButtonStyle = (active: boolean): React.CSSProperties => ({
+  position: "relative",
+  zIndex: 1,
   minHeight: 30,
   border: 0,
   borderRadius: 999,
   padding: "0 12px",
-  background: active ? "#ffffff" : "transparent",
+  background: "transparent",
   color: active ? "#0f172a" : "#64748b",
   fontSize: 12,
   fontWeight: 900,
   cursor: "pointer",
-  boxShadow: active ? "0 1px 4px rgba(15, 23, 42, 0.10)" : "none",
+  transition: "color 160ms ease",
 });
+
+const surfaceHeaderActionsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 8,
+  flexWrap: "wrap",
+};
 
 const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
   minHeight: 32,
@@ -1708,10 +1839,14 @@ const projectHeaderCellStyle: React.CSSProperties = {
   textAlign: "left",
 };
 
-const projectRowStyle: React.CSSProperties = {
+const projectRowStyle = (hovered: boolean): React.CSSProperties => ({
   height: 48,
   cursor: "pointer",
-};
+  background: hovered ? "linear-gradient(90deg, rgba(236, 253, 245, 0.82), rgba(240, 249, 255, 0.76))" : "transparent",
+  outline: hovered ? "2px solid rgba(14, 165, 233, 0.22)" : "2px solid transparent",
+  outlineOffset: -2,
+  transition: "background 150ms ease, outline-color 150ms ease",
+});
 
 const projectCellStyle: React.CSSProperties = {
   padding: "0 14px",
@@ -2045,6 +2180,81 @@ const timelineContextMenuButtonStyle: React.CSSProperties = {
   fontWeight: 850,
   textAlign: "left",
   padding: "0 9px",
+};
+
+function projectContextMenuStyle(x: number, y: number): React.CSSProperties {
+  return {
+    ...timelineContextMenuStyle(x, y),
+    minWidth: 170,
+  };
+}
+
+const projectContextMenuButtonStyle: React.CSSProperties = {
+  ...timelineContextMenuButtonStyle,
+};
+
+const projectDeleteBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 120,
+  display: "grid",
+  placeItems: "center",
+  padding: 18,
+  background: "rgba(15, 23, 42, 0.28)",
+  boxSizing: "border-box",
+};
+
+const projectDeleteDialogStyle: React.CSSProperties = {
+  width: "min(420px, 100%)",
+  display: "grid",
+  gap: 12,
+  padding: 16,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 10,
+  background: "#ffffff",
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.24)",
+  boxSizing: "border-box",
+};
+
+const projectDeleteTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 16,
+  fontWeight: 950,
+};
+
+const projectDeleteMessageStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#475569",
+  fontSize: 13,
+  fontWeight: 750,
+  lineHeight: 1.45,
+};
+
+const projectDeleteActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+};
+
+const projectDeleteCancelButtonStyle: React.CSSProperties = {
+  minHeight: 32,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 12px",
+};
+
+const projectDeleteYesButtonStyle: React.CSSProperties = {
+  ...projectDeleteCancelButtonStyle,
+  border: "1px solid rgba(185, 28, 28, 0.22)",
+  background: "#b91c1c",
+  color: "#ffffff",
 };
 
 const timelineEmptyStyle: React.CSSProperties = {

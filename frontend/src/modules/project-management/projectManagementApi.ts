@@ -231,6 +231,14 @@ export async function updateProject(input: {
   });
 }
 
+export async function deleteProject(companyID: string, projectID: string): Promise<ProjectMutationResponse & { deleted_project_id?: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<ProjectMutationResponse & { deleted_project_id?: string }>(`/v1/projects/${encodeURIComponent(projectID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchProjectView(companyID: string, projectID: string): Promise<ProjectView> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
