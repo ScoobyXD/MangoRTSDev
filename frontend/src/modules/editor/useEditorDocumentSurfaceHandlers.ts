@@ -662,6 +662,16 @@ function insertEditorTableRowAt(table: HTMLTableElement, rowIndex: number): numb
   return safeRowIndex;
 }
 
+function removeEditorTableRowAt(table: HTMLTableElement, rowIndex: number): boolean {
+  const rows = getEditorTableRows(table);
+  if (rows.length <= 1) return false;
+  const targetRow = rows[rowIndex];
+  if (!targetRow) return false;
+  targetRow.remove();
+  normalizeEditorTable(table);
+  return true;
+}
+
 function insertEditorTableColumnAt(table: HTMLTableElement, columnIndex: number): number | null {
   const columns = getEditorTableColumnCount(table);
   if (columns >= EDITOR_TABLE_MAX_COLUMNS) return null;
@@ -684,8 +694,9 @@ function insertEditorTableColumnAt(table: HTMLTableElement, columnIndex: number)
   return safeColumnIndex;
 }
 
-function removeEditorTableColumnAt(table: HTMLTableElement, columnIndex: number) {
+function removeEditorTableColumnAt(table: HTMLTableElement, columnIndex: number): boolean {
   const columns = getEditorTableColumnCount(table);
+  if (columns <= 1) return false;
   const widths = readEditorTableColumnWidths(table, columns);
   getEditorTableRows(table).forEach((row) => {
     const cells = getEditorTableCells(row);
@@ -694,6 +705,7 @@ function removeEditorTableColumnAt(table: HTMLTableElement, columnIndex: number)
   widths.splice(columnIndex, 1);
   if (widths.length > 0) applyEditorTableColumnWidths(table, widths);
   normalizeEditorTable(table);
+  return true;
 }
 
 type EditorTableCommand = "insert-row-before" | "insert-row-after" | "insert-column-before" | "insert-column-after" | "delete-row" | "delete-column" | "delete-table";
@@ -767,6 +779,43 @@ function applyEditorTableCommand(
   recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   return true;
+}
+
+function getSelectedEditorTableDeletion(root: HTMLElement): { cell: HTMLTableCellElement; command: EditorTableCommand } | null {
+  const selectedCells = Array.from(root.querySelectorAll(`[data-mango-editor-table-selected]`))
+    .filter((cell): cell is HTMLTableCellElement => cell instanceof HTMLTableCellElement);
+  if (selectedCells.length === 0) return null;
+
+  const allCell = selectedCells.find((cell) => cell.getAttribute("data-mango-editor-table-selected") === "all");
+  if (allCell) return { cell: allCell, command: "delete-table" };
+
+  const columnCell = selectedCells.find((cell) => cell.getAttribute("data-mango-editor-table-selected") === "column");
+  if (columnCell) return { cell: columnCell, command: "delete-column" };
+
+  const rowCell = selectedCells.find((cell) => cell.getAttribute("data-mango-editor-table-selected") === "row");
+  return rowCell ? { cell: rowCell, command: "delete-row" } : null;
+}
+
+function deleteSelectedEditorTableDimension(
+  root: HTMLElement,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const selectedDeletion = getSelectedEditorTableDeletion(root);
+  if (!selectedDeletion) return false;
+  const table = getEditorTableForCell(root, selectedDeletion.cell);
+  if (!table) return false;
+  setSelectionInEditorTableCell(root, selectedDeletion.cell);
+  const applied = applyEditorTableCommand(
+    root,
+    selectedDeletion.command,
+    documentUndoHistory,
+    scheduleDocumentSave,
+    scheduleIndentGuideUpdate,
+  );
+  if (applied) clearEditorTableCellSelections(root);
+  return applied;
 }
 
 function getImageFileFromDataTransfer(dataTransfer: DataTransfer): File | null {
@@ -1068,9 +1117,10 @@ function insertEditorTable(
   const undoBefore = snapshotEditorDocumentRoot(root);
   removeEditorTerminalBreaks(root);
   const table = createEditorTableElement(root.ownerDocument);
+  const beforeTable = root.ownerDocument.createElement("br");
   const afterTable = root.ownerDocument.createElement("br");
   const fragment = root.ownerDocument.createDocumentFragment();
-  fragment.append(table, afterTable);
+  fragment.append(beforeTable, table, afterTable);
   range.deleteContents();
   range.insertNode(fragment);
   const firstCell = table.querySelector(`[${EDITOR_TABLE_CELL_ATTRIBUTE}="true"]`);
@@ -1438,6 +1488,23 @@ type EditorTablePointerInteraction =
   | { kind: "resize-table"; table: HTMLTableElement; edge: "left" | "right" }
   | { kind: "extend"; table: HTMLTableElement };
 
+function getEditorTableCellNearPoint(table: HTMLTableElement, clientX: number, clientY: number): HTMLTableCellElement | null {
+  for (const row of getEditorTableRows(table)) {
+    for (const cell of getEditorTableCells(row)) {
+      const rect = cell.getBoundingClientRect();
+      if (
+        clientX >= rect.left - EDITOR_TABLE_POINTER_EDGE_PX
+        && clientX <= rect.right + EDITOR_TABLE_POINTER_EDGE_PX
+        && clientY >= rect.top - EDITOR_TABLE_POINTER_EDGE_PX
+        && clientY <= rect.bottom + EDITOR_TABLE_POINTER_EDGE_PX
+      ) {
+        return cell;
+      }
+    }
+  }
+  return null;
+}
+
 function getEditorTablePointerInteraction(root: HTMLElement, target: EventTarget | null, clientX: number, clientY: number): EditorTablePointerInteraction | null {
   const table = getClosestEditorTable(root, target);
   if (!table) return null;
@@ -1456,7 +1523,10 @@ function getEditorTablePointerInteraction(root: HTMLElement, target: EventTarget
   if (Math.abs(clientX - tableRect.left) <= EDITOR_TABLE_POINTER_EDGE_PX) return { kind: "resize-table", table, edge: "left" };
   if (Math.abs(clientX - tableRect.right) <= EDITOR_TABLE_POINTER_EDGE_PX) return { kind: "resize-table", table, edge: "right" };
 
-  const cell = getClosestEditorTableCell(root, target);
+  const targetCell = getClosestEditorTableCell(root, target);
+  const cell = targetCell && getEditorTableForCell(root, targetCell) === table
+    ? targetCell
+    : getEditorTableCellNearPoint(table, clientX, clientY);
   const coordinates = cell ? getEditorTableCellCoordinates(table, cell) : null;
   if (!cell || !coordinates) return null;
   const columns = getEditorTableColumnCount(table);
@@ -1480,6 +1550,29 @@ function getEditorTableCursorForInteraction(interaction: EditorTablePointerInter
 
 function updateEditorTableCursor(root: HTMLElement, target: EventTarget | null, clientX: number, clientY: number) {
   root.style.cursor = getEditorTableCursorForInteraction(getEditorTablePointerInteraction(root, target, clientX, clientY));
+}
+
+function ensureEditorTablePreviewSize(table: HTMLTableElement, rows: number, columns: number, minimumRows: number, minimumColumns: number): boolean {
+  const targetRows = Math.max(minimumRows, Math.min(EDITOR_TABLE_MAX_ROWS, rows));
+  const targetColumns = Math.max(minimumColumns, Math.min(EDITOR_TABLE_MAX_COLUMNS, columns));
+  let changed = false;
+
+  while (getEditorTableColumnCount(table) > targetColumns && getEditorTableColumnCount(table) > minimumColumns) {
+    changed = removeEditorTableColumnAt(table, getEditorTableColumnCount(table) - 1) || changed;
+  }
+  while (getEditorTableRows(table).length > targetRows && getEditorTableRows(table).length > minimumRows) {
+    changed = removeEditorTableRowAt(table, getEditorTableRows(table).length - 1) || changed;
+  }
+  while (getEditorTableColumnCount(table) < targetColumns) {
+    if (insertEditorTableColumnAt(table, getEditorTableColumnCount(table)) === null) break;
+    changed = true;
+  }
+  while (getEditorTableRows(table).length < targetRows) {
+    if (insertEditorTableRowAt(table, getEditorTableRows(table).length) === null) break;
+    changed = true;
+  }
+
+  return changed;
 }
 
 function startEditorTablePointerInteraction(
@@ -1507,6 +1600,7 @@ function startEditorTablePointerInteraction(
     rows: getEditorTableRows(table).length,
     columns: getEditorTableColumnCount(table),
   };
+  const startColumnWidths = readEditorTableColumnWidths(table, start.columns);
   let moved = false;
 
   const onPointerMove = (event: PointerEvent) => {
@@ -1515,14 +1609,13 @@ function startEditorTablePointerInteraction(
     const dy = event.clientY - start.y;
 
     if (interaction.kind === "resize-column") {
-      const columns = getEditorTableColumnCount(table);
-      if (interaction.dividerColumnIndex < 0 || interaction.dividerColumnIndex >= columns - 1) return;
-      const widths = readEditorTableColumnWidths(table, columns);
+      if (interaction.dividerColumnIndex < 0 || interaction.dividerColumnIndex >= start.columns - 1) return;
+      const widths = [...startColumnWidths];
       const pairTotal = widths[interaction.dividerColumnIndex] + widths[interaction.dividerColumnIndex + 1];
       const minPercent = Math.min(Math.max(3, (EDITOR_TABLE_MIN_COLUMN_WIDTH_PX / Math.max(1, startTableRect.width)) * 100), Math.max(3, (pairTotal / 2) - 0.5));
       if (pairTotal <= minPercent * 2) return;
       const deltaPercent = (dx / Math.max(1, startTableRect.width)) * 100;
-      const leftWidth = Math.min(pairTotal - minPercent, Math.max(minPercent, widths[interaction.dividerColumnIndex] + deltaPercent));
+      const leftWidth = Math.min(pairTotal - minPercent, Math.max(minPercent, startColumnWidths[interaction.dividerColumnIndex] + deltaPercent));
       widths[interaction.dividerColumnIndex] = leftWidth;
       widths[interaction.dividerColumnIndex + 1] = pairTotal - leftWidth;
       applyEditorTableColumnWidths(table, widths);
@@ -1546,30 +1639,48 @@ function startEditorTablePointerInteraction(
 
     const desiredColumns = Math.min(EDITOR_TABLE_MAX_COLUMNS, start.columns + Math.max(0, Math.floor((start.x - event.clientX) / EDITOR_TABLE_EXTEND_COLUMN_STEP_PX)));
     const desiredRows = Math.min(EDITOR_TABLE_MAX_ROWS, start.rows + Math.max(0, Math.floor(dy / EDITOR_TABLE_EXTEND_ROW_STEP_PX)));
-    while (getEditorTableColumnCount(table) < desiredColumns) {
-      if (insertEditorTableColumnAt(table, getEditorTableColumnCount(table)) === null) break;
-      moved = true;
-    }
-    while (getEditorTableRows(table).length < desiredRows) {
-      if (insertEditorTableRowAt(table, getEditorTableRows(table).length) === null) break;
-      moved = true;
-    }
+    if (ensureEditorTablePreviewSize(table, desiredRows, desiredColumns, start.rows, start.columns)) moved = true;
   };
 
-  const finish = () => {
+  const restoreStartState = () => {
+    if (interaction.kind === "extend") {
+      ensureEditorTablePreviewSize(table, start.rows, start.columns, start.rows, start.columns);
+    }
+    applyEditorTableColumnWidths(table, startColumnWidths);
+    applyEditorTableLayout(table, start.widthPercent, start.offsetPercent);
+  };
+
+  const finish = (commit: boolean) => {
     ownerDocument.removeEventListener("pointermove", onPointerMove);
-    ownerDocument.removeEventListener("pointerup", finish);
-    ownerDocument.removeEventListener("pointercancel", finish);
+    ownerDocument.removeEventListener("pointerup", onPointerUp);
+    ownerDocument.removeEventListener("pointercancel", onPointerCancel);
     ownerDocument.body.style.cursor = previousCursor;
     root.style.cursor = "text";
+
+    if (!commit) {
+      restoreStartState();
+      return;
+    }
+
+    if (interaction.kind === "extend") {
+      const hasFinalExtension = getEditorTableRows(table).length !== start.rows || getEditorTableColumnCount(table) !== start.columns;
+      if (!hasFinalExtension) {
+        restoreStartState();
+        return;
+      }
+    }
+
     if (!moved) return;
     recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, interaction.kind === "resize-table" || interaction.kind === "resize-column" ? "resize" : "format");
     commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   };
 
+  const onPointerUp = () => finish(true);
+  const onPointerCancel = () => finish(false);
+
   ownerDocument.addEventListener("pointermove", onPointerMove);
-  ownerDocument.addEventListener("pointerup", finish, { once: true });
-  ownerDocument.addEventListener("pointercancel", finish, { once: true });
+  ownerDocument.addEventListener("pointerup", onPointerUp, { once: true });
+  ownerDocument.addEventListener("pointercancel", onPointerCancel, { once: true });
 }
 
 function startEditorImagePointerInteraction(
@@ -2616,6 +2727,12 @@ export function useEditorDocumentSurfaceHandlers({
         if (event.key === "Backspace" || event.key === "Delete") {
           pendingEditorFontSizeRef.current = null;
           clearEditorImageSelection(root);
+          if (deleteSelectedEditorTableDimension(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate)) {
+            event.preventDefault();
+            pendingNativeUndoSnapshotRef.current = null;
+            setActiveTableContextMenu(null);
+            return;
+          }
           return;
         }
       }
