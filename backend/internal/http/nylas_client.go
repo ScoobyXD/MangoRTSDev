@@ -224,25 +224,26 @@ func (f *NylasFolder) UnmarshalJSON(raw []byte) error {
 }
 
 type NylasMessage struct {
-	ID             string                                  `json:"id"`
-	ThreadID       string                                  `json:"thread_id,omitempty"`
-	Subject        string                                  `json:"subject"`
-	Snippet        string                                  `json:"snippet,omitempty"`
-	Body           string                                  `json:"body,omitempty"`
-	Date           int64                                   `json:"date,omitempty"`
-	Unread         bool                                    `json:"unread"`
-	Starred        bool                                    `json:"starred"`
-	From           []NylasEmailAddress                     `json:"from,omitempty"`
-	To             []NylasEmailAddress                     `json:"to,omitempty"`
-	Cc             []NylasEmailAddress                     `json:"cc,omitempty"`
-	Bcc            []NylasEmailAddress                     `json:"bcc,omitempty"`
-	ReplyTo        []NylasEmailAddress                     `json:"reply_to,omitempty"`
-	Attachments    []NylasAttachment                       `json:"attachments,omitempty"`
-	Folders        []string                                `json:"folders,omitempty"`
-	FolderIDs      []string                                `json:"folder_ids,omitempty"`
-	LogicGateIDs   []string                                `json:"logic_gate_ids,omitempty"`
-	LogicGateCount int                                     `json:"logic_gate_count,omitempty"`
-	ReadStatus     *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
+	ID              string                                  `json:"id"`
+	ThreadID        string                                  `json:"thread_id,omitempty"`
+	Subject         string                                  `json:"subject"`
+	Snippet         string                                  `json:"snippet,omitempty"`
+	Body            string                                  `json:"body,omitempty"`
+	Date            int64                                   `json:"date,omitempty"`
+	Unread          bool                                    `json:"unread"`
+	Starred         bool                                    `json:"starred"`
+	From            []NylasEmailAddress                     `json:"from,omitempty"`
+	To              []NylasEmailAddress                     `json:"to,omitempty"`
+	Cc              []NylasEmailAddress                     `json:"cc,omitempty"`
+	Bcc             []NylasEmailAddress                     `json:"bcc,omitempty"`
+	ReplyTo         []NylasEmailAddress                     `json:"reply_to,omitempty"`
+	Attachments     []NylasAttachment                       `json:"attachments,omitempty"`
+	Folders         []string                                `json:"folders,omitempty"`
+	FolderIDs       []string                                `json:"folder_ids,omitempty"`
+	LogicGateIDs    []string                                `json:"logic_gate_ids,omitempty"`
+	LogicGateCount  int                                     `json:"logic_gate_count,omitempty"`
+	TrackingOptions *NylasTrackingOptions                   `json:"tracking_options,omitempty"`
+	ReadStatus      *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
 }
 
 type NylasThread struct {
@@ -313,7 +314,10 @@ type NylasSendMessageRequest struct {
 }
 
 type NylasTrackingOptions struct {
-	Opens bool `json:"opens,omitempty"`
+	Opens         bool   `json:"opens,omitempty"`
+	Links         bool   `json:"links,omitempty"`
+	ThreadReplies bool   `json:"thread_replies,omitempty"`
+	Label         string `json:"label,omitempty"`
 }
 
 type NylasAttachment struct {

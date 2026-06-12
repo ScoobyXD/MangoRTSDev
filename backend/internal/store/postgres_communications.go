@@ -188,6 +188,9 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 }
 
 func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
 	userID := strings.TrimSpace(input.UserID)
 	messageID := strings.TrimSpace(input.MessageID)
 	threadID := strings.TrimSpace(input.ThreadID)
@@ -248,6 +251,9 @@ returning user_id::text, message_id, thread_id, status, signal_count, first_sign
 }
 
 func (r *PostgresRepo) ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error) {
+	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
+		return nil, err
+	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrInvalid
@@ -283,6 +289,38 @@ order by last_signal_timestamp desc, message_id asc`, args...)
 		statuses = append(statuses, status)
 	}
 	return statuses, rows.Err()
+}
+
+func (r *PostgresRepo) ensureCommunicationsMessageReadStatusSchema() error {
+	if r == nil || r.db == nil {
+		return ErrInvalid
+	}
+	r.communicationsMessageReadStatusSchemaOnce.Do(func() {
+		_, r.communicationsMessageReadStatusSchemaErr = r.db.Exec(`
+create table if not exists communications_message_read_statuses (
+  user_id uuid not null references users(user_id) on delete cascade,
+  message_id text not null,
+  thread_id text not null default '',
+  status text not null default 'likely_read',
+  signal_count integer not null default 0,
+  first_signal_timestamp timestamptz not null,
+  last_signal_timestamp timestamptz not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (user_id, message_id),
+  constraint communications_message_read_statuses_message_id_chk check (btrim(message_id) <> ''),
+  constraint communications_message_read_statuses_status_chk check (status in ('likely_read', 'read')),
+  constraint communications_message_read_statuses_signal_count_chk check (signal_count >= 0)
+);
+
+create index if not exists idx_communications_message_read_statuses_user_thread
+  on communications_message_read_statuses(user_id, thread_id)
+  where thread_id <> '';
+
+create index if not exists idx_communications_message_read_statuses_user_latest
+  on communications_message_read_statuses(user_id, last_signal_timestamp desc);`)
+	})
+	return r.communicationsMessageReadStatusSchemaErr
 }
 
 func scanCommunicationsMessageReadStatus(row interface {
