@@ -31,8 +31,10 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.applyProjectOwnershipLocked(&project, input.AccountID, input.TeamID)
+	r.applyProjectOwnershipLocked(&project, input.AccountIDs, input.TeamIDs)
 	r.projects[key(input.CompanyID, input.ProjectID)] = project
+	r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
+	r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
 
 	var folderItem *domain.CompanyExplorerFolderItem
 	if activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveProjectsKey); ok {
@@ -61,12 +63,13 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	}
 	project.Name = input.Name
 	project.Status = input.Status
-	if input.AccountSet {
-		project.AccountID = cloneStringPointer(input.AccountID)
+	if input.AccountSet || input.AccountIDsSet {
+		r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
 	}
-	if input.TeamSet {
-		project.TeamID = cloneStringPointer(input.TeamID)
+	if input.TeamSet || input.TeamIDsSet {
+		r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
 	}
+	r.applyProjectOwnershipLocked(&project, r.projectAccountIDsLocked(input.CompanyID, input.ProjectID), r.projectTeamIDsLocked(input.CompanyID, input.ProjectID))
 	project.UpdatedTimestamp = time.Now().UTC()
 	r.projects[k] = project
 	project = r.withProjectReadModelLocked(project)
@@ -481,26 +484,116 @@ func (r *MemoryRepo) ListProjectRelationshipsForResource(companyID, resourceType
 	return items, nil
 }
 
-func (r *MemoryRepo) applyProjectOwnershipLocked(project *domain.Project, accountID, teamID *string) {
-	project.AccountID = cloneStringPointer(accountID)
-	project.TeamID = cloneStringPointer(teamID)
+func (r *MemoryRepo) applyProjectOwnershipLocked(project *domain.Project, accountIDs, teamIDs []string) {
+	project.AccountID = firstProjectIDPointer(accountIDs)
+	project.TeamID = firstProjectIDPointer(teamIDs)
 }
 
 func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.Project {
 	project = cloneProject(project)
-	if project.AccountID != nil {
-		if account, ok := r.accounts[key(project.CompanyID, *project.AccountID)]; ok {
-			name := account.Name
-			project.AccountName = &name
-		}
+	accountIDs := r.projectAccountIDsLocked(project.CompanyID, project.ProjectID)
+	if len(accountIDs) == 0 {
+		accountIDs = projectIDListFromPointer(project.AccountID)
 	}
-	if project.TeamID != nil {
-		if group, ok := r.userGroups[userGroupKey(project.CompanyID, *project.TeamID)]; ok {
-			name := group.Name
-			project.TeamName = &name
+	project.AccountID = firstProjectIDPointer(accountIDs)
+	project.Accounts = make([]domain.Account, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		account, ok := r.accounts[key(project.CompanyID, accountID)]
+		if !ok {
+			continue
 		}
+		project.Accounts = append(project.Accounts, account)
+	}
+	if len(project.Accounts) > 0 {
+		name := project.Accounts[0].Name
+		project.AccountName = &name
+	} else {
+		project.AccountName = nil
+	}
+	teamIDs := r.projectTeamIDsLocked(project.CompanyID, project.ProjectID)
+	if len(teamIDs) == 0 {
+		teamIDs = projectIDListFromPointer(project.TeamID)
+	}
+	project.TeamID = firstProjectIDPointer(teamIDs)
+	project.Teams = make([]domain.CompanyUserGroup, 0, len(teamIDs))
+	for _, teamID := range teamIDs {
+		group, ok := r.userGroups[userGroupKey(project.CompanyID, teamID)]
+		if !ok {
+			continue
+		}
+		project.Teams = append(project.Teams, group)
+	}
+	if len(project.Teams) > 0 {
+		name := project.Teams[0].Name
+		project.TeamName = &name
+	} else {
+		project.TeamName = nil
 	}
 	return project
+}
+
+func projectAccountAssignmentKey(companyID, projectID, accountID string) string {
+	return strings.TrimSpace(companyID) + ":" + strings.TrimSpace(projectID) + ":" + strings.TrimSpace(accountID)
+}
+
+func projectTeamAssignmentKey(companyID, projectID, teamID string) string {
+	return strings.TrimSpace(companyID) + ":" + strings.TrimSpace(projectID) + ":" + strings.TrimSpace(teamID)
+}
+
+func splitProjectAssignmentKey(value string) (string, string, string, bool) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+func (r *MemoryRepo) setProjectAccountAssignmentsLocked(companyID, projectID string, accountIDs []string) {
+	for assignmentKey := range r.projectAccountAssignments {
+		kCompanyID, kProjectID, _, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			delete(r.projectAccountAssignments, assignmentKey)
+		}
+	}
+	for _, accountID := range cleanProjectIDList(accountIDs) {
+		r.projectAccountAssignments[projectAccountAssignmentKey(companyID, projectID, accountID)] = true
+	}
+}
+
+func (r *MemoryRepo) setProjectTeamAssignmentsLocked(companyID, projectID string, teamIDs []string) {
+	for assignmentKey := range r.projectTeamAssignments {
+		kCompanyID, kProjectID, _, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			delete(r.projectTeamAssignments, assignmentKey)
+		}
+	}
+	for _, teamID := range cleanProjectIDList(teamIDs) {
+		r.projectTeamAssignments[projectTeamAssignmentKey(companyID, projectID, teamID)] = true
+	}
+}
+
+func (r *MemoryRepo) projectAccountIDsLocked(companyID, projectID string) []string {
+	ids := make([]string, 0)
+	for assignmentKey := range r.projectAccountAssignments {
+		kCompanyID, kProjectID, accountID, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			ids = append(ids, accountID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (r *MemoryRepo) projectTeamIDsLocked(companyID, projectID string) []string {
+	ids := make([]string, 0)
+	for assignmentKey := range r.projectTeamAssignments {
+		kCompanyID, kProjectID, teamID, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			ids = append(ids, teamID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (r *MemoryRepo) projectRelationshipProjectionsLocked(companyID, projectID string) []domain.ProjectRelationshipProjection {
@@ -640,6 +733,18 @@ func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 		return ErrNotFound
 	}
 	delete(r.projects, k)
+	for assignmentKey := range r.projectAccountAssignments {
+		kCompanyID, kProjectID, _, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			delete(r.projectAccountAssignments, assignmentKey)
+		}
+	}
+	for assignmentKey := range r.projectTeamAssignments {
+		kCompanyID, kProjectID, _, ok := splitProjectAssignmentKey(assignmentKey)
+		if ok && kCompanyID == companyID && kProjectID == projectID {
+			delete(r.projectTeamAssignments, assignmentKey)
+		}
+	}
 	delete(r.projectInfo, k)
 	delete(r.projectText, k)
 	for relationshipKey, relationship := range r.projectRelationships {

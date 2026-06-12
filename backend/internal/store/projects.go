@@ -17,6 +17,8 @@ func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectIn
 	input.Name = strings.TrimSpace(input.Name)
 	input.Status = NormalizeProjectStatus(input.Status)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.AccountIDs = cleanProjectIDList(input.AccountIDs)
+	input.TeamIDs = cleanProjectIDList(input.TeamIDs)
 	if input.AccountSet && input.AccountID != nil {
 		accountID := cleanUUIDText(*input.AccountID)
 		if accountID == "" {
@@ -24,6 +26,12 @@ func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectIn
 		} else {
 			input.AccountID = &accountID
 		}
+	}
+	if input.AccountIDsSet {
+		input.AccountID = firstProjectIDPointer(input.AccountIDs)
+		input.AccountSet = true
+	} else if input.AccountSet {
+		input.AccountIDs = projectIDListFromPointer(input.AccountID)
 	}
 	if input.TeamSet && input.TeamID != nil {
 		teamID := cleanUUIDText(*input.TeamID)
@@ -33,10 +41,49 @@ func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectIn
 			input.TeamID = &teamID
 		}
 	}
+	if input.TeamIDsSet {
+		input.TeamID = firstProjectIDPointer(input.TeamIDs)
+		input.TeamSet = true
+	} else if input.TeamSet {
+		input.TeamIDs = projectIDListFromPointer(input.TeamID)
+	}
 	if input.CompanyID == "" || input.Name == "" || (requireProjectID && input.ProjectID == "") {
 		return ProjectInput{}, ErrInvalid
 	}
 	return input, nil
+}
+
+func cleanProjectIDList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		id := cleanUUIDText(value)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func firstProjectIDPointer(values []string) *string {
+	if len(values) == 0 {
+		return nil
+	}
+	value := values[0]
+	return &value
+}
+
+func projectIDListFromPointer(value *string) []string {
+	if value == nil {
+		return nil
+	}
+	id := cleanUUIDText(*value)
+	if id == "" {
+		return nil
+	}
+	return []string{id}
 }
 
 func NormalizeProjectStatus(status string) string {
@@ -204,8 +251,10 @@ func cloneBoolPointer(value *bool) *bool {
 func cloneProject(item domain.Project) domain.Project {
 	item.AccountID = cloneStringPointer(item.AccountID)
 	item.AccountName = cloneStringPointer(item.AccountName)
+	item.Accounts = append([]domain.Account{}, item.Accounts...)
 	item.TeamID = cloneStringPointer(item.TeamID)
 	item.TeamName = cloneStringPointer(item.TeamName)
+	item.Teams = append([]domain.CompanyUserGroup{}, item.Teams...)
 	return item
 }
 

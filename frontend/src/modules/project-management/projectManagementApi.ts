@@ -54,11 +54,23 @@ export type ProjectRecord = {
   default_access?: string;
   account_id?: string | null;
   account_name?: string | null;
+  accounts?: Account[];
   team_id?: string | null;
   team_name?: string | null;
+  teams?: ProjectTeam[];
   effective_access_level?: string;
   created_timestamp: string;
   updated_timestamp: string;
+};
+
+export type ProjectTeam = {
+  company_id: string;
+  group_id: string;
+  parent_group_id?: string | null;
+  name: string;
+  position?: number;
+  created_timestamp: string;
+  updated_timestamp?: string;
 };
 
 export type ProjectInformation = {
@@ -197,17 +209,22 @@ export async function createProject(input: {
   name: string;
   status?: string;
   accountID?: string | null;
+  accountIDs?: string[];
   teamID?: string | null;
+  teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
+  const body: Record<string, unknown> = {
+    company_id: input.companyID,
+    name: input.name,
+    status: input.status ?? "Active",
+  };
+  if (input.accountID !== undefined) body.account_id = input.accountID;
+  if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
+  if (input.teamID !== undefined) body.team_id = input.teamID;
+  if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
   return apiFetchJSON<ProjectMutationResponse>("/v1/projects", {
     method: "POST",
-    body: JSON.stringify({
-      company_id: input.companyID,
-      name: input.name,
-      status: input.status ?? "Active",
-      account_id: input.accountID ?? null,
-      team_id: input.teamID ?? null,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -217,17 +234,22 @@ export async function updateProject(input: {
   name: string;
   status: string;
   accountID?: string | null;
+  accountIDs?: string[];
   teamID?: string | null;
+  teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
+  const body: Record<string, unknown> = {
+    company_id: input.companyID,
+    name: input.name,
+    status: input.status,
+  };
+  if (input.accountID !== undefined) body.account_id = input.accountID;
+  if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
+  if (input.teamID !== undefined) body.team_id = input.teamID;
+  if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
   return apiFetchJSON<ProjectMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}`, {
     method: "PUT",
-    body: JSON.stringify({
-      company_id: input.companyID,
-      name: input.name,
-      status: input.status,
-      account_id: input.accountID ?? null,
-      team_id: input.teamID ?? null,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -290,6 +312,38 @@ export async function upsertProjectRelationship(input: {
       relationship_id: input.relationshipID,
       resource_type: input.resourceType,
       resource_id: input.resourceID,
+      position: input.position ?? 0,
+    }),
+  });
+}
+
+export async function createProjectNode(input: {
+  companyID: string;
+  projectID: string;
+  title: string;
+  position?: number;
+}): Promise<{ node?: unknown; relationship?: ProjectRelationshipProjection }> {
+  return apiFetchJSON<{ node?: unknown; relationship?: ProjectRelationshipProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/nodes`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      title: input.title,
+      position: input.position ?? 0,
+    }),
+  });
+}
+
+export async function createProjectLogicGate(input: {
+  companyID: string;
+  projectID: string;
+  header: string;
+  position?: number;
+}): Promise<{ logic_gate?: unknown; relationship?: ProjectRelationshipProjection }> {
+  return apiFetchJSON<{ logic_gate?: unknown; relationship?: ProjectRelationshipProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/logic-gates`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      header: input.header,
       position: input.position ?? 0,
     }),
   });

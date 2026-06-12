@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
-import { listCompanyUsers, type CompanyUser } from "../communications/communicationsApi.js";
+import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
+import type { Account } from "../accounts/accountsApi.js";
+import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
@@ -54,8 +56,11 @@ import type { NodeRecord } from "../node-map/shared.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
 import {
   addProjectInformation,
+  createProjectLogicGate,
+  createProjectNode,
   deleteProjectProjection,
   fetchProjectView,
+  updateProject,
   upsertProjectRelationship,
   type ProjectProjection,
   type ProjectRecord,
@@ -100,6 +105,11 @@ type ProjectRelationshipDropTarget = {
   resourceID: string;
 };
 
+type RelationshipCanvasContextMenuState = {
+  x: number;
+  y: number;
+};
+
 type SummarySplitResizeState = {
   left: number;
   width: number;
@@ -123,12 +133,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const permissionsRequestJSON = useMemo(() => createRequestJSON(readAuthConfig().apiBase), []);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
+  const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [blocks, setBlocks] = useState<ProjectTextBlockDraft[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [relationships, setRelationships] = useState<ProjectRelationshipProjection[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingID, setSavingID] = useState("");
@@ -149,6 +161,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
   const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [assignmentAccountIDs, setAssignmentAccountIDs] = useState<string[]>([]);
+  const [assignmentTeamIDs, setAssignmentTeamIDs] = useState<string[]>([]);
+  const [assignmentsSaving, setAssignmentsSaving] = useState(false);
+  const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
@@ -160,14 +177,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     if (options.showLoading !== false) setLoading(true);
     setError("");
     try {
-      const [view, current, users] = await Promise.all([
+      const [view, current, users, userGroups] = await Promise.all([
         fetchProjectView(companyID, cleanProjectID),
         fetchCurrentUser().catch(() => null),
         listCompanyUsers(companyID).catch(() => [] as CompanyUser[]),
+        listCompanyUserGroups(companyID).catch(() => ({ groups: [] as CompanyUserGroup[], members: [] })),
       ]);
       setProject(view.project);
       setRelationships(view.relationships ?? []);
       setCompanyUsers(users);
+      setGroups(userGroups.groups);
+      setAssignmentAccountIDs(projectAccountIDs(view.project));
+      setAssignmentTeamIDs(projectTeamIDs(view.project));
       setCurrentUserID(current?.user.user_id.trim() ?? "");
       setBlocks(blockDraftsFromProjections(view.projections ?? []));
       setChatMessages(parseEditorTextBlockChats(view.projections ?? []));
@@ -204,6 +225,22 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       window.removeEventListener("pointerup", onPointerUp);
     };
   }, [splitResizeState]);
+
+  useEffect(() => {
+    if (!relationshipContextMenu) return undefined;
+    const close = () => setRelationshipContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [relationshipContextMenu]);
 
   const relationshipGroups = useMemo(() => buildRelationshipGroups(relationships), [relationships]);
   const ungroupedNodes = useMemo(() => {
@@ -481,6 +518,65 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject, projectID, relationships]);
 
+  const saveProjectAssignments = useCallback(async () => {
+    if (!project) return;
+    setAssignmentsSaving(true);
+    setError("");
+    try {
+      const accountIDs = uniqueStringIDs(assignmentAccountIDs);
+      const teamIDs = uniqueStringIDs(assignmentTeamIDs);
+      const result = await updateProject({
+        companyID,
+        projectID,
+        name: project.name || "Untitled Project",
+        status: project.status || "Active",
+        accountID: accountIDs[0] ?? null,
+        accountIDs,
+        teamID: teamIDs[0] ?? null,
+        teamIDs,
+      });
+      if (result.project) {
+        setProject(result.project);
+        setAssignmentAccountIDs(projectAccountIDs(result.project));
+        setAssignmentTeamIDs(projectTeamIDs(result.project));
+      } else {
+        await loadProject({ showLoading: false });
+      }
+      setAssignmentsOpen(false);
+    } catch (assignmentError) {
+      setError(assignmentError instanceof Error ? assignmentError.message : "Failed to save project assignments");
+    } finally {
+      setAssignmentsSaving(false);
+    }
+  }, [assignmentAccountIDs, assignmentTeamIDs, companyID, loadProject, project, projectID]);
+
+  const createRelationshipResource = useCallback(async (resourceType: "logic_gate" | "node") => {
+    setRelationshipContextMenu(null);
+    setError("");
+    try {
+      const result = resourceType === "logic_gate"
+        ? await createProjectLogicGate({
+          companyID,
+          projectID,
+          header: "New Logic Gate",
+          position: relationships.length + 1,
+        })
+        : await createProjectNode({
+          companyID,
+          projectID,
+          title: "New Node",
+          position: relationships.length + 1,
+        });
+      if (result.relationship) {
+        setRelationships((current) => mergeProjectRelationships(current, [result.relationship!]));
+      } else {
+        await loadProject({ showLoading: false });
+      }
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : `Failed to create ${resourceType === "logic_gate" ? "logic gate" : "node"}`);
+    }
+  }, [companyID, loadProject, projectID, relationships.length]);
+
   const relationshipTargetsFromTransfer = useCallback((dataTransfer: DataTransfer): ProjectRelationshipDropTarget[] => {
     const payload = readExplorerDragPayload(dataTransfer);
     return resolveProjectRelationshipDropTargets(payload, workspace);
@@ -515,12 +611,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <h2 style={summaryTitleStyle}>{project?.name || projectID}</h2>
         </div>
         <div style={summaryMetaPillsStyle}>
+          <button type="button" style={summaryPermissionButtonStyle} onClick={() => setAssignmentsOpen(true)}>
+            Assignments
+          </button>
           <button type="button" style={summaryPermissionButtonStyle} onClick={() => setPermissionsOpen(true)}>
             Permissions
           </button>
           <span style={statusPillStyle(accent)}>{project?.status || "Active"}</span>
-          {project?.account_name ? <span style={plainPillStyle}>{project.account_name}</span> : null}
-          {project?.team_name ? <span style={plainPillStyle}>{project.team_name}</span> : null}
+          {projectAccountLabels(project).map((label) => <span key={`account:${label}`} style={plainPillStyle}>{label}</span>)}
+          {projectTeamLabels(project).map((label) => <span key={`team:${label}`} style={plainPillStyle}>{label}</span>)}
         </div>
       </div>
       {permissionsOpen && (
@@ -534,6 +633,25 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           onSaved={() => void loadProject({ showLoading: false })}
         />
       )}
+      {assignmentsOpen ? (
+        <ProjectAssignmentsDialog
+          accounts={accounts}
+          groups={groups}
+          selectedAccountIDs={assignmentAccountIDs}
+          selectedTeamIDs={assignmentTeamIDs}
+          saving={assignmentsSaving}
+          onSetAccountIDs={setAssignmentAccountIDs}
+          onSetTeamIDs={setAssignmentTeamIDs}
+          onSave={() => void saveProjectAssignments()}
+          onClose={() => {
+            setAssignmentsOpen(false);
+            if (project) {
+              setAssignmentAccountIDs(projectAccountIDs(project));
+              setAssignmentTeamIDs(projectTeamIDs(project));
+            }
+          }}
+        />
+      ) : null}
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
       <div ref={bodyRef} style={summaryBodyStyle}>
         <section style={textColumnStyle(summarySplitPct)}>
@@ -755,6 +873,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <div
             className="kanban-board-scroll"
             style={relationshipScrollStyle(relationshipDropActive)}
+            onContextMenu={(event) => {
+              if (event.target !== event.currentTarget) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setRelationshipContextMenu({ x: event.clientX, y: event.clientY });
+            }}
             onDragOver={(event) => {
               if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
               event.preventDefault();
@@ -845,6 +969,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div style={emptyRelationshipStyle}>No relationships</div>
             ) : null}
           </div>
+          {relationshipContextMenu ? (
+            <div
+              role="menu"
+              style={relationshipContextMenuStyle(relationshipContextMenu.x, relationshipContextMenu.y)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("logic_gate")}>
+                Create new logic gate
+              </button>
+              <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("node")}>
+                Create new node
+              </button>
+            </div>
+          ) : null}
         </aside>
       </div>
       {emailPickerBlockID ? (
@@ -910,11 +1049,135 @@ function mergeProjectRelationships(
   return Array.from(byID.values()).sort(compareRelationshipProjection);
 }
 
+function uniqueStringIDs(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function projectAccountIDs(project?: ProjectRecord | null): string[] {
+  const fromAccounts = project?.accounts?.map((account) => account.account_id) ?? [];
+  const fallback = project?.account_id ? [project.account_id] : [];
+  return uniqueStringIDs(fromAccounts.length > 0 ? fromAccounts : fallback);
+}
+
+function projectTeamIDs(project?: ProjectRecord | null): string[] {
+  const fromTeams = project?.teams?.map((team) => team.group_id) ?? [];
+  const fallback = project?.team_id ? [project.team_id] : [];
+  return uniqueStringIDs(fromTeams.length > 0 ? fromTeams : fallback);
+}
+
+function projectAccountLabels(project?: ProjectRecord | null): string[] {
+  const labels = (project?.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
+  if (labels.length > 0) return labels;
+  return project?.account_name ? [project.account_name] : [];
+}
+
+function projectTeamLabels(project?: ProjectRecord | null): string[] {
+  const labels = (project?.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
+  if (labels.length > 0) return labels;
+  return project?.team_name ? [project.team_name] : [];
+}
+
 function toggleSetValue(current: Set<string>, value: string): Set<string> {
   const next = new Set(current);
   if (next.has(value)) next.delete(value);
   else next.add(value);
   return next;
+}
+
+function ProjectAssignmentsDialog({
+  accounts,
+  groups,
+  selectedAccountIDs,
+  selectedTeamIDs,
+  saving,
+  onSetAccountIDs,
+  onSetTeamIDs,
+  onSave,
+  onClose,
+}: {
+  accounts: Account[];
+  groups: CompanyUserGroup[];
+  selectedAccountIDs: string[];
+  selectedTeamIDs: string[];
+  saving: boolean;
+  onSetAccountIDs: (accountIDs: string[]) => void;
+  onSetTeamIDs: (teamIDs: string[]) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const selectedAccounts = new Set(selectedAccountIDs);
+  const selectedTeams = new Set(selectedTeamIDs);
+  const toggleAccount = (accountID: string) => {
+    onSetAccountIDs(toggleStringIDList(selectedAccountIDs, accountID));
+  };
+  const toggleTeam = (teamID: string) => {
+    onSetTeamIDs(toggleStringIDList(selectedTeamIDs, teamID));
+  };
+  return (
+    <div style={assignmentDialogBackdropStyle} onPointerDown={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-assignments-title"
+        style={assignmentDialogStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div style={assignmentDialogHeaderStyle}>
+          <h3 id="project-assignments-title" style={assignmentDialogTitleStyle}>Project Assignments</h3>
+          <button type="button" style={assignmentCloseButtonStyle} onClick={onClose}>Close</button>
+        </div>
+        <div style={assignmentDialogColumnsStyle}>
+          <div style={assignmentSectionStyle}>
+            <div style={assignmentSectionTitleStyle}>Accounts</div>
+            <div style={assignmentListStyle}>
+              {accounts.map((account) => (
+                <label key={account.account_id} style={assignmentOptionStyle}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAccounts.has(account.account_id)}
+                    onChange={() => toggleAccount(account.account_id)}
+                  />
+                  <span style={assignmentOptionLabelStyle}>{account.name || account.account_id}</span>
+                </label>
+              ))}
+              {accounts.length === 0 ? <div style={assignmentEmptyStyle}>No accounts</div> : null}
+            </div>
+          </div>
+          <div style={assignmentSectionStyle}>
+            <div style={assignmentSectionTitleStyle}>Teams</div>
+            <div style={assignmentListStyle}>
+              {groups.map((group) => (
+                <label key={group.group_id} style={assignmentOptionStyle}>
+                  <input
+                    type="checkbox"
+                    checked={selectedTeams.has(group.group_id)}
+                    onChange={() => toggleTeam(group.group_id)}
+                  />
+                  <span style={assignmentOptionLabelStyle}>{group.name || group.group_id}</span>
+                </label>
+              ))}
+              {groups.length === 0 ? <div style={assignmentEmptyStyle}>No teams</div> : null}
+            </div>
+          </div>
+        </div>
+        <div style={assignmentDialogActionsStyle}>
+          <button type="button" style={assignmentCancelButtonStyle} onClick={onClose}>Cancel</button>
+          <button type="button" style={assignmentSaveButtonStyle} disabled={saving} onClick={onSave}>
+            {saving ? "Saving" : "Save Assignments"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function toggleStringIDList(values: string[], value: string): string[] {
+  const cleanValue = value.trim();
+  if (!cleanValue) return values;
+  const current = new Set(values.map((item) => item.trim()).filter(Boolean));
+  if (current.has(cleanValue)) current.delete(cleanValue);
+  else current.add(cleanValue);
+  return Array.from(current);
 }
 
 function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -1114,6 +1377,150 @@ const plainPillStyle: React.CSSProperties = {
   color: "#334155",
   fontSize: 12,
   fontWeight: 700,
+};
+
+const assignmentDialogBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 120,
+  display: "grid",
+  placeItems: "center",
+  padding: 18,
+  background: "rgba(15, 23, 42, 0.28)",
+  boxSizing: "border-box",
+};
+
+const assignmentDialogStyle: React.CSSProperties = {
+  width: "min(760px, 100%)",
+  maxHeight: "min(680px, calc(100vh - 36px))",
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr) auto",
+  gap: 14,
+  padding: 16,
+  border: "1px solid rgba(148, 163, 184, 0.28)",
+  borderRadius: 10,
+  background: "#ffffff",
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.24)",
+  boxSizing: "border-box",
+};
+
+const assignmentDialogHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+};
+
+const assignmentDialogTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 16,
+  fontWeight: 950,
+};
+
+const assignmentCloseButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#475569",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 10px",
+};
+
+const assignmentDialogColumnsStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const assignmentSectionStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 8,
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 8,
+  padding: 10,
+  background: "#f8fafc",
+  boxSizing: "border-box",
+};
+
+const assignmentSectionTitleStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 950,
+};
+
+const assignmentListStyle: React.CSSProperties = {
+  minHeight: 180,
+  maxHeight: 380,
+  overflow: "auto",
+  display: "grid",
+  alignContent: "start",
+  gap: 6,
+};
+
+const assignmentOptionStyle: React.CSSProperties = {
+  minHeight: 32,
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 8px",
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  boxSizing: "border-box",
+};
+
+const assignmentOptionLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const assignmentEmptyStyle: React.CSSProperties = {
+  minHeight: 84,
+  display: "grid",
+  placeItems: "center",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const assignmentDialogActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+};
+
+const assignmentCancelButtonStyle: React.CSSProperties = {
+  minHeight: 34,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 12px",
+};
+
+const assignmentSaveButtonStyle: React.CSSProperties = {
+  ...assignmentCancelButtonStyle,
+  border: "1px solid rgba(37, 99, 235, 0.26)",
+  background: "#2563eb",
+  color: "#ffffff",
 };
 
 const summaryErrorStyle: React.CSSProperties = {
@@ -1383,6 +1790,39 @@ const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({
   borderRadius: 8,
   background: dropActive ? "rgba(239, 246, 255, 0.76)" : "rgba(255, 255, 255, 0.54)",
 });
+
+function relationshipContextMenuStyle(x: number, y: number): React.CSSProperties {
+  return {
+    position: "fixed",
+    left: x,
+    top: y,
+    zIndex: 90,
+    minWidth: 190,
+    display: "grid",
+    gap: 2,
+    padding: 5,
+    border: "1px solid rgba(100, 116, 139, 0.24)",
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, 0.98)",
+    boxShadow: "0 14px 34px rgba(15, 23, 42, 0.18)",
+    boxSizing: "border-box",
+  };
+}
+
+const relationshipContextMenuButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  width: "100%",
+  border: 0,
+  borderRadius: 6,
+  background: "transparent",
+  color: "#334155",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 850,
+  textAlign: "left",
+  padding: "0 9px",
+};
 
 const gateGroupStyle = (collapsed: boolean): React.CSSProperties => ({
   display: "flex",

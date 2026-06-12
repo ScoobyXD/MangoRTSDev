@@ -437,18 +437,20 @@ type LogicGateView struct {
 }
 
 type Project struct {
-	CompanyID        string    `json:"company_id"`
-	ProjectID        string    `json:"project_id"`
-	Name             string    `json:"name"`
-	Status           string    `json:"status"`
-	DefaultAccess    string    `json:"default_access"`
-	AccountID        *string   `json:"account_id,omitempty"`
-	AccountName      *string   `json:"account_name,omitempty"`
-	TeamID           *string   `json:"team_id,omitempty"`
-	TeamName         *string   `json:"team_name,omitempty"`
-	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID        string             `json:"company_id"`
+	ProjectID        string             `json:"project_id"`
+	Name             string             `json:"name"`
+	Status           string             `json:"status"`
+	DefaultAccess    string             `json:"default_access"`
+	AccountID        *string            `json:"account_id,omitempty"`
+	AccountName      *string            `json:"account_name,omitempty"`
+	Accounts         []Account          `json:"accounts,omitempty"`
+	TeamID           *string            `json:"team_id,omitempty"`
+	TeamName         *string            `json:"team_name,omitempty"`
+	Teams            []CompanyUserGroup `json:"teams,omitempty"`
+	EffectiveAccess  string             `json:"effective_access_level,omitempty"`
+	CreatedTimestamp time.Time          `json:"created_timestamp"`
+	UpdatedTimestamp time.Time          `json:"updated_timestamp"`
 }
 
 type ProjectInformation struct {
