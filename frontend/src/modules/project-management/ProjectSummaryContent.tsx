@@ -542,9 +542,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         name: project.name || "Untitled Project",
         status: project.status || "Active",
-        accountID: accountIDs[0] ?? null,
         accountIDs,
-        teamID: teamIDs[0] ?? null,
         teamIDs,
       });
       if (result.project) {
@@ -1226,26 +1224,22 @@ function uniqueStringIDs(values: string[]): string[] {
 
 function projectAccountIDs(project?: ProjectRecord | null): string[] {
   const fromAccounts = project?.accounts?.map((account) => account.account_id) ?? [];
-  const fallback = project?.account_id ? [project.account_id] : [];
-  return uniqueStringIDs(fromAccounts.length > 0 ? fromAccounts : fallback);
+  return uniqueStringIDs(fromAccounts);
 }
 
 function projectTeamIDs(project?: ProjectRecord | null): string[] {
   const fromTeams = project?.teams?.map((team) => team.group_id) ?? [];
-  const fallback = project?.team_id ? [project.team_id] : [];
-  return uniqueStringIDs(fromTeams.length > 0 ? fromTeams : fallback);
+  return uniqueStringIDs(fromTeams);
 }
 
 function projectAccountLabels(project?: ProjectRecord | null): string[] {
   const labels = (project?.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
-  if (labels.length > 0) return labels;
-  return project?.account_name ? [project.account_name] : [];
+  return labels;
 }
 
 function projectTeamLabels(project?: ProjectRecord | null): string[] {
   const labels = (project?.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
-  if (labels.length > 0) return labels;
-  return project?.team_name ? [project.team_name] : [];
+  return labels;
 }
 
 function toggleSetValue(current: Set<string>, value: string): Set<string> {

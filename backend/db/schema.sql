@@ -418,8 +418,6 @@ create table if not exists projects (
   project_id uuid not null,
   name text not null,
   status text not null default 'Active',
-  account_id uuid,
-  team_id uuid,
   default_access text not null default 'edit',
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -432,14 +430,6 @@ create table if not exists projects (
 
 create index if not exists idx_projects_company_name
   on projects(company_id, lower(name), project_id);
-
-create index if not exists idx_projects_account
-  on projects(company_id, account_id, lower(name), project_id)
-  where account_id is not null;
-
-create index if not exists idx_projects_team
-  on projects(company_id, team_id, lower(name), project_id)
-  where team_id is not null;
 
 create table if not exists project_account_assignments (
   company_id uuid not null,

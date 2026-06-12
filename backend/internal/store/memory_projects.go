@@ -31,7 +31,6 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.applyProjectOwnershipLocked(&project, input.AccountIDs, input.TeamIDs)
 	r.projects[key(input.CompanyID, input.ProjectID)] = project
 	r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
 	r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
@@ -63,13 +62,12 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	}
 	project.Name = input.Name
 	project.Status = input.Status
-	if input.AccountSet || input.AccountIDsSet {
+	if input.AccountIDsSet {
 		r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
 	}
-	if input.TeamSet || input.TeamIDsSet {
+	if input.TeamIDsSet {
 		r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
 	}
-	r.applyProjectOwnershipLocked(&project, r.projectAccountIDsLocked(input.CompanyID, input.ProjectID), r.projectTeamIDsLocked(input.CompanyID, input.ProjectID))
 	project.UpdatedTimestamp = time.Now().UTC()
 	r.projects[k] = project
 	project = r.withProjectReadModelLocked(project)
@@ -484,18 +482,9 @@ func (r *MemoryRepo) ListProjectRelationshipsForResource(companyID, resourceType
 	return items, nil
 }
 
-func (r *MemoryRepo) applyProjectOwnershipLocked(project *domain.Project, accountIDs, teamIDs []string) {
-	project.AccountID = firstProjectIDPointer(accountIDs)
-	project.TeamID = firstProjectIDPointer(teamIDs)
-}
-
 func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.Project {
 	project = cloneProject(project)
 	accountIDs := r.projectAccountIDsLocked(project.CompanyID, project.ProjectID)
-	if len(accountIDs) == 0 {
-		accountIDs = projectIDListFromPointer(project.AccountID)
-	}
-	project.AccountID = firstProjectIDPointer(accountIDs)
 	project.Accounts = make([]domain.Account, 0, len(accountIDs))
 	for _, accountID := range accountIDs {
 		account, ok := r.accounts[key(project.CompanyID, accountID)]
@@ -504,17 +493,7 @@ func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.P
 		}
 		project.Accounts = append(project.Accounts, account)
 	}
-	if len(project.Accounts) > 0 {
-		name := project.Accounts[0].Name
-		project.AccountName = &name
-	} else {
-		project.AccountName = nil
-	}
 	teamIDs := r.projectTeamIDsLocked(project.CompanyID, project.ProjectID)
-	if len(teamIDs) == 0 {
-		teamIDs = projectIDListFromPointer(project.TeamID)
-	}
-	project.TeamID = firstProjectIDPointer(teamIDs)
 	project.Teams = make([]domain.CompanyUserGroup, 0, len(teamIDs))
 	for _, teamID := range teamIDs {
 		group, ok := r.userGroups[userGroupKey(project.CompanyID, teamID)]
@@ -522,12 +501,6 @@ func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.P
 			continue
 		}
 		project.Teams = append(project.Teams, group)
-	}
-	if len(project.Teams) > 0 {
-		name := project.Teams[0].Name
-		project.TeamName = &name
-	} else {
-		project.TeamName = nil
 	}
 	return project
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -15,48 +14,20 @@ project.project_id::text,
 project.name,
 project.status,
 project.default_access,
-project.account_id::text,
-nullif(account.name, '') as account_name,
-project.team_id::text,
-nullif(team.name, '') as team_name,
 project.created_timestamp,
 project.updated_timestamp`
 
 func scanProject(row interface{ Scan(dest ...any) error }) (domain.Project, error) {
 	var item domain.Project
-	var accountID sql.NullString
-	var accountName sql.NullString
-	var teamID sql.NullString
-	var teamName sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.ProjectID,
 		&item.Name,
 		&item.Status,
 		&item.DefaultAccess,
-		&accountID,
-		&accountName,
-		&teamID,
-		&teamName,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
-	if accountID.Valid && strings.TrimSpace(accountID.String) != "" {
-		value := accountID.String
-		item.AccountID = &value
-	}
-	if accountName.Valid && strings.TrimSpace(accountName.String) != "" {
-		value := accountName.String
-		item.AccountName = &value
-	}
-	if teamID.Valid && strings.TrimSpace(teamID.String) != "" {
-		value := teamID.String
-		item.TeamID = &value
-	}
-	if teamName.Valid && strings.TrimSpace(teamName.String) != "" {
-		value := teamName.String
-		item.TeamName = &value
-	}
 	return item, err
 }
 
@@ -74,25 +45,7 @@ func attachProjectAssignmentReadModel(ctx context.Context, queryer postgresProje
 		return domain.Project{}, err
 	}
 	project.Accounts = accounts
-	if len(accounts) > 0 {
-		accountID := accounts[0].AccountID
-		accountName := accounts[0].Name
-		project.AccountID = &accountID
-		project.AccountName = &accountName
-	} else {
-		project.AccountID = nil
-		project.AccountName = nil
-	}
 	project.Teams = teams
-	if len(teams) > 0 {
-		teamID := teams[0].GroupID
-		teamName := teams[0].Name
-		project.TeamID = &teamID
-		project.TeamName = &teamName
-	} else {
-		project.TeamID = nil
-		project.TeamName = nil
-	}
 	return project, nil
 }
 
@@ -259,41 +212,16 @@ func (r *PostgresRepo) CreateProject(input ProjectInput) (ProjectMutationResult,
 	}
 	defer tx.Rollback()
 
-	var accountID any
-	if input.AccountID != nil {
-		accountID = *input.AccountID
-	}
-	var teamID any
-	if input.TeamID != nil {
-		teamID = *input.TeamID
-	}
 	project, err := scanProject(tx.QueryRowContext(ctx, `
 with inserted as (
   insert into projects (
-    company_id, project_id, name, status, account_id, team_id, default_access, created_timestamp, updated_timestamp
-  ) values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, 'edit', now(), now())
+    company_id, project_id, name, status, default_access, created_timestamp, updated_timestamp
+  ) values ($1::uuid, $2::uuid, $3, $4, 'edit', now(), now())
   returning *
 )
-select
-  project.company_id::text,
-  project.project_id::text,
-  project.name,
-  project.status,
-  project.default_access,
-  project.account_id::text,
-  nullif(account.name, '') as account_name,
-  project.team_id::text,
-  nullif(team.name, '') as team_name,
-  project.created_timestamp,
-  project.updated_timestamp
+select `+projectSelectColumns+`
 from inserted project
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id
-`, input.CompanyID, input.ProjectID, input.Name, input.Status, accountID, teamID))
+`, input.CompanyID, input.ProjectID, input.Name, input.Status))
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
@@ -332,53 +260,19 @@ func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult,
 		return ProjectMutationResult{}, err
 	}
 	defer tx.Rollback()
-	setClauses := []string{"name=$3", "status=$4", "updated_timestamp=now()"}
 	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status}
-	argIndex := 5
-	if input.AccountSet {
-		setClauses = append(setClauses, fmt.Sprintf("account_id=$%d::uuid", argIndex))
-		if input.AccountID != nil {
-			args = append(args, *input.AccountID)
-		} else {
-			args = append(args, nil)
-		}
-		argIndex++
-	}
-	if input.TeamSet {
-		setClauses = append(setClauses, fmt.Sprintf("team_id=$%d::uuid", argIndex))
-		if input.TeamID != nil {
-			args = append(args, *input.TeamID)
-		} else {
-			args = append(args, nil)
-		}
-	}
 	query := `
 with updated as (
   update projects
-  set ` + strings.Join(setClauses, ", ") + `
+  set name=$3,
+      status=$4,
+      updated_timestamp=now()
   where company_id=$1::uuid
     and project_id=$2::uuid
   returning *
 )
-select
-  project.company_id::text,
-  project.project_id::text,
-  project.name,
-  project.status,
-  project.default_access,
-  project.account_id::text,
-  nullif(account.name, '') as account_name,
-  project.team_id::text,
-  nullif(team.name, '') as team_name,
-  project.created_timestamp,
-  project.updated_timestamp
-from updated project
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id`
+select ` + projectSelectColumns + `
+from updated project`
 	project, err := scanProject(tx.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectMutationResult{}, ErrNotFound
@@ -386,12 +280,12 @@ left join company_user_groups team
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
-	if input.AccountSet || input.AccountIDsSet {
+	if input.AccountIDsSet {
 		if err := setProjectAccountAssignmentsTx(ctx, tx, input.CompanyID, input.ProjectID, input.AccountIDs); err != nil {
 			return ProjectMutationResult{}, err
 		}
 	}
-	if input.TeamSet || input.TeamIDsSet {
+	if input.TeamIDsSet {
 		if err := setProjectTeamAssignmentsTx(ctx, tx, input.CompanyID, input.ProjectID, input.TeamIDs); err != nil {
 			return ProjectMutationResult{}, err
 		}
@@ -432,12 +326,6 @@ func (r *PostgresRepo) GetProject(companyID, projectID string) (domain.Project, 
 	project, err := scanProject(r.db.QueryRowContext(ctx, `
 select `+projectSelectColumns+`
 from projects project
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id
 where project.company_id=$1::uuid
   and project.project_id=$2::uuid`, companyID, projectID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -458,12 +346,6 @@ func (r *PostgresRepo) ListProjects(companyID, viewerUserID string) ([]domain.Pr
 	query := `
 select ` + projectSelectColumns + `
 from projects project
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id
 where project.company_id=$1::uuid`
 	args := []any{companyID}
 	if viewerUserID != "" {
@@ -530,12 +412,6 @@ join company_explorer_folder_items item
  and item.item_id=project.project_id::text
 join folder_scope folder
   on folder.folder_id=item.folder_id
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id
 where project.company_id=$1::uuid
 order by lower(project.name) asc, project.project_id asc`, companyID, folderID)
 	if err != nil {
@@ -590,12 +466,6 @@ join company_explorer_folder_items item
  and item.item_id=project.project_id::text
 join folder_scope folder
   on folder.folder_id=item.folder_id
-left join accounts account
-  on account.company_id=project.company_id
- and account.account_id=project.account_id
-left join company_user_groups team
-  on team.company_id=project.company_id
- and team.group_id=project.team_id
 where project.company_id=$1::uuid
   and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, $4::text)
 order by lower(project.name) asc, project.project_id asc`, companyID, folderID, userID, EntityPermissionView)

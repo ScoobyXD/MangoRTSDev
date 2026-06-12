@@ -89,6 +89,30 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 	if len(relationships) != 1 || relationships[0].LogicGateID == nil || *relationships[0].LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("relationships after allowed create = %+v, want one row assigned to guarded gate", relationships)
 	}
+
+	payloadWithoutPriority := map[string]any{
+		"company_id": companyID,
+		"title":      "Allowed project node default priority",
+		"initial_assignment": map[string]any{
+			"logic_gate_id": logicGate.LogicGateID,
+			"status":        store.LogicGateWorkStatusPending,
+		},
+	}
+	req = logicGateWorkV2Request(t, http.MethodPost, "/v1/projects/"+projectID+"/nodes", payloadWithoutPriority, editor, companyID)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST project node without priority status = %d body=%s, want 201", rr.Code, rr.Body.String())
+	}
+	var createPayload struct {
+		Node domain.Node `json:"node"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode project node create response: %v", err)
+	}
+	if createPayload.Node.Priority == nil || *createPayload.Node.Priority != store.ProjectScopedNodeDefaultPriority {
+		t.Fatalf("created node priority = %+v, want %d", createPayload.Node.Priority, store.ProjectScopedNodeDefaultPriority)
+	}
 }
 
 func TestProjectRelationshipsGETFiltersTargetsForViewer(t *testing.T) {

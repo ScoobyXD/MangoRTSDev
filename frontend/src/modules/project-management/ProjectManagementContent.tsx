@@ -569,13 +569,11 @@ function projectGroupValues(project: ProjectRecord, field: ProjectGroupField): P
   if (field === "account") {
     const accounts = project.accounts ?? [];
     const values = accounts.map((account) => ({ key: account.account_id, label: account.name || account.account_id }));
-    if (values.length === 0 && project.account_id) values.push({ key: project.account_id, label: project.account_name || project.account_id });
     return uniqueGroupValues(values);
   }
   if (field === "team") {
     const teams = project.teams ?? [];
     const values = teams.map((team) => ({ key: team.group_id, label: team.name || team.group_id }));
-    if (values.length === 0 && project.team_id) values.push({ key: project.team_id, label: project.team_name || project.team_id });
     return uniqueGroupValues(values);
   }
   return [fallbackGroupValue()];
@@ -685,13 +683,13 @@ function buildGroupedTimelineRows(
 function projectAccountLabel(project: ProjectRecord): string {
   const labels = (project.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
   if (labels.length > 0) return labels.join(", ");
-  return project.account_name || "Unassigned";
+  return "Unassigned";
 }
 
 function projectTeamLabel(project: ProjectRecord): string {
   const labels = (project.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
   if (labels.length > 0) return labels.join(", ");
-  return project.team_name || "Unassigned";
+  return "Unassigned";
 }
 
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({

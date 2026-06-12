@@ -52,11 +52,7 @@ export type ProjectRecord = {
   name: string;
   status: string;
   default_access?: string;
-  account_id?: string | null;
-  account_name?: string | null;
   accounts?: Account[];
-  team_id?: string | null;
-  team_name?: string | null;
   teams?: ProjectTeam[];
   effective_access_level?: string;
   created_timestamp: string;
@@ -208,9 +204,7 @@ export async function createProject(input: {
   companyID: string;
   name: string;
   status?: string;
-  accountID?: string | null;
   accountIDs?: string[];
-  teamID?: string | null;
   teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
   const body: Record<string, unknown> = {
@@ -218,9 +212,7 @@ export async function createProject(input: {
     name: input.name,
     status: input.status ?? "Active",
   };
-  if (input.accountID !== undefined) body.account_id = input.accountID;
   if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
-  if (input.teamID !== undefined) body.team_id = input.teamID;
   if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
   return apiFetchJSON<ProjectMutationResponse>("/v1/projects", {
     method: "POST",
@@ -233,9 +225,7 @@ export async function updateProject(input: {
   projectID: string;
   name: string;
   status: string;
-  accountID?: string | null;
   accountIDs?: string[];
-  teamID?: string | null;
   teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
   const body: Record<string, unknown> = {
@@ -243,9 +233,7 @@ export async function updateProject(input: {
     name: input.name,
     status: input.status,
   };
-  if (input.accountID !== undefined) body.account_id = input.accountID;
   if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
-  if (input.teamID !== undefined) body.team_id = input.teamID;
   if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
   return apiFetchJSON<ProjectMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}`, {
     method: "PUT",
@@ -331,7 +319,7 @@ export async function createProjectNode(input: {
       company_id: input.companyID,
       title: input.title,
       position: input.position ?? 0,
-      initial_assignment: logicGateID ? { logic_gate_id: logicGateID, position: input.position ?? 0 } : undefined,
+      initial_assignment: logicGateID ? { logic_gate_id: logicGateID, position: input.position ?? 0, priority: 3 } : undefined,
     }),
   });
 }
