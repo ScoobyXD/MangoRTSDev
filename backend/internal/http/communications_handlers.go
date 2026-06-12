@@ -757,6 +757,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
+		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, req.Subject)
+	}
 	now := time.Now().UTC()
 	s.commCache.patchMessagePages(connection.UserID, message, now)
 	s.commCache.invalidateMessage(connection.UserID, message.ID)
@@ -765,7 +768,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 }
 
 func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
-	return &NylasTrackingOptions{Opens: true}
+	return &NylasTrackingOptions{Opens: true, Label: "Mango read receipt"}
 }
 
 func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request) {

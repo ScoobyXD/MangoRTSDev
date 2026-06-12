@@ -119,23 +119,29 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			userID = connection.UserID
 			grantUserIDs[grantID] = userID
 		}
+		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) == "" {
+			log.Printf("nylas message.opened webhook missing message_id grant_id=%s", grantID)
+		}
 		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) != "" {
 			signalAt := change.OccurredAt.UTC()
 			if signalAt.IsZero() {
 				signalAt = time.Now().UTC()
 			}
-			if _, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
+			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
 				UserID:          userID,
 				MessageID:       change.MessageID,
 				ThreadID:        change.ThreadID,
 				Status:          "likely_read",
 				SignalTimestamp: signalAt,
 				SignalCount:     change.SignalCount,
-			}); err != nil {
+			})
+			if err != nil {
+				log.Printf("failed to store nylas message.opened read status user_id=%s grant_id=%s message_id=%s: %v", userID, grantID, change.MessageID, err)
 				s.nylasWebhooks.forget(receiptKey)
 				writeError(w, http.StatusInternalServerError, "failed_to_store_message_read_status")
 				return
 			}
+			log.Printf("stored nylas message.opened read status user_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", userID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
 		s.applyNylasWebhookCacheInvalidation(userID, change)
 		s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
