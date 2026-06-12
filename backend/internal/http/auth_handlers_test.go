@@ -923,6 +923,63 @@ func TestDeleteCompanyUserWithRemainingMembershipKeepsIdentity(t *testing.T) {
 	}
 }
 
+func TestDeleteCompanyUserAsDevAdminDeletesIdentityWithRemainingMembership(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const adminCompanyID = "00000000-0000-0000-0000-000000000001"
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const otherCompanyID = "22222222-2222-2222-2222-222222222222"
+	const adminSubject = "admin-subject"
+	const targetSubject = "target-subject"
+	const targetEmail = "target@example.com"
+	repo.EnsureCompany(adminCompanyID, "MangoRTS Admin")
+	repo.EnsureCompany(companyID, "MangoRTS Dev")
+	repo.EnsureCompany(otherCompanyID, "Second Company")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, adminCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	target, err := repo.UpsertAuthUser(targetSubject, targetEmail, "Target User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(targetSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(targetSubject, otherCompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	cognito := &recordingCognitoAdmin{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
+	}).Routes()
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/companies/"+companyID+"/users/"+target.UserID, nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d, body=%s", deleteRes.Code, http.StatusOK, strings.TrimSpace(deleteRes.Body.String()))
+	}
+	if len(cognito.deleted) != 1 || cognito.deleted[0] != targetSubject {
+		t.Fatalf("cognito deletes = %v, want [%s]", cognito.deleted, targetSubject)
+	}
+	if _, err := repo.GetCompanyUser(companyID, target.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("removed company membership error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetCompanyUser(otherCompanyID, target.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("other company membership error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetAuthUser(targetSubject); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("target user after dev admin delete error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRepositoryCreateInvitationRejectsCompanyUser(t *testing.T) {
 	t.Parallel()
 

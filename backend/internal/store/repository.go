@@ -74,7 +74,7 @@ type IdentityRepository interface {
 	ListCompanyUserOnboarding(companyID string) ([]domain.CompanyUserOnboarding, error)
 	ListMentionableCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
-	DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error)
+	DeleteCompanyUser(companyID, userID string, deleteIdentity bool) (DeleteCompanyUserResult, error)
 	ListCompanyUserGroups(companyID string) ([]domain.CompanyUserGroup, error)
 	CreateCompanyUserGroup(companyID, parentGroupID, name string) (domain.CompanyUserGroup, error)
 	UpdateCompanyUserGroup(companyID, groupID string, parentGroupID *string, name string, position int) (domain.CompanyUserGroup, error)
