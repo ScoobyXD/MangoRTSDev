@@ -991,9 +991,10 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 const (
 	communicationsNylasDefaultMessageLimit = 20
 	communicationsNylasMaxMessageLimit     = 20
-	communicationsNylasMinRequestInterval  = 50 * time.Millisecond
-	communicationsNylasMaxInFlightPerGrant = 4
+	communicationsNylasMinRequestInterval  = 200 * time.Millisecond
+	communicationsNylasMaxInFlightPerGrant = 2
 	communicationsArchiveBatchConcurrency  = 4
+	communicationsAttachmentMaxTotalBytes  = 24_000_000
 )
 
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {
@@ -1454,6 +1455,7 @@ func cleanNylasAttachments(items []NylasAttachment) ([]NylasAttachment, bool) {
 		return nil, true
 	}
 	cleaned := make([]NylasAttachment, 0, len(items))
+	var totalDecodedBytes int64
 	for _, item := range items {
 		filename := strings.TrimSpace(item.Filename)
 		content := strings.TrimSpace(item.Content)
@@ -1465,6 +1467,10 @@ func cleanNylasAttachments(items []NylasAttachment) ([]NylasAttachment, bool) {
 		}
 		decoded, err := base64.StdEncoding.DecodeString(content)
 		if err != nil {
+			return nil, false
+		}
+		totalDecodedBytes += int64(len(decoded))
+		if totalDecodedBytes > communicationsAttachmentMaxTotalBytes {
 			return nil, false
 		}
 		contentType := strings.TrimSpace(item.ContentType)

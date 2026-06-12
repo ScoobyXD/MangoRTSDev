@@ -957,6 +957,12 @@ export function messageHasRecipient(message: EmailMessage, email: string): boole
   return emailAddressListContains([...(message.to ?? []), ...(message.cc ?? []), ...(message.bcc ?? [])], email);
 }
 
+export function messageIsSent(message: EmailMessage): boolean {
+  return [...(message.folders ?? []), ...(message.folder_ids ?? [])]
+    .map(normalizeEmailFolderToken)
+    .some((token) => token === "sent");
+}
+
 export function emailAddressListContains(addresses: EmailAddress[], email: string): boolean {
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail) return false;
@@ -971,10 +977,10 @@ export function formatMessageDate(epochSeconds?: number): string {
 }
 
 export function messageReadStatusLabel(status?: EmailReadStatus): string {
-  if (!status) return "";
+  if (!status) return "Not opened";
   if (status.status === "read") return "Read";
   if (status.status === "likely_read") return "Likely read";
-  return "";
+  return "Not opened";
 }
 
 export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
@@ -988,6 +994,7 @@ export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
 export function messageReadStatusTitle(status?: EmailReadStatus): string {
   const label = messageReadStatusLabel(status);
   if (!label) return "";
+  if (!status) return "No opens recorded yet.";
   const timestamp = messageReadStatusTimestamp(status);
   const count = typeof status?.signal_count === "number" && status.signal_count > 1 ? ` (${Math.floor(status.signal_count)} signals)` : "";
   return timestamp ? `${label} ${timestamp}${count}` : `${label}${count}`;

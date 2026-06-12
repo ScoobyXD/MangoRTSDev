@@ -528,10 +528,14 @@ export async function deleteEmailMessage(messageID: string, sharedInboxID?: stri
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
   const { company_id: companyID, shared_inbox_id: sharedInboxID, ...messageInput } = input;
+  const cleanCompanyID = companyID?.trim() ?? "";
   const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/send${query}`, {
     method: "POST",
-    body: JSON.stringify(messageInput),
+    body: JSON.stringify({
+      ...(cleanCompanyID ? { company_id: cleanCompanyID } : {}),
+      ...messageInput,
+    }),
   });
   const message = sentEmailMessageForLocalLists(payload.message);
   primeMessageCaches(message);

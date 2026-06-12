@@ -424,6 +424,7 @@ test("sendEmail scopes shared inbox sends through query params", async () => {
       path: "/v1/communications/messages/send?company_id=company-1&shared_inbox_id=shared-1",
       method: "POST",
       body: {
+        company_id: "company-1",
         to: [{ email: "customer@example.test" }],
         subject: "Hello",
         body: "Body",

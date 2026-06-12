@@ -399,6 +399,46 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	}
 }
 
+func TestCommunicationsSendAllowsLargeAttachmentBodyWithQueryCompanyID(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+	largeContent := strings.Repeat("QUJD", 280000)
+	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"large.txt","content":"` + largeContent + `"}]}`
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" {
+		t.Fatalf("attachments = %+v, want large attachment to reach Nylas send", nylas.sent.Attachments)
+	}
+}
+
 func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	t.Parallel()
 
