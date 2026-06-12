@@ -322,13 +322,16 @@ export async function createProjectNode(input: {
   projectID: string;
   title: string;
   position?: number;
+  logicGateID?: string;
 }): Promise<{ node?: unknown; relationship?: ProjectRelationshipProjection }> {
+  const logicGateID = input.logicGateID?.trim() ?? "";
   return apiFetchJSON<{ node?: unknown; relationship?: ProjectRelationshipProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/nodes`, {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
       title: input.title,
       position: input.position ?? 0,
+      initial_assignment: logicGateID ? { logic_gate_id: logicGateID, position: input.position ?? 0 } : undefined,
     }),
   });
 }
