@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	ProjectDefaultStatus = "Active"
-	ProjectMaxStatusLen  = 80
+	ProjectDefaultStatus             = "Active"
+	ProjectMaxStatusLen              = 80
+	ProjectScopedNodeDefaultPriority = 3
 )
 
 func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectInput, error) {
@@ -19,34 +20,6 @@ func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectIn
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.AccountIDs = cleanProjectIDList(input.AccountIDs)
 	input.TeamIDs = cleanProjectIDList(input.TeamIDs)
-	if input.AccountSet && input.AccountID != nil {
-		accountID := cleanUUIDText(*input.AccountID)
-		if accountID == "" {
-			input.AccountID = nil
-		} else {
-			input.AccountID = &accountID
-		}
-	}
-	if input.AccountIDsSet {
-		input.AccountID = firstProjectIDPointer(input.AccountIDs)
-		input.AccountSet = true
-	} else if input.AccountSet {
-		input.AccountIDs = projectIDListFromPointer(input.AccountID)
-	}
-	if input.TeamSet && input.TeamID != nil {
-		teamID := cleanUUIDText(*input.TeamID)
-		if teamID == "" {
-			input.TeamID = nil
-		} else {
-			input.TeamID = &teamID
-		}
-	}
-	if input.TeamIDsSet {
-		input.TeamID = firstProjectIDPointer(input.TeamIDs)
-		input.TeamSet = true
-	} else if input.TeamSet {
-		input.TeamIDs = projectIDListFromPointer(input.TeamID)
-	}
 	if input.CompanyID == "" || input.Name == "" || (requireProjectID && input.ProjectID == "") {
 		return ProjectInput{}, ErrInvalid
 	}
@@ -65,25 +38,6 @@ func cleanProjectIDList(values []string) []string {
 		out = append(out, id)
 	}
 	return out
-}
-
-func firstProjectIDPointer(values []string) *string {
-	if len(values) == 0 {
-		return nil
-	}
-	value := values[0]
-	return &value
-}
-
-func projectIDListFromPointer(value *string) []string {
-	if value == nil {
-		return nil
-	}
-	id := cleanUUIDText(*value)
-	if id == "" {
-		return nil
-	}
-	return []string{id}
 }
 
 func NormalizeProjectStatus(status string) string {
@@ -234,6 +188,10 @@ func normalizeProjectScopedNodeLogicGateAssignment(input *ProjectScopedNodeLogic
 	if item.LogicGateID == "" {
 		return nil, ErrInvalid
 	}
+	if item.Priority == nil {
+		priority := ProjectScopedNodeDefaultPriority
+		item.Priority = &priority
+	}
 	if item.Priority != nil && (*item.Priority < 1 || *item.Priority > 5) {
 		return nil, ErrInvalid
 	}
@@ -249,11 +207,7 @@ func cloneBoolPointer(value *bool) *bool {
 }
 
 func cloneProject(item domain.Project) domain.Project {
-	item.AccountID = cloneStringPointer(item.AccountID)
-	item.AccountName = cloneStringPointer(item.AccountName)
 	item.Accounts = append([]domain.Account{}, item.Accounts...)
-	item.TeamID = cloneStringPointer(item.TeamID)
-	item.TeamName = cloneStringPointer(item.TeamName)
 	item.Teams = append([]domain.CompanyUserGroup{}, item.Teams...)
 	return item
 }

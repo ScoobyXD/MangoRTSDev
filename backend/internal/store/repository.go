@@ -534,12 +534,8 @@ type ProjectInput struct {
 	ProjectID     string
 	Name          string
 	Status        string
-	AccountID     *string
-	AccountSet    bool
 	AccountIDs    []string
 	AccountIDsSet bool
-	TeamID        *string
-	TeamSet       bool
 	TeamIDs       []string
 	TeamIDsSet    bool
 	ActorUserID   string

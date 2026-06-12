@@ -12,9 +12,7 @@ type projectRequest struct {
 	CompanyID  string    `json:"company_id"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
-	AccountID  *string   `json:"account_id"`
 	AccountIDs *[]string `json:"account_ids"`
-	TeamID     *string   `json:"team_id"`
 	TeamIDs    *[]string `json:"team_ids"`
 }
 
@@ -121,12 +119,8 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			CompanyID:     companyID,
 			Name:          req.Name,
 			Status:        req.Status,
-			AccountID:     req.AccountID,
-			AccountSet:    req.AccountID != nil,
 			AccountIDs:    stringSliceValue(req.AccountIDs),
 			AccountIDsSet: req.AccountIDs != nil,
-			TeamID:        req.TeamID,
-			TeamSet:       req.TeamID != nil,
 			TeamIDs:       stringSliceValue(req.TeamIDs),
 			TeamIDsSet:    req.TeamIDs != nil,
 			ActorUserID:   actor.User.UserID,
@@ -256,12 +250,8 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			ProjectID:     projectID,
 			Name:          req.Name,
 			Status:        req.Status,
-			AccountID:     req.AccountID,
-			AccountSet:    true,
 			AccountIDs:    stringSliceValue(req.AccountIDs),
 			AccountIDsSet: req.AccountIDs != nil,
-			TeamID:        req.TeamID,
-			TeamSet:       true,
 			TeamIDs:       stringSliceValue(req.TeamIDs),
 			TeamIDsSet:    req.TeamIDs != nil,
 			ActorUserID:   actor.User.UserID,
@@ -601,6 +591,8 @@ func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fal
 		writeError(w, http.StatusConflict, "project_already_exists")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "project_not_found")
+	case errors.Is(err, store.ErrPriorityRequired):
+		writeError(w, http.StatusBadRequest, "priority_required")
 	default:
 		writeError(w, http.StatusInternalServerError, fallback)
 	}
