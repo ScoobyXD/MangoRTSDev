@@ -539,7 +539,7 @@ func (r *PostgresRepo) GetCompanyUser(companyID, userID string) (domain.CompanyU
 	return item, err
 }
 
-func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error) {
+func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity bool) (DeleteCompanyUserResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if companyID == "" || userID == "" {
@@ -623,9 +623,15 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 	if err = tx.QueryRow(`select exists(select 1 from company_memberships where user_id = $1)`, userID).Scan(&hasRemainingMembership); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if !hasRemainingMembership {
-		if _, err = tx.Exec(
-			`insert into auth_external_identity_deletions
+	if hasRemainingMembership && !deleteIdentity {
+		if err = tx.Commit(); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: false}, nil
+	}
+
+	if _, err = tx.Exec(
+		`insert into auth_external_identity_deletions
 			 (provider, external_subject, user_id, email, status, attempts, last_error, created_timestamp, updated_timestamp)
 			 values ('cognito', $1, $2, $3, 'pending', 0, '', now(), now())
 			 on conflict (provider, external_subject) do update set
@@ -635,55 +641,75 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 			   last_error='',
 			   updated_timestamp=now(),
 			   completed_timestamp=null`,
-			item.CognitoSubject,
-			userID,
-			normalizeEmail(item.Email),
-		); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(
-			`delete from invitations
+		item.CognitoSubject,
+		userID,
+		normalizeEmail(item.Email),
+	); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(
+		`delete from invitations
 			 where ($1 <> '' and email = $1)
 			    or invited_by_user_id = $2
 			    or accepted_by_user_id = $2`,
-			normalizeEmail(item.Email),
-			userID,
-		); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(
-			`delete from company_explorer_folder_shares
+		normalizeEmail(item.Email),
+		userID,
+	); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(
+		`delete from company_explorer_folder_shares
 			 where ($1 <> '' and email = $1)
 			    or invited_by_user_id = $2
 			    or user_id = $2`,
-			normalizeEmail(item.Email),
-			userID,
-		); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`delete from user_email_connections where user_id = $1`, userID); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`delete from resource_access_grants where principal_type = 'user' and principal_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`delete from resource_permissions where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`delete from racio_matrix_projection_table where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "racio_matrix_projection_table") {
-			return DeleteCompanyUserResult{}, err
-		}
-		if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
-			return DeleteCompanyUserResult{}, err
-		}
+		normalizeEmail(item.Email),
+		userID,
+	); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from user_email_connections where user_id = $1`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`update kanban_board_projection set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "kanban_board_projection") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "project_management_timeline_items") && !isPostgresUndefinedColumn(err, "created_by_user_id") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`update project_management_timeline_projection set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "project_management_timeline_projection") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from resource_access_grants where principal_type = 'user' and principal_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from resource_permissions where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from resource_permissions where assigned_by_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") && !isPostgresUndefinedColumn(err, "assigned_by_user_id") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from racio_matrix_projection_table where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "racio_matrix_projection_table") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from resource_raci_assignments where subject_type = 'user' and subject_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from entity_access_permissions where subject_type = 'user' and subject_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from company_memberships where user_id = $1`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: !hasRemainingMembership}, nil
+	return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: true}, nil
 }
 
 func (r *PostgresRepo) CompleteExternalIdentityDeletion(cognitoSubject string) error {

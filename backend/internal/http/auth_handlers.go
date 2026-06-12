@@ -178,7 +178,7 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusConflict, "cannot_delete_self")
 		return
 	}
-	result, err := s.repo.DeleteCompanyUser(companyID, userID)
+	result, err := s.repo.DeleteCompanyUser(companyID, userID, actor.IsDevAdmin)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "company_user_not_found")
 		return

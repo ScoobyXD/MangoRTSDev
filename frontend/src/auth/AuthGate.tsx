@@ -1635,7 +1635,9 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               Are you sure you want to delete this user?
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.4, color: SETTINGS_MUTED, overflowWrap: "anywhere" }}>
-              This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.
+              {me.is_dev_admin
+                ? <>This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.</>
+                : <>This removes {companyUserLabel(deleteConfirmation)} from {activeCompanyLabel}. If this is their last company, Mango also deletes their Cognito identity.</>}
             </div>
             <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
               <input type="checkbox" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />

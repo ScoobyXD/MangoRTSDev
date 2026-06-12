@@ -517,7 +517,7 @@ func (r *MemoryRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUse
 	return domain.CompanyUser{}, ErrNotFound
 }
 
-func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error) {
+func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity bool) (DeleteCompanyUserResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if companyID == "" || userID == "" {
@@ -663,11 +663,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			break
 		}
 	}
-	if hasRemainingMembership {
+	if hasRemainingMembership && !deleteIdentity {
 		return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: false}, nil
 	}
 
 	email := normalizeEmail(user.Email)
+	for membershipKeyValue, membership := range r.memberships {
+		if membership.UserID == userID {
+			delete(r.memberships, membershipKeyValue)
+		}
+	}
 	for key, invitation := range r.invitations {
 		if normalizeEmail(invitation.Email) == email || invitation.InvitedByUserID == userID || (invitation.AcceptedByUserID != nil && *invitation.AcceptedByUserID == userID) {
 			delete(r.invitations, key)
