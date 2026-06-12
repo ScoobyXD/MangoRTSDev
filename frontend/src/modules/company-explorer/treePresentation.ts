@@ -164,7 +164,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
 
   const itemType = getExplorerDropPayloadItemType(payload);
   if (!itemType || itemType === "kanban") return null;
-  if (isRaciScopedRow && itemType !== row.folderKind) return null;
+  if (itemType !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -249,8 +249,8 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const logicGateParentFolderID = containingFolderID;
   const projectParentFolderID = containingFolderID;
   const nodeFolderParentID = nodeParentFolderID;
-  const logicGateFolderParentID = containingFolderID;
-  const projectFolderParentID = containingFolderID;
+  const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
+  const projectFolderParentID = row?.folderKind === "project" ? containingFolderID : "";
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind ?? (row?.kind === "project" ? "project" : row?.kind === "node" ? "node" : "logic_gate");
 
   return {
