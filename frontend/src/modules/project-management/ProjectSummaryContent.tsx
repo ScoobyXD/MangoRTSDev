@@ -51,6 +51,7 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
@@ -108,6 +109,13 @@ type ProjectRelationshipDropTarget = {
 type RelationshipCanvasContextMenuState = {
   x: number;
   y: number;
+  logicGateID?: string;
+};
+
+type ProjectRelationshipNodeDragPayload = {
+  nodeID: string;
+  fromLogicGateID?: string;
+  status?: string | null;
 };
 
 type SummarySplitResizeState = {
@@ -119,6 +127,7 @@ const PROJECT_SUMMARY_SURFACE_TEXT = "#172033";
 const PROJECT_SUMMARY_RULE = "rgba(91, 141, 239, 0.24)";
 const PROJECT_SUMMARY_SPLIT_MIN = 42;
 const PROJECT_SUMMARY_SPLIT_MAX = 74;
+const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
@@ -135,6 +144,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const refreshTokenRef = useRef(refreshToken);
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
+  const [projectTitleEditing, setProjectTitleEditing] = useState(false);
+  const [projectTitleDraft, setProjectTitleDraft] = useState("");
   const [blocks, setBlocks] = useState<ProjectTextBlockDraft[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
@@ -184,6 +195,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         listCompanyUserGroups(companyID).catch(() => ({ groups: [] as CompanyUserGroup[], members: [] })),
       ]);
       setProject(view.project);
+      setProjectTitleDraft(view.project.name || "");
       setRelationships(view.relationships ?? []);
       setCompanyUsers(users);
       setGroups(userGroups.groups);
@@ -553,6 +565,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const createRelationshipResource = useCallback(async (resourceType: "logic_gate" | "node") => {
     setRelationshipContextMenu(null);
     setError("");
+    const targetLogicGateID = relationshipContextMenu?.logicGateID?.trim() ?? "";
     try {
       const result = resourceType === "logic_gate"
         ? await createProjectLogicGate({
@@ -566,6 +579,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           projectID,
           title: "New Node",
           position: relationships.length + 1,
+          logicGateID: targetLogicGateID,
         });
       if (result.relationship) {
         setRelationships((current) => mergeProjectRelationships(current, [result.relationship!]));
@@ -575,7 +589,62 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : `Failed to create ${resourceType === "logic_gate" ? "logic gate" : "node"}`);
     }
-  }, [companyID, loadProject, projectID, relationships.length]);
+  }, [companyID, loadProject, projectID, relationshipContextMenu?.logicGateID, relationships.length]);
+
+  const saveProjectTitle = useCallback(async () => {
+    if (!project) return;
+    const nextName = projectTitleDraft.trim();
+    if (!nextName || nextName === project.name) {
+      setProjectTitleDraft(project.name || "");
+      setProjectTitleEditing(false);
+      return;
+    }
+    setError("");
+    try {
+      const result = await updateProject({
+        companyID,
+        projectID,
+        name: nextName,
+        status: project.status || "Active",
+      });
+      if (result.project) {
+        setProject(result.project);
+        setProjectTitleDraft(result.project.name || nextName);
+      } else {
+        setProject((current) => current ? { ...current, name: nextName } : current);
+        setProjectTitleDraft(nextName);
+      }
+      setProjectTitleEditing(false);
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : "Failed to rename project");
+      setProjectTitleDraft(project.name || "");
+      setProjectTitleEditing(false);
+    }
+  }, [companyID, project, projectID, projectTitleDraft]);
+
+  const moveRelationshipNodeToGate = useCallback(async (payload: ProjectRelationshipNodeDragPayload, targetLogicGateID: string, position: number) => {
+    const nodeID = payload.nodeID.trim();
+    const toLogicGateID = targetLogicGateID.trim();
+    const fromLogicGateID = payload.fromLogicGateID?.trim() ?? "";
+    if (!nodeID || !toLogicGateID || fromLogicGateID === toLogicGateID) return;
+    setError("");
+    try {
+      await moveLogicGateAssignment({
+        apiBase: readAuthConfig().apiBase,
+        companyID,
+        logicGateID: toLogicGateID,
+        fromLogicGateID,
+        nodeID,
+        status: payload.status ?? undefined,
+        position,
+        mutationOrigin: "matrix",
+      });
+      await loadProject({ showLoading: false });
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Failed to move node");
+      await loadProject({ showLoading: false });
+    }
+  }, [companyID, loadProject]);
 
   const relationshipTargetsFromTransfer = useCallback((dataTransfer: DataTransfer): ProjectRelationshipDropTarget[] => {
     const payload = readExplorerDragPayload(dataTransfer);
@@ -608,7 +677,44 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         <button type="button" style={backButtonStyle} onClick={onBack}>{"<"} Project Management</button>
         <div style={summaryTitleClusterStyle}>
           <div style={summaryEyebrowStyle}>Project Summary</div>
-          <h2 style={summaryTitleStyle}>{project?.name || projectID}</h2>
+          {projectTitleEditing ? (
+            <input
+              autoFocus
+              value={projectTitleDraft}
+              style={summaryTitleInputStyle}
+              onChange={(event) => setProjectTitleDraft(event.currentTarget.value)}
+              onBlur={() => void saveProjectTitle()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void saveProjectTitle();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setProjectTitleDraft(project?.name || "");
+                  setProjectTitleEditing(false);
+                }
+              }}
+            />
+          ) : (
+            <h2
+              tabIndex={0}
+              title="Rename project"
+              style={summaryTitleStyle}
+              onClick={() => {
+                setProjectTitleDraft(project?.name || "");
+                setProjectTitleEditing(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                setProjectTitleDraft(project?.name || "");
+                setProjectTitleEditing(true);
+              }}
+            >
+              {project?.name || projectID}
+            </h2>
+          )}
         </div>
         <div style={summaryMetaPillsStyle}>
           <button type="button" style={summaryPermissionButtonStyle} onClick={() => setAssignmentsOpen(true)}>
@@ -899,8 +1005,32 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           >
             {relationshipGroups.map((group) => {
               const collapsed = collapsedGateRelationshipIDs.has(group.gate.relationship_id);
+              const gateLogicGateID = group.gate.logic_gate_id?.trim() ?? "";
               return (
-                <div key={group.gate.relationship_id} style={gateGroupStyle(collapsed)}>
+                <div
+                  key={group.gate.relationship_id}
+                  style={gateGroupStyle(collapsed)}
+                  onContextMenu={(event) => {
+                    if (!gateLogicGateID) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRelationshipContextMenu({ x: event.clientX, y: event.clientY, logicGateID: gateLogicGateID });
+                  }}
+                  onDragOver={(event) => {
+                    if (!Array.from(event.dataTransfer.types).includes(PROJECT_RELATIONSHIP_NODE_DRAG_MIME)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    if (!gateLogicGateID) return;
+                    const payload = readProjectRelationshipNodeDragPayload(event.dataTransfer);
+                    if (!payload) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void moveRelationshipNodeToGate(payload, gateLogicGateID, group.nodes.length + 1);
+                  }}
+                >
                   <div style={logicGateCardHeaderStyle}>
                     <span style={logicGateIconBadgeStyle}><ExplorerRowIcon kind="logic_gate" /></span>
                     <span
@@ -931,7 +1061,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         <button
                           key={node.relationship_id}
                           type="button"
+                          draggable={Boolean(node.node_id || node.resource_id)}
                           style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id)}
+                          onDragStart={(event) => startProjectRelationshipNodeDrag(event, node, gateLogicGateID)}
                           onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
                           onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
                           onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
@@ -976,11 +1108,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onPointerDown={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
             >
-              <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("logic_gate")}>
-                Create new logic gate
-              </button>
+              {relationshipContextMenu.logicGateID ? null : (
+                <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("logic_gate")}>
+                  Create new logic gate
+                </button>
+              )}
               <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("node")}>
-                Create new node
+                {relationshipContextMenu.logicGateID ? "Create new node in logic gate" : "Create new node"}
               </button>
             </div>
           ) : null}
@@ -1047,6 +1181,43 @@ function mergeProjectRelationships(
     byID.set(relationship.relationship_id, relationship);
   }
   return Array.from(byID.values()).sort(compareRelationshipProjection);
+}
+
+function startProjectRelationshipNodeDrag(
+  event: React.DragEvent<HTMLElement>,
+  node: ProjectRelationshipProjection,
+  fromLogicGateID: string,
+): void {
+  const nodeID = (node.node_id || node.resource_id || "").trim();
+  if (!nodeID) {
+    event.preventDefault();
+    return;
+  }
+  const payload: ProjectRelationshipNodeDragPayload = {
+    nodeID,
+    fromLogicGateID: fromLogicGateID.trim() || undefined,
+    status: node.status,
+  };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData(PROJECT_RELATIONSHIP_NODE_DRAG_MIME, JSON.stringify(payload));
+  event.dataTransfer.setData("text/plain", node.display_title || nodeID);
+}
+
+function readProjectRelationshipNodeDragPayload(dataTransfer: DataTransfer): ProjectRelationshipNodeDragPayload | null {
+  const raw = dataTransfer.getData(PROJECT_RELATIONSHIP_NODE_DRAG_MIME);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ProjectRelationshipNodeDragPayload>;
+    const nodeID = typeof parsed.nodeID === "string" ? parsed.nodeID.trim() : "";
+    if (!nodeID) return null;
+    return {
+      nodeID,
+      fromLogicGateID: typeof parsed.fromLogicGateID === "string" ? parsed.fromLogicGateID.trim() : undefined,
+      status: typeof parsed.status === "string" ? parsed.status : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function uniqueStringIDs(values: string[]): string[] {
@@ -1333,6 +1504,24 @@ const summaryTitleStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  cursor: "text",
+};
+
+const summaryTitleInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 30,
+  border: "1px solid rgba(91, 141, 239, 0.34)",
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#0f172a",
+  fontFamily: "inherit",
+  fontSize: 22,
+  fontWeight: 850,
+  letterSpacing: 0,
+  outline: "none",
+  padding: "0 8px",
+  boxSizing: "border-box",
 };
 
 const summaryMetaPillsStyle: React.CSSProperties = {

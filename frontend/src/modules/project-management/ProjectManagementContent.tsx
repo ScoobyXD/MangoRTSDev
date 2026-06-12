@@ -43,6 +43,7 @@ import {
   deleteProjectManagementTimelineItem,
   fetchProjectManagementTimeline,
   listProjects,
+  updateProject,
   updateProjectManagementTimelineItem,
   type ProjectRecord,
   type ProjectManagementEntityType,
@@ -114,8 +115,8 @@ type TimelineLoadOptions = {
 
 type ProjectManagementViewMode = "timeline" | "list";
 
-type ProjectGroupField = "account" | "team" | "status";
-type ProjectGroupSortDirection = "asc" | "desc";
+type ProjectGroupField = "account" | "team";
+type ProjectGroupingField = ProjectGroupField | "";
 
 type ProjectGroupValue = {
   key: string;
@@ -155,7 +156,6 @@ const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-en
 const PROJECT_GROUP_FIELDS: Array<{ field: ProjectGroupField; label: string }> = [
   { field: "account", label: "Account" },
   { field: "team", label: "Team" },
-  { field: "status", label: "Status" },
 ];
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
@@ -578,7 +578,7 @@ function projectGroupValues(project: ProjectRecord, field: ProjectGroupField): P
     if (values.length === 0 && project.team_id) values.push({ key: project.team_id, label: project.team_name || project.team_id });
     return uniqueGroupValues(values);
   }
-  return uniqueGroupValues([{ key: project.status || "Active", label: project.status || "Active" }], "No status");
+  return [fallbackGroupValue()];
 }
 
 function timelineGroupValues(
@@ -602,89 +602,81 @@ function timelineGroupValues(
       .map((member) => {
         const group = groupsByID.get(member.group_id);
         return { key: member.group_id, label: group?.name || member.group_id };
-      });
+    });
     return uniqueGroupValues(values);
   }
-  return uniqueGroupValues([{ key: row.status || "No status", label: row.status || "No status" }], "No status");
+  return [fallbackGroupValue()];
 }
 
-function compareProjectGroupValues(left: ProjectGroupValue, right: ProjectGroupValue, direction: ProjectGroupSortDirection): number {
+function compareProjectGroupValues(left: ProjectGroupValue, right: ProjectGroupValue): number {
   const leftUnassigned = left.key === UNASSIGNED_GROUP_KEY;
   const rightUnassigned = right.key === UNASSIGNED_GROUP_KEY;
   if (leftUnassigned || rightUnassigned) return leftUnassigned === rightUnassigned ? 0 : leftUnassigned ? 1 : -1;
-  const result = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }) || left.key.localeCompare(right.key);
-  return direction === "asc" ? result : -result;
+  return left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }) || left.key.localeCompare(right.key);
 }
 
 function buildGroupedSections<T>(
   items: T[],
   getValues: (item: T, field: ProjectGroupField) => ProjectGroupValue[],
-  yField: ProjectGroupField,
-  xField: ProjectGroupField,
-  yDirection: ProjectGroupSortDirection,
-  xDirection: ProjectGroupSortDirection,
+  groupField: ProjectGroupField,
+  subgroupField: ProjectGroupingField,
 ): ProjectGroupSection<T>[] {
   const sectionsByKey = new Map<string, ProjectGroupSection<T>>();
-  const append = (yValue: ProjectGroupValue, xValue: ProjectGroupValue, item: T) => {
-    let section = sectionsByKey.get(yValue.key);
+  const effectiveSubgroupField = subgroupField && subgroupField !== groupField ? subgroupField : "";
+  const append = (groupValue: ProjectGroupValue, subgroupValue: ProjectGroupValue, item: T) => {
+    let section = sectionsByKey.get(groupValue.key);
     if (!section) {
-      section = { group: yValue, buckets: [] };
-      sectionsByKey.set(yValue.key, section);
+      section = { group: groupValue, buckets: [] };
+      sectionsByKey.set(groupValue.key, section);
     }
-    let bucket = section.buckets.find((candidate) => candidate.group.key === xValue.key);
+    let bucket = section.buckets.find((candidate) => candidate.group.key === subgroupValue.key);
     if (!bucket) {
-      bucket = { group: xValue, items: [] };
+      bucket = { group: subgroupValue, items: [] };
       section.buckets.push(bucket);
     }
     bucket.items.push(item);
   };
   for (const item of items) {
-    const yValues = getValues(item, yField);
-    if (yField === xField) {
-      yValues.forEach((value) => append(value, value, item));
-      continue;
-    }
-    const xValues = getValues(item, xField);
-    for (const yValue of yValues) {
-      for (const xValue of xValues) {
-        append(yValue, xValue, item);
+    const groupValues = getValues(item, groupField);
+    const subgroupValues = effectiveSubgroupField ? getValues(item, effectiveSubgroupField) : [{ key: "__all", label: "All" }];
+    for (const groupValue of groupValues) {
+      for (const subgroupValue of subgroupValues) {
+        append(groupValue, subgroupValue, item);
       }
     }
   }
   return Array.from(sectionsByKey.values())
-    .sort((left, right) => compareProjectGroupValues(left.group, right.group, yDirection))
+    .sort((left, right) => compareProjectGroupValues(left.group, right.group))
     .map((section) => ({
       ...section,
-      buckets: section.buckets.sort((left, right) => compareProjectGroupValues(left.group, right.group, xDirection)),
+      buckets: section.buckets.sort((left, right) => compareProjectGroupValues(left.group, right.group)),
     }));
 }
 
 function buildGroupedTimelineRows(
   rows: TimelineWorkDisplayRow[],
-  yField: ProjectGroupField,
-  xField: ProjectGroupField,
-  yDirection: ProjectGroupSortDirection,
-  xDirection: ProjectGroupSortDirection,
+  groupField: ProjectGroupField,
+  subgroupField: ProjectGroupingField,
   groups: CompanyUserGroup[],
   groupMembers: CompanyUserGroupMember[],
   nodeByID: Map<string, NodeRecord>,
 ): TimelineDisplayRow[] {
+  const effectiveSubgroupField = subgroupField && subgroupField !== groupField ? subgroupField : "";
   const sections = buildGroupedSections(
     rows,
     (row, field) => timelineGroupValues(row.item, field, groups, groupMembers, nodeByID),
-    yField,
-    xField,
-    yDirection,
-    xDirection,
+    groupField,
+    effectiveSubgroupField,
   );
   const displayRows: TimelineDisplayRow[] = [];
   for (const section of sections) {
-    displayRows.push({ id: `group-y:${yField}:${section.group.key}`, kind: "group", label: section.group.label, depth: 0 });
+    displayRows.push({ id: `group:${groupField}:${section.group.key}`, kind: "group", label: section.group.label, depth: 0 });
     for (const bucket of section.buckets) {
-      const bucketID = `group-x:${yField}:${section.group.key}:${xField}:${bucket.group.key}`;
-      const label = yField === xField ? bucket.group.label : bucket.group.label;
-      displayRows.push({ id: bucketID, kind: "group", label, depth: 1 });
-      displayRows.push(...bucket.items.map((row) => ({ ...row, id: `${bucketID}:${row.id}`, depth: row.depth + 2 })));
+      const bucketID = `subgroup:${groupField}:${section.group.key}:${effectiveSubgroupField || "none"}:${bucket.group.key}`;
+      if (effectiveSubgroupField) {
+        displayRows.push({ id: bucketID, kind: "group", label: bucket.group.label, depth: 1 });
+      }
+      displayRows.push(...bucket.items.map((row) => ({ ...row, id: `${bucketID}:${row.id}`, depth: row.depth + (effectiveSubgroupField ? 2 : 1) })));
     }
   }
   return displayRows;
@@ -729,11 +721,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("list");
-  const [groupingOpen, setGroupingOpen] = useState(false);
-  const [xGroupBy, setXGroupBy] = useState<ProjectGroupField>("status");
-  const [yGroupBy, setYGroupBy] = useState<ProjectGroupField>("account");
-  const [xGroupDirection, setXGroupDirection] = useState<ProjectGroupSortDirection>("asc");
-  const [yGroupDirection, setYGroupDirection] = useState<ProjectGroupSortDirection>("asc");
+  const [groupBy, setGroupBy] = useState<ProjectGroupingField>("");
+  const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
   const [projectSummaryReloadKey, setProjectSummaryReloadKey] = useState(0);
@@ -751,6 +740,9 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
   const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<ProjectRecord | null>(null);
+  const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRecord | null>(null);
+  const [projectRenameDraft, setProjectRenameDraft] = useState("");
+  const [projectRenameSaving, setProjectRenameSaving] = useState(false);
   const { accounts: timelineAccounts } = useCompanyAccounts(companyID);
 
   const loadWorkspacePanel = useCallback(async () => {
@@ -1110,10 +1102,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   }, [timelineAccountFilterIDs, timelineRows, weekDays, workspaceNodeByID]);
   const baseTimelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes, timelineExpandedGateIDs), [timelineExpandedGateIDs, visibleTimelineRows, workspace.nodes]);
   const timelineDisplayRows = useMemo(() => (
-    groupingOpen
-      ? buildGroupedTimelineRows(baseTimelineDisplayRows, yGroupBy, xGroupBy, yGroupDirection, xGroupDirection, groups, groupMembers, workspaceNodeByID)
+    groupBy
+      ? buildGroupedTimelineRows(baseTimelineDisplayRows, groupBy, subgroupBy, groups, groupMembers, workspaceNodeByID)
       : baseTimelineDisplayRows
-  ), [baseTimelineDisplayRows, groupingOpen, groups, groupMembers, workspaceNodeByID, xGroupBy, xGroupDirection, yGroupBy, yGroupDirection]);
+  ), [baseTimelineDisplayRows, groupBy, groups, groupMembers, subgroupBy, workspaceNodeByID]);
   const explorerRows = useMemo(() => buildProjectExplorerRows({
     expanded: explorerExpanded,
     nodes: filteredNodes,
@@ -1254,6 +1246,36 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
   }, [companyID, loadProjectList, projects, scheduleProjectListReload, scheduleWorkspacePanelReload]);
 
+  const saveProjectRename = useCallback(async () => {
+    const project = projectRenameTarget;
+    if (!project) return;
+    const nextName = projectRenameDraft.trim();
+    if (!nextName || nextName === project.name) {
+      setProjectRenameTarget(null);
+      setProjectRenameDraft("");
+      return;
+    }
+    setProjectRenameSaving(true);
+    setError("");
+    try {
+      const result = await updateProject({
+        companyID,
+        projectID: project.project_id,
+        name: nextName,
+        status: project.status || "Active",
+      });
+      const renamed = result.project ?? { ...project, name: nextName };
+      setProjects((current) => current.map((item) => item.project_id === project.project_id ? renamed : item));
+      setProjectRenameTarget(null);
+      setProjectRenameDraft("");
+      scheduleProjectListReload();
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : "Failed to rename project");
+    } finally {
+      setProjectRenameSaving(false);
+    }
+  }, [companyID, projectRenameDraft, projectRenameTarget, scheduleProjectListReload]);
+
   const createNewProject = useCallback(async () => {
     setError("");
     try {
@@ -1311,16 +1333,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           </div>
           <div style={surfaceHeaderActionsStyle}>
           <ProjectGroupingControls
-            enabled={groupingOpen}
-            xField={xGroupBy}
-            yField={yGroupBy}
-            xDirection={xGroupDirection}
-            yDirection={yGroupDirection}
-            onEnabledChange={setGroupingOpen}
-            onXFieldChange={setXGroupBy}
-            onYFieldChange={setYGroupBy}
-            onXDirectionChange={setXGroupDirection}
-            onYDirectionChange={setYGroupDirection}
+            groupBy={groupBy}
+            subgroupBy={subgroupBy}
+            onGroupByChange={setGroupBy}
+            onSubgroupByChange={setSubgroupBy}
           />
           {viewMode === "timeline" ? (
             <>
@@ -1377,11 +1393,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           <ProjectListTable
             projects={projects}
             loading={projectsLoading}
-            groupingOpen={groupingOpen}
-            xGroupBy={xGroupBy}
-            yGroupBy={yGroupBy}
-            xDirection={xGroupDirection}
-            yDirection={yGroupDirection}
+            groupBy={groupBy}
+            subgroupBy={subgroupBy}
             onProjectOpen={openProject}
             onProjectContextMenu={(project, event) => {
               event.preventDefault();
@@ -1424,6 +1437,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           <button
             type="button"
             role="menuitem"
+            style={projectContextMenuButtonStyle}
+            onClick={() => {
+              setProjectRenameTarget(projectContextMenu.project);
+              setProjectRenameDraft(projectContextMenu.project.name || "");
+              setProjectContextMenu(null);
+            }}
+          >
+            Rename Title
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             style={{ ...projectContextMenuButtonStyle, color: "#b91c1c" }}
             onClick={() => {
               setProjectDeleteConfirmation(projectContextMenu.project);
@@ -1432,6 +1457,47 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           >
             Delete project
           </button>
+        </div>
+      ) : null}
+      {projectRenameTarget ? (
+        <div
+          role="presentation"
+          style={projectDeleteBackdropStyle}
+          onPointerDown={() => {
+            if (!projectRenameSaving) setProjectRenameTarget(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-rename-title"
+            style={projectDeleteDialogStyle}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <h3 id="project-rename-title" style={projectDeleteTitleStyle}>Rename project</h3>
+            <input
+              autoFocus
+              value={projectRenameDraft}
+              style={projectRenameInputStyle}
+              onChange={(event) => setProjectRenameDraft(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void saveProjectRename();
+                }
+                if (event.key === "Escape" && !projectRenameSaving) {
+                  event.preventDefault();
+                  setProjectRenameTarget(null);
+                }
+              }}
+            />
+            <div style={projectDeleteActionsStyle}>
+              <button type="button" style={projectDeleteCancelButtonStyle} disabled={projectRenameSaving} onClick={() => setProjectRenameTarget(null)}>Cancel</button>
+              <button type="button" style={projectRenameSaveButtonStyle} disabled={projectRenameSaving} onClick={() => void saveProjectRename()}>
+                {projectRenameSaving ? "Saving" : "Save"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {projectDeleteConfirmation ? (
@@ -1464,78 +1530,45 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 };
 
 function ProjectGroupingControls({
-  enabled,
-  xField,
-  yField,
-  xDirection,
-  yDirection,
-  onEnabledChange,
-  onXFieldChange,
-  onYFieldChange,
-  onXDirectionChange,
-  onYDirectionChange,
+  groupBy,
+  subgroupBy,
+  onGroupByChange,
+  onSubgroupByChange,
 }: {
-  enabled: boolean;
-  xField: ProjectGroupField;
-  yField: ProjectGroupField;
-  xDirection: ProjectGroupSortDirection;
-  yDirection: ProjectGroupSortDirection;
-  onEnabledChange: (enabled: boolean) => void;
-  onXFieldChange: (field: ProjectGroupField) => void;
-  onYFieldChange: (field: ProjectGroupField) => void;
-  onXDirectionChange: (direction: ProjectGroupSortDirection) => void;
-  onYDirectionChange: (direction: ProjectGroupSortDirection) => void;
+  groupBy: ProjectGroupingField;
+  subgroupBy: ProjectGroupingField;
+  onGroupByChange: (field: ProjectGroupingField) => void;
+  onSubgroupByChange: (field: ProjectGroupingField) => void;
 }) {
   return (
     <div style={projectGroupingControlsStyle}>
-      <button
-        type="button"
-        aria-pressed={enabled}
-        style={projectGroupingButtonStyle(enabled)}
-        onClick={() => onEnabledChange(!enabled)}
-      >
-        Group
-      </button>
-      {enabled ? (
-        <>
-          <label style={projectGroupFieldStyle}>
-            <span style={projectGroupAxisLabelStyle}>Y-axis</span>
-            <select
-              value={yField}
-              style={projectGroupSelectStyle}
-              onChange={(event) => onYFieldChange(event.currentTarget.value as ProjectGroupField)}
-            >
-              {PROJECT_GROUP_FIELDS.map((field) => <option key={`y:${field.field}`} value={field.field}>{field.label}</option>)}
-            </select>
-            <button
-              type="button"
-              aria-label="Toggle Y-axis sort"
-              style={projectGroupDirectionButtonStyle}
-              onClick={() => onYDirectionChange(yDirection === "asc" ? "desc" : "asc")}
-            >
-              {yDirection === "asc" ? "A-Z" : "Z-A"}
-            </button>
-          </label>
-          <label style={projectGroupFieldStyle}>
-            <span style={projectGroupAxisLabelStyle}>X-axis</span>
-            <select
-              value={xField}
-              style={projectGroupSelectStyle}
-              onChange={(event) => onXFieldChange(event.currentTarget.value as ProjectGroupField)}
-            >
-              {PROJECT_GROUP_FIELDS.map((field) => <option key={`x:${field.field}`} value={field.field}>{field.label}</option>)}
-            </select>
-            <button
-              type="button"
-              aria-label="Toggle X-axis sort"
-              style={projectGroupDirectionButtonStyle}
-              onClick={() => onXDirectionChange(xDirection === "asc" ? "desc" : "asc")}
-            >
-              {xDirection === "asc" ? "A-Z" : "Z-A"}
-            </button>
-          </label>
-        </>
-      ) : null}
+      <label style={projectGroupFieldStyle}>
+        <span style={projectGroupAxisLabelStyle}>Group by</span>
+        <select
+          value={groupBy}
+          style={projectGroupSelectStyle}
+          onChange={(event) => {
+            const next = event.currentTarget.value as ProjectGroupingField;
+            onGroupByChange(next);
+            if (!next) onSubgroupByChange("");
+          }}
+        >
+          <option value="">None</option>
+          {PROJECT_GROUP_FIELDS.map((field) => <option key={`group:${field.field}`} value={field.field}>{field.label}</option>)}
+        </select>
+      </label>
+      <label style={projectGroupFieldStyle}>
+        <span style={projectGroupAxisLabelStyle}>Subgroup</span>
+        <select
+          value={subgroupBy}
+          style={projectGroupSelectStyle}
+          disabled={!groupBy}
+          onChange={(event) => onSubgroupByChange(event.currentTarget.value as ProjectGroupingField)}
+        >
+          <option value="">None</option>
+          {PROJECT_GROUP_FIELDS.map((field) => <option key={`subgroup:${field.field}`} value={field.field}>{field.label}</option>)}
+        </select>
+      </label>
     </div>
   );
 }
@@ -1543,21 +1576,15 @@ function ProjectGroupingControls({
 function ProjectListTable({
   projects,
   loading,
-  groupingOpen,
-  xGroupBy,
-  yGroupBy,
-  xDirection,
-  yDirection,
+  groupBy,
+  subgroupBy,
   onProjectOpen,
   onProjectContextMenu,
 }: {
   projects: ProjectRecord[];
   loading: boolean;
-  groupingOpen: boolean;
-  xGroupBy: ProjectGroupField;
-  yGroupBy: ProjectGroupField;
-  xDirection: ProjectGroupSortDirection;
-  yDirection: ProjectGroupSortDirection;
+  groupBy: ProjectGroupingField;
+  subgroupBy: ProjectGroupingField;
   onProjectOpen: (projectID: string) => void;
   onProjectContextMenu: (project: ProjectRecord, event: React.MouseEvent<HTMLTableRowElement>) => void;
 }) {
@@ -1597,14 +1624,13 @@ function ProjectListTable({
     </>
   );
 
-  if (groupingOpen) {
+  if (groupBy) {
+    const effectiveSubgroupBy = subgroupBy && subgroupBy !== groupBy ? subgroupBy : "";
     const sections = buildGroupedSections(
       sortedProjects,
       projectGroupValues,
-      yGroupBy,
-      xGroupBy,
-      yDirection,
-      xDirection,
+      groupBy,
+      effectiveSubgroupBy,
     );
     return (
       <div className="kanban-board-scroll" style={projectListScrollStyle}>
@@ -1612,16 +1638,18 @@ function ProjectListTable({
           {sections.map((section) => (
             <section key={`y:${section.group.key}`} style={projectGroupedSectionStyle}>
               <div style={projectGroupHeaderStyle}>
-                <span style={projectGroupHeaderAxisStyle}>Y-axis</span>
+                <span style={projectGroupHeaderAxisStyle}>Group by</span>
                 <span style={projectGroupHeaderTextStyle}>{section.group.label}</span>
               </div>
               {section.buckets.map((bucket) => (
                 <div key={`x:${section.group.key}:${bucket.group.key}`} style={projectGroupedBucketStyle}>
-                  <div style={projectBucketHeaderStyle}>
-                    <span style={projectGroupHeaderAxisStyle}>X-axis</span>
-                    <span style={projectBucketHeaderTextStyle}>{bucket.group.label}</span>
-                    <span style={projectBucketCountStyle}>{bucket.items.length}</span>
-                  </div>
+                  {effectiveSubgroupBy ? (
+                    <div style={projectBucketHeaderStyle}>
+                      <span style={projectGroupHeaderAxisStyle}>Subgroup</span>
+                      <span style={projectBucketHeaderTextStyle}>{bucket.group.label}</span>
+                      <span style={projectBucketCountStyle}>{bucket.items.length}</span>
+                    </div>
+                  ) : null}
                   <table style={projectTableStyle}>
                     <thead>
                       <tr>
@@ -2168,24 +2196,10 @@ const projectGroupingControlsStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
-const projectGroupingButtonStyle = (enabled: boolean): React.CSSProperties => ({
-  minHeight: 30,
-  border: enabled ? "1px solid rgba(37, 99, 235, 0.34)" : "1px solid rgba(148, 163, 184, 0.24)",
-  borderRadius: 8,
-  background: enabled ? "#eff6ff" : "#ffffff",
-  color: enabled ? "#1d4ed8" : "#334155",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 12,
-  fontWeight: 900,
-  padding: "0 11px",
-  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.14), -4px -4px 10px rgba(255, 255, 255, 0.82)",
-});
-
 const projectGroupFieldStyle: React.CSSProperties = {
   height: 30,
   display: "inline-grid",
-  gridTemplateColumns: "auto 112px 42px",
+  gridTemplateColumns: "auto 120px",
   alignItems: "center",
   gap: 5,
   border: "1px solid rgba(148, 163, 184, 0.24)",
@@ -2212,19 +2226,6 @@ const projectGroupSelectStyle: React.CSSProperties = {
   fontFamily: "inherit",
   fontSize: 11,
   fontWeight: 900,
-};
-
-const projectGroupDirectionButtonStyle: React.CSSProperties = {
-  height: 22,
-  border: "1px solid rgba(148, 163, 184, 0.22)",
-  borderRadius: 6,
-  background: "#f8fafc",
-  color: "#475569",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 9,
-  fontWeight: 950,
-  padding: 0,
 };
 
 const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
@@ -2795,6 +2796,28 @@ const projectDeleteYesButtonStyle: React.CSSProperties = {
   ...projectDeleteCancelButtonStyle,
   border: "1px solid rgba(185, 28, 28, 0.22)",
   background: "#b91c1c",
+  color: "#ffffff",
+};
+
+const projectRenameInputStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 36,
+  border: "1px solid rgba(148, 163, 184, 0.30)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#0f172a",
+  fontFamily: "inherit",
+  fontSize: 14,
+  fontWeight: 850,
+  outline: "none",
+  padding: "0 10px",
+  boxSizing: "border-box",
+};
+
+const projectRenameSaveButtonStyle: React.CSSProperties = {
+  ...projectDeleteCancelButtonStyle,
+  border: "1px solid rgba(37, 99, 235, 0.26)",
+  background: "#2563eb",
   color: "#ffffff",
 };
 
