@@ -439,7 +439,7 @@ function friendlyApiError(code: string): string {
     case "user_already_exists":
       return "This user already exists.";
     case "display_name_required":
-      return "Enter your name.";
+      return "Enter your full name.";
     case "password_reset_user_not_found":
       return "You are not a user.";
     case "cognito_admin_not_configured":
