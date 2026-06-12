@@ -49,6 +49,7 @@ type KanbanColumnViewProps = {
   showCreateNodeButton?: boolean;
   layout?: "column" | "backlog";
   minimumColumnHeightPx?: number;
+  stretchHeight?: boolean;
 };
 
 export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
@@ -76,6 +77,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   showCreateNodeButton = true,
   layout = "column",
   minimumColumnHeightPx,
+  stretchHeight = false,
 }) => {
   const columnWidth = getColumnWidth(column);
   const isBacklogLayout = layout === "backlog";
@@ -111,8 +113,9 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         position: "relative",
         flex: isBacklogLayout ? "1 1 100%" : `0 0 ${columnWidth}px`,
         width: isBacklogLayout ? "100%" : columnWidth,
-        height: columnHeight,
-        minHeight: minimumColumnHeight,
+        height: stretchHeight ? "100%" : columnHeight,
+        minHeight: stretchHeight ? columnHeight : minimumColumnHeight,
+        alignSelf: stretchHeight ? "stretch" : undefined,
         background: `${columnFill} padding-box, ${columnFrame} border-box`,
         border: "1px solid transparent",
         borderRadius: 16,
@@ -197,9 +200,9 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             startX: event.clientX,
             startY: event.clientY,
             startWidth: columnWidth,
-            startHeight: columnHeight,
+            startHeight: event.currentTarget.parentElement?.getBoundingClientRect().height ?? columnHeight,
             currentWidth: columnWidth,
-            currentHeight: columnHeight,
+            currentHeight: event.currentTarget.parentElement?.getBoundingClientRect().height ?? columnHeight,
             minHeight: minimumColumnHeight,
           };
         }}

@@ -266,8 +266,12 @@ export function KanbanArenaGroupingControls({
       >
         Group
       </button>
-      <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" menuID="toolbar-y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} menuOpen={menuOpen === "toolbar-y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
-      <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" menuID="toolbar-x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} menuOpen={menuOpen === "toolbar-x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+      {groupingOpen && (
+        <>
+          <ArenaGroupSelect value={yGroupBy} onChange={onSetYGroupBy} label="Y-axis" menuID="toolbar-y" sortDirection={ySortDirection} onToggleSortDirection={onToggleYSortDirection} menuOpen={menuOpen === "toolbar-y"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+          <ArenaGroupSelect value={xGroupBy} onChange={onSetXGroupBy} label="X-Axis" menuID="toolbar-x" sortDirection={xSortDirection} onToggleSortDirection={onToggleXSortDirection} menuOpen={menuOpen === "toolbar-x"} onSetMenuOpen={onSetMenuOpen} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+        </>
+      )}
     </div>
   );
 }

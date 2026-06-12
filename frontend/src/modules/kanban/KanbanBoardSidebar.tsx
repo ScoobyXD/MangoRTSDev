@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type React from "react";
+import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import {
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -43,6 +44,7 @@ type KanbanBoardSidebarProps = {
   boardTitleReadOnly?: boolean;
   headerLeftPaddingPx?: number;
   topClearancePx?: number;
+  compactArenaHeader?: boolean;
   onSetBoardTitleDraft: React.Dispatch<React.SetStateAction<string>>;
   onSetContentSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   onSetEditingBoardTitle: React.Dispatch<React.SetStateAction<boolean>>;
@@ -77,6 +79,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   boardTitleReadOnly = false,
   headerLeftPaddingPx = 162,
   topClearancePx = KANBAN_MODULE_TOP_CLEARANCE_PX,
+  compactArenaHeader = false,
   onSetBoardTitleDraft,
   onSetContentSearchQuery,
   onSetEditingBoardTitle,
@@ -113,6 +116,23 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [boardPickerOpen, onCloseAllBoards]);
+
+  if (compactArenaHeader) {
+    return onCollapseToTab ? (
+      <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 7, pointerEvents: "auto" }}>
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title="Minimize Logic Gate Arena to app tab"
+          aria-label="Minimize Logic Gate Arena to app tab"
+          onClick={onCollapseToTab}
+          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE, color: text, padding: 0, cursor: "pointer", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
+        >
+          <MinimizeToLineIcon />
+        </button>
+      </div>
+    ) : null;
+  }
 
   return (
   <>
@@ -189,15 +209,12 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         <button
           className="mango-elevated-action"
           type="button"
-          title="Collapse Logic Gate Arena to app tab"
-          aria-label="Collapse Logic Gate Arena to app tab"
+          title="Minimize Logic Gate Arena to app tab"
+          aria-label="Minimize Logic Gate Arena to app tab"
           onClick={onCollapseToTab}
           style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE, color: text, padding: 0, cursor: "pointer", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
         >
-          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-            <rect x="2.3" y="3" width="11.4" height="7.6" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
-            <path d="M4.25 13h7.5M8 7.15v5.1M6.15 10.35 8 12.25l1.85-1.9" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <MinimizeToLineIcon />
         </button>
       )}
     </div>

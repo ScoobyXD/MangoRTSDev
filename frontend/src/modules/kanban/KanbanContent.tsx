@@ -108,6 +108,7 @@ type StoredLogicGateColumnLayout = {
 type StoredLogicGateColumnLayouts = Record<string, StoredLogicGateColumnLayout>;
 
 const KANBAN_COLUMN_BOTTOM_BUFFER_HEIGHT_PX = 180;
+const KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX = 280;
 
 function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
   return `mango:kanban:logic-gate-column-layout:v1:${encodeURIComponent(companyID)}:${encodeURIComponent(boardID)}`;
@@ -410,7 +411,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const laneBorder = isDark ? "rgba(255,255,255,0.18)" : KANBAN_SOFT_BORDER;
   const laneShadow = isDark ? "none" : KANBAN_PANEL_SHADOW;
   const cardBackground = isDark ? "#101418" : KANBAN_SURFACE;
-  const topClearancePx = arenaMode ? 34 : KANBAN_MODULE_TOP_CLEARANCE_PX;
+  const topClearancePx = arenaMode ? 0 : KANBAN_MODULE_TOP_CLEARANCE_PX;
   const boardHeaderLeftPaddingPx = arenaMode ? 0 : 162;
   const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
 
@@ -2214,7 +2215,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         dataTransferIncludes={dataTransferIncludes}
         showCreateNodeButton
         layout={layout}
-        minimumColumnHeightPx={layout === "backlog" ? 190 : (arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : undefined)}
+        minimumColumnHeightPx={layout === "backlog" ? KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX : (arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : undefined)}
+        stretchHeight={arenaMode && layout === "backlog"}
       />
     );
   };
@@ -2288,6 +2290,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setArenaYSortDirection(getDefaultKanbanYAxisSortDirection(field));
   }, []);
 
+  const toggleArenaGroupingOpen = useCallback(() => {
+    setArenaGroupMenuOpen(null);
+    setArenaGroupingOpen((open) => !open);
+  }, []);
+
   return (
     <div
       ref={boardRootRef}
@@ -2295,7 +2302,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       onTouchStart={(event) => event.stopPropagation()}
       style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box", paddingTop: topClearancePx, background: surface, color: text, overflow: arenaMode ? "visible" : "hidden" }}
     >
-      <div style={{ position: "absolute", top: topClearancePx - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />
+      {topClearancePx > 0 && <div style={{ position: "absolute", top: topClearancePx - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />}
       <KanbanBoardSidebar
         activeBoardTitle={activeBoardTitle}
         boardID={boardID}
@@ -2316,6 +2323,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         boardTitleReadOnly={!!activeBoard?.logic_gate_id || !!activeLogicGateID}
         headerLeftPaddingPx={boardHeaderLeftPaddingPx}
         topClearancePx={topClearancePx}
+        compactArenaHeader={arenaMode}
         onSetBoardTitleDraft={setBoardTitleDraft}
         onSetContentSearchQuery={setContentSearchQuery}
         onSetEditingBoardTitle={setEditingBoardTitle}
@@ -2350,9 +2358,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "4px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", display: arenaMode ? "flex" : undefined, flexDirection: arenaMode ? "column" : undefined, alignItems: arenaMode ? "stretch" : undefined, ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+        <div style={{ marginBottom: arenaMode ? 6 : 10, display: "flex", justifyContent: "flex-end", minWidth: 0, paddingRight: arenaMode && onCollapseArenaToTab ? 34 : 0, boxSizing: "border-box" }}>
           <AccountFilterControl
             accounts={companyAccounts}
             selectedAccountIDs={kanbanAccountFilterIDs}
@@ -2363,14 +2371,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             style={{ maxWidth: "min(420px, 100%)" }}
           />
         </div>
-        {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
+        {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={toggleArenaGroupingOpen} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} onCellContextMenu={(columnKey, rowKey, event) => {
           setCardContextMenu(null);
           setColumnContextMenu(null);
           setPriorityMenu(null);
           setArenaCellContextMenu({ x: event.clientX, y: event.clientY, columnKey, rowKey });
         }} /> : (
-        <div style={{ display: "grid", alignItems: "start", gap: useBacklogBottomLayout ? 12 : 0, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
+        <div style={{ display: "grid", alignItems: "start", gap: useBacklogBottomLayout ? 12 : 0, gridTemplateRows: arenaMode && useBacklogBottomLayout ? `${boardMinColumnHeightPx + 18}px minmax(${KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX}px, 1fr)` : undefined, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, flex: arenaMode ? "1 0 auto" : undefined, minHeight: arenaMode ? 0 : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: useBacklogBottomLayout ? 0 : 16 }}>
             {mainBoardColumns.map((column) => renderColumnView(column))}
             {!arenaMode && !activeBoardIsLogicGate && <button
@@ -2407,7 +2415,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             </button>}
           </div>
           {useBacklogBottomLayout && (
-            <div style={{ display: "grid", alignItems: "start", paddingBottom: 16 }}>
+            <div style={{ display: "grid", alignItems: arenaMode ? "stretch" : "start", height: arenaMode ? "100%" : undefined, paddingBottom: 16, boxSizing: "border-box" }}>
               {backlogColumns.map((column) => renderColumnView(column, "backlog"))}
             </div>
           )}
