@@ -902,7 +902,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
             throw new Error("Enter the Mango invite token.");
           }
           if (!displayName.trim()) {
-            throw new Error("Enter your name.");
+            throw new Error("Enter your full name.");
           }
           if (showPasswordStep && (newPassword.length > 0 || confirmNewPassword.length > 0) && newPassword !== confirmNewPassword) {
             throw new Error("Passwords are not the same.");
@@ -955,7 +955,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
       }}>
         {tokenFromURL && invitedEmail && <div style={authInfoMessageStyle}>Invitation for {invitedEmail}.</div>}
         {!tokenFromURL && <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />}
-        <AuthTextField label="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" />
+        <AuthTextField label="Your full name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your full name" autoComplete="name" />
         {showPasswordStep && !pendingChallenge && <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />}
         {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary password from invite email" autoComplete="current-password" />}
         {showPasswordStep && <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
