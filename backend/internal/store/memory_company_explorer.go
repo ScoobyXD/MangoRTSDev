@@ -247,7 +247,10 @@ func (r *MemoryRepo) activeLogicGatesFolderLocked(companyID string) (domain.Comp
 func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
 	next := 1000
 	for _, folder := range folders {
-		if folder.CompanyID != companyID || folder.FolderKind != folderKind || companyExplorerParentID(folder) != parentFolderID {
+		if folder.CompanyID != companyID || companyExplorerParentID(folder) != parentFolderID {
+			continue
+		}
+		if parentFolderID == "" && folder.FolderKind != folderKind {
 			continue
 		}
 		if folder.Position >= next {
@@ -292,7 +295,7 @@ func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplor
 func nextCompanyExplorerFolderChildPosition(folders map[string]domain.CompanyExplorerFolder, items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
 	next := nextCompanyExplorerFolderItemPosition(items, companyID, folderID)
 	for _, folder := range folders {
-		if folder.CompanyID != companyID || folder.FolderKind != itemType || companyExplorerParentID(folder) != folderID {
+		if folder.CompanyID != companyID || companyExplorerParentID(folder) != folderID {
 			continue
 		}
 		if folder.Position >= next {
@@ -310,8 +313,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	var parent *string
 	if parentFolderID != "" {
-		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
-		if !ok || parentFolder.FolderKind != folderKind {
+		if _, ok := r.folders[key(companyID, parentFolderID)]; !ok {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parentValue := parentFolderID
@@ -579,8 +581,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		parent = nil
 	}
 	if parentFolderID != nil && targetParentID != "" {
-		parentFolder, ok := r.folders[key(companyID, targetParentID)]
-		if !ok || parentFolder.FolderKind != item.FolderKind {
+		if _, ok := r.folders[key(companyID, targetParentID)]; !ok {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		// A folder cannot be moved under one of its descendants; that would

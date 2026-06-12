@@ -12,6 +12,8 @@ export type ExplorerCreationContextRow = {
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   systemKey?: CompanyExplorerSystemFolderKey;
+  syntheticKind?: string;
+  raciRole?: string;
 };
 
 export type ExplorerDropPayload = {
@@ -148,18 +150,21 @@ export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | n
 
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || !payload || !row.folderID || !row.folderKind) return null;
+  if (row.syntheticKind === "default_scope_folder") return null;
+  const isRaciScopedRow = row.syntheticKind === "raci_folder" || Boolean(row.raciRole);
 
   // Drag events fire on the row under the pointer. A file row already carries
   // its containing folderID, so users can drop anywhere inside that visible
   // folder section without us scanning the DOM or the full tree on every hover.
   if (payload.kind === "folder") {
-    if (!payload.folderID || payload.folderID === row.folderID || payload.folderKind !== row.folderKind) return null;
+    if (!payload.folderID || payload.folderID === row.folderID) return null;
+    if (isRaciScopedRow && payload.folderKind !== row.folderKind) return null;
     return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
   }
 
   const itemType = getExplorerDropPayloadItemType(payload);
   if (!itemType || itemType === "kanban") return null;
-  if (itemType !== row.folderKind) return null;
+  if (isRaciScopedRow && itemType !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -244,8 +249,8 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const logicGateParentFolderID = containingFolderID;
   const projectParentFolderID = containingFolderID;
   const nodeFolderParentID = nodeParentFolderID;
-  const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
-  const projectFolderParentID = row?.folderKind === "project" ? containingFolderID : "";
+  const logicGateFolderParentID = containingFolderID;
+  const projectFolderParentID = containingFolderID;
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind ?? (row?.kind === "project" ? "project" : row?.kind === "node" ? "node" : "logic_gate");
 
   return {

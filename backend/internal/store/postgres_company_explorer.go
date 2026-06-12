@@ -146,10 +146,10 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 		`select coalesce(max(position), 0) + 1000
 		 from (
 		   select position
-		   from company_explorer_folders
-		   where company_id=$1
-		     and folder_kind=$2
+		 from company_explorer_folders
+		 where company_id=$1
 		     and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)
+		     and ($3::uuid is not null or folder_kind=$2)
 		   union all
 		   select position
 		   from company_explorer_folder_items
@@ -318,19 +318,18 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 
 	var parent any
 	if parentFolderID != "" {
-		var parentKind string
+		var parentExists bool
 		if err := tx.QueryRowContext(ctx,
-			`select folder_kind
-			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2`,
+			`select exists(
+			   select 1
+			   from company_explorer_folders
+			   where company_id=$1 and folder_id=$2
+			 )`,
 			companyID, parentFolderID,
-		).Scan(&parentKind); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.CompanyExplorerFolder{}, ErrNotFound
-			}
+		).Scan(&parentExists); err != nil {
 			return domain.CompanyExplorerFolder{}, err
 		}
-		if parentKind != folderKind {
+		if !parentExists {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parent = parentFolderID
@@ -743,19 +742,18 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 	}
 
 	if parentFolderID != nil && targetParentID != "" {
-		var parentKind string
+		var parentExists bool
 		if err := tx.QueryRowContext(ctx,
-			`select folder_kind
-			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2`,
+			`select exists(
+			   select 1
+			   from company_explorer_folders
+			   where company_id=$1 and folder_id=$2
+			 )`,
 			companyID, targetParentID,
-		).Scan(&parentKind); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.CompanyExplorerFolder{}, ErrNotFound
-			}
+		).Scan(&parentExists); err != nil {
 			return domain.CompanyExplorerFolder{}, err
 		}
-		if parentKind != folderKind {
+		if !parentExists {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 

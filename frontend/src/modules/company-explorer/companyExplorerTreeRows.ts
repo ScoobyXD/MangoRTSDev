@@ -129,7 +129,7 @@ export function buildCompanyExplorerTreeRows({
   }
   const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
   for (const folder of folders) {
-    const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
+    const key = folder.parent_folder_id ?? "";
     const bucket = foldersByParent.get(key) ?? [];
     bucket.push(folder);
     foldersByParent.set(key, bucket);
@@ -170,6 +170,7 @@ export function buildCompanyExplorerTreeRows({
   };
 
   const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
+    const parentFolderKind = (folderByID.get(parentFolderID)?.folder_kind ?? folderKind) as CompanyExplorerFolderKind;
     const directItems = itemsByFolder.get(parentFolderID) ?? [];
     const branchRows: ExplorerTreeNode[] = [];
     let syntheticRootPosition = 0;
@@ -242,7 +243,7 @@ export function buildCompanyExplorerTreeRows({
             kind: "node",
             nodeID: node.node_id,
             folderID: parentFolderID,
-            folderKind,
+            folderKind: parentFolderKind,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `node-${node.node_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -259,7 +260,7 @@ export function buildCompanyExplorerTreeRows({
             kind: "logic_gate",
             logicGateID: logicGate.logic_gate_id,
             folderID: parentFolderID,
-            folderKind,
+            folderKind: parentFolderKind,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -277,7 +278,7 @@ export function buildCompanyExplorerTreeRows({
             kind: "project",
             projectID: project.project_id,
             folderID: parentFolderID,
-            folderKind,
+            folderKind: parentFolderKind,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `project-${project.project_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -287,9 +288,11 @@ export function buildCompanyExplorerTreeRows({
       }
     }
 
-    const childFolders = foldersByParent.get(`${folderKind}:${parentFolderID}`) ?? [];
+    const childFolders = (foldersByParent.get(parentFolderID) ?? [])
+      .filter((folder) => parentFolderID !== "" || folder.folder_kind === folderKind);
     for (const folder of childFolders) {
       if (folder.system_key === "kanban_boards") continue;
+      const childFolderKind = folder.folder_kind as CompanyExplorerFolderKind;
       const rowID = `workspace-folder-${folder.folder_id}`;
       branchRows.push({
         id: rowID,
@@ -298,11 +301,11 @@ export function buildCompanyExplorerTreeRows({
         kind: "folder",
         folderID: folder.folder_id,
         parentFolderID: folder.parent_folder_id ?? "",
-        folderKind,
+        folderKind: childFolderKind,
         systemKey: isExplorerSystemFolderKey(folder.system_key) ? folder.system_key : undefined,
         folderLabel: getFolderPathLabel(folder.folder_id),
         scopeLevel: depth,
-        position: parentFolderID === "" ? getRootAwarePosition(folderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
+        position: parentFolderID === "" ? getRootAwarePosition(childFolderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
         createdTimestamp: folder.created_timestamp,
       });
     }
