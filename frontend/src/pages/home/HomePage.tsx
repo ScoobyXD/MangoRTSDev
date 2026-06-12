@@ -1170,12 +1170,13 @@ export function HomePage({
   useEffect(() => {
     loadMessagesRef.current = loadMessages;
   }, [loadMessages]);
-  const scheduleMessageListRefresh = useCallback((delayMs = MESSAGE_EVENT_REFRESH_DELAY_MS) => {
+  const scheduleMessageListRefresh = useCallback((delayMs = MESSAGE_EVENT_REFRESH_DELAY_MS, options?: { refresh?: boolean }) => {
     if (messageListRefreshTimerRef.current !== null) window.clearTimeout(messageListRefreshTimerRef.current);
+    const refresh = options?.refresh === true;
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
       if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current)) return;
-      void loadMessagesRef.current?.({ refresh: true });
+      void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [status?.connected]);
   const fillMessageListAfterRemoval = useCallback(() => {
@@ -1370,6 +1371,9 @@ export function HomePage({
           return;
         }
         if (!trigger.startsWith("message.")) return;
+        if (trigger.startsWith("message.opened")) {
+          invalidateCommunicationsCache({ messagePages: true, messages: true });
+        }
         if (!messageID) {
           if (trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted")) {
             scheduleMessageListRefresh();

@@ -2,7 +2,7 @@ package httpapi
 
 import "net/http"
 
-const defaultMaxRequestBodyBytes int64 = 20 << 20
+const defaultMaxRequestBodyBytes int64 = 40 << 20
 
 func (s *Server) withRequestLimits(next http.Handler) http.Handler {
 	maxBodyBytes := s.maxRequestBodyBytes()

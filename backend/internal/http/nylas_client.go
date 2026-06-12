@@ -3,11 +3,14 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"miraeopus/backend/internal/domain"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -458,6 +461,9 @@ func (c *NylasRESTClient) DeleteMessage(ctx context.Context, grantID, messageID 
 }
 
 func (c *NylasRESTClient) SendMessage(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
+	if len(request.Attachments) > 0 {
+		return c.sendMessageMultipart(ctx, grantID, request)
+	}
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
@@ -465,6 +471,94 @@ func (c *NylasRESTClient) SendMessage(ctx context.Context, grantID string, reque
 		return NylasMessage{}, err
 	}
 	return response.Data, nil
+}
+
+func (c *NylasRESTClient) sendMessageMultipart(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	messageRequest := request
+	messageRequest.Attachments = nil
+	messageRaw, err := json.Marshal(messageRequest)
+	if err != nil {
+		return NylasMessage{}, err
+	}
+	if err := writer.WriteField("message", string(messageRaw)); err != nil {
+		return NylasMessage{}, err
+	}
+	for index, attachment := range request.Attachments {
+		content, err := base64.StdEncoding.DecodeString(strings.TrimSpace(attachment.Content))
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		filename := strings.TrimSpace(attachment.Filename)
+		if filename == "" {
+			filename = "attachment"
+		}
+		fieldName := strings.TrimSpace(attachment.ContentID)
+		if fieldName == "" {
+			fieldName = fmt.Sprintf("attachment_%d", index+1)
+		}
+		contentType := strings.TrimSpace(attachment.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeMultipartQuote(fieldName), escapeMultipartQuote(filename)))
+		header.Set("Content-Type", contentType)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return NylasMessage{}, err
+		}
+		if _, err := part.Write(content); err != nil {
+			return NylasMessage{}, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return NylasMessage{}, err
+	}
+	var response struct {
+		Data NylasMessage `json:"data"`
+	}
+	if err := c.doMultipart(ctx, grantPath(grantID, "messages", "send"), writer.FormDataContentType(), &body, &response); err != nil {
+		return NylasMessage{}, err
+	}
+	return response.Data, nil
+}
+
+func escapeMultipartQuote(value string) string {
+	return strings.NewReplacer("\\", "\\\\", `"`, `\"`).Replace(value)
+}
+
+func (c *NylasRESTClient) doMultipart(ctx context.Context, path, contentType string, body *bytes.Buffer, out any) error {
+	if c == nil || c.apiBase == "" {
+		return NylasAPIError{StatusCode: http.StatusServiceUnavailable, Code: "nylas_not_configured"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBase+path, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return parseNylasAPIError(resp.StatusCode, resp.Header, raw)
+	}
+	if out == nil || len(strings.TrimSpace(string(raw))) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *NylasRESTClient) do(ctx context.Context, method, path string, query url.Values, body any, out any, authorize bool) error {

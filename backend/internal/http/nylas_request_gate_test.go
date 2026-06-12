@@ -66,11 +66,11 @@ func TestNylasRequestGateAllowsDifferentKeys(t *testing.T) {
 	releaseSecond()
 }
 
-func TestCommunicationsNylasRequestIntervalTargetsTwentyStartsPerSecond(t *testing.T) {
+func TestCommunicationsNylasRequestIntervalTargetsFiveStartsPerSecond(t *testing.T) {
 	t.Parallel()
 
-	if communicationsNylasMinRequestInterval != 50*time.Millisecond {
-		t.Fatalf("communicationsNylasMinRequestInterval = %s, want 50ms for 20 starts/second", communicationsNylasMinRequestInterval)
+	if communicationsNylasMinRequestInterval != 200*time.Millisecond {
+		t.Fatalf("communicationsNylasMinRequestInterval = %s, want 200ms for 5 starts/second", communicationsNylasMinRequestInterval)
 	}
 }
 

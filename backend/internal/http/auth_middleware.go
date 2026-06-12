@@ -215,6 +215,9 @@ func requestCompanyID(r *http.Request) (string, error) {
 	if r.Body == nil || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch) {
 		return queryCompanyID, nil
 	}
+	if queryCompanyID != "" && requestBodyCompanyIDIgnoredByHandler(r) {
+		return queryCompanyID, nil
+	}
 	bodyCompanyID, found, err := readCompanyIDFromJSONBody(r, maxCompanyIDPayloadScanBytes)
 	if err != nil {
 		return "", err
@@ -223,6 +226,10 @@ func requestCompanyID(r *http.Request) (string, error) {
 		return bodyCompanyID, nil
 	}
 	return queryCompanyID, nil
+}
+
+func requestBodyCompanyIDIgnoredByHandler(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == "/v1/communications/messages/send"
 }
 
 func readCompanyIDFromJSONBody(r *http.Request, maxScanBytes int64) (string, bool, error) {
