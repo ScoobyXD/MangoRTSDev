@@ -109,6 +109,8 @@ type StoredLogicGateColumnLayouts = Record<string, StoredLogicGateColumnLayout>;
 
 const KANBAN_COLUMN_BOTTOM_BUFFER_HEIGHT_PX = 180;
 const KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX = 280;
+const KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX = 220;
+const KANBAN_ARENA_TOP_CONTROL_HEIGHT_PX = 48;
 
 function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
   return `mango:kanban:logic-gate-column-layout:v1:${encodeURIComponent(companyID)}:${encodeURIComponent(boardID)}`;
@@ -665,6 +667,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const columnsForWidth = useBacklogBottomLayout ? mainBoardColumns : orderedColumns;
     return columnsForWidth.reduce((total, column) => total + getColumnWidth(column), 0) + Math.max(0, columnsForWidth.length - 1) * 10;
   }, [mainBoardColumns, orderedColumns, useBacklogBottomLayout]);
+  const arenaAccountFilterLeftPx = useMemo(() => {
+    if (!arenaMode || mainBoardColumns.length === 0) return 0;
+    const doneIndex = mainBoardColumns.findIndex((column) => column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ") === "done");
+    const targetIndex = doneIndex >= 0 ? doneIndex : mainBoardColumns.length - 1;
+    const targetRight = mainBoardColumns
+      .slice(0, targetIndex + 1)
+      .reduce((total, column, index) => total + getColumnWidth(column) + (index > 0 ? 10 : 0), 0);
+    return Math.max(0, targetRight - KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX);
+  }, [arenaMode, mainBoardColumns]);
   const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Logic Gate")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
@@ -2295,6 +2306,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setArenaGroupingOpen((open) => !open);
   }, []);
 
+  const accountFilterControl = (
+    <AccountFilterControl
+      accounts={companyAccounts}
+      selectedAccountIDs={kanbanAccountFilterIDs}
+      onChange={setKanbanAccountFilterIDs}
+      label="Accounts"
+      placeholder="Filter accounts"
+      compact
+      style={arenaMode ? { width: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX, maxWidth: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX } : { maxWidth: "min(420px, 100%)" }}
+    />
+  );
+
   return (
     <div
       ref={boardRootRef}
@@ -2358,20 +2381,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "4px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", display: arenaMode ? "flex" : undefined, flexDirection: arenaMode ? "column" : undefined, alignItems: arenaMode ? "stretch" : undefined, ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
+      <div className="kanban-board-scroll" style={{ position: "relative", height: "100%", overflow: "auto", padding: arenaMode ? "0 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", background: isDark ? "transparent" : "linear-gradient(135deg, rgba(255,255,255,0.34), rgba(240,249,255,0.24) 44%, rgba(245,243,255,0.30))", display: arenaMode ? "flex" : undefined, flexDirection: arenaMode ? "column" : undefined, alignItems: arenaMode ? "stretch" : undefined, ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(100, 116, 139, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#b00020", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        <div style={{ marginBottom: arenaMode ? 6 : 10, display: "flex", justifyContent: "flex-end", minWidth: 0, paddingRight: arenaMode && onCollapseArenaToTab ? 34 : 0, boxSizing: "border-box" }}>
-          <AccountFilterControl
-            accounts={companyAccounts}
-            selectedAccountIDs={kanbanAccountFilterIDs}
-            onChange={setKanbanAccountFilterIDs}
-            label="Accounts"
-            placeholder="Filter accounts"
-            compact
-            style={{ maxWidth: "min(420px, 100%)" }}
-          />
-        </div>
-        {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={toggleArenaGroupingOpen} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
+        {!arenaMode && (
+          <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+            {accountFilterControl}
+          </div>
+        )}
+        {arenaMode && (
+          <div style={{ position: "relative", minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, minHeight: KANBAN_ARENA_TOP_CONTROL_HEIGHT_PX, display: "flex", alignItems: "end", zIndex: 8 }}>
+            <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={toggleArenaGroupingOpen} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
+            <div style={{ position: "absolute", top: 0, left: arenaAccountFilterLeftPx, width: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX, zIndex: 9 }}>
+              {accountFilterControl}
+            </div>
+          </div>
+        )}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} isDark={isDark} text={text} renderCard={renderCard} onDropCardIDsToCell={(cardIDs, columnKey, rowKey) => void moveCardsToArenaGroupCell(cardIDs, columnKey, rowKey)} onCreateNodeInCell={createNodeInArenaGroupCell} onCellContextMenu={(columnKey, rowKey, event) => {
           setCardContextMenu(null);
           setColumnContextMenu(null);
