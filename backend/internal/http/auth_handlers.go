@@ -184,6 +184,7 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err != nil {
+		log.Printf("failed to delete company user company_id=%s user_id=%s target_email=%s actor_user_id=%s actor_dev_admin=%t: %v", companyID, userID, target.Email, actor.User.UserID, actor.IsDevAdmin, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_user")
 		return
 	}

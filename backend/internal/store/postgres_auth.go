@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -539,6 +540,37 @@ func (r *PostgresRepo) GetCompanyUser(companyID, userID string) (domain.CompanyU
 	return item, err
 }
 
+func execOptionalPostgresCleanup(tx *sql.Tx, query string, shouldIgnore func(error) bool, args ...any) error {
+	if tx == nil {
+		return ErrInvalid
+	}
+	const savepoint = "mangorts_optional_cleanup"
+	if _, err := tx.Exec(`savepoint ` + savepoint); err != nil {
+		return fmt.Errorf("create optional cleanup savepoint: %w", err)
+	}
+	if _, err := tx.Exec(query, args...); err != nil {
+		if shouldIgnore != nil && shouldIgnore(err) {
+			if _, rollbackErr := tx.Exec(`rollback to savepoint ` + savepoint); rollbackErr != nil {
+				return fmt.Errorf("rollback optional cleanup savepoint after ignored error %v: %w", err, rollbackErr)
+			}
+			if _, releaseErr := tx.Exec(`release savepoint ` + savepoint); releaseErr != nil {
+				return fmt.Errorf("release optional cleanup savepoint after ignored error %v: %w", err, releaseErr)
+			}
+			return nil
+		}
+		_, _ = tx.Exec(`rollback to savepoint ` + savepoint)
+		return err
+	}
+	if _, err := tx.Exec(`release savepoint ` + savepoint); err != nil {
+		return fmt.Errorf("release optional cleanup savepoint: %w", err)
+	}
+	return nil
+}
+
+func isOptionalPostgresCleanupShapeError(err error, tableName string) bool {
+	return isPostgresUndefinedTable(err, tableName) || isPostgresUndefinedColumn(err, "")
+}
+
 func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity bool) (DeleteCompanyUserResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
@@ -551,14 +583,22 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, err
 	}
 	defer tx.Rollback()
+	optionalCleanup := func(step, tableName, query string, args ...any) error {
+		if err := execOptionalPostgresCleanup(tx, query, func(err error) bool {
+			return isOptionalPostgresCleanupShapeError(err, tableName)
+		}, args...); err != nil {
+			return fmt.Errorf("%s: %w", step, err)
+		}
+		return nil
+	}
 
 	var item domain.CompanyUser
 	err = tx.QueryRow(
 		`select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role, cm.created_timestamp, cm.updated_timestamp
 		 from company_memberships cm
 		 join users u on u.user_id = cm.user_id
-		 where cm.company_id = $1
-		   and u.user_id = $2
+		 where cm.company_id = $1::uuid
+		   and u.user_id = $2::uuid
 		 for update of cm, u`,
 		companyID,
 		userID,
@@ -567,65 +607,65 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, ErrNotFound
 	}
 	if err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("load company user: %w", err)
 	}
 
-	assignedNodeRows, err := tx.Query(`select node_id::text from nodes where company_id = $1 and assignee_user_id = $2`, companyID, userID)
+	assignedNodeRows, err := tx.Query(`select node_id::text from nodes where company_id = $1::uuid and assignee_user_id = $2::uuid`, companyID, userID)
 	if err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("list assigned nodes: %w", err)
 	}
 	assignedNodeIDs := []string{}
 	for assignedNodeRows.Next() {
 		var nodeID string
 		if scanErr := assignedNodeRows.Scan(&nodeID); scanErr != nil {
 			assignedNodeRows.Close()
-			return DeleteCompanyUserResult{}, scanErr
+			return DeleteCompanyUserResult{}, fmt.Errorf("scan assigned node: %w", scanErr)
 		}
 		assignedNodeIDs = append(assignedNodeIDs, nodeID)
 	}
 	if err = assignedNodeRows.Err(); err != nil {
 		assignedNodeRows.Close()
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("iterate assigned nodes: %w", err)
 	}
 	assignedNodeRows.Close()
 
-	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1 and assignee_user_id = $2`, companyID, userID); err != nil {
+	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1::uuid and assignee_user_id = $2::uuid`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("clear company node assignees: %w", err)
+	}
+	if err = optionalCleanup("delete company resource access grants for user", "resource_access_grants", `delete from resource_access_grants where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_access_grants where company_id = $1 and principal_type = 'user' and principal_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+	if err = optionalCleanup("delete company resource permissions for user", "resource_permissions", `delete from resource_permissions where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_permissions where company_id = $1 and user_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+	if err = optionalCleanup("delete company racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from racio_matrix_projection_table where company_id = $1 and user_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "racio_matrix_projection_table") {
+	if err = optionalCleanup("delete company resource raci assignments for user", "resource_raci_assignments", `delete from resource_raci_assignments where company_id = $1::uuid and subject_type = 'user' and subject_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_raci_assignments where company_id = $1 and subject_type = 'user' and subject_id = $2`, companyID, userID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
-		return DeleteCompanyUserResult{}, err
-	}
-	if _, err = tx.Exec(`delete from company_memberships where company_id = $1 and user_id = $2`, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
+	if _, err = tx.Exec(`delete from company_memberships where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("delete company membership: %w", err)
 	}
 	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("recompute company admin access for user: %w", err)
 	}
 	for _, nodeID := range assignedNodeIDs {
 		if err = recomputeNodeAssigneeEffectiveAccessTx(context.Background(), tx, companyID, nodeID); err != nil {
-			return DeleteCompanyUserResult{}, err
+			return DeleteCompanyUserResult{}, fmt.Errorf("recompute node assignee access for node %s: %w", nodeID, err)
 		}
 	}
 	if err = deleteEffectiveFactsForCompanyUserTx(context.Background(), tx, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("delete effective access facts for company user: %w", err)
 	}
 
 	var hasRemainingMembership bool
-	if err = tx.QueryRow(`select exists(select 1 from company_memberships where user_id = $1)`, userID).Scan(&hasRemainingMembership); err != nil {
-		return DeleteCompanyUserResult{}, err
+	if err = tx.QueryRow(`select exists(select 1 from company_memberships where user_id = $1::uuid)`, userID).Scan(&hasRemainingMembership); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("check remaining memberships: %w", err)
 	}
 	if hasRemainingMembership && !deleteIdentity {
 		if err = tx.Commit(); err != nil {
-			return DeleteCompanyUserResult{}, err
+			return DeleteCompanyUserResult{}, fmt.Errorf("commit company membership deletion: %w", err)
 		}
 		return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: false}, nil
 	}
@@ -633,7 +673,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if _, err = tx.Exec(
 		`insert into auth_external_identity_deletions
 			 (provider, external_subject, user_id, email, status, attempts, last_error, created_timestamp, updated_timestamp)
-			 values ('cognito', $1, $2, $3, 'pending', 0, '', now(), now())
+			 values ('cognito', $1, $2::uuid, $3, 'pending', 0, '', now(), now())
 			 on conflict (provider, external_subject) do update set
 			   user_id=excluded.user_id,
 			   email=excluded.email,
@@ -645,69 +685,71 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		userID,
 		normalizeEmail(item.Email),
 	); err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("queue external identity deletion: %w", err)
 	}
 	if _, err = tx.Exec(
 		`delete from invitations
 			 where ($1 <> '' and email = $1)
-			    or invited_by_user_id = $2
-			    or accepted_by_user_id = $2`,
+			    or invited_by_user_id = $2::uuid
+			    or accepted_by_user_id = $2::uuid`,
 		normalizeEmail(item.Email),
 		userID,
 	); err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("delete user invitations: %w", err)
 	}
-	if _, err = tx.Exec(
+	if err = optionalCleanup(
+		"delete company explorer folder shares for user",
+		"company_explorer_folder_shares",
 		`delete from company_explorer_folder_shares
 			 where ($1 <> '' and email = $1)
-			    or invited_by_user_id = $2
-			    or user_id = $2`,
+			    or invited_by_user_id = $2::uuid
+			    or user_id = $2::uuid`,
 		normalizeEmail(item.Email),
 		userID,
 	); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from user_email_connections where user_id = $1`, userID); err != nil {
+	if err = optionalCleanup("delete user email connections", "user_email_connections", `delete from user_email_connections where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
+	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("clear all node assignees: %w", err)
+	}
+	if err = optionalCleanup("clear kanban projection assignees for user", "kanban_board_projection", `update kanban_board_projection set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`update kanban_board_projection set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "kanban_board_projection") {
+	if err = optionalCleanup("clear project timeline created-by references for user", "project_management_timeline_items", `update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "project_management_timeline_items") && !isPostgresUndefinedColumn(err, "created_by_user_id") {
+	if err = optionalCleanup("clear project timeline projection assignees for user", "project_management_timeline_projection", `update project_management_timeline_projection set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`update project_management_timeline_projection set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "project_management_timeline_projection") {
+	if err = optionalCleanup("delete all resource access grants for user", "resource_access_grants", `delete from resource_access_grants where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_access_grants where principal_type = 'user' and principal_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+	if err = optionalCleanup("delete all resource permissions for user", "resource_permissions", `delete from resource_permissions where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_permissions where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+	if err = optionalCleanup("delete resource permissions assigned by user", "resource_permissions", `delete from resource_permissions where assigned_by_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_permissions where assigned_by_user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") && !isPostgresUndefinedColumn(err, "assigned_by_user_id") {
+	if err = optionalCleanup("delete all racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from racio_matrix_projection_table where user_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "racio_matrix_projection_table") {
+	if err = optionalCleanup("delete all resource raci assignments for user", "resource_raci_assignments", `delete from resource_raci_assignments where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from resource_raci_assignments where subject_type = 'user' and subject_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+	if err = optionalCleanup("delete all entity access permissions for user", "entity_access_permissions", `delete from entity_access_permissions where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from entity_access_permissions where subject_type = 'user' and subject_id = $1`, userID); err != nil && !isPostgresUndefinedTable(err, "entity_access_permissions") {
-		return DeleteCompanyUserResult{}, err
+	if _, err = tx.Exec(`delete from company_memberships where user_id = $1::uuid`, userID); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("delete remaining company memberships: %w", err)
 	}
-	if _, err = tx.Exec(`delete from company_memberships where user_id = $1`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
+	if _, err = tx.Exec(`delete from users where user_id = $1::uuid`, userID); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("delete user row: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return DeleteCompanyUserResult{}, err
+		return DeleteCompanyUserResult{}, fmt.Errorf("commit user deletion: %w", err)
 	}
 	return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: true}, nil
 }
