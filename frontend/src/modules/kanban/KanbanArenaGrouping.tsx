@@ -245,7 +245,7 @@ export function KanbanArenaGroupingControls({
   text: string;
 }) {
   return (
-    <div ref={controlsRef as React.Ref<HTMLDivElement>} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, margin: "0 0 8px 0", minHeight: 32 }}>
+    <div ref={controlsRef as React.Ref<HTMLDivElement>} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, margin: 0, minHeight: 32 }}>
       <button
         className="mango-elevated-action"
         type="button"
@@ -253,7 +253,7 @@ export function KanbanArenaGroupingControls({
         style={{
           height: 28,
           border: groupingOpen && !isDark ? "1px solid transparent" : `1px solid ${groupingOpen ? "rgb(71, 85, 105)" : (isDark ? line : KANBAN_SOFT_BORDER)}`,
-          borderRadius: 8,
+          borderRadius: "8px 8px 0 0",
           background: groupingOpen && !isDark ? `${KANBAN_ACTIVE_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box` : (groupingOpen ? "rgba(100, 116, 139, 0.16)" : (isDark ? cardBackground : KANBAN_SURFACE)),
           color: groupingOpen ? "rgb(71, 85, 105)" : text,
           font: "inherit",
