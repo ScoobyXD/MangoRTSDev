@@ -114,7 +114,25 @@ type TimelineLoadOptions = {
 
 type ProjectManagementViewMode = "timeline" | "list";
 
-type TimelineDisplayRow = {
+type ProjectGroupField = "account" | "team" | "status";
+type ProjectGroupSortDirection = "asc" | "desc";
+
+type ProjectGroupValue = {
+  key: string;
+  label: string;
+};
+
+type ProjectGroupBucket<T> = {
+  group: ProjectGroupValue;
+  items: T[];
+};
+
+type ProjectGroupSection<T> = {
+  group: ProjectGroupValue;
+  buckets: ProjectGroupBucket<T>[];
+};
+
+type TimelineWorkDisplayRow = {
   id: string;
   kind: "logic_gate" | "node";
   item: ProjectManagementTimelineRow;
@@ -124,7 +142,21 @@ type TimelineDisplayRow = {
   expanded?: boolean;
 };
 
+type TimelineGroupDisplayRow = {
+  id: string;
+  kind: "group";
+  label: string;
+  depth: number;
+};
+
+type TimelineDisplayRow = TimelineWorkDisplayRow | TimelineGroupDisplayRow;
+
 const PROJECT_TIMELINE_ENTITY_MIME = "application/x-mangorts-project-timeline-entity";
+const PROJECT_GROUP_FIELDS: Array<{ field: ProjectGroupField; label: string }> = [
+  { field: "account", label: "Account" },
+  { field: "team", label: "Team" },
+  { field: "status", label: "Status" },
+];
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
   nodeFolderItems: [],
@@ -443,7 +475,7 @@ function upsertTimelineRows(current: ProjectManagementTimelineRow[], incoming: P
   return next;
 }
 
-function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: NodeRecord[], expandedGateIDs: Set<string>): TimelineDisplayRow[] {
+function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: NodeRecord[], expandedGateIDs: Set<string>): TimelineWorkDisplayRow[] {
   const visibleGateIDs = new Set(rows.map(logicGateIDForTimelineRow).filter(Boolean));
   const nodesByGateID = new Map<string, NodeRecord[]>();
   const nestedNodeIDs = new Set<string>();
@@ -473,7 +505,7 @@ function buildTimelineDisplayRows(rows: ProjectManagementTimelineRow[], nodes: N
     if (nodeID && !nodeRowsByID.has(nodeID)) nodeRowsByID.set(nodeID, row);
   }
 
-  const displayRows: TimelineDisplayRow[] = [];
+  const displayRows: TimelineWorkDisplayRow[] = [];
   for (const row of rows) {
     if (row.resource_type === "logic_gate") {
       const gateID = logicGateIDForTimelineRow(row);
@@ -517,6 +549,159 @@ function timelineRowMatchesAccountFilter(row: ProjectManagementTimelineRow, sele
   return entityMatchesAccountFilter(nodeByID.get(nodeID), selectedAccountIDs);
 }
 
+const UNASSIGNED_GROUP_KEY = "__unassigned";
+
+function fallbackGroupValue(label = "Unassigned"): ProjectGroupValue {
+  return { key: UNASSIGNED_GROUP_KEY, label };
+}
+
+function uniqueGroupValues(values: ProjectGroupValue[], fallbackLabel = "Unassigned"): ProjectGroupValue[] {
+  const byKey = new Map<string, ProjectGroupValue>();
+  for (const value of values) {
+    const key = value.key.trim();
+    if (!key) continue;
+    byKey.set(key, { key, label: value.label.trim() || key });
+  }
+  return byKey.size > 0 ? Array.from(byKey.values()) : [fallbackGroupValue(fallbackLabel)];
+}
+
+function projectGroupValues(project: ProjectRecord, field: ProjectGroupField): ProjectGroupValue[] {
+  if (field === "account") {
+    const accounts = project.accounts ?? [];
+    const values = accounts.map((account) => ({ key: account.account_id, label: account.name || account.account_id }));
+    if (values.length === 0 && project.account_id) values.push({ key: project.account_id, label: project.account_name || project.account_id });
+    return uniqueGroupValues(values);
+  }
+  if (field === "team") {
+    const teams = project.teams ?? [];
+    const values = teams.map((team) => ({ key: team.group_id, label: team.name || team.group_id }));
+    if (values.length === 0 && project.team_id) values.push({ key: project.team_id, label: project.team_name || project.team_id });
+    return uniqueGroupValues(values);
+  }
+  return uniqueGroupValues([{ key: project.status || "Active", label: project.status || "Active" }], "No status");
+}
+
+function timelineGroupValues(
+  row: ProjectManagementTimelineRow,
+  field: ProjectGroupField,
+  groups: CompanyUserGroup[],
+  groupMembers: CompanyUserGroupMember[],
+  nodeByID: Map<string, NodeRecord>,
+): ProjectGroupValue[] {
+  if (field === "account") {
+    const rowAccounts = row.accounts ?? [];
+    const nodeAccounts = row.resource_type === "node" ? nodeByID.get(nodeIDForTimelineRow(row))?.accounts ?? [] : [];
+    return uniqueGroupValues([...rowAccounts, ...nodeAccounts].map((account) => ({ key: account.account_id, label: account.name || account.account_id })));
+  }
+  if (field === "team") {
+    const assigneeID = row.assignee_user_id?.trim() ?? "";
+    if (!assigneeID) return [fallbackGroupValue()];
+    const groupsByID = new Map(groups.map((group) => [group.group_id, group]));
+    const values = groupMembers
+      .filter((member) => member.user_id === assigneeID)
+      .map((member) => {
+        const group = groupsByID.get(member.group_id);
+        return { key: member.group_id, label: group?.name || member.group_id };
+      });
+    return uniqueGroupValues(values);
+  }
+  return uniqueGroupValues([{ key: row.status || "No status", label: row.status || "No status" }], "No status");
+}
+
+function compareProjectGroupValues(left: ProjectGroupValue, right: ProjectGroupValue, direction: ProjectGroupSortDirection): number {
+  const leftUnassigned = left.key === UNASSIGNED_GROUP_KEY;
+  const rightUnassigned = right.key === UNASSIGNED_GROUP_KEY;
+  if (leftUnassigned || rightUnassigned) return leftUnassigned === rightUnassigned ? 0 : leftUnassigned ? 1 : -1;
+  const result = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }) || left.key.localeCompare(right.key);
+  return direction === "asc" ? result : -result;
+}
+
+function buildGroupedSections<T>(
+  items: T[],
+  getValues: (item: T, field: ProjectGroupField) => ProjectGroupValue[],
+  yField: ProjectGroupField,
+  xField: ProjectGroupField,
+  yDirection: ProjectGroupSortDirection,
+  xDirection: ProjectGroupSortDirection,
+): ProjectGroupSection<T>[] {
+  const sectionsByKey = new Map<string, ProjectGroupSection<T>>();
+  const append = (yValue: ProjectGroupValue, xValue: ProjectGroupValue, item: T) => {
+    let section = sectionsByKey.get(yValue.key);
+    if (!section) {
+      section = { group: yValue, buckets: [] };
+      sectionsByKey.set(yValue.key, section);
+    }
+    let bucket = section.buckets.find((candidate) => candidate.group.key === xValue.key);
+    if (!bucket) {
+      bucket = { group: xValue, items: [] };
+      section.buckets.push(bucket);
+    }
+    bucket.items.push(item);
+  };
+  for (const item of items) {
+    const yValues = getValues(item, yField);
+    if (yField === xField) {
+      yValues.forEach((value) => append(value, value, item));
+      continue;
+    }
+    const xValues = getValues(item, xField);
+    for (const yValue of yValues) {
+      for (const xValue of xValues) {
+        append(yValue, xValue, item);
+      }
+    }
+  }
+  return Array.from(sectionsByKey.values())
+    .sort((left, right) => compareProjectGroupValues(left.group, right.group, yDirection))
+    .map((section) => ({
+      ...section,
+      buckets: section.buckets.sort((left, right) => compareProjectGroupValues(left.group, right.group, xDirection)),
+    }));
+}
+
+function buildGroupedTimelineRows(
+  rows: TimelineWorkDisplayRow[],
+  yField: ProjectGroupField,
+  xField: ProjectGroupField,
+  yDirection: ProjectGroupSortDirection,
+  xDirection: ProjectGroupSortDirection,
+  groups: CompanyUserGroup[],
+  groupMembers: CompanyUserGroupMember[],
+  nodeByID: Map<string, NodeRecord>,
+): TimelineDisplayRow[] {
+  const sections = buildGroupedSections(
+    rows,
+    (row, field) => timelineGroupValues(row.item, field, groups, groupMembers, nodeByID),
+    yField,
+    xField,
+    yDirection,
+    xDirection,
+  );
+  const displayRows: TimelineDisplayRow[] = [];
+  for (const section of sections) {
+    displayRows.push({ id: `group-y:${yField}:${section.group.key}`, kind: "group", label: section.group.label, depth: 0 });
+    for (const bucket of section.buckets) {
+      const bucketID = `group-x:${yField}:${section.group.key}:${xField}:${bucket.group.key}`;
+      const label = yField === xField ? bucket.group.label : bucket.group.label;
+      displayRows.push({ id: bucketID, kind: "group", label, depth: 1 });
+      displayRows.push(...bucket.items.map((row) => ({ ...row, id: `${bucketID}:${row.id}`, depth: row.depth + 2 })));
+    }
+  }
+  return displayRows;
+}
+
+function projectAccountLabel(project: ProjectRecord): string {
+  const labels = (project.accounts ?? []).map((account) => account.name || account.account_id).filter(Boolean);
+  if (labels.length > 0) return labels.join(", ");
+  return project.account_name || "Unassigned";
+}
+
+function projectTeamLabel(project: ProjectRecord): string {
+  const labels = (project.teams ?? []).map((team) => team.name || team.group_id).filter(Boolean);
+  if (labels.length > 0) return labels.join(", ");
+  return project.team_name || "Unassigned";
+}
+
 export const ProjectManagementContent: React.FC<ProjectManagementContentProps> = ({
   accent,
   widgetId,
@@ -544,6 +729,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<ProjectManagementViewMode>("list");
+  const [groupingOpen, setGroupingOpen] = useState(false);
+  const [xGroupBy, setXGroupBy] = useState<ProjectGroupField>("status");
+  const [yGroupBy, setYGroupBy] = useState<ProjectGroupField>("account");
+  const [xGroupDirection, setXGroupDirection] = useState<ProjectGroupSortDirection>("asc");
+  const [yGroupDirection, setYGroupDirection] = useState<ProjectGroupSortDirection>("asc");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
   const [projectSummaryReloadKey, setProjectSummaryReloadKey] = useState(0);
@@ -918,7 +1108,12 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         : matchingGateIDs.has(logicGateIDForTimelineRow(row)) || timelineRowMatchesAccountFilter(row, timelineAccountFilterIDs, workspaceNodeByID)
     ));
   }, [timelineAccountFilterIDs, timelineRows, weekDays, workspaceNodeByID]);
-  const timelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes, timelineExpandedGateIDs), [timelineExpandedGateIDs, visibleTimelineRows, workspace.nodes]);
+  const baseTimelineDisplayRows = useMemo(() => buildTimelineDisplayRows(visibleTimelineRows, workspace.nodes, timelineExpandedGateIDs), [timelineExpandedGateIDs, visibleTimelineRows, workspace.nodes]);
+  const timelineDisplayRows = useMemo(() => (
+    groupingOpen
+      ? buildGroupedTimelineRows(baseTimelineDisplayRows, yGroupBy, xGroupBy, yGroupDirection, xGroupDirection, groups, groupMembers, workspaceNodeByID)
+      : baseTimelineDisplayRows
+  ), [baseTimelineDisplayRows, groupingOpen, groups, groupMembers, workspaceNodeByID, xGroupBy, xGroupDirection, yGroupBy, yGroupDirection]);
   const explorerRows = useMemo(() => buildProjectExplorerRows({
     expanded: explorerExpanded,
     nodes: filteredNodes,
@@ -1115,6 +1310,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>
           </div>
           <div style={surfaceHeaderActionsStyle}>
+          <ProjectGroupingControls
+            enabled={groupingOpen}
+            xField={xGroupBy}
+            yField={yGroupBy}
+            xDirection={xGroupDirection}
+            yDirection={yGroupDirection}
+            onEnabledChange={setGroupingOpen}
+            onXFieldChange={setXGroupBy}
+            onYFieldChange={setYGroupBy}
+            onXDirectionChange={setXGroupDirection}
+            onYDirectionChange={setYGroupDirection}
+          />
           {viewMode === "timeline" ? (
             <>
               <CompanyPerspectiveSelector
@@ -1170,6 +1377,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           <ProjectListTable
             projects={projects}
             loading={projectsLoading}
+            groupingOpen={groupingOpen}
+            xGroupBy={xGroupBy}
+            yGroupBy={yGroupBy}
+            xDirection={xGroupDirection}
+            yDirection={yGroupDirection}
             onProjectOpen={openProject}
             onProjectContextMenu={(project, event) => {
               event.preventDefault();
@@ -1251,14 +1463,101 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   );
 };
 
+function ProjectGroupingControls({
+  enabled,
+  xField,
+  yField,
+  xDirection,
+  yDirection,
+  onEnabledChange,
+  onXFieldChange,
+  onYFieldChange,
+  onXDirectionChange,
+  onYDirectionChange,
+}: {
+  enabled: boolean;
+  xField: ProjectGroupField;
+  yField: ProjectGroupField;
+  xDirection: ProjectGroupSortDirection;
+  yDirection: ProjectGroupSortDirection;
+  onEnabledChange: (enabled: boolean) => void;
+  onXFieldChange: (field: ProjectGroupField) => void;
+  onYFieldChange: (field: ProjectGroupField) => void;
+  onXDirectionChange: (direction: ProjectGroupSortDirection) => void;
+  onYDirectionChange: (direction: ProjectGroupSortDirection) => void;
+}) {
+  return (
+    <div style={projectGroupingControlsStyle}>
+      <button
+        type="button"
+        aria-pressed={enabled}
+        style={projectGroupingButtonStyle(enabled)}
+        onClick={() => onEnabledChange(!enabled)}
+      >
+        Group
+      </button>
+      {enabled ? (
+        <>
+          <label style={projectGroupFieldStyle}>
+            <span style={projectGroupAxisLabelStyle}>Y-axis</span>
+            <select
+              value={yField}
+              style={projectGroupSelectStyle}
+              onChange={(event) => onYFieldChange(event.currentTarget.value as ProjectGroupField)}
+            >
+              {PROJECT_GROUP_FIELDS.map((field) => <option key={`y:${field.field}`} value={field.field}>{field.label}</option>)}
+            </select>
+            <button
+              type="button"
+              aria-label="Toggle Y-axis sort"
+              style={projectGroupDirectionButtonStyle}
+              onClick={() => onYDirectionChange(yDirection === "asc" ? "desc" : "asc")}
+            >
+              {yDirection === "asc" ? "A-Z" : "Z-A"}
+            </button>
+          </label>
+          <label style={projectGroupFieldStyle}>
+            <span style={projectGroupAxisLabelStyle}>X-axis</span>
+            <select
+              value={xField}
+              style={projectGroupSelectStyle}
+              onChange={(event) => onXFieldChange(event.currentTarget.value as ProjectGroupField)}
+            >
+              {PROJECT_GROUP_FIELDS.map((field) => <option key={`x:${field.field}`} value={field.field}>{field.label}</option>)}
+            </select>
+            <button
+              type="button"
+              aria-label="Toggle X-axis sort"
+              style={projectGroupDirectionButtonStyle}
+              onClick={() => onXDirectionChange(xDirection === "asc" ? "desc" : "asc")}
+            >
+              {xDirection === "asc" ? "A-Z" : "Z-A"}
+            </button>
+          </label>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function ProjectListTable({
   projects,
   loading,
+  groupingOpen,
+  xGroupBy,
+  yGroupBy,
+  xDirection,
+  yDirection,
   onProjectOpen,
   onProjectContextMenu,
 }: {
   projects: ProjectRecord[];
   loading: boolean;
+  groupingOpen: boolean;
+  xGroupBy: ProjectGroupField;
+  yGroupBy: ProjectGroupField;
+  xDirection: ProjectGroupSortDirection;
+  yDirection: ProjectGroupSortDirection;
   onProjectOpen: (projectID: string) => void;
   onProjectContextMenu: (project: ProjectRecord, event: React.MouseEvent<HTMLTableRowElement>) => void;
 }) {
@@ -1270,6 +1569,78 @@ function ProjectListTable({
 
   if (loading) {
     return <div style={projectListEmptyStyle}>Loading</div>;
+  }
+
+  const renderProjectRows = (items: ProjectRecord[]) => (
+    <>
+      {items.map((project) => (
+        <tr
+          key={project.project_id}
+          style={projectRowStyle(hoveredProjectID === project.project_id)}
+          onPointerEnter={() => setHoveredProjectID(project.project_id)}
+          onPointerLeave={() => setHoveredProjectID((current) => current === project.project_id ? "" : current)}
+          onClick={() => onProjectOpen(project.project_id)}
+          onDoubleClick={() => onProjectOpen(project.project_id)}
+          onContextMenu={(event) => onProjectContextMenu(project, event)}
+        >
+          <td style={projectNameCellStyle}>
+            <span style={projectNameCellInnerStyle}>
+              <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
+              <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
+            </span>
+          </td>
+          <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
+          <td style={projectCellStyle}>{projectAccountLabel(project)}</td>
+          <td style={projectCellStyle}>{projectTeamLabel(project)}</td>
+        </tr>
+      ))}
+    </>
+  );
+
+  if (groupingOpen) {
+    const sections = buildGroupedSections(
+      sortedProjects,
+      projectGroupValues,
+      yGroupBy,
+      xGroupBy,
+      yDirection,
+      xDirection,
+    );
+    return (
+      <div className="kanban-board-scroll" style={projectListScrollStyle}>
+        <div style={projectGroupedListStyle}>
+          {sections.map((section) => (
+            <section key={`y:${section.group.key}`} style={projectGroupedSectionStyle}>
+              <div style={projectGroupHeaderStyle}>
+                <span style={projectGroupHeaderAxisStyle}>Y-axis</span>
+                <span style={projectGroupHeaderTextStyle}>{section.group.label}</span>
+              </div>
+              {section.buckets.map((bucket) => (
+                <div key={`x:${section.group.key}:${bucket.group.key}`} style={projectGroupedBucketStyle}>
+                  <div style={projectBucketHeaderStyle}>
+                    <span style={projectGroupHeaderAxisStyle}>X-axis</span>
+                    <span style={projectBucketHeaderTextStyle}>{bucket.group.label}</span>
+                    <span style={projectBucketCountStyle}>{bucket.items.length}</span>
+                  </div>
+                  <table style={projectTableStyle}>
+                    <thead>
+                      <tr>
+                        <th style={projectHeaderCellStyle}>Project Name</th>
+                        <th style={projectHeaderCellStyle}>Status</th>
+                        <th style={projectHeaderCellStyle}>Account</th>
+                        <th style={projectHeaderCellStyle}>Team</th>
+                      </tr>
+                    </thead>
+                    <tbody>{renderProjectRows(bucket.items)}</tbody>
+                  </table>
+                </div>
+              ))}
+            </section>
+          ))}
+          {sections.length === 0 ? <div style={projectListEmptyStyle}>No projects</div> : null}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -1284,27 +1655,7 @@ function ProjectListTable({
           </tr>
         </thead>
         <tbody>
-          {sortedProjects.map((project) => (
-            <tr
-              key={project.project_id}
-              style={projectRowStyle(hoveredProjectID === project.project_id)}
-              onPointerEnter={() => setHoveredProjectID(project.project_id)}
-              onPointerLeave={() => setHoveredProjectID((current) => current === project.project_id ? "" : current)}
-              onClick={() => onProjectOpen(project.project_id)}
-              onDoubleClick={() => onProjectOpen(project.project_id)}
-              onContextMenu={(event) => onProjectContextMenu(project, event)}
-            >
-              <td style={projectNameCellStyle}>
-                <span style={projectNameCellInnerStyle}>
-                  <span style={projectIconCellStyle}><ExplorerRowIcon kind="project" /></span>
-                  <span style={projectNameTextStyle}>{project.name || project.project_id}</span>
-                </span>
-              </td>
-              <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
-              <td style={projectCellStyle}>{project.account_name || "Unassigned"}</td>
-              <td style={projectCellStyle}>{project.team_name || "Unassigned"}</td>
-            </tr>
-          ))}
+          {renderProjectRows(sortedProjects)}
           {sortedProjects.length === 0 ? (
             <tr>
               <td colSpan={4} style={projectEmptyCellStyle}>No projects</td>
@@ -1391,6 +1742,18 @@ function TimelineChart({
         {loading ? (
           <div style={{ ...timelineEmptyStyle, gridColumn: `1 / span ${WEEK_DAY_COUNT + 1}` }}>Loading</div>
         ) : rows.length > 0 ? rows.map((displayRow, rowIndex) => {
+          if (displayRow.kind === "group") {
+            return (
+              <React.Fragment key={displayRow.id}>
+                <div style={timelineGroupLabelStyle(rowIndex, displayRow.depth)}>
+                  <span style={timelineGroupTextStyle}>{displayRow.label}</span>
+                </div>
+                {weekDays.map((day, dayIndex) => (
+                  <div key={`${displayRow.id}:${isoDate(day)}`} style={timelineGroupCellStyle(rowIndex, dayIndex === dropOffset, accent)} />
+                ))}
+              </React.Fragment>
+            );
+          }
           const item = displayRow.item;
           const actualStartOffset = displayStartOffset(item, weekStartDate);
           const baseStart = clampInteger(actualStartOffset, 0, WEEK_DAY_COUNT - 1);
@@ -1797,6 +2160,73 @@ const surfaceHeaderActionsStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
+const projectGroupingControlsStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+const projectGroupingButtonStyle = (enabled: boolean): React.CSSProperties => ({
+  minHeight: 30,
+  border: enabled ? "1px solid rgba(37, 99, 235, 0.34)" : "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 8,
+  background: enabled ? "#eff6ff" : "#ffffff",
+  color: enabled ? "#1d4ed8" : "#334155",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 11px",
+  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.14), -4px -4px 10px rgba(255, 255, 255, 0.82)",
+});
+
+const projectGroupFieldStyle: React.CSSProperties = {
+  height: 30,
+  display: "inline-grid",
+  gridTemplateColumns: "auto 112px 42px",
+  alignItems: "center",
+  gap: 5,
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 8,
+  background: "#ffffff",
+  padding: "0 5px 0 8px",
+  boxSizing: "border-box",
+};
+
+const projectGroupAxisLabelStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const projectGroupSelectStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  border: 0,
+  outline: "none",
+  background: "transparent",
+  color: "#0f172a",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const projectGroupDirectionButtonStyle: React.CSSProperties = {
+  height: 22,
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 6,
+  background: "#f8fafc",
+  color: "#475569",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 9,
+  fontWeight: 950,
+  padding: 0,
+};
+
 const primaryProjectButtonStyle = (accent: string): React.CSSProperties => ({
   minHeight: 32,
   border: 0,
@@ -1823,6 +2253,80 @@ const projectTableStyle: React.CSSProperties = {
   borderSpacing: 0,
   minWidth: 720,
   color: "#0f172a",
+};
+
+const projectGroupedListStyle: React.CSSProperties = {
+  minWidth: 760,
+  display: "grid",
+  alignContent: "start",
+  gap: 14,
+  padding: 12,
+  boxSizing: "border-box",
+};
+
+const projectGroupedSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const projectGroupHeaderStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  color: "#0f172a",
+};
+
+const projectGroupHeaderAxisStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 22,
+  borderRadius: 999,
+  padding: "0 8px",
+  background: "#e2e8f0",
+  color: "#475569",
+  fontSize: 10,
+  fontWeight: 950,
+};
+
+const projectGroupHeaderTextStyle: React.CSSProperties = {
+  fontSize: 15,
+  fontWeight: 950,
+};
+
+const projectGroupedBucketStyle: React.CSSProperties = {
+  overflow: "hidden",
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 8,
+  background: "#ffffff",
+};
+
+const projectBucketHeaderStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 12px",
+  borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
+  background: "#f8fafc",
+  boxSizing: "border-box",
+};
+
+const projectBucketHeaderTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#0f172a",
+  fontSize: 13,
+  fontWeight: 950,
+};
+
+const projectBucketCountStyle: React.CSSProperties = {
+  marginLeft: "auto",
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 900,
 };
 
 const projectHeaderCellStyle: React.CSSProperties = {
@@ -2094,6 +2598,43 @@ function timelineCellStyle(rowIndex: number, active: boolean, accent: string, ki
     borderRight: "1px solid rgba(148, 163, 184, 0.13)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.13)",
     background: active ? `${accent}10` : kind === "logic_gate" ? "rgba(236, 253, 245, 0.52)" : rowIndex % 2 === 0 ? "rgba(255, 255, 255, 0.48)" : "rgba(248, 250, 252, 0.62)",
+    boxSizing: "border-box",
+  };
+}
+
+function timelineGroupLabelStyle(rowIndex: number, depth: number): React.CSSProperties {
+  return {
+    position: "sticky",
+    left: 0,
+    zIndex: 5,
+    gridColumn: 1,
+    gridRow: rowIndex + 2,
+    display: "flex",
+    alignItems: "center",
+    padding: `0 12px 0 ${12 + depth * 18}px`,
+    borderRight: "1px solid rgba(148, 163, 184, 0.18)",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+    background: depth === 0 ? "#e2e8f0" : "#f1f5f9",
+    color: "#0f172a",
+    boxSizing: "border-box",
+  };
+}
+
+const timelineGroupTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 950,
+};
+
+function timelineGroupCellStyle(rowIndex: number, active: boolean, accent: string): React.CSSProperties {
+  return {
+    gridRow: rowIndex + 2,
+    borderRight: "1px solid rgba(148, 163, 184, 0.13)",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+    background: active ? `${accent}12` : "#f8fafc",
     boxSizing: "border-box",
   };
 }

@@ -530,15 +530,19 @@ type ProjectManagementTimelineMutationResult struct {
 }
 
 type ProjectInput struct {
-	CompanyID   string
-	ProjectID   string
-	Name        string
-	Status      string
-	AccountID   *string
-	AccountSet  bool
-	TeamID      *string
-	TeamSet     bool
-	ActorUserID string
+	CompanyID     string
+	ProjectID     string
+	Name          string
+	Status        string
+	AccountID     *string
+	AccountSet    bool
+	AccountIDs    []string
+	AccountIDsSet bool
+	TeamID        *string
+	TeamSet       bool
+	TeamIDs       []string
+	TeamIDsSet    bool
+	ActorUserID   string
 }
 
 type ProjectMutationResult struct {

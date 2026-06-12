@@ -9,11 +9,13 @@ import (
 )
 
 type projectRequest struct {
-	CompanyID string  `json:"company_id"`
-	Name      string  `json:"name"`
-	Status    string  `json:"status"`
-	AccountID *string `json:"account_id"`
-	TeamID    *string `json:"team_id"`
+	CompanyID  string    `json:"company_id"`
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	AccountID  *string   `json:"account_id"`
+	AccountIDs *[]string `json:"account_ids"`
+	TeamID     *string   `json:"team_id"`
+	TeamIDs    *[]string `json:"team_ids"`
 }
 
 type projectInformationRequest struct {
@@ -116,14 +118,18 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err := s.repo.CreateProject(store.ProjectInput{
-			CompanyID:   companyID,
-			Name:        req.Name,
-			Status:      req.Status,
-			AccountID:   req.AccountID,
-			AccountSet:  req.AccountID != nil,
-			TeamID:      req.TeamID,
-			TeamSet:     req.TeamID != nil,
-			ActorUserID: actor.User.UserID,
+			CompanyID:     companyID,
+			Name:          req.Name,
+			Status:        req.Status,
+			AccountID:     req.AccountID,
+			AccountSet:    req.AccountID != nil,
+			AccountIDs:    stringSliceValue(req.AccountIDs),
+			AccountIDsSet: req.AccountIDs != nil,
+			TeamID:        req.TeamID,
+			TeamSet:       req.TeamID != nil,
+			TeamIDs:       stringSliceValue(req.TeamIDs),
+			TeamIDsSet:    req.TeamIDs != nil,
+			ActorUserID:   actor.User.UserID,
 		})
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_create_project")
@@ -246,15 +252,19 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 		}
 		actor, _ := authenticatedActor(r)
 		result, err := s.repo.UpdateProject(store.ProjectInput{
-			CompanyID:   companyID,
-			ProjectID:   projectID,
-			Name:        req.Name,
-			Status:      req.Status,
-			AccountID:   req.AccountID,
-			AccountSet:  true,
-			TeamID:      req.TeamID,
-			TeamSet:     true,
-			ActorUserID: actor.User.UserID,
+			CompanyID:     companyID,
+			ProjectID:     projectID,
+			Name:          req.Name,
+			Status:        req.Status,
+			AccountID:     req.AccountID,
+			AccountSet:    true,
+			AccountIDs:    stringSliceValue(req.AccountIDs),
+			AccountIDsSet: req.AccountIDs != nil,
+			TeamID:        req.TeamID,
+			TeamSet:       true,
+			TeamIDs:       stringSliceValue(req.TeamIDs),
+			TeamIDsSet:    req.TeamIDs != nil,
+			ActorUserID:   actor.User.UserID,
 		})
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_update_project")
@@ -594,4 +604,11 @@ func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fal
 	default:
 		writeError(w, http.StatusInternalServerError, fallback)
 	}
+}
+
+func stringSliceValue(value *[]string) []string {
+	if value == nil {
+		return nil
+	}
+	return append([]string{}, (*value)...)
 }

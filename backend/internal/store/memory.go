@@ -24,6 +24,8 @@ type MemoryRepo struct {
 	logicGateRels                 map[string][]domain.LogicGateRelationship
 	logicGateRaci                 map[string][]domain.LogicGateRaciAssignment
 	projects                      map[string]domain.Project
+	projectAccountAssignments     map[string]bool
+	projectTeamAssignments        map[string]bool
 	projectInfo                   map[string][]domain.ProjectInformation
 	projectText                   map[string]map[string]domain.ProjectProjection
 	projectRelationships          map[string]domain.ProjectRelationship
@@ -85,6 +87,8 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateRels:                 map[string][]domain.LogicGateRelationship{},
 		logicGateRaci:                 map[string][]domain.LogicGateRaciAssignment{},
 		projects:                      map[string]domain.Project{},
+		projectAccountAssignments:     map[string]bool{},
+		projectTeamAssignments:        map[string]bool{},
 		projectInfo:                   map[string][]domain.ProjectInformation{},
 		projectText:                   map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:          map[string]domain.ProjectRelationship{},

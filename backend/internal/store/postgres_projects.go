@@ -60,6 +60,141 @@ func scanProject(row interface{ Scan(dest ...any) error }) (domain.Project, erro
 	return item, err
 }
 
+type postgresProjectAssignmentQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func attachProjectAssignmentReadModel(ctx context.Context, queryer postgresProjectAssignmentQueryer, project domain.Project) (domain.Project, error) {
+	accounts, err := listProjectAccountAssignments(ctx, queryer, project.CompanyID, project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	teams, err := listProjectTeamAssignments(ctx, queryer, project.CompanyID, project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	project.Accounts = accounts
+	if len(accounts) > 0 {
+		accountID := accounts[0].AccountID
+		accountName := accounts[0].Name
+		project.AccountID = &accountID
+		project.AccountName = &accountName
+	} else {
+		project.AccountID = nil
+		project.AccountName = nil
+	}
+	project.Teams = teams
+	if len(teams) > 0 {
+		teamID := teams[0].GroupID
+		teamName := teams[0].Name
+		project.TeamID = &teamID
+		project.TeamName = &teamName
+	} else {
+		project.TeamID = nil
+		project.TeamName = nil
+	}
+	return project, nil
+}
+
+func listProjectAccountAssignments(ctx context.Context, queryer postgresProjectAssignmentQueryer, companyID, projectID string) ([]domain.Account, error) {
+	rows, err := queryer.QueryContext(ctx, `
+select account.company_id::text, account.account_id::text, account.name, account.folder_id::text, account.position, account.created_timestamp, account.updated_timestamp
+from project_account_assignments assignment
+join accounts account
+  on account.company_id=assignment.company_id
+ and account.account_id=assignment.account_id
+where assignment.company_id=$1::uuid
+  and assignment.project_id=$2::uuid
+order by account.position asc, lower(account.name) asc, account.account_id::text asc`, companyID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.Account, 0)
+	for rows.Next() {
+		item, err := scanAccount(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func listProjectTeamAssignments(ctx context.Context, queryer postgresProjectAssignmentQueryer, companyID, projectID string) ([]domain.CompanyUserGroup, error) {
+	rows, err := queryer.QueryContext(ctx, `
+select team.company_id::text, team.group_id::text, team.parent_group_id::text, team.name, team.position, team.created_timestamp, team.updated_timestamp
+from project_team_assignments assignment
+join company_user_groups team
+  on team.company_id=assignment.company_id
+ and team.group_id=assignment.team_id
+where assignment.company_id=$1::uuid
+  and assignment.project_id=$2::uuid
+order by team.position asc, lower(team.name) asc, team.group_id::text asc`, companyID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.CompanyUserGroup, 0)
+	for rows.Next() {
+		item, err := scanProjectTeam(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func scanProjectTeam(row interface{ Scan(dest ...any) error }) (domain.CompanyUserGroup, error) {
+	var item domain.CompanyUserGroup
+	var parentID sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.GroupID,
+		&parentID,
+		&item.Name,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if parentID.Valid && strings.TrimSpace(parentID.String) != "" {
+		value := parentID.String
+		item.ParentGroupID = &value
+	}
+	return item, err
+}
+
+func setProjectAccountAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, projectID string, accountIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `delete from project_account_assignments where company_id=$1::uuid and project_id=$2::uuid`, companyID, projectID); err != nil {
+		return err
+	}
+	for _, accountID := range cleanProjectIDList(accountIDs) {
+		if _, err := tx.ExecContext(ctx, `
+insert into project_account_assignments (company_id, project_id, account_id, created_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, now())
+on conflict (company_id, project_id, account_id) do nothing`, companyID, projectID, accountID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setProjectTeamAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, projectID string, teamIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `delete from project_team_assignments where company_id=$1::uuid and project_id=$2::uuid`, companyID, projectID); err != nil {
+		return err
+	}
+	for _, teamID := range cleanProjectIDList(teamIDs) {
+		if _, err := tx.ExecContext(ctx, `
+insert into project_team_assignments (company_id, project_id, team_id, created_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, now())
+on conflict (company_id, project_id, team_id) do nothing`, companyID, projectID, teamID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error }) (domain.ProjectRelationshipProjection, error) {
 	var item domain.ProjectRelationshipProjection
 	var logicGateID sql.NullString
@@ -162,6 +297,16 @@ left join company_user_groups team
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
+	if err := setProjectAccountAssignmentsTx(ctx, tx, input.CompanyID, project.ProjectID, input.AccountIDs); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	if err := setProjectTeamAssignmentsTx(ctx, tx, input.CompanyID, project.ProjectID, input.TeamIDs); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	project, err = attachProjectAssignmentReadModel(ctx, tx, project)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
 	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveProjectsKey)
 	if err != nil {
 		return ProjectMutationResult{}, err
@@ -181,6 +326,12 @@ func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult,
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	defer tx.Rollback()
 	setClauses := []string{"name=$3", "status=$4", "updated_timestamp=now()"}
 	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status}
 	argIndex := 5
@@ -228,11 +379,28 @@ left join accounts account
 left join company_user_groups team
   on team.company_id=project.company_id
  and team.group_id=project.team_id`
-	project, err := scanProject(r.db.QueryRowContext(context.Background(), query, args...))
+	project, err := scanProject(tx.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectMutationResult{}, ErrNotFound
 	}
 	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	if input.AccountSet || input.AccountIDsSet {
+		if err := setProjectAccountAssignmentsTx(ctx, tx, input.CompanyID, input.ProjectID, input.AccountIDs); err != nil {
+			return ProjectMutationResult{}, err
+		}
+	}
+	if input.TeamSet || input.TeamIDsSet {
+		if err := setProjectTeamAssignmentsTx(ctx, tx, input.CompanyID, input.ProjectID, input.TeamIDs); err != nil {
+			return ProjectMutationResult{}, err
+		}
+	}
+	project, err = attachProjectAssignmentReadModel(ctx, tx, project)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
 	return ProjectMutationResult{Project: &project}, nil
@@ -260,7 +428,8 @@ func (r *PostgresRepo) DeleteProject(companyID, projectID, actorUserID string) (
 }
 
 func (r *PostgresRepo) GetProject(companyID, projectID string) (domain.Project, error) {
-	project, err := scanProject(r.db.QueryRowContext(context.Background(), `
+	ctx := context.Background()
+	project, err := scanProject(r.db.QueryRowContext(ctx, `
 select `+projectSelectColumns+`
 from projects project
 left join accounts account
@@ -274,7 +443,10 @@ where project.company_id=$1::uuid
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Project{}, ErrNotFound
 	}
-	return project, err
+	if err != nil {
+		return domain.Project{}, err
+	}
+	return attachProjectAssignmentReadModel(ctx, r.db, project)
 }
 
 func (r *PostgresRepo) ListProjects(companyID, viewerUserID string) ([]domain.Project, error) {
@@ -312,6 +484,10 @@ where project.company_id=$1::uuid`
 		}
 		if viewerUserID != "" {
 			item.EffectiveAccess = EntityPermissionEdit
+		}
+		item, err = attachProjectAssignmentReadModel(context.Background(), r.db, item)
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
@@ -369,6 +545,10 @@ order by lower(project.name) asc, project.project_id asc`, companyID, folderID)
 	items := make([]domain.Project, 0)
 	for rows.Next() {
 		item, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		item, err = attachProjectAssignmentReadModel(context.Background(), r.db, item)
 		if err != nil {
 			return nil, err
 		}
@@ -430,6 +610,10 @@ order by lower(project.name) asc, project.project_id asc`, companyID, folderID, 
 			return nil, err
 		}
 		item.EffectiveAccess = EntityPermissionEdit
+		item, err = attachProjectAssignmentReadModel(context.Background(), r.db, item)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
