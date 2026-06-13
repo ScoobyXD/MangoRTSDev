@@ -75,29 +75,134 @@ function Get-VsCodeExe {
   return $code
 }
 
-function Stop-StaleVsCodeUpdaterProcesses {
-  $updaters = @()
+function Get-VsCodeUpdaterProcesses {
   try {
-    $updaters = @(Get-CimInstance Win32_Process | Where-Object {
+    return @(Get-CimInstance Win32_Process | Where-Object {
       ($_.Name -like "CodeSetup*") -or ($_.CommandLine -like "*vscode-stable-user-x64*")
     })
   } catch {
     Write-Host "VS Code updater check skipped: $($_.Exception.Message)"
-    return
+    return @()
+  }
+}
+
+function Get-ProcessAgeSeconds {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object]$Process,
+
+    [Parameter(Mandatory = $true)]
+    [datetime]$Now
+  )
+
+  if (-not $Process.CreationDate) {
+    return 0
   }
 
-  if ($updaters.Count -eq 0) {
+  return ($Now - $Process.CreationDate).TotalSeconds
+}
+
+function Get-VsCodeUpdaterCancelPath {
+  param(
+    [string]$CommandLine
+  )
+
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+    return $null
+  }
+
+  $match = [regex]::Match($CommandLine, '/cancel=(?:"([^"]+)"|(\S+))')
+  if (-not $match.Success) {
+    return $null
+  }
+
+  if ($match.Groups[1].Success) {
+    return $match.Groups[1].Value
+  }
+
+  return $match.Groups[2].Value
+}
+
+function Request-VsCodeUpdaterCancel {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object]$Updater
+  )
+
+  $cancelPath = Get-VsCodeUpdaterCancelPath -CommandLine $Updater.CommandLine
+  if ([string]::IsNullOrWhiteSpace($cancelPath)) {
+    return $false
+  }
+
+  try {
+    New-Item -ItemType File -Path $cancelPath -Force | Out-Null
+    Write-Host "Requested VS Code updater cancel via $cancelPath"
+    return $true
+  } catch {
+    Write-Host "Could not request VS Code updater cancel via $cancelPath`: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Wait-VsCodeUpdaterReady {
+  param(
+    [int]$TimeoutSeconds = 180,
+    [int]$StaleSeconds = 120
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $cancelRequested = New-Object "System.Collections.Generic.HashSet[string]"
+  $nextStatusAt = Get-Date
+
+  while ($true) {
+    $updaters = @(Get-VsCodeUpdaterProcesses)
+    if ($updaters.Count -eq 0) {
+      return
+    }
+
+    $now = Get-Date
+    $status = ($updaters | ForEach-Object {
+      $ageSeconds = [int](Get-ProcessAgeSeconds -Process $_ -Now $now)
+      "PID $($_.ProcessId) $($_.Name) age ${ageSeconds}s"
+    }) -join "; "
+
+    foreach ($updater in $updaters) {
+      $ageSeconds = Get-ProcessAgeSeconds -Process $updater -Now $now
+      if ($ageSeconds -lt $StaleSeconds) {
+        continue
+      }
+
+      $cancelPath = Get-VsCodeUpdaterCancelPath -CommandLine $updater.CommandLine
+      if ([string]::IsNullOrWhiteSpace($cancelPath) -or $cancelRequested.Contains($cancelPath)) {
+        continue
+      }
+
+      if (Request-VsCodeUpdaterCancel -Updater $updater) {
+        [void]$cancelRequested.Add($cancelPath)
+      }
+    }
+
+    if ((Get-Date) -ge $deadline) {
+      break
+    }
+
+    if ((Get-Date) -ge $nextStatusAt) {
+      Write-Host "VS Code updater is active; waiting before launch: $status"
+      $nextStatusAt = (Get-Date).AddSeconds(15)
+    }
+
+    Start-Sleep -Seconds 2
+  }
+
+  $remaining = @(Get-VsCodeUpdaterProcesses)
+  if ($remaining.Count -eq 0) {
     return
   }
 
   $now = Get-Date
-  foreach ($updater in $updaters) {
-    $ageSeconds = 0
-    if ($updater.CreationDate) {
-      $ageSeconds = ($now - $updater.CreationDate).TotalSeconds
-    }
-
-    if (($updater.Name -like "CodeSetup*") -and ($ageSeconds -ge 120)) {
+  foreach ($updater in $remaining) {
+    $ageSeconds = Get-ProcessAgeSeconds -Process $updater -Now $now
+    if (($updater.Name -like "CodeSetup*") -and ($ageSeconds -ge $StaleSeconds)) {
       Write-Host "Stopping stale VS Code updater process PID $($updater.ProcessId): $($updater.Name)"
       try {
         Stop-Process -Id $updater.ProcessId -Force -ErrorAction Stop
@@ -107,7 +212,13 @@ function Stop-StaleVsCodeUpdaterProcesses {
       continue
     }
 
-    Write-Host "VS Code updater-related process present; leaving it alone: PID $($updater.ProcessId) $($updater.Name)"
+    Write-Host "VS Code updater-related process is still active after waiting: PID $($updater.ProcessId) $($updater.Name)"
+  }
+
+  Start-Sleep -Seconds 2
+  $stillActive = @(Get-VsCodeUpdaterProcesses)
+  if ($stillActive.Count -gt 0) {
+    throw "VS Code updater is still active; aborting launch because Code.exe exits while the updater mutex is held."
   }
 }
 
@@ -187,6 +298,40 @@ function Wait-VsCodeProcessForUserData {
   return $null
 }
 
+function Get-VsCodeWindowForUserData {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$UserData
+  )
+
+  $processIds = @(Get-VsCodeProcessForUserData -UserData $UserData | Select-Object -ExpandProperty ProcessId)
+  if ($processIds.Count -eq 0) {
+    return $null
+  }
+
+  Get-Process Code -ErrorAction SilentlyContinue | Where-Object {
+    ($processIds -contains $_.Id) -and ($_.MainWindowHandle -ne 0)
+  } | Select-Object -First 1
+}
+
+function Wait-VsCodeWindowForUserData {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$UserData
+  )
+
+  for ($i = 0; $i -lt 120; $i += 1) {
+    $window = Get-VsCodeWindowForUserData -UserData $UserData
+    if ($window) {
+      return $window
+    }
+
+    Start-Sleep -Milliseconds 250
+  }
+
+  return $null
+}
+
 Assert-AgentCommand -Name git
 
 $mainRoot = Resolve-AgentPath -Path $MainPath
@@ -203,6 +348,12 @@ Invoke-AgentGit -RepoPath $mainRoot -Arguments @("fetch", "origin", "main")
 $containsRemote = Invoke-AgentGitExitCode -RepoPath $mainRoot -Arguments @("merge-base", "--is-ancestor", "FETCH_HEAD", "main")
 if ($containsRemote -ne 0) {
   throw "Local main does not contain the fetched origin/main. Run git pull --ff-only origin main from the main worktree, then retry."
+}
+
+if (-not $NoStart) {
+  if (-not $SkipUpdaterCheck) {
+    Wait-VsCodeUpdaterReady
+  }
 }
 
 $suffixNumber = Get-NextCodexSuffixNumber -RepoPath $mainRoot
@@ -233,10 +384,6 @@ $launcherPid = ""
 $codePid = ""
 
 if (-not $NoStart) {
-  if (-not $SkipUpdaterCheck) {
-    Stop-StaleVsCodeUpdaterProcesses
-  }
-
   $script = New-VsCodeLauncherScript -Slug $slug -Worktree $workerPath -UserData $userData -Extensions $extensions -Code $code
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
   $launcher = Start-Process powershell.exe -WorkingDirectory $workerPath -ArgumentList @(
@@ -252,6 +399,11 @@ if (-not $NoStart) {
   $codeProcess = Wait-VsCodeProcessForUserData -UserData $userData
   if ($codeProcess) {
     $codePid = $codeProcess.ProcessId
+  }
+
+  $codeWindow = Wait-VsCodeWindowForUserData -UserData $userData
+  if ($codeWindow) {
+    $codePid = $codeWindow.Id
   }
 }
 
