@@ -371,3 +371,11 @@ export async function deleteProjectManagementNode(companyID: string, nodeID: str
     method: "DELETE",
   });
 }
+
+export async function deleteProjectManagementLogicGate(companyID: string, logicGateID: string): Promise<{ status: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  return apiFetchJSON<{ status: string }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
