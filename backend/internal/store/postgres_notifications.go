@@ -411,6 +411,11 @@ func (r *PostgresRepo) DeleteNotifications(input NotificationDeleteInput) ([]dom
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.NotificationID = strings.TrimSpace(input.NotificationID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
+	input.Surface = strings.TrimSpace(input.Surface)
+	input.Role = strings.TrimSpace(input.Role)
+	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
 	if input.UserID == "" {
 		return nil, ErrInvalid
 	}
@@ -419,7 +424,21 @@ delete from notifications
 where recipient_user_id=$1::uuid
   and ($2 = '' or company_id = nullif($2, '')::uuid)
   and ($3 = '' or notification_id = nullif($3, '')::uuid)
-returning `+notificationSelectColumns, input.UserID, input.CompanyID, input.NotificationID)
+  and ($4 = '' or notification_type = $4)
+  and ($5 = '' or surface = $5)
+  and ($6 = '' or role = $6)
+  and ($7 = '' or logic_gate_id = $7)
+  and ($8 = '' or node_id = $8)
+returning `+notificationSelectColumns,
+		input.UserID,
+		input.CompanyID,
+		input.NotificationID,
+		input.NotificationType,
+		input.Surface,
+		input.Role,
+		input.LogicGateID,
+		input.NodeID,
+	)
 	if err != nil {
 		return nil, err
 	}

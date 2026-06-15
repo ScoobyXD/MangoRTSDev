@@ -1324,9 +1324,14 @@ type NotificationMarkReadInput struct {
 }
 
 type NotificationDeleteInput struct {
-	UserID         string
-	CompanyID      string
-	NotificationID string
+	UserID           string
+	CompanyID        string
+	NotificationID   string
+	NotificationType string
+	Surface          string
+	Role             string
+	LogicGateID      string
+	NodeID           string
 }
 
 type NotificationSummaryInput struct {
