@@ -673,13 +673,6 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 	}
 	normalized = filtered
 	targetEntityIDs := []string{entityID}
-	if entityType == EntityTypeSharedTriageFolder {
-		ids, err := postgresSharedTriagePermissionTargetIDs(ctx, tx, companyID, entityID)
-		if err != nil {
-			return nil, err
-		}
-		targetEntityIDs = ids
-	}
 	for _, targetEntityID := range targetEntityIDs {
 		if _, err := tx.ExecContext(ctx, `
 delete from resource_access_grants
@@ -737,46 +730,6 @@ on conflict (company_id, resource_type, resource_id, principal_type, principal_i
 	return r.ListEntityPermissions(companyID, entityType, entityID)
 }
 
-func postgresSharedTriagePermissionTargetIDs(ctx context.Context, tx *sql.Tx, companyID, folderID string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `
-with recursive root(folder_id, parent_folder_id) as (
-  select folder_id, parent_folder_id
-  from company_explorer_folders
-  where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications'
-),
-descendants(folder_id, path) as (
-  select folder_id, array[folder_id]
-  from root
-  union all
-  select child.folder_id, descendants.path || child.folder_id
-  from company_explorer_folders child
-  join descendants on child.parent_folder_id = descendants.folder_id
-  cross join root
-  where child.company_id=$1::uuid
-    and child.folder_kind='communications'
-    and not child.folder_id = any(descendants.path)
-)
-select folder_id::text from descendants`, companyID, folderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	ids := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return nil, ErrNotFound
-	}
-	return ids, nil
-}
 func (r *PostgresRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {
 	return r.UserCanAccessEntity(companyID, entityType, entityID, userID, EntityPermissionView)
 }
@@ -806,163 +759,7 @@ func (r *PostgresRepo) ListAccessibleEntityIDs(companyID, entityType, userID, ac
 	if usesDefaultResourceAccessPolicy(entityType) {
 		return r.ListEffectiveResourceIDsForUser(companyID, userID, entityType, accessLevel, cleanIDs)
 	}
-
-	existingSQL := ""
-	switch entityType {
-	case EntityTypeNode:
-		existingSQL = `
-  select input.resource_id
-  from input
-  join nodes item
-    on item.company_id=$1::uuid
-   and item.node_id=input.resource_id`
-	case EntityTypeLogicGate:
-		existingSQL = `
-  select input.resource_id
-  from input
-  join logic_gates item
-    on item.company_id=$1::uuid
-   and item.logic_gate_id=input.resource_id`
-	case EntityTypeSharedTriageFolder:
-		existingSQL = `
-  select input.resource_id
-  from input
-  join company_explorer_folders item
-    on item.company_id=$1::uuid
-   and item.folder_id=input.resource_id
-   and item.folder_kind='communications'`
-	default:
-		return nil, ErrInvalid
-	}
-
-	rows, err := r.db.QueryContext(context.Background(), `
-with recursive input(resource_id) as (
-  select distinct raw.resource_id::uuid
-  from unnest($5::text[]) as raw(resource_id)
-),
-normalized_resource(resource_type) as (
-  select $2::text
-),
-requested(required_rank) as (
-  select mangorts_access_level_rank($4::text)
-),
-role_admin_actor(allowed) as (
-  select exists (
-    select 1
-    from company_memberships membership
-    where membership.user_id=$3::uuid
-      and (
-        membership.role='dev_admin'
-        or (membership.company_id=$1::uuid and membership.role='company_admin')
-      )
-  )
-),
-existing(resource_id) as (`+existingSQL+`
-),
-resource_scope(root_id, resource_id, depth, path) as (
-  select existing.resource_id, existing.resource_id, 0, array[existing.resource_id]
-  from existing
-  union all
-  select resource_scope.root_id,
-         folder.parent_folder_id,
-         resource_scope.depth + 1,
-         resource_scope.path || folder.parent_folder_id
-  from resource_scope
-  join company_explorer_folders folder
-    on folder.company_id=$1::uuid
-   and folder.folder_kind='communications'
-   and folder.folder_id=resource_scope.resource_id
-  join normalized_resource normalized
-    on normalized.resource_type='shared_triage_folder'
-  where folder.parent_folder_id is not null
-    and not folder.parent_folder_id = any(resource_scope.path)
-),
-permitted_group_scope(root_id, resource_id, depth, group_id, access_rank, path) as (
-  select resource_scope.root_id,
-         permission.resource_id,
-         resource_scope.depth,
-         permission.principal_id,
-         mangorts_access_level_rank(permission.access_level),
-         array[permission.principal_id]
-  from resource_access_grants permission
-  join resource_scope
-    on resource_scope.resource_id=permission.resource_id
-  join normalized_resource normalized
-    on normalized.resource_type=permission.resource_type
-  where permission.company_id=$1::uuid
-    and permission.principal_type='group'
-  union all
-  select parent.root_id,
-         parent.resource_id,
-         parent.depth,
-         child.group_id,
-         parent.access_rank,
-         parent.path || child.group_id
-  from permitted_group_scope parent
-  join company_user_groups child
-    on child.company_id=$1::uuid
-   and child.parent_group_id=parent.group_id
-  where not child.group_id = any(parent.path)
-),
-matching_grants(root_id, depth, subject_rank, access_rank) as (
-  select resource_scope.root_id,
-         resource_scope.depth,
-         2,
-         mangorts_access_level_rank(permission.access_level)
-  from resource_access_grants permission
-  join resource_scope
-    on resource_scope.resource_id=permission.resource_id
-  join normalized_resource normalized
-    on normalized.resource_type=permission.resource_type
-  where permission.company_id=$1::uuid
-    and permission.principal_type='user'
-    and permission.principal_id=$3::uuid
-  union all
-  select permitted_group_scope.root_id,
-         permitted_group_scope.depth,
-         3,
-         permitted_group_scope.access_rank
-  from company_user_group_members member
-  join permitted_group_scope
-    on permitted_group_scope.group_id=member.group_id
-  where member.company_id=$1::uuid
-    and member.user_id=$3::uuid
-),
-effective_grant(root_id, access_rank) as (
-  select distinct on (matching_grants.root_id)
-         matching_grants.root_id,
-         matching_grants.access_rank
-  from matching_grants
-  order by matching_grants.root_id,
-           matching_grants.depth asc,
-           matching_grants.subject_rank desc,
-           matching_grants.access_rank desc
-)
-select existing.resource_id::text
-from existing
-cross join requested
-cross join normalized_resource
-left join effective_grant
-  on effective_grant.root_id=existing.resource_id
-where requested.required_rank > 0
-  and (
-    (select allowed from role_admin_actor)
-    or coalesce(effective_grant.access_rank >= requested.required_rank, false)
-  )`, companyID, entityType, userID, accessLevel, cleanIDs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := map[string]bool{}
-	for rows.Next() {
-		var entityID string
-		if err := rows.Scan(&entityID); err != nil {
-			return nil, err
-		}
-		out[entityID] = true
-	}
-	return out, rows.Err()
+	return nil, ErrInvalid
 }
 
 func (r *PostgresRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
@@ -1075,22 +872,56 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxAccessGrants(ctx context.C
 			ids = append(ids, folder.FolderID)
 		}
 	}
-	parentByFolder, grantFolderIDs, err := r.listCommunicationsSharedInboxRaciAncestry(ctx, companyID, ids)
+	if len(ids) == 0 {
+		return folders, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select access.company_id::text,
+       access.resource_type,
+       access.resource_id::text,
+       'user'::text,
+       access.user_id::text,
+       nullif(app_user.display_name, ''),
+       nullif(app_user.email, ''),
+       case
+         when coalesce(folder.default_access, $4) = $4 then $5
+         else $4
+       end as access_level,
+       access.created_timestamp
+from resource_permissions access
+join communications_shared_inbox_folders folder
+  on folder.company_id=access.company_id
+ and folder.folder_id=access.resource_id
+join users app_user on app_user.user_id=access.user_id
+where access.company_id=$1::uuid
+  and access.resource_type=$2
+  and access.resource_id = any(string_to_array($3, ',')::uuid[])
+order by access.resource_id::text asc,
+         lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.user_id::text)) asc,
+         access.user_id::text asc`, companyID, EntityTypeSharedTriageFolder, strings.Join(ids, ","), ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
 	if err != nil {
-		if isPostgresUndefinedTable(err, "") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+		if isPostgresUndefinedTable(err, "resource_permissions") || postgresSharedInboxStorageUnavailable(err) || isPostgresInvalidTextRepresentation(err) {
 			return folders, nil
 		}
 		return nil, err
 	}
-	grantsByResource, err := r.listResourceAccessGrants(ctx, companyID, EntityTypeSharedTriageFolder, grantFolderIDs)
-	if err != nil {
+	defer rows.Close()
+	grantsByResource := map[string][]domain.EntityPermission{}
+	for rows.Next() {
+		item, err := scanEntityPermission(rows)
+		if err != nil {
+			return nil, err
+		}
+		grantsByResource[item.EntityID] = append(grantsByResource[item.EntityID], item)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	for index := range folders {
 		if folders[index].FolderKind != "communications" {
 			continue
 		}
-		folders[index].AccessGrants = resourceAccessGrantsForFolder(folders[index].FolderID, parentByFolder, grantsByResource)
+		folders[index].AccessGrants = grantsByResource[folders[index].FolderID]
 	}
 	return folders, nil
 }
@@ -1124,7 +955,7 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		return exists, err
 	case EntityTypeSharedTriageFolder:
 		var exists bool
-		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID).Scan(&exists)
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID).Scan(&exists)
 		return exists, err
 	default:
 		return false, ErrInvalid
@@ -1142,7 +973,7 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 	case EntityTypeCompanyExplorerFolder:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID)
 	case EntityTypeSharedTriageFolder:
-		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='communications')`, companyID, entityID)
+		return postgresTxExists(ctx, tx, `select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID)
 	default:
 		return false, ErrInvalid
 	}

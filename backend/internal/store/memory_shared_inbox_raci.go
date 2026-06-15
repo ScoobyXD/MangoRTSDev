@@ -51,7 +51,6 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 	assignments := make([]domain.SharedInboxRaciAssignment, 0)
 	accessGrants := make([]domain.EntityPermission, 0)
 	seenAssignments := map[string]bool{}
-	seenAccessSubjects := map[string]bool{}
 	seenFolders := map[string]bool{}
 	for current := folder; strings.TrimSpace(current.FolderID) != ""; {
 		currentID := strings.TrimSpace(current.FolderID)
@@ -73,17 +72,6 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 			seenAssignments[seenKey] = true
 			assignments = append(assignments, assignment)
 		}
-		for _, grant := range r.entityPermissions {
-			if grant.CompanyID != folder.CompanyID || grant.EntityType != EntityTypeSharedTriageFolder || grant.EntityID != currentID {
-				continue
-			}
-			seenKey := grant.SubjectType + ":" + grant.SubjectID
-			if seenAccessSubjects[seenKey] {
-				continue
-			}
-			seenAccessSubjects[seenKey] = true
-			accessGrants = append(accessGrants, r.withEntityPermissionSubjectLocked(grant))
-		}
 		if current.ParentFolderID == nil || strings.TrimSpace(*current.ParentFolderID) == "" {
 			break
 		}
@@ -92,6 +80,14 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 			break
 		}
 		current = parent
+	}
+	for _, grant := range r.entityPermissions {
+		if grant.CompanyID != folder.CompanyID || grant.EntityType != EntityTypeSharedTriageFolder || grant.EntityID != folder.FolderID || grant.SubjectType != EntityPermissionSubjectUser {
+			continue
+		}
+		grant.Permission = OppositeResourceDefaultAccess(folder.DefaultAccess)
+		grant.AccessLevel = grant.Permission
+		accessGrants = append(accessGrants, r.withEntityPermissionSubjectLocked(grant))
 	}
 	sortSharedInboxRaciAssignments(assignments)
 	sortEntityPermissions(accessGrants)

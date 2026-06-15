@@ -249,6 +249,13 @@ type CompanyExplorerRepository interface {
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
 	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error)
+	CreateCommunicationsSharedInboxFolder(companyID, parentFolderID, name, accountEmail string) (domain.CompanyExplorerFolder, error)
+	ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error)
+	ListVisibleCommunicationsSharedInboxFolders(companyID, userID string) ([]domain.CompanyExplorerFolder, error)
+	GetCommunicationsSharedInboxFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error)
+	MoveCommunicationsSharedInboxFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
+	RenameCommunicationsSharedInboxFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
+	DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error
 	SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error)
 	SetCommunicationsSharedInboxRaciAssignments(input SharedInboxRaciAssignmentUpdateInput) ([]domain.SharedInboxRaciAssignment, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)

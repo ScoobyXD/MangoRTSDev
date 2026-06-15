@@ -40,9 +40,8 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 		     and not exists (
 		       select 1
 		       from company_memberships membership
-		       join company_explorer_folders folder
+		       join communications_shared_inbox_folders folder
 		         on folder.company_id = membership.company_id
-		        and folder.folder_kind = 'communications'
 		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
 		       where membership.user_id = connection.user_id
 		     )
@@ -312,9 +311,8 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 		     and not exists (
 		       select 1
 		       from company_memberships membership
-		       join company_explorer_folders folder
+		       join communications_shared_inbox_folders folder
 		         on folder.company_id = membership.company_id
-		        and folder.folder_kind = 'communications'
 		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
 		       where membership.user_id = connection.user_id
 		     )

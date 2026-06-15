@@ -558,6 +558,7 @@ type CompanyExplorerFolder struct {
 	FolderID         string                      `json:"folder_id"`
 	ParentFolderID   *string                     `json:"parent_folder_id,omitempty"`
 	FolderKind       string                      `json:"folder_kind"`
+	EntryType        string                      `json:"entry_type,omitempty"`
 	SystemKey        *string                     `json:"system_key,omitempty"`
 	Name             string                      `json:"name"`
 	DefaultAccess    string                      `json:"default_access,omitempty"`

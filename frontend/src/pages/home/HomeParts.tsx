@@ -967,7 +967,7 @@ export function HomeSidebar({
   const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
-  const [sharedCreateDialog, setSharedCreateDialog] = useState<{ parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
+  const [sharedCreateDialog, setSharedCreateDialog] = useState<{ mode: "folder" | "shared_inbox"; parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
   const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; detail: string; label: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1066,13 +1066,14 @@ export function HomeSidebar({
     await onRenameSharedInbox(folderID, name);
   }, [onRenameSharedInbox, renameDraft, renamingSharedFolderID, sharedInboxes]);
 
-  const openSharedInboxCreateDialog = useCallback((parentFolder: CommunicationsSharedInbox | null) => {
+  const openSharedInboxCreateDialog = useCallback((parentFolder: CommunicationsSharedInbox | null, mode: "folder" | "shared_inbox") => {
     setSharedContextMenu(null);
     setSharedCreateDialog({
+      mode,
       parentFolderID: parentFolder?.folder_id ?? "",
       parentName: parentFolder?.name ?? "",
       name: "",
-      accountEmail: cleanConnectedAccountEmail,
+      accountEmail: mode === "shared_inbox" ? cleanConnectedAccountEmail : "",
       error: "",
     });
   }, [cleanConnectedAccountEmail]);
@@ -1082,16 +1083,16 @@ export function HomeSidebar({
     const name = sharedCreateDialog.name.trim();
     const accountEmail = sharedCreateDialog.accountEmail.trim().toLowerCase();
     if (!name) {
-      setSharedCreateDialog((current) => current ? { ...current, error: "Enter a shared inbox name." } : current);
+      setSharedCreateDialog((current) => current ? { ...current, error: sharedCreateDialog.mode === "shared_inbox" ? "Enter a shared inbox name." : "Enter a folder name." } : current);
       return;
     }
-    if (!isValidSharedInboxEmail(accountEmail)) {
+    if (sharedCreateDialog.mode === "shared_inbox" && !isValidSharedInboxEmail(accountEmail)) {
       setSharedCreateDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
       return;
     }
     const parentFolderID = sharedCreateDialog.parentFolderID;
     setSharedCreateDialog(null);
-    const folder = await onCreateSharedInbox(parentFolderID, name, accountEmail);
+    const folder = await onCreateSharedInbox(parentFolderID, name, sharedCreateDialog.mode === "shared_inbox" ? accountEmail : "");
     if (!folder) return;
     if (parentFolderID) {
       setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
@@ -1101,14 +1102,15 @@ export function HomeSidebar({
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     setSharedContextMenu(null);
-    if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
+    const current = sharedInboxes.find((folder) => folder.folder_id === folderID.trim());
+    if (!current || current.entry_type !== "shared_inbox") {
       return;
     }
     await onSetSharedInboxAccountEmail(folderID, accountEmail);
   }, [onSetSharedInboxAccountEmail, sharedInboxes]);
 
   const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
-    if (sharedInboxes.some((item) => (item.parent_folder_id ?? "").trim() === folder.folder_id)) {
+    if (folder.entry_type !== "shared_inbox") {
       setSharedContextMenu(null);
       return;
     }
@@ -1179,6 +1181,7 @@ export function HomeSidebar({
       const target = sharedInboxes.find((folder) => folder.folder_id === targetFolderID);
       if (!target) return;
       if (placement === "inside") {
+        if (target.entry_type === "shared_inbox") return;
         parentFolderID = target.folder_id;
         position = getSharedInboxChildPosition(sharedInboxes, target.folder_id, sourceFolderID);
         setExpandedSharedFolderIDs((previous) => new Set(previous).add(target.folder_id));
@@ -1264,6 +1267,7 @@ export function HomeSidebar({
         onDragOver={(event) => {
           const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
           const placement = getSharedTriageDropPlacement(event);
+          if (placement === "inside" && folder.entry_type === "shared_inbox") return;
           if (!canDropSharedFolder(sourceFolderID, folder.folder_id)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
@@ -1410,30 +1414,42 @@ export function HomeSidebar({
       </nav>
       {sharedContextMenu && (() => {
         const contextFolder = sharedContextMenu.folder;
-        const contextFolderHasChildren = !!contextFolder && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === contextFolder.folder_id);
+        const contextFolderAcceptsChildren = !contextFolder || contextFolder.entry_type !== "shared_inbox";
         return (
           <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
-            <button
-              type="button"
-              style={sharedInboxContextMenuButtonStyle}
-              disabled={sharedBusy}
-              onClick={() => openSharedInboxCreateDialog(contextFolder)}
-            >
-              Create new shared inbox
-            </button>
+            {contextFolderAcceptsChildren && (
+              <>
+                <button
+                  type="button"
+                  style={sharedInboxContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => openSharedInboxCreateDialog(contextFolder, "folder")}
+                >
+                  Create folder
+                </button>
+                <button
+                  type="button"
+                  style={sharedInboxContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => openSharedInboxCreateDialog(contextFolder, "shared_inbox")}
+                >
+                  Create shared inbox
+                </button>
+              </>
+            )}
             {contextFolder && (
               <>
-                {!contextFolderHasChildren && (
+                {contextFolder.entry_type === "shared_inbox" && (
                   <button
                     type="button"
                     style={sharedInboxContextMenuButtonStyle}
                     disabled={sharedBusy}
                     onClick={() => openSharedEmailDialog(contextFolder)}
                   >
-                    Assign email to inbox
+                    Change inbox email
                   </button>
                 )}
-                {!contextFolderHasChildren && contextFolder.account_email && (
+                {contextFolder.entry_type === "shared_inbox" && contextFolder.account_email && (
                   <button
                     type="button"
                     style={sharedInboxContextMenuButtonStyle}
@@ -1467,6 +1483,7 @@ export function HomeSidebar({
         <SharedInboxCreateDialog
           nameInputRef={sharedCreateNameInputRef}
           parentName={sharedCreateDialog.parentName}
+          mode={sharedCreateDialog.mode}
           name={sharedCreateDialog.name}
           accountEmail={sharedCreateDialog.accountEmail}
           error={sharedCreateDialog.error}
@@ -1554,9 +1571,10 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
   );
 }
 
-function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail, error, busy, onNameChange, onAccountEmailChange, onSubmit, onCancel }: {
+function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, accountEmail, error, busy, onNameChange, onAccountEmailChange, onSubmit, onCancel }: {
   nameInputRef: React.RefObject<HTMLInputElement>;
   parentName: string;
+  mode: "folder" | "shared_inbox";
   name: string;
   accountEmail: string;
   error: string;
@@ -1567,12 +1585,13 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail,
   onCancel: () => void;
 }) {
   const parentLabel = parentName.trim();
+  const isSharedInbox = mode === "shared_inbox";
   return (
     <div style={deleteModalBackdropStyle} onPointerDown={onCancel}>
       <form
         role="dialog"
         aria-modal="true"
-        aria-label="Create shared inbox"
+        aria-label={isSharedInbox ? "Create shared inbox" : "Create Shared Triage folder"}
         style={deleteModalStyle}
         onPointerDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
@@ -1580,7 +1599,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail,
           onSubmit();
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700 }}>Create shared inbox</div>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>{isSharedInbox ? "Create shared inbox" : "Create folder"}</div>
         <div style={deleteModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Triage"}</div>
         <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
           <span>Name</span>
@@ -1588,22 +1607,24 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail,
             ref={nameInputRef}
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
-            placeholder="Support inbox"
+            placeholder={isSharedInbox ? "Support inbox" : "Finance"}
             disabled={busy}
             style={inputStyle}
           />
         </label>
-        <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
-          <span>Email</span>
-          <input
-            type="email"
-            value={accountEmail}
-            onChange={(event) => onAccountEmailChange(event.target.value)}
-            placeholder="support@example.com"
-            disabled={busy}
-            style={inputStyle}
-          />
-        </label>
+        {isSharedInbox && (
+          <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
+            <span>Email</span>
+            <input
+              type="email"
+              value={accountEmail}
+              onChange={(event) => onAccountEmailChange(event.target.value)}
+              placeholder="support@example.com"
+              disabled={busy}
+              style={inputStyle}
+            />
+          </label>
+        )}
         {error && <div style={{ color: "#8b123f", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>

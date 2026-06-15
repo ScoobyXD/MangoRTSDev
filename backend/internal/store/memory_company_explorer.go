@@ -8,7 +8,6 @@ import (
 )
 
 const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
-const companyExplorerDefaultCommunicationsFolderSeedKey = "communications_v1"
 const companyExplorerSystemFolderSeedKey = "system_folders_v1"
 const CompanyExplorerSystemActiveNodesKey = "active_nodes"
 const CompanyExplorerSystemActiveLogicGatesKey = "active_logic_gates"
@@ -26,54 +25,6 @@ var companyExplorerDefaultLogicGateChildFolderNames = []string{
 type companyExplorerDefaultFolderDefinition struct {
 	Name     string
 	Children []companyExplorerDefaultFolderDefinition
-}
-
-var companyExplorerDefaultCommunicationsFolderTree = []companyExplorerDefaultFolderDefinition{
-	{
-		Name: "BM",
-		Children: []companyExplorerDefaultFolderDefinition{
-			{
-				Name: "Product",
-				Children: []companyExplorerDefaultFolderDefinition{
-					{Name: "design"},
-					{Name: "printing"},
-					{Name: "suppliers"},
-				},
-			},
-			{Name: "Account"},
-			{Name: "Commercial"},
-			{Name: "Project"},
-		},
-	},
-	{
-		Name: "Supply Chain",
-		Children: []companyExplorerDefaultFolderDefinition{
-			{Name: "orders"},
-			{Name: "shipping"},
-			{Name: "receiving"},
-		},
-	},
-	{
-		Name: "Production",
-		Children: []companyExplorerDefaultFolderDefinition{
-			{Name: "temps"},
-		},
-	},
-	{
-		Name: "QA",
-		Children: []companyExplorerDefaultFolderDefinition{
-			{Name: "quality"},
-		},
-	},
-	{
-		Name: "Finance",
-		Children: []companyExplorerDefaultFolderDefinition{
-			{Name: "ar"},
-			{Name: "ap"},
-		},
-	},
-	{Name: "Legal"},
-	{Name: "HR"},
 }
 
 type companyExplorerSystemFolderDefinition struct {
@@ -195,14 +146,6 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 		}
 		r.defaultFolderSeed[seedKey] = true
 	}
-
-	communicationsSeedKey := companyID + ":" + companyExplorerDefaultCommunicationsFolderSeedKey
-	if !r.defaultFolderSeed[communicationsSeedKey] {
-		now := time.Now().UTC()
-		startPosition := nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, "communications", "")
-		r.createCompanyExplorerDefaultFolderTreeLocked(companyID, "communications", "", startPosition, companyExplorerDefaultCommunicationsFolderTree, now)
-		r.defaultFolderSeed[communicationsSeedKey] = true
-	}
 }
 
 func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKey string) (domain.CompanyExplorerFolder, bool) {
@@ -311,11 +254,13 @@ func nextCompanyExplorerFolderChildPosition(folders map[string]domain.CompanyExp
 }
 
 func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	foldersSnapshot := cloneMemoryMap(r.folders)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	var parent *string
 	scopeType := CompanyExplorerFolderScopeCompany
 	var scopeID *string
@@ -345,24 +290,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		UpdatedTimestamp: now,
 	}
 	r.folders[key(companyID, item.FolderID)] = item
-	if item.FolderKind == "communications" {
-		if err := r.recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
-			r.folders = foldersSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
-			r.folders = foldersSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if err := r.recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, item.FolderID); err != nil {
-			r.folders = foldersSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			return domain.CompanyExplorerFolder{}, err
-		}
-	}
-	return r.withSharedInboxRaciLocked(item), nil
+	return item, nil
 }
 
 func (r *MemoryRepo) SetCompanyExplorerFolderScope(companyID, folderID, scopeType, scopeID string) (domain.CompanyExplorerFolder, error) {
@@ -394,13 +322,16 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 		if folder.CompanyID != companyID {
 			continue
 		}
+		if folder.FolderKind == "communications" {
+			continue
+		}
 		if folderKind != "" && folder.FolderKind != folderKind {
 			continue
 		}
 		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
 			continue
 		}
-		items = append(items, r.withSharedInboxRaciLocked(folder))
+		items = append(items, folder)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
@@ -425,10 +356,10 @@ func (r *MemoryRepo) GetCompanyExplorerFolder(companyID, folderID string) (domai
 	defer r.mu.RUnlock()
 
 	item, ok := r.folders[key(companyID, folderID)]
-	if !ok {
+	if !ok || item.FolderKind == "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
-	return r.withSharedInboxRaciLocked(item), nil
+	return item, nil
 }
 
 func (r *MemoryRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
@@ -448,8 +379,8 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, us
 		if !visibleFolderIDs[folder.FolderID] {
 			continue
 		}
-		item := r.withSharedInboxRaciLocked(folder)
-		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView)
+		item := folder
+		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView)
 		if accessLevel == "" {
 			continue
 		}
@@ -472,6 +403,9 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderIDsLocked(companyID, folderKind
 			if folderKind != "" && folder.FolderKind != folderKind {
 				continue
 			}
+			if folder.FolderKind == "communications" {
+				continue
+			}
 			if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
 				continue
 			}
@@ -479,10 +413,10 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderIDsLocked(companyID, folderKind
 				continue
 			}
 			parentID := companyExplorerParentID(folder)
-			if folder.FolderKind != "communications" && parentID != "" && !ids[parentID] {
+			if parentID != "" && !ids[parentID] {
 				continue
 			}
-			if !r.userHasEffectiveAccessLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView) {
+			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
 				continue
 			}
 			ids[folder.FolderID] = true
@@ -490,13 +424,6 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderIDsLocked(companyID, folderKind
 		}
 	}
 	return ids
-}
-
-func companyExplorerFolderAccessResourceType(folder domain.CompanyExplorerFolder) string {
-	if folder.FolderKind == "communications" {
-		return EntityTypeSharedTriageFolder
-	}
-	return EntityTypeCompanyExplorerFolder
 }
 
 func sortCompanyExplorerFolders(items []domain.CompanyExplorerFolder) {
@@ -572,10 +499,7 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, fol
 		if folderKind != "" && folder.FolderKind != folderKind {
 			return ids
 		}
-		if folder.FolderKind == "communications" {
-			return r.visibleCommunicationsFolderSubtreeIDsLocked(companyID, folderID, userID)
-		}
-		if folder.FolderKind != "communications" && !r.userHasEffectiveAccessLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView) {
+		if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
 			return ids
 		}
 		ids[folder.FolderID] = true
@@ -591,25 +515,17 @@ func (r *MemoryRepo) visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, fol
 			if folderKind != "" && folder.FolderKind != folderKind {
 				continue
 			}
+			if folder.FolderKind == "communications" {
+				continue
+			}
 			if !ids[*folder.ParentFolderID] || ids[folder.FolderID] {
 				continue
 			}
-			if !r.userHasEffectiveAccessLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView) {
+			if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
 				continue
 			}
 			ids[folder.FolderID] = true
 			changed = true
-		}
-	}
-	return ids
-}
-
-func (r *MemoryRepo) visibleCommunicationsFolderSubtreeIDsLocked(companyID, folderID, userID string) map[string]bool {
-	structuralIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "communications")
-	ids := map[string]bool{}
-	for folderID := range structuralIDs {
-		if r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeSharedTriageFolder, folderID, EntityPermissionView) {
-			ids[folderID] = true
 		}
 	}
 	return ids
@@ -628,10 +544,13 @@ func (r *MemoryRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folde
 		if !ids[folder.FolderID] {
 			continue
 		}
+		if folder.FolderKind == "communications" {
+			continue
+		}
 		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
 			continue
 		}
-		items = append(items, r.withSharedInboxRaciLocked(folder))
+		items = append(items, folder)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
@@ -666,11 +585,14 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID
 		if !ids[folder.FolderID] {
 			continue
 		}
+		if folder.FolderKind == "communications" {
+			continue
+		}
 		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
 			continue
 		}
-		item := r.withSharedInboxRaciLocked(folder)
-		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView)
+		item := folder
+		accessLevel := r.effectiveAccessLevelLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView)
 		if accessLevel == "" {
 			continue
 		}
@@ -684,10 +606,8 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	foldersSnapshot := cloneMemoryMap(r.folders)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	item, ok := r.folders[key(companyID, folderID)]
-	if !ok {
+	if !ok || item.FolderKind == "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 	parent := item.ParentFolderID
@@ -703,7 +623,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	}
 	if parentFolderID != nil && targetParentID != "" {
 		parentFolder, ok := r.folders[key(companyID, targetParentID)]
-		if !ok {
+		if !ok || parentFolder.FolderKind == "communications" {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		// A folder cannot be moved under one of its descendants; that would
@@ -742,14 +662,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	if item.FolderKind == "communications" && parentChanged {
-		if err := r.recomputeSharedTriageInheritedEffectiveAccessForSubtreeLocked(companyID, item.FolderID); err != nil {
-			r.folders = foldersSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			return domain.CompanyExplorerFolder{}, err
-		}
-	}
-	return r.withSharedInboxRaciLocked(item), nil
+	return item, nil
 }
 
 func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -757,7 +670,7 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	defer r.mu.Unlock()
 
 	item, ok := r.folders[key(companyID, folderID)]
-	if !ok {
+	if !ok || item.FolderKind == "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 	if item.SystemKey != nil {
@@ -766,7 +679,19 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxRaciLocked(item), nil
+	return item, nil
+}
+
+func (r *MemoryRepo) companyHasConnectedEmailAccountLocked(companyID, accountEmail string) bool {
+	for _, connection := range r.emailConnections {
+		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
+			continue
+		}
+		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
@@ -787,6 +712,10 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 	if item.FolderKind != "communications" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
+	item = normalizeMemorySharedInboxFolder(item)
+	if accountEmail != "" && item.EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	if accountEmail != "" && !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
 		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 	}
@@ -798,18 +727,6 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
 	return r.withSharedInboxRaciLocked(item), nil
-}
-
-func (r *MemoryRepo) companyHasConnectedEmailAccountLocked(companyID, accountEmail string) bool {
-	for _, connection := range r.emailConnections {
-		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
-			continue
-		}
-		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
@@ -850,6 +767,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			if !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
+			if folder.FolderKind == "communications" {
+				return CompanyExplorerDeleteResult{}, ErrInvalid
+			}
 			toDelete := map[string]bool{target.ID: true}
 			changed := true
 			for changed {
@@ -868,6 +788,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			for id := range toDelete {
 				item := r.folders[key(companyID, id)]
 				if item.SystemKey != nil {
+					return CompanyExplorerDeleteResult{}, ErrInvalid
+				}
+				if item.FolderKind == "communications" {
 					return CompanyExplorerDeleteResult{}, ErrInvalid
 				}
 				folderIDs[id] = true
@@ -960,14 +883,8 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	r.createRecycleBinItemsLocked(companyID, result.Targets, recycleSnapshot)
 
 	for folderID := range folderIDs {
-		if folderKinds[folderID] == "communications" {
-			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
-		} else {
-			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
+		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
 		}
 	}
 	for logicGateID := range logicGateIDs {
@@ -1229,7 +1146,7 @@ func (r *MemoryRepo) companyExplorerFolderItemVisibleLocked(companyID, userID st
 	if !ok {
 		return false
 	}
-	if !r.userHasEffectiveAccessLocked(companyID, userID, companyExplorerFolderAccessResourceType(folder), folder.FolderID, EntityPermissionView) {
+	if folder.FolderKind == "communications" || !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeCompanyExplorerFolder, folder.FolderID, EntityPermissionView) {
 		return false
 	}
 	switch item.ItemType {

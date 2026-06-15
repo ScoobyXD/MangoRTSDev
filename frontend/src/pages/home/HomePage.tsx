@@ -454,9 +454,9 @@ export function HomePage({
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
     [activeSharedInboxFolderID, sharedInboxes],
   );
-  const activeSharedInboxIsParent = !!activeSharedInbox && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === activeSharedInbox.folder_id);
-  const activeSharedInboxNeedsEmail = !!activeSharedInbox && !activeSharedInboxIsParent && !(activeSharedInbox.account_email ?? "").trim();
-  const activeSharedInboxBlocksEmail = !!activeSharedInbox && activeSharedInboxIsParent;
+  const activeSharedInboxIsParent = !!activeSharedInbox && activeSharedInbox.entry_type !== "shared_inbox";
+  const activeSharedInboxNeedsEmail = !!activeSharedInbox && activeSharedInbox.entry_type === "shared_inbox" && !(activeSharedInbox.account_email ?? "").trim();
+  const activeSharedInboxBlocksEmail = !!activeSharedInbox && activeSharedInbox.entry_type !== "shared_inbox";
   const activeMailAccountEmail = activeViewID === "shared-root"
     ? ""
     : activeSharedInboxFolderID

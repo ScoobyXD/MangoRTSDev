@@ -145,7 +145,7 @@ func WorkspaceReadVersionStaticRows(companyID string) []WorkspaceReadVersionQuer
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "node")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "logic_gate")},
 		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "project")},
-		{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer", ResourceKey: WorkspaceReadVersionResourceKey("folder_kind", "communications")},
+		{CompanyID: companyID, Scope: "workspace-snapshot:shared_triage"},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items"},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "node")},
 		{CompanyID: companyID, Scope: "company-explorer-folder-items", ResourceKey: WorkspaceReadVersionResourceKey("item_type", "logic_gate")},
@@ -291,7 +291,7 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			addCompanyExplorerFolderItems("")
 			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
 		case "communications":
-			addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "communications"))
+			add("workspace-snapshot:shared_triage", "")
 		}
 	}
 	if stringInList(eventType, CompanyExplorerFolderItemWorkspaceEventTypes) {

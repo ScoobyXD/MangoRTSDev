@@ -19,6 +19,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	repo := backing
 	server := NewServer(repo)
 	companyID := "company-shared-inbox-route-test"
+	repo.EnsureCompany(companyID, "Shared Inbox Route Company")
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 
 	user, err := repo.UpsertAuthUser("subject-shared-route", "shared@example.com", "Shared User")
@@ -126,9 +127,18 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPerm
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership error = %v", err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Access")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Access", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions default error = %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -185,19 +195,17 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(targetUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership target error = %v", err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Resource Admin")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Resource Admin", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   adminUser.UserID,
-			AccessLevel: store.EntityPermissionAdmin,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{adminUser.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions admin error = %v", err)
 	}
@@ -254,35 +262,46 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 		t.Fatalf("AddCompanyMembership other error = %v", err)
 	}
 
-	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Business")
+	parent, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Business", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder parent error = %v", err)
 	}
-	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "communications", "Client Facing")
+	child, err := repo.CreateCommunicationsSharedInboxFolder(companyID, parent.FolderID, "Client Facing", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder child error = %v", err)
 	}
-	unrelated, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Supply Chain")
+	unrelated, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Supply Chain", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder unrelated error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder unrelated error = %v", err)
+	}
+	for _, folder := range []domain.CompanyExplorerFolder{parent, child, unrelated} {
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:        companyID,
+			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityID:         folder.FolderID,
+			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+			DefaultAccessSet: true,
+		}); err != nil {
+			t.Fatalf("SetEntityPermissions default %s error = %v", folder.FolderID, err)
+		}
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   child.FolderID,
-		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: currentUser.UserID, AccessLevel: store.EntityPermissionEdit},
-		},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         child.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{currentUser.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions child error = %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   unrelated.FolderID,
-		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: otherUser.UserID, AccessLevel: store.EntityPermissionEdit},
-		},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         unrelated.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{otherUser.UserID},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions unrelated error = %v", err)
 	}
@@ -322,12 +341,16 @@ type sharedInboxListErrorRepo struct {
 	err error
 }
 
-func (r sharedInboxListErrorRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+func (r sharedInboxListErrorRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error) {
 	return nil, r.err
 }
 
-func (r sharedInboxListErrorRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+func (r sharedInboxListErrorRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, userID string) ([]domain.CompanyExplorerFolder, error) {
 	return nil, r.err
+}
+
+func (r sharedInboxListErrorRepo) GetCommunicationsSharedInboxFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
+	return domain.CompanyExplorerFolder{}, r.err
 }
 
 func TestCommunicationsSharedInboxListReportsStorageUnavailable(t *testing.T) {

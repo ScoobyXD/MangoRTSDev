@@ -277,7 +277,7 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		return true
 	}
 	switch resourceType {
-	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder:
+	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder, EntityTypeSharedTriageFolder:
 		if accessLevel == EntityPermissionAdmin {
 			return false
 		}
@@ -290,8 +290,6 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		}
 		hasOverride := r.resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID)
 		return (defaultAccess == ResourceDefaultAccessEdit) != hasOverride
-	case EntityTypeSharedTriageFolder:
-		return r.userHasSharedTriagePermissionLocked(companyID, resourceID, userID, accessLevel)
 	default:
 		return false
 	}
@@ -324,6 +322,12 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 	case EntityTypeCompanyExplorerFolder:
 		folder, ok := r.folders[key(companyID, resourceID)]
 		if !ok || folder.FolderKind == "communications" {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(folder.DefaultAccess), true
+	case EntityTypeSharedTriageFolder:
+		folder, ok := r.folders[key(companyID, resourceID)]
+		if !ok || folder.FolderKind != "communications" {
 			return "", false
 		}
 		return defaultResourceAccessOrEdit(folder.DefaultAccess), true

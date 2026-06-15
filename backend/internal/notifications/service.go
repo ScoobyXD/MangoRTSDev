@@ -820,7 +820,7 @@ func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]str
 	if companyID == "" || folderID == "" {
 		return []string{}, nil
 	}
-	folders, err := s.Repo.ListCompanyExplorerFolders(companyID, "communications")
+	folders, err := s.Repo.ListCommunicationsSharedInboxFolders(companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -864,7 +864,7 @@ func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map
 	if companyID == "" || folderID == "" {
 		return map[string]string{}, nil
 	}
-	folders, err := s.Repo.ListCompanyExplorerFolders(companyID, "communications")
+	folders, err := s.Repo.ListCommunicationsSharedInboxFolders(companyID)
 	if err != nil {
 		return nil, err
 	}

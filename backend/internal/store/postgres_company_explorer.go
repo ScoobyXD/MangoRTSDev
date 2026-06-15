@@ -107,13 +107,7 @@ func scanCompanyExplorerFolderWithEffectiveAccess(row companyExplorerFolderScann
 }
 
 func companyExplorerFolderAccountEmailColumn(includeAccountEmail bool, qualifier string) string {
-	if !includeAccountEmail {
-		return "null::text as account_email"
-	}
-	if strings.TrimSpace(qualifier) == "" {
-		return "account_email"
-	}
-	return qualifier + ".account_email"
+	return "null::text as account_email"
 }
 
 func companyExplorerFolderScopeColumns(qualifier string) string {
@@ -121,16 +115,6 @@ func companyExplorerFolderScopeColumns(qualifier string) string {
 		return "coalesce(scope_type, 'company') as scope_type, scope_id"
 	}
 	return "coalesce(" + qualifier + ".scope_type, 'company') as scope_type, " + qualifier + ".scope_id"
-}
-
-func companyExplorerCommunicationsFolderStorageUnavailable(err error, folderKind string) bool {
-	if folderKind != "communications" {
-		return false
-	}
-	if isPostgresUndefinedTable(err, "company_explorer_folders") {
-		return true
-	}
-	return isPostgresUndefinedColumn(err, "")
 }
 
 func (r *PostgresRepo) getCompanyExplorerFolder(ctx context.Context, companyID, folderID string, includeAccountEmail bool) (domain.CompanyExplorerFolder, error) {
@@ -153,21 +137,10 @@ func (r *PostgresRepo) getCompanyExplorerFolder(ctx context.Context, companyID, 
 }
 
 func (r *PostgresRepo) attachCompanyExplorerFolderMetadata(ctx context.Context, companyID string, item domain.CompanyExplorerFolder) (domain.CompanyExplorerFolder, error) {
-	if item.FolderKind != "communications" {
-		return item, nil
+	if item.FolderKind == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
-	items, err := r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, []domain.CompanyExplorerFolder{item})
-	if err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-	items, err = r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
-	if err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-	if len(items) == 0 {
-		return item, nil
-	}
-	return items[0], nil
+	return item, nil
 }
 
 func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any) (int, error) {
@@ -281,28 +254,6 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 		}
 	}
 
-	var insertedCommunicationsSeed string
-	err = tx.QueryRowContext(ctx,
-		`insert into company_explorer_default_folder_seeds
-		 (company_id, seed_key, created_timestamp)
-		 values ($1, $2, now())
-		 on conflict (company_id, seed_key) do nothing
-		 returning seed_key`,
-		companyID, companyExplorerDefaultCommunicationsFolderSeedKey,
-	).Scan(&insertedCommunicationsSeed)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil {
-		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "communications", nil)
-		if err != nil {
-			return err
-		}
-		if err := createCompanyExplorerDefaultFolderTreeSQL(ctx, tx, companyID, "communications", nil, position, companyExplorerDefaultCommunicationsFolderTree); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -340,6 +291,9 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 }
 
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -354,7 +308,7 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		if err := tx.QueryRowContext(ctx,
 			`select coalesce(scope_type, 'company'), scope_id
 			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2`,
+			 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
 			companyID, parentFolderID,
 		).Scan(&scopeType, &scopeID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -388,17 +342,6 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	if item.FolderKind == "communications" {
-		if err := recomputeCompanyAdminEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, item.FolderID); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if err := recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx, tx, companyID, item.FolderID); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -406,11 +349,17 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return []domain.CompanyExplorerFolder{}, nil
+	}
 	ctx := context.Background()
 	return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, true)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return []domain.CompanyExplorerFolder{}, nil
+	}
 	ctx := context.Background()
 	return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, true)
 }
@@ -435,6 +384,7 @@ func (r *PostgresRepo) SetCompanyExplorerFolderScope(companyID, folderID, scopeT
 		`update company_explorer_folders
 		 set scope_type=$3, scope_id=$4, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
+		   and folder_kind <> 'communications'
 		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, normalizedScopeType, scopeIDParam,
 	))
@@ -457,6 +407,7 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 		 from company_explorer_folders
 		 where company_id=$1
 		   and ($2::text is null or folder_kind=$2)
+		   and folder_kind <> 'communications'
 		   and (system_key is null or system_key <> 'kanban_boards')
 		 order by position asc, created_timestamp asc`,
 		companyID, kindParam,
@@ -464,9 +415,6 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
-		}
-		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
-			return nil, ErrSharedInboxStorageUnavailable
 		}
 		return nil, err
 	}
@@ -484,16 +432,9 @@ func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyI
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolders(ctx, companyID, folderKind, false)
 		}
-		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
-			return nil, ErrSharedInboxStorageUnavailable
-		}
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
-	if err != nil {
-		return nil, err
-	}
-	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+	return items, nil
 }
 
 func (r *PostgresRepo) GetCompanyExplorerFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error) {
@@ -548,6 +489,9 @@ where company_id=$1::uuid
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
+	if item.FolderKind == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
 	if parent.Valid {
 		item.ParentFolderID = &parent.String
 	}
@@ -574,23 +518,15 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 	if companyID == "" || userID == "" {
 		return nil, ErrInvalid
 	}
+	if strings.TrimSpace(folderKind) == "communications" {
+		return []domain.CompanyExplorerFolder{}, nil
+	}
 	var kindParam any
 	if folderKind != "" {
 		kindParam = folderKind
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`with recursive visible_shared_triage as (
-		   select shared.folder_id as resource_id,
-		          case
-		            when mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, 'admin') then 'admin'
-		            when mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, 'edit') then 'edit'
-		            else 'view'
-		          end as access_level
-		   from company_explorer_folders shared
-		   where shared.company_id=$1::uuid
-		     and shared.folder_kind='communications'
-		     and mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, $4)
-		 ), visible_workspace_folder as (
+		`with recursive visible_workspace_folder as (
 		   select folder.folder_id as resource_id,
 		          case
 		            when exists (
@@ -633,26 +569,19 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 		 )
 		 select folder.company_id, folder.folder_id, folder.parent_folder_id, folder.folder_kind, folder.system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, `+companyExplorerFolderScopeColumns("folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
-		        coalesce(visible_shared_triage.access_level, visible_workspace_folder.access_level)
+		        visible_workspace_folder.access_level
 		 from company_explorer_folders folder
-		 left join visible_shared_triage on visible_shared_triage.resource_id=folder.folder_id
-		 left join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
+		 join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
 		 where folder.company_id=$1::uuid
 		   and ($2::text is null or folder.folder_kind=$2)
+		   and folder.folder_kind <> 'communications'
 		   and (folder.system_key is null or folder.system_key <> 'kanban_boards')
-		   and (
-		     (folder.folder_kind = 'communications' and visible_shared_triage.resource_id is not null)
-		     or (folder.folder_kind <> 'communications' and visible_workspace_folder.resource_id is not null)
-		   )
 		 order by folder.position asc, folder.created_timestamp asc`,
 		companyID, kindParam, userID, EntityPermissionView,
 	)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, false)
-		}
-		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
-			return nil, ErrSharedInboxStorageUnavailable
 		}
 		return nil, err
 	}
@@ -670,19 +599,15 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryVisibleCompanyExplorerFolders(ctx, companyID, folderKind, userID, false)
 		}
-		if companyExplorerCommunicationsFolderStorageUnavailable(err, folderKind) {
-			return nil, ErrSharedInboxStorageUnavailable
-		}
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
-	if err != nil {
-		return nil, err
-	}
-	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+	return items, nil
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return []domain.CompanyExplorerFolder{}, nil
+	}
 	if strings.TrimSpace(folderID) == "" {
 		return r.ListCompanyExplorerFolders(companyID, folderKind)
 	}
@@ -691,6 +616,9 @@ func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, fol
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderKind) == "communications" {
+		return []domain.CompanyExplorerFolder{}, nil
+	}
 	if strings.TrimSpace(folderID) == "" {
 		return r.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
 	}
@@ -710,6 +638,7 @@ with recursive subtree as (
   where company_id=$1
     and folder_id=$2::uuid
     and ($3::text is null or folder_kind=$3)
+    and folder_kind <> 'communications'
   union all
   select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
@@ -717,6 +646,7 @@ with recursive subtree as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where ($3::text is null or child.folder_kind=$3)
+    and child.folder_kind <> 'communications'
 )
 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, scope_type, scope_id, position, created_timestamp, updated_timestamp
 from subtree
@@ -744,11 +674,7 @@ order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(fold
 		}
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
-	if err != nil {
-		return nil, err
-	}
-	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+	return items, nil
 }
 
 func (r *PostgresRepo) queryVisibleCompanyExplorerFolderSubtree(ctx context.Context, companyID, folderID, folderKind, userID string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
@@ -769,10 +695,8 @@ with recursive subtree as (
   where company_id=$1::uuid
     and folder_id=$2::uuid
     and ($3::text is null or folder_kind=$3)
-    and (
-      folder_kind = 'communications'
-      or mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
-    )
+    and folder_kind <> 'communications'
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
   union all
   select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
@@ -780,20 +704,8 @@ with recursive subtree as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where ($3::text is null or child.folder_kind=$3)
-    and (
-      child.folder_kind = 'communications'
-      or mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
-    )
-), visible_shared_triage as (
-  select subtree.folder_id as resource_id,
-         case
-           when mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, 'admin') then 'admin'
-           when mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, 'edit') then 'edit'
-           else 'view'
-         end as access_level
-  from subtree
-  where subtree.folder_kind='communications'
-    and mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, $5)
+    and child.folder_kind <> 'communications'
+    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
 ), visible_workspace_folder as (
   select subtree.folder_id as resource_id,
          case
@@ -814,15 +726,10 @@ with recursive subtree as (
     and mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $4::uuid, $5)
 )
 select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.folder_kind, subtree.system_key, subtree.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "subtree")+`, `+companyExplorerFolderScopeColumns("subtree")+`, subtree.position, subtree.created_timestamp, subtree.updated_timestamp,
-       coalesce(visible_shared_triage.access_level, visible_workspace_folder.access_level)
+       visible_workspace_folder.access_level
 from subtree
-left join visible_shared_triage on visible_shared_triage.resource_id=subtree.folder_id
-left join visible_workspace_folder on visible_workspace_folder.resource_id=subtree.folder_id
+join visible_workspace_folder on visible_workspace_folder.resource_id=subtree.folder_id
 where (subtree.system_key is null or subtree.system_key <> 'kanban_boards')
-  and (
-    (subtree.folder_kind = 'communications' and visible_shared_triage.resource_id is not null)
-    or (subtree.folder_kind <> 'communications' and visible_workspace_folder.resource_id is not null)
-  )
 order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, kindParam, userID, EntityPermissionView)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
@@ -846,11 +753,7 @@ order by subtree.position asc, subtree.created_timestamp asc`, companyID, folder
 		}
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
-	if err != nil {
-		return nil, err
-	}
-	return r.attachCommunicationsSharedInboxAccessGrants(ctx, companyID, items)
+	return items, nil
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
@@ -876,6 +779,9 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
+	if folderKind == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
 
 	var parent any
 	targetParentID := ""
@@ -900,7 +806,7 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		if err := tx.QueryRowContext(ctx,
 			`select coalesce(scope_type, 'company'), scope_id
 			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2`,
+			 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
 			companyID, targetParentID,
 		).Scan(&targetScopeType, &targetScopeID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -959,6 +865,7 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		     scope_id=case when $5 then $7 else scope_id end,
 		     updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
+		   and folder_kind <> 'communications'
 		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, parent, position, updateScope, targetScopeTypeParam, targetScopeIDParam,
 	))
@@ -967,11 +874,6 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
-	}
-	if folderKind == "communications" && parentChanged {
-		if err := recomputeSharedTriageInheritedEffectiveAccessForSubtreeTx(ctx, tx, companyID, folderID); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -986,7 +888,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 	if err := r.db.QueryRowContext(ctx,
 		`select system_key
 		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2`,
+		 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
 		companyID, folderID,
 	).Scan(&systemKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1002,6 +904,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		`update company_explorer_folders
 		 set name=$3, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
+		   and folder_kind <> 'communications'
 		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, name,
 	))
@@ -1012,72 +915,6 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		return domain.CompanyExplorerFolder{}, err
 	}
 	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
-}
-
-func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
-	companyID = strings.TrimSpace(companyID)
-	folderID = strings.TrimSpace(folderID)
-	accountEmail = normalizeEmail(accountEmail)
-	if companyID == "" || folderID == "" {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
-	}
-
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-	defer tx.Rollback()
-
-	var folderKind string
-	if err := tx.QueryRowContext(ctx,
-		`select folder_kind
-		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2
-		 for update`,
-		companyID, folderID,
-	).Scan(&folderKind); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		}
-		return domain.CompanyExplorerFolder{}, err
-	}
-	if folderKind != "communications" {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
-	}
-
-	var accountParam any
-	if accountEmail != "" {
-		available, err := postgresCompanyHasConnectedEmailAccount(ctx, tx, companyID, accountEmail)
-		if err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if !available {
-			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
-		}
-		accountParam = accountEmail
-	}
-
-	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
-		`update company_explorer_folders
-		 set account_email=$3, updated_timestamp=now()
-		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, accountParam,
-	))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		}
-		if isPostgresUndefinedColumn(err, "account_email") {
-			return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
-		}
-		return domain.CompanyExplorerFolder{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
 }
 
 func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, companyID, accountEmail string) (bool, error) {
@@ -1145,11 +982,12 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 				`with recursive subtree as (
 				   select folder_id, folder_kind, system_key
 				   from company_explorer_folders
-				   where company_id=$1 and folder_id=$2
+				   where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'
 				   union all
 				   select child.folder_id, child.folder_kind, child.system_key
 				   from company_explorer_folders child
 				   join subtree parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
+				   where child.folder_kind <> 'communications'
 				 )
 				 select folder_id::text, folder_kind, system_key is not null
 				 from subtree`,
@@ -1357,14 +1195,8 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	}
 
 	for folderID := range folderIDs {
-		if folderKinds[folderID] == "communications" {
-			if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID); err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
-		} else {
-			if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
+		if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
 		}
 	}
 	for logicGateID := range logicGateIDs {
@@ -1953,10 +1785,8 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		   and ($2::uuid is null or item.folder_id=$2::uuid)
 		   and ($3::text is null or item.item_type=$3)
 		   and item.item_type <> 'kanban'
-		   and (
-		     (folder.folder_kind = 'communications' and mangorts_user_can_access_resource(item.company_id, 'shared_triage_folder', item.folder_id, $4::uuid, $5))
-		     or (folder.folder_kind <> 'communications' and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5))
-		   )
+		   and folder.folder_kind <> 'communications'
+		   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5)
 		   and (
 		     item.item_type not in ('node', 'logic_gate', 'project')
 		     or mangorts_user_can_access_resource(
@@ -2012,11 +1842,13 @@ with recursive subtree as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
+    and folder_kind <> 'communications'
   union all
   select child.folder_id
   from company_explorer_folders child
   join subtree parent on child.parent_folder_id=parent.folder_id
   where child.company_id=$1
+    and child.folder_kind <> 'communications'
 )
 select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
 from company_explorer_folder_items item
@@ -2071,19 +1903,15 @@ with recursive subtree as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and (
-      folder_kind = 'communications'
-      or mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
-    )
+    and folder_kind <> 'communications'
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
   union all
   select child.folder_id
   from company_explorer_folders child
   join subtree parent on child.parent_folder_id=parent.folder_id
   where child.company_id=$1::uuid
-    and (
-      child.folder_kind = 'communications'
-      or mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
-    )
+    and child.folder_kind <> 'communications'
+    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
 )
 select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
 from company_explorer_folder_items item
@@ -2094,10 +1922,8 @@ join company_explorer_folders folder
 where item.company_id=$1::uuid
   and ($3::text is null or item.item_type=$3)
   and item.item_type <> 'kanban'
-  and (
-    (folder.folder_kind = 'communications' and mangorts_user_can_access_resource(item.company_id, 'shared_triage_folder', item.folder_id, $4::uuid, $5))
-    or (folder.folder_kind <> 'communications' and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5))
-  )
+  and folder.folder_kind <> 'communications'
+  and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5)
   and (
     item.item_type not in ('node', 'logic_gate', 'project')
     or mangorts_user_can_access_resource(

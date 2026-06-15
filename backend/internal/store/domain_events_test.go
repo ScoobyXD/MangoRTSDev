@@ -210,7 +210,7 @@ func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
 		t.Fatalf("AppendDomainEvent communications folder: %v", err)
 	}
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", WorkspaceReadVersionResourceKey("folder_kind", "communications"), 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:shared_triage", "", 2, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 2, true)
 
 	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "node_map_positions_updated"}); err != nil {
