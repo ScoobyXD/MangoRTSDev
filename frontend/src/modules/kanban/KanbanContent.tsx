@@ -172,6 +172,7 @@ function applyStoredLogicGateColumnLayouts(companyID: string, boardID: string, c
     return { ...column, width_px: widthPx, height_px: heightPx, item_color: itemColor };
   });
 }
+import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
@@ -249,6 +250,17 @@ function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "boar
   return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
 }
 
+function requestedAssigneeDisplayName(card: Pick<KanbanCard, "assignee_user_id" | "assignee_name" | "assignee_email">, userByID: Map<string, CompanyUser>): string {
+  const assigneeUserID = (card.assignee_user_id ?? "").trim();
+  const assignee = assigneeUserID ? userByID.get(assigneeUserID) : undefined;
+  return (card.assignee_name ?? "").trim()
+    || (assignee?.display_name ?? "").trim()
+    || (card.assignee_email ?? "").trim()
+    || (assignee?.email ?? "").trim()
+    || assigneeUserID
+    || "assignee";
+}
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -286,6 +298,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [nodeGraphRevision, setNodeGraphRevision] = useState(0);
   const [explorerFolders, setExplorerFolders] = useState<CompanyExplorerFolder[]>([]);
   const [explorerFolderItems, setExplorerFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -341,6 +354,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const { accounts: companyAccounts } = useCompanyAccounts(companyID);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((current) => {
+        if (!cancelled) setCurrentUserID(current.user.user_id.trim());
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserID("");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const usesLocalColumnLayout = useCallback((targetBoardID: string): boolean => {
     const cleanBoardID = targetBoardID.trim();
@@ -587,7 +612,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
   const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()])), [orderedColumns]);
-  const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
+  const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     const nodeByID = new Map<string, NodeRecord>((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
@@ -2077,6 +2102,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
     const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
     const color = getKanbanConditionalColor(card, columnColorByID);
+    const isRequestedCard = activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" });
+    const isRequestedForCurrentUser = isRequestedCard && !!currentUserID && (card.assignee_user_id ?? "").trim() === currentUserID;
     return (
       <KanbanCardView
         key={card.card_id}
@@ -2173,11 +2200,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setDragOverCard(null);
           requestAddEntitiesToColumn(card.column_id, explorerItems, { x: event.clientX, y: event.clientY });
         }}
-        requestedActions={activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" }) ? {
+        requestedActions={isRequestedForCurrentUser ? {
           busy: requestedCardActionID === card.card_id,
           onAccept: () => void resolveRequestedCard(card, true),
           onDecline: () => void resolveRequestedCard(card, false),
         } : undefined}
+        requestedStatusText={isRequestedCard && currentUserID !== null && !isRequestedForCurrentUser ? `Request sent to ${requestedAssigneeDisplayName(card, arenaUserByID)}` : undefined}
       />
     );
   };
