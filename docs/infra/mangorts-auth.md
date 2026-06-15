@@ -4,12 +4,12 @@ MangoRTS uses Amazon Cognito for authentication and Mango-owned PostgreSQL table
 
 ## Onboarding Flow
 
-The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in and invite password challenges, Nylas Hosted OAuth for Google mailbox access, and Cognito password resets:
+The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in, Nylas Hosted OAuth for Google mailbox access, and Cognito password resets:
 
 1. Dev admin or company admin creates an invitation in Mango.
 2. The backend stores a hashed Mango invitation token, creates or reissues the Cognito user with `AdminCreateUser`, and records Cognito status on the invitation.
-3. Mango sends its own SES invitation email with `/accept-invite?token=...`. The email includes the Cognito temporary password for new users, or tells existing Mango users to sign in with their existing password.
-4. The user opens the Mango invite link, sets or finishes the Cognito password flow, and accepts the Mango invitation.
+3. Mango sends its own SES invitation email with `/accept-invite?token=...`. The email includes the Mango invite token link, not a temporary password.
+4. The user opens the Mango invite link, enters their email, full name, and new password, and accepts the Mango invitation.
 5. Mango links the Cognito subject to `users`, writes `company_memberships`, marks the invitation accepted, and sends a signup confirmation email when `MANGORTS_EMAIL_FROM` is configured.
 6. After acceptance, the frontend sends the user to Connect Google. Mango starts Nylas Hosted OAuth with the user's email as the login hint.
 7. The user approves Google access. Nylas creates a grant, Mango stores the Nylas `grant_id` in `user_email_connections`, and the user lands in the app.
@@ -63,14 +63,27 @@ aws sso login --profile <profile>
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile <profile> -StopExisting
 ```
 
-The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
+The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
+
+For local invitation emails, the script also exports:
+
+- `MANGORTS_APP_URL`: defaults to the local frontend origin, usually `http://localhost:5173`, so invite links point at local `/accept-invite`.
+- `MANGORTS_EMAIL_FROM`: resolved from `-EmailFrom`, the current shell, `scripts/start_local_cognito_backend.local.ps1` via `$MangoLocalEmailFrom`, `infra/aws-dev/terraform.tfvars` `email_from_address`, or the deployed backend task definition.
+
+Override the sender directly when needed:
+
+```powershell
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting -EmailFrom "verified-sender@example.com"
+```
+
+To send invite links that open the public dev frontend while the backend runs locally, override `-AppURL` as well.
 
 ## Backend Enforcement
 
 The backend enables auth only when `AUTH_MODE=cognito`.
 
 - `/healthz` stays public for load balancer health checks.
-- `/v1/*` requires a valid Cognito access or ID token when auth is enabled.
+- `/v1/*` requires a valid Cognito access or ID token when auth is enabled, except public invitation validation/acceptance and password-reset eligibility checks.
 - The backend validates issuer, client ID, token use, expiry, and RS256 signature through the Cognito JWKS.
 - The backend upserts the authenticated Cognito subject into `users`.
 - Memberships are loaded once per request into an actor context.

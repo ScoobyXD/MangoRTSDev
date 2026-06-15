@@ -478,7 +478,6 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cognitoStatus := "not_configured"
-	temporaryPassword := ""
 	if s.cognitoAdmin != nil {
 		if existingMangoUser {
 			cognitoStatus = "existing_mango_user"
@@ -501,7 +500,6 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			cognitoStatus = firstNonBlank(result.Status, "created")
-			temporaryPassword = result.TemporaryPassword
 		}
 	}
 	if updated, err := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
@@ -520,11 +518,10 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	if s.emailSender != nil {
 		inviteEmailStatus = "sent"
 		if err := s.emailSender.SendInvitation(r.Context(), auth.InvitationEmailInput{
-			Email:             invitation.Email,
-			CompanyName:       invitation.CompanyName,
-			AcceptURL:         acceptURL,
-			TemporaryPassword: temporaryPassword,
-			ExpiresAt:         invitation.ExpiresTimestamp,
+			Email:       invitation.Email,
+			CompanyName: invitation.CompanyName,
+			AcceptURL:   acceptURL,
+			ExpiresAt:   invitation.ExpiresTimestamp,
 		}); err != nil {
 			inviteEmailStatus = "failed"
 			inviteEmailError = compactErrorDetail(err)
@@ -578,14 +575,11 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	claims, ok := authenticatedClaims(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
 	var req struct {
 		Token       string `json:"token"`
 		DisplayName string `json:"display_name"`
+		Email       string `json:"email"`
+		Password    string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -599,11 +593,48 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invitation_token_required")
 		return
 	}
-	if strings.TrimSpace(claims.Email) == "" {
-		writeError(w, http.StatusBadRequest, "authenticated_email_required")
+	if strings.TrimSpace(req.Email) != "" || strings.TrimSpace(req.Password) != "" {
+		s.handleInvitationAcceptWithPassword(w, r, req.Token, req.DisplayName, req.Email, req.Password)
 		return
 	}
-	invitation, err := s.repo.AcceptInvitation(req.Token, claims.Subject, claims.Email, req.DisplayName)
+	s.handleInvitationAcceptAuthenticated(w, r, req.Token, req.DisplayName)
+}
+
+func (s *Server) handleInvitationAcceptWithPassword(w http.ResponseWriter, r *http.Request, token, displayName, email, password string) {
+	email = normalizeEmailForCompare(email)
+	password = strings.TrimSpace(password)
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "email_required")
+		return
+	}
+	if password == "" {
+		writeError(w, http.StatusBadRequest, "password_required")
+		return
+	}
+	invitation, err := s.repo.ValidateInvitationToken(token)
+	if err != nil {
+		if writeInvitationError(w, err) {
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed_to_validate_invitation")
+		return
+	}
+	if normalizeEmailForCompare(invitation.Email) != email {
+		writeError(w, http.StatusForbidden, "invitation_email_mismatch")
+		return
+	}
+	if s.cognitoAdmin == nil {
+		writeError(w, http.StatusServiceUnavailable, "cognito_admin_not_configured")
+		return
+	}
+	acceptedUser, err := s.cognitoAdmin.AdminAcceptInvitation(r.Context(), invitation.Email, password)
+	if err != nil {
+		log.Printf("failed to set cognito invitation password email=%s company_id=%s invitation_id=%s: %v", invitation.Email, invitation.CompanyID, invitation.InvitationID, err)
+		writeError(w, http.StatusBadGateway, "failed_to_set_cognito_password")
+		return
+	}
+	acceptedEmail := firstNonBlank(acceptedUser.Email, invitation.Email)
+	invitation, err = s.repo.AcceptInvitation(token, acceptedUser.Subject, acceptedEmail, displayName)
 	if err != nil {
 		if writeInvitationError(w, err) {
 			return
@@ -611,7 +642,38 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed_to_accept_invitation")
 		return
 	}
-	s.authCache.invalidateSubject(claims.Subject)
+	s.writeInvitationAcceptSuccess(w, r, acceptedUser.Subject, invitation)
+}
+
+func (s *Server) handleInvitationAcceptAuthenticated(w http.ResponseWriter, r *http.Request, token, displayName string) {
+	claims, ok := authenticatedClaims(r)
+	if !ok && s.authValidator != nil {
+		if validated, err := s.authValidator.Validate(r.Context(), requestAuthToken(r)); err == nil {
+			claims = validated
+			ok = true
+		}
+	}
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if strings.TrimSpace(claims.Email) == "" {
+		writeError(w, http.StatusBadRequest, "authenticated_email_required")
+		return
+	}
+	invitation, err := s.repo.AcceptInvitation(token, claims.Subject, claims.Email, displayName)
+	if err != nil {
+		if writeInvitationError(w, err) {
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed_to_accept_invitation")
+		return
+	}
+	s.writeInvitationAcceptSuccess(w, r, claims.Subject, invitation)
+}
+
+func (s *Server) writeInvitationAcceptSuccess(w http.ResponseWriter, r *http.Request, cognitoSubject string, invitation domain.Invitation) {
+	s.authCache.invalidateSubject(cognitoSubject)
 	s.authCache.invalidateCompany(invitation.CompanyID)
 	emailStatus := "not_configured"
 	if s.emailSender != nil {

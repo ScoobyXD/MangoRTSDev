@@ -4,6 +4,8 @@ param(
   [string]$CognitoUserPoolID = "us-west-1_g4Iavy1aU",
   [string]$CognitoClientID = "2a3i1n88t0jl9crll68tds4fhe",
   [string]$AllowedOrigin = "http://localhost:5173",
+  [string]$AppURL = "",
+  [string]$EmailFrom = "",
   [string]$NylasRedirectURI = "http://localhost:8080/nylas/oauth/callback",
   [string]$NylasFrontendRedirectURL = "http://localhost:5173/communications",
   [switch]$SkipCredentialExport,
@@ -21,6 +23,8 @@ if (-not (Test-Path -LiteralPath $tfvarsPath)) {
 }
 
 $MangoLocalTunnelURL = ""
+$MangoLocalAppURL = ""
+$MangoLocalEmailFrom = ""
 $MangoLocalNylasClientID = ""
 $MangoLocalNylasAPIBaseURL = ""
 $MangoLocalNylasAPIKeySecretArn = ""
@@ -273,10 +277,31 @@ $dbPassword = Get-SecretStringValue -SecretID $dbPasswordSecretArn -PropertyName
 
 $projectName = Get-OptionalTfvarString -Name "project_name" -Path $tfvarsPath -Default "mangorts"
 $environmentName = Get-OptionalTfvarString -Name "environment" -Path $tfvarsPath -Default "dev"
+$tfvarsEmailFrom = Get-OptionalTfvarString -Name "email_from_address" -Path $tfvarsPath
+$localEmailFromCandidate = First-NonBlank @(
+  $EmailFrom,
+  $env:MANGORTS_EMAIL_FROM,
+  $MangoLocalEmailFrom,
+  $tfvarsEmailFrom
+)
 $backendContainer = $null
-if (-not $SkipNylas) {
+if (-not $SkipNylas -or [string]::IsNullOrWhiteSpace($localEmailFromCandidate)) {
   $backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
 }
+
+$appURL = First-NonBlank @(
+  $AppURL,
+  $env:MANGORTS_APP_URL,
+  $MangoLocalAppURL,
+  $AllowedOrigin
+)
+$emailFromAddress = First-NonBlank @(
+  $EmailFrom,
+  $env:MANGORTS_EMAIL_FROM,
+  $MangoLocalEmailFrom,
+  $tfvarsEmailFrom,
+  (Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_EMAIL_FROM")
+)
 
 $nylasClientID = First-NonBlank @(
   $MangoLocalNylasClientID,
@@ -348,6 +373,12 @@ $env:APP_ENV = "local"
 $env:ALLOW_INMEMORY_FALLBACK = "false"
 $env:MANGORTS_ADDR = ":8080"
 $env:MANGORTS_ALLOWED_ORIGIN = $AllowedOrigin
+$env:MANGORTS_APP_URL = $appURL
+if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
+  Remove-Item Env:\MANGORTS_EMAIL_FROM -ErrorAction SilentlyContinue
+} else {
+  $env:MANGORTS_EMAIL_FROM = $emailFromAddress
+}
 
 $env:AUTH_MODE = "cognito"
 $env:AWS_REGION = $AwsRegion
@@ -405,6 +436,12 @@ Write-Host "Starting local MangoRTS API with Cognito auth and Postgres."
 Write-Host "DB host: $dbHost"
 Write-Host "Cognito user pool: $CognitoUserPoolID"
 Write-Host "Allowed origin: $AllowedOrigin"
+Write-Host "App URL: $appURL"
+if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
+  Write-Host "SES invite email: not configured. Set -EmailFrom, `$env:MANGORTS_EMAIL_FROM, `$MangoLocalEmailFrom, or tfvars email_from_address."
+} else {
+  Write-Host "SES invite email: enabled from $emailFromAddress"
+}
 if ($nylasConfigured) {
   Write-Host "Nylas: configured from local env, tfvars, or deployed ECS secret references."
   Write-Host "Nylas redirect URI: $NylasRedirectURI"

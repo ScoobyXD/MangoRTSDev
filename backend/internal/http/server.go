@@ -18,6 +18,7 @@ type AuthTokenValidator interface {
 
 type CognitoAdminClient interface {
 	AdminCreateUser(ctx context.Context, email string) (auth.CognitoAdminCreateUserResult, error)
+	AdminAcceptInvitation(ctx context.Context, email, password string) (auth.CognitoAdminAcceptInvitationResult, error)
 	AdminDeleteUser(ctx context.Context, username string) error
 }
 
