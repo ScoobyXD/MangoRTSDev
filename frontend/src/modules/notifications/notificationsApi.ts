@@ -81,11 +81,21 @@ export async function deleteNotification(notificationID: string, companyID = "")
   return normalizeCount(result.deleted_count);
 }
 
-export async function deleteNotifications(input: { companyID: string }): Promise<number> {
+export async function deleteNotifications(input: NotificationClearInput & { companyID: string }): Promise<number> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID) throw new Error("company_id_required");
-  const query = `?company_id=${encodeURIComponent(cleanCompanyID)}`;
-  const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications${query}`, {
+  const query = new URLSearchParams({ company_id: cleanCompanyID });
+  const cleanType = input.type?.trim() ?? "";
+  const cleanSurface = input.surface?.trim() ?? "";
+  const cleanRole = input.role?.trim() ?? "";
+  const cleanLogicGateID = input.logicGateID?.trim() ?? "";
+  const cleanNodeID = input.nodeID?.trim() ?? "";
+  if (cleanType) query.set("type", cleanType);
+  if (cleanSurface) query.set("surface", cleanSurface);
+  if (cleanRole) query.set("role", cleanRole);
+  if (cleanLogicGateID) query.set("logic_gate_id", cleanLogicGateID);
+  if (cleanNodeID) query.set("node_id", cleanNodeID);
+  const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications?${query.toString()}`, {
     method: "DELETE",
   });
   emitNotificationsUpdated(cleanCompanyID);

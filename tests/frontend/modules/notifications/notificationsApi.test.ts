@@ -83,7 +83,7 @@ test("deleteNotification calls DELETE for one notification and emits an update e
   }
 });
 
-test("deleteNotifications clears all notifications for a company with DELETE query scope", async () => {
+test("deleteNotifications clears matching notifications with DELETE query scope", async () => {
   const originalFetch = globalThis.fetch;
   const { events, restore } = installTestWindow();
   const calls: Array<{ url: string; method: string }> = [];
@@ -92,9 +92,19 @@ test("deleteNotifications clears all notifications for a company with DELETE que
     return jsonResponse({ deleted_count: 3 });
   };
   try {
-    const count = await deleteNotifications({ companyID: " company-1 " });
+    const count = await deleteNotifications({
+      companyID: " company-1 ",
+      type: "mention.created",
+      surface: "r_inbox",
+      role: "responsible",
+      logicGateID: " logic-gate-1 ",
+      nodeID: " node-1 ",
+    });
     assert.equal(count, 3);
-    assert.deepEqual(calls, [{ url: "https://app.example.test/v1/notifications?company_id=company-1", method: "DELETE" }]);
+    assert.deepEqual(calls, [{
+      url: "https://app.example.test/v1/notifications?company_id=company-1&type=mention.created&surface=r_inbox&role=responsible&logic_gate_id=logic-gate-1&node_id=node-1",
+      method: "DELETE",
+    }]);
     assert.equal(events.length, 1);
     assert.equal(events[0].detail.companyID, "company-1");
   } finally {

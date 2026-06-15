@@ -92,7 +92,13 @@ func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		CompanyID string `json:"company_id"`
+		CompanyID        string `json:"company_id"`
+		Type             string `json:"type"`
+		NotificationType string `json:"notification_type"`
+		Surface          string `json:"surface"`
+		Role             string `json:"role"`
+		LogicGateID      string `json:"logic_gate_id"`
+		NodeID           string `json:"node_id"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -103,8 +109,13 @@ func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	deleted, err := s.repo.DeleteNotifications(store.NotificationDeleteInput{
-		UserID:    actor.User.UserID,
-		CompanyID: companyID,
+		UserID:           actor.User.UserID,
+		CompanyID:        companyID,
+		NotificationType: strings.TrimSpace(firstNonEmptyString(req.Type, req.NotificationType, r.URL.Query().Get("type"), r.URL.Query().Get("notification_type"))),
+		Surface:          firstNonEmptyString(req.Surface, r.URL.Query().Get("surface")),
+		Role:             firstNonEmptyString(req.Role, r.URL.Query().Get("role")),
+		LogicGateID:      firstNonEmptyString(req.LogicGateID, r.URL.Query().Get("logic_gate_id")),
+		NodeID:           firstNonEmptyString(req.NodeID, r.URL.Query().Get("node_id")),
 	})
 	if errorsIsInvalid(err) {
 		writeError(w, http.StatusBadRequest, "invalid_notifications_request")

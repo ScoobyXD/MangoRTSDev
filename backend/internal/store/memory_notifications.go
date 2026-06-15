@@ -460,6 +460,11 @@ func (r *MemoryRepo) DeleteNotifications(input NotificationDeleteInput) ([]domai
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.NotificationID = strings.TrimSpace(input.NotificationID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
+	input.Surface = strings.TrimSpace(input.Surface)
+	input.Role = strings.TrimSpace(input.Role)
+	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
 	if input.UserID == "" {
 		return nil, ErrInvalid
 	}
@@ -476,6 +481,21 @@ func (r *MemoryRepo) DeleteNotifications(input NotificationDeleteInput) ([]domai
 			continue
 		}
 		if input.NotificationID != "" && item.NotificationID != input.NotificationID {
+			continue
+		}
+		if input.NotificationType != "" && item.Type != input.NotificationType {
+			continue
+		}
+		if input.Surface != "" && item.Surface != input.Surface {
+			continue
+		}
+		if input.Role != "" && item.Role != input.Role {
+			continue
+		}
+		if input.LogicGateID != "" && item.LogicGateID != input.LogicGateID {
+			continue
+		}
+		if input.NodeID != "" && item.NodeID != input.NodeID {
 			continue
 		}
 		delete(r.notifications, id)

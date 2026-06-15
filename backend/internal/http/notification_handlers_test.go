@@ -1003,6 +1003,94 @@ func TestClearAllNotificationsRemovesOnlyCurrentUsersNotifications(t *testing.T)
 	}
 }
 
+func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "70707070-7070-4070-8070-707070707070"
+	user, err := repo.UpsertAuthUser("clear-filter-subject", "clear-filter@example.com", "Clear Filter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("clear-filter-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Filtered clear notification node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
+	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "70707070-7070-4070-8070-000000000001",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Responsible R inbox",
+			Surface:         domain.NotificationSurfaceRInbox,
+			Role:            domain.LogicGateRaciRoleResponsible,
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "70707070-7070-4070-8070-000000000002",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Consulted R inbox",
+			Surface:         domain.NotificationSurfaceRInbox,
+			Role:            domain.LogicGateRaciRoleConsulted,
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "70707070-7070-4070-8070-000000000003",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Responsible ACI inbox",
+			Surface:         domain.NotificationSurfaceACIInbox,
+			Role:            domain.LogicGateRaciRoleResponsible,
+			NodeID:          node.NodeID,
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID+"&surface="+domain.NotificationSurfaceRInbox+"&role="+domain.LogicGateRaciRoleResponsible, nil)
+	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE filtered notifications status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var deletedPayload struct {
+		DeletedCount int `json:"deleted_count"`
+	}
+	if err := json.NewDecoder(deleteRec.Body).Decode(&deletedPayload); err != nil {
+		t.Fatalf("decode filtered delete: %v", err)
+	}
+	if deletedPayload.DeletedCount != 1 {
+		t.Fatalf("deleted_count = %d, want 1", deletedPayload.DeletedCount)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	listReq = requestWithActorForNotifications(listReq, user, companyID)
+	remaining := listNotificationsForRequestForTest(t, handler, listReq)
+	if len(remaining) != 2 {
+		t.Fatalf("remaining notifications after filtered clear = %+v, want 2", remaining)
+	}
+	for _, item := range remaining {
+		if item.Surface == domain.NotificationSurfaceRInbox && item.Role == domain.LogicGateRaciRoleResponsible {
+			t.Fatalf("remaining notifications include deleted filtered notification: %+v", remaining)
+		}
+	}
+}
+
 func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	t.Parallel()
 

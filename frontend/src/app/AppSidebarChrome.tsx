@@ -26,7 +26,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import { deleteNotification, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import { INBOX_PRIORITIES, RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import { convertMessagesToLogicGateCommand } from "../pages/home/homeCommands";
@@ -503,14 +503,13 @@ export function AppSidebar({
   const clearNotificationMenu = useCallback(() => {
     const menu = notificationMenu;
     if (!menu || menu.loading || menu.items.length === 0) return;
-    const notificationsToDelete = menu.items
-      .map((item) => ({
-        notificationID: item.notification_id.trim(),
-        companyID: item.company_id?.trim() || companyID,
-      }))
-      .filter((item) => item.notificationID);
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
-    void Promise.all(notificationsToDelete.map((item) => deleteNotification(item.notificationID, item.companyID))).catch((error) => {
+    void deleteNotifications({
+      companyID,
+      type: menu.type,
+      surface: menu.surface,
+      role: menu.role,
+    }).catch((error) => {
       console.error("Failed to clear notifications", error);
       setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
     });
