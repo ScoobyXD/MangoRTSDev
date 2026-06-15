@@ -18,6 +18,7 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 10000;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#475569";
 export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
+export const KANBAN_LOGIC_GATE_REQUESTED_COLOR = "#facc15";
 export const KANBAN_LOGIC_GATE_BACKLOG_COLOR = "#8b5cf6";
 export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#6f7b8a";
 export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#f08a24";
@@ -82,6 +83,7 @@ const KANBAN_COLUMN_ITEM_COLOR_SET = new Set([
   "#64748b",
   "#808080",
   KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+  KANBAN_LOGIC_GATE_REQUESTED_COLOR,
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
@@ -327,6 +329,7 @@ export function normalizeKanbanColumnItemColor(value: unknown): string {
 
 export function getKanbanStatusColumnColor(title: string): string | null {
   const normalized = title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  if (normalized === "requested" || normalized === "request" || normalized === "requests") return KANBAN_LOGIC_GATE_REQUESTED_COLOR;
   if (normalized === "backlog" || normalized === "backlogs") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
   if (normalized === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (normalized === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
@@ -339,10 +342,20 @@ export function getKanbanColumnDisplayColor(column: Pick<KanbanColumn, "title" |
   return getKanbanStatusColumnColor(column.title) ?? normalizeKanbanColumnItemColor(column.item_color);
 }
 
+export function isKanbanRequestedColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
+  const normalizedColumnID = column.column_id.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  const normalizedTitle = column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  return normalizedColumnID === "requested" || normalizedTitle === "requested";
+}
+
 export function isKanbanBacklogColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
   const normalizedColumnID = column.column_id.trim().toLowerCase().replace(/[\s_-]+/g, " ");
   const normalizedTitle = column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
   return normalizedColumnID === "backlog" || normalizedColumnID === "backlogs" || normalizedTitle === "backlog" || normalizedTitle === "backlogs";
+}
+
+export function isKanbanBottomLaneColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
+  return isKanbanRequestedColumn(column) || isKanbanBacklogColumn(column);
 }
 
 export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title" | "logic_gate_id">): string {
@@ -1048,7 +1061,7 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
-  const palette = [KANBAN_LOGIC_GATE_BACKLOG_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
+  const palette = [KANBAN_LOGIC_GATE_REQUESTED_COLOR, KANBAN_LOGIC_GATE_BACKLOG_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
   const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {

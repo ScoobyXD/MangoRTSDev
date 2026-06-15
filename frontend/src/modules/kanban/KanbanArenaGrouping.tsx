@@ -7,6 +7,7 @@ import {
   KANBAN_LOGIC_GATE_DONE_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_REQUESTED_COLOR,
   KANBAN_LOGIC_GATE_VERIFY_COLOR,
   KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
   hexToRgba,
@@ -289,6 +290,7 @@ function arenaGroupAccent(field: KanbanGroupField, groupKey: string): string {
   if (field === "status") {
     if (groupKey === "issue") return KANBAN_ISSUE_CARD_COLOR;
     const status = normalizeArenaGroupKeyValue(groupKey, "status:");
+    if (status === "requested") return KANBAN_LOGIC_GATE_REQUESTED_COLOR;
     if (status === "backlog") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
     if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
     if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;

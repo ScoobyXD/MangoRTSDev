@@ -1140,6 +1140,7 @@ func NormalizeCompanyListLimit(limit int) int {
 	return limit
 }
 
+const KanbanDefaultRequestedColor = "#facc15"
 const KanbanDefaultBacklogColor = "#8b5cf6"
 const KanbanDefaultPendingColor = "#808080"
 const KanbanDefaultInProgressColor = "#ff9500"

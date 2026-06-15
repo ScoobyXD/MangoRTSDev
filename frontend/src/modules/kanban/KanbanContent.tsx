@@ -76,7 +76,8 @@ import {
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
   hydrateKanbanCardsFromNodes,
-  isKanbanBacklogColumn,
+  isKanbanBottomLaneColumn,
+  isKanbanRequestedColumn,
   logicGateKanbanBoardID,
   logicGateIDFromKanbanBoardID,
   nextCardPosition,
@@ -111,6 +112,8 @@ const KANBAN_COLUMN_BOTTOM_BUFFER_HEIGHT_PX = 180;
 const KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX = 280;
 const KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX = 220;
 const KANBAN_ARENA_TOP_CONTROL_HEIGHT_PX = 48;
+const KANBAN_REQUESTED_ACCEPT_COLUMN_ID = "pending";
+const KANBAN_REQUESTED_DECLINE_COLUMN_ID = "backlog";
 
 function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
   return `mango:kanban:logic-gate-column-layout:v1:${encodeURIComponent(companyID)}:${encodeURIComponent(boardID)}`;
@@ -312,6 +315,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
   const [accountAssignmentModal, setAccountAssignmentModal] = useState<KanbanAccountAssignmentState | null>(null);
   const [accountAssignmentBusy, setAccountAssignmentBusy] = useState(false);
+  const [requestedCardActionID, setRequestedCardActionID] = useState("");
   const [kanbanProjectionSnapshotBoardID, setKanbanProjectionSnapshotBoardID] = useState("");
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
@@ -582,6 +586,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
+  const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()])), [orderedColumns]);
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
@@ -607,7 +612,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const normalizedContentSearchQuery = contentSearchQuery.trim().toLowerCase();
   const contentMatchedCards = useMemo(() => {
     if (!normalizedContentSearchQuery) return cards;
-    const columnTitleByID = new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()]));
     const matchingColumnIDs = new Set(orderedColumns
       .filter((column) => column.column_id.toLowerCase().includes(normalizedContentSearchQuery) || column.title.toLowerCase().includes(normalizedContentSearchQuery))
       .map((column) => column.column_id));
@@ -640,7 +644,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       ];
       return fields.some((field) => field.trim().toLowerCase().includes(normalizedContentSearchQuery));
     });
-  }, [arenaNodeByID, cards, normalizedContentSearchQuery, orderedColumns]);
+  }, [arenaNodeByID, cards, columnTitleByID, normalizedContentSearchQuery, orderedColumns]);
   const searchedCards = useMemo(() => (
     kanbanAccountFilterIDs.length > 0
       ? contentMatchedCards.filter((card) => entityMatchesAccountFilter(card.accounts?.length ? card : arenaNodeByID.get(card.node_id), kanbanAccountFilterIDs))
@@ -660,13 +664,24 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
-  const backlogColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBacklogColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
-  const mainBoardColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter((column) => !isKanbanBacklogColumn(column)) : orderedColumns), [activeBoardIsLogicGate, orderedColumns]);
-  const useBacklogBottomLayout = activeBoardIsLogicGate && backlogColumns.length > 0;
+  const bottomLaneColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBottomLaneColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
+  const mainBoardColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter((column) => !isKanbanBottomLaneColumn(column)) : orderedColumns), [activeBoardIsLogicGate, orderedColumns]);
+  const useBottomLaneLayout = activeBoardIsLogicGate && bottomLaneColumns.length > 0;
   const boardColumnsMinWidth = useMemo(() => {
-    const columnsForWidth = useBacklogBottomLayout ? mainBoardColumns : orderedColumns;
-    return columnsForWidth.reduce((total, column) => total + getColumnWidth(column), 0) + Math.max(0, columnsForWidth.length - 1) * 10;
-  }, [mainBoardColumns, orderedColumns, useBacklogBottomLayout]);
+    const columnsForWidth = useBottomLaneLayout ? mainBoardColumns : orderedColumns;
+    const topWidth = columnsForWidth.reduce((total, column) => total + getColumnWidth(column), 0) + Math.max(0, columnsForWidth.length - 1) * 10;
+    const bottomWidth = useBottomLaneLayout
+      ? bottomLaneColumns.reduce((total, column) => total + getColumnWidth(column), 0) + Math.max(0, bottomLaneColumns.length - 1) * 10
+      : 0;
+    return Math.max(topWidth, bottomWidth);
+  }, [bottomLaneColumns, mainBoardColumns, orderedColumns, useBottomLaneLayout]);
+  const bottomLaneGridTemplateColumns = useMemo(() => (
+    bottomLaneColumns.map((column) => (
+      isKanbanRequestedColumn(column)
+        ? `minmax(${Math.min(getColumnWidth(column), 360)}px, ${getColumnWidth(column)}px)`
+        : "minmax(260px, 1fr)"
+    )).join(" ")
+  ), [bottomLaneColumns]);
   const arenaAccountFilterLeftPx = useMemo(() => {
     if (!arenaMode || mainBoardColumns.length === 0) return 0;
     const doneIndex = mainBoardColumns.findIndex((column) => column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ") === "done");
@@ -1507,6 +1522,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
+  const resolveRequestedCard = useCallback(async (card: KanbanCard, accept: boolean) => {
+    setRequestedCardActionID(card.card_id);
+    try {
+      await reorderCards([card.card_id], accept ? KANBAN_REQUESTED_ACCEPT_COLUMN_ID : KANBAN_REQUESTED_DECLINE_COLUMN_ID, null, "after");
+    } finally {
+      setRequestedCardActionID((current) => (current === card.card_id ? "" : current));
+    }
+  }, [reorderCards]);
+
   const moveCardsToArenaGroupCell = useCallback(async (
     cardIDs: string[],
     columnGroupKey: string,
@@ -2149,6 +2173,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setDragOverCard(null);
           requestAddEntitiesToColumn(card.column_id, explorerItems, { x: event.clientX, y: event.clientY });
         }}
+        requestedActions={activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" }) ? {
+          busy: requestedCardActionID === card.card_id,
+          onAccept: () => void resolveRequestedCard(card, true),
+          onDecline: () => void resolveRequestedCard(card, false),
+        } : undefined}
       />
     );
   };
@@ -2403,8 +2432,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setPriorityMenu(null);
           setArenaCellContextMenu({ x: event.clientX, y: event.clientY, columnKey, rowKey });
         }} /> : (
-        <div style={{ display: "grid", alignItems: "start", gap: useBacklogBottomLayout ? 12 : 0, gridTemplateRows: arenaMode && useBacklogBottomLayout ? `${boardMinColumnHeightPx + 18}px minmax(${KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX}px, 1fr)` : undefined, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, flex: arenaMode ? "1 0 auto" : undefined, minHeight: arenaMode ? 0 : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: useBacklogBottomLayout ? 0 : 16 }}>
+        <div style={{ display: "grid", alignItems: "start", gap: useBottomLaneLayout ? 12 : 0, gridTemplateRows: arenaMode && useBottomLaneLayout ? `${boardMinColumnHeightPx + 18}px minmax(${KANBAN_ARENA_BACKLOG_MIN_COLUMN_HEIGHT_PX}px, 1fr)` : undefined, minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, width: arenaMode ? "100%" : undefined, flex: arenaMode ? "1 0 auto" : undefined, minHeight: arenaMode ? 0 : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: useBottomLaneLayout ? 0 : 16 }}>
             {mainBoardColumns.map((column) => renderColumnView(column))}
             {!arenaMode && !activeBoardIsLogicGate && <button
             className="mango-elevated-action"
@@ -2439,9 +2468,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             +
             </button>}
           </div>
-          {useBacklogBottomLayout && (
-            <div style={{ display: "grid", alignItems: arenaMode ? "stretch" : "start", height: arenaMode ? "100%" : undefined, paddingBottom: 16, boxSizing: "border-box" }}>
-              {backlogColumns.map((column) => renderColumnView(column, "backlog"))}
+          {useBottomLaneLayout && (
+            <div style={{ display: "grid", gridTemplateColumns: bottomLaneGridTemplateColumns || undefined, gap: 10, alignItems: arenaMode ? "stretch" : "start", height: arenaMode ? "100%" : undefined, paddingBottom: 16, boxSizing: "border-box" }}>
+              {bottomLaneColumns.map((column) => renderColumnView(column, "backlog"))}
             </div>
           )}
         </div>
