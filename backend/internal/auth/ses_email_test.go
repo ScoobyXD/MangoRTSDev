@@ -42,6 +42,32 @@ func TestSESEmailSenderDoesNotSignMissingAmzTarget(t *testing.T) {
 	}
 }
 
+func TestSESEmailSenderReportsMissingCredentials(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "")
+	t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN", "")
+
+	sender := &SESEmailSender{
+		Region:           "us-west-1",
+		FromEmailAddress: "sender@example.com",
+	}
+	err := sender.SendInvitation(context.Background(), InvitationEmailInput{
+		Email:       "user@example.com",
+		CompanyName: "Acme",
+		AcceptURL:   "https://app.example.com/accept-invite?token=test",
+		ExpiresAt:   time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("SendInvitation succeeded without AWS credentials")
+	}
+	if got := err.Error(); got != "ses email unavailable: AWS credentials are not configured" {
+		t.Fatalf("error = %q, want missing AWS credentials detail", got)
+	}
+}
+
 func TestSignV4UsesRequestPathAndOptionalTargetHeader(t *testing.T) {
 	creds := awsCredentials{AccessKeyID: "test-access-key", SecretAccessKey: "test-secret-key"}
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)

@@ -70,8 +70,20 @@ func (s *SESEmailSender) SendSignupConfirmation(ctx context.Context, email, comp
 
 func (s *SESEmailSender) sendTextEmail(ctx context.Context, email, subject, bodyText string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if s == nil || s.Region == "" || s.FromEmailAddress == "" || email == "" || strings.TrimSpace(subject) == "" || strings.TrimSpace(bodyText) == "" {
-		return ErrCognitoAdminUnavailable
+	if s == nil {
+		return fmt.Errorf("ses email unavailable: sender is not configured")
+	}
+	if s.Region == "" {
+		return fmt.Errorf("ses email unavailable: AWS region is not configured")
+	}
+	if s.FromEmailAddress == "" {
+		return fmt.Errorf("ses email unavailable: MANGORTS_EMAIL_FROM is not configured")
+	}
+	if email == "" {
+		return fmt.Errorf("ses email unavailable: recipient email is empty")
+	}
+	if strings.TrimSpace(subject) == "" || strings.TrimSpace(bodyText) == "" {
+		return fmt.Errorf("ses email unavailable: message content is empty")
 	}
 	payload := map[string]any{
 		"FromEmailAddress": s.FromEmailAddress,
@@ -145,6 +157,9 @@ func (s *SESEmailSender) credentials(ctx context.Context) (awsCredentials, error
 	}
 	creds, err := s.credentialsFromContainer(ctx)
 	if err != nil {
+		if err == ErrCognitoAdminUnavailable {
+			return awsCredentials{}, fmt.Errorf("ses email unavailable: AWS credentials are not configured")
+		}
 		return awsCredentials{}, err
 	}
 	s.mu.Lock()

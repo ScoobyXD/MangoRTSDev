@@ -326,6 +326,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	addHealthEnv(payload, "deploy_revision", "MANGORTS_DEPLOY_REVISION")
 	addHealthEnv(payload, "app_url", "MANGORTS_APP_URL")
 	addHealthEnv(payload, "api_url", "MANGORTS_API_URL")
+	payload["email_sender_configured"] = strings.TrimSpace(os.Getenv("MANGORTS_EMAIL_FROM")) != ""
+	payload["aws_env_credentials_configured"] = strings.TrimSpace(os.Getenv("AWS_ACCESS_KEY_ID")) != "" && strings.TrimSpace(os.Getenv("AWS_SECRET_ACCESS_KEY")) != ""
 	writeJSON(w, http.StatusOK, payload)
 }
 
