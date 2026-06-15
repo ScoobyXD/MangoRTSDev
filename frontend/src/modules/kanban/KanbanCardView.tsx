@@ -44,6 +44,7 @@ type KanbanCardViewProps = {
     onAccept: () => void;
     onDecline: () => void;
   };
+  requestedStatusText?: string;
 };
 
 export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
@@ -73,6 +74,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   onDragLeave,
   onDrop,
   requestedActions,
+  requestedStatusText,
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
@@ -223,6 +225,11 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           </>
         )}
       </div>
+      {requestedStatusText && (
+        <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
+          ({requestedStatusText})
+        </div>
+      )}
       {description && (
         <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {description}
