@@ -80,7 +80,8 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid_email_provider")
 		return
 	}
-	accountEmail := normalizeEmailForCompare(r.URL.Query().Get("account_email"))
+	requestedAccountEmail := normalizeEmailForCompare(r.URL.Query().Get("account_email"))
+	accountEmail := requestedAccountEmail
 	if accountEmail == "" {
 		accountEmail = normalizeEmailForCompare(actor.User.Email)
 	}
@@ -89,9 +90,10 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
-		UserID:   actor.User.UserID,
-		Email:    accountEmail,
-		Provider: provider,
+		UserID:      actor.User.UserID,
+		Email:       accountEmail,
+		Provider:    provider,
+		StrictEmail: requestedAccountEmail != "",
 	}, time.Now())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_state")
@@ -837,6 +839,13 @@ func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
 	return &NylasTrackingOptions{Opens: true, Label: "Mango read receipt"}
 }
 
+func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) string {
+	if state.StrictEmail {
+		return "shared"
+	}
+	return "personal"
+}
+
 func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -870,7 +879,7 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		s.redirectCommunications(w, r, "nylas_token_exchange_failed")
 		return
 	}
-	if normalizeEmailForCompare(grant.Email) != state.Email {
+	if state.StrictEmail && normalizeEmailForCompare(grant.Email) != state.Email {
 		if strings.TrimSpace(grant.GrantID) != "" {
 			_ = s.nylasClient.DeleteGrant(r.Context(), grant.GrantID)
 		}
@@ -885,6 +894,7 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		UserID:       state.UserID,
 		Provider:     provider,
 		AccountEmail: grant.Email,
+		Scope:        communicationsConnectionScopeForOAuthState(state),
 		GrantID:      grant.GrantID,
 		Status:       "connected",
 	})
@@ -1166,6 +1176,10 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 		}
 		var err error
 		message, err = s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+		if err != nil {
+			return err
+		}
+		message = s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
 		return err
 	})
 	if err != nil {
@@ -1525,6 +1539,7 @@ func emailConnectionResponse(connection domain.UserEmailConnection) map[string]a
 		"user_id":           connection.UserID,
 		"provider":          connection.Provider,
 		"account_email":     connection.AccountEmail,
+		"scope":             connection.Scope,
 		"status":            connection.Status,
 		"created_timestamp": connection.CreatedTimestamp,
 		"updated_timestamp": connection.UpdatedTimestamp,

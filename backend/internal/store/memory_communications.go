@@ -20,6 +20,10 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
 	connection, ok := r.emailConnections[emailConnectionKey(userID, user.Email)]
+	if ok && emailConnectionIsPersonal(connection) {
+		return connection, nil
+	}
+	connection, _, ok = r.personalEmailConnectionForUserLocked(userID)
 	if !ok {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
@@ -77,9 +81,10 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	userID := strings.TrimSpace(input.UserID)
 	provider := normalizeEmailProvider(input.Provider)
 	accountEmail := normalizeEmail(input.AccountEmail)
+	scope := normalizeEmailConnectionScope(input.Scope)
 	grantID := strings.TrimSpace(input.GrantID)
 	status := normalizeEmailConnectionStatus(input.Status)
-	if userID == "" || provider == "" || accountEmail == "" || grantID == "" || status == "" {
+	if userID == "" || provider == "" || accountEmail == "" || scope == "" || grantID == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 
@@ -98,6 +103,7 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.UserID = userID
 	connection.Provider = provider
 	connection.AccountEmail = accountEmail
+	connection.Scope = scope
 	connection.GrantID = grantID
 	connection.Status = status
 	connection.UpdatedTimestamp = now
@@ -140,11 +146,55 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 		return ErrNotFound
 	}
 	key := emailConnectionKey(userID, user.Email)
-	if _, ok := r.emailConnections[key]; !ok {
+	if connection, ok := r.emailConnections[key]; ok && emailConnectionIsPersonal(connection) {
+		delete(r.emailConnections, key)
+		return nil
+	}
+	_, key, ok = r.personalEmailConnectionForUserLocked(userID)
+	if !ok {
 		return ErrNotFound
 	}
 	delete(r.emailConnections, key)
 	return nil
+}
+
+func (r *MemoryRepo) personalEmailConnectionForUserLocked(userID string) (domain.UserEmailConnection, string, bool) {
+	var found domain.UserEmailConnection
+	foundKey := ""
+	hasFound := false
+	for key, connection := range r.emailConnections {
+		if connection.UserID != userID {
+			continue
+		}
+		if !emailConnectionIsPersonal(connection) {
+			continue
+		}
+		if r.emailConnectionAccountAssignedToSharedInboxLocked(userID, connection.AccountEmail) {
+			continue
+		}
+		if !hasFound || connection.UpdatedTimestamp.After(found.UpdatedTimestamp) {
+			found = connection
+			foundKey = key
+			hasFound = true
+		}
+	}
+	return found, foundKey, hasFound
+}
+
+func (r *MemoryRepo) emailConnectionAccountAssignedToSharedInboxLocked(userID, accountEmail string) bool {
+	accountEmail = normalizeEmail(accountEmail)
+	if accountEmail == "" {
+		return false
+	}
+	for _, folder := range r.folders {
+		if folder.FolderKind != "communications" || folder.AccountEmail == nil || normalizeEmail(*folder.AccountEmail) != accountEmail {
+			continue
+		}
+		if _, ok := r.memberships[membershipKey(folder.CompanyID, userID)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
@@ -291,4 +341,19 @@ func normalizeEmailConnectionStatus(status string) string {
 	default:
 		return ""
 	}
+}
+
+func normalizeEmailConnectionScope(scope string) string {
+	switch strings.TrimSpace(strings.ToLower(scope)) {
+	case "", "personal":
+		return "personal"
+	case "shared", "shared_inbox":
+		return "shared"
+	default:
+		return ""
+	}
+}
+
+func emailConnectionIsPersonal(connection domain.UserEmailConnection) bool {
+	return normalizeEmailConnectionScope(connection.Scope) == "personal"
 }

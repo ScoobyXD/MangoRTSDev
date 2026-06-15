@@ -1146,6 +1146,7 @@ func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
 		UserID:       user.UserID,
 		Provider:     "google",
 		AccountEmail: "shared@example.com",
+		Scope:        "shared",
 		GrantID:      "shared-grant",
 		Status:       "connected",
 	}); err != nil {
@@ -1187,6 +1188,90 @@ func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
 	}
 	if shared.Status != "reauth_required" {
 		t.Fatalf("shared status = %q, want reauth_required after personal delete", shared.Status)
+	}
+}
+
+func TestMemoryRepoUserEmailConnectionFallsBackToNonSharedAccount(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject-email", "profile@example.com", "Email User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "mailbox@example.com",
+		GrantID:      "mailbox-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "mailbox-grant" {
+		t.Fatalf("connection = %+v, want non-shared mailbox fallback", connection)
+	}
+	if err := repo.DeleteUserEmailConnection(user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetUserEmailConnectionByGrantID("mailbox-grant"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryRepoUserEmailConnectionDoesNotUseSharedInboxFallback(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	const subject = "subject-email"
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	user, err := repo.UpsertAuthUser(subject, "profile@example.com", "Email User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "shared@example.com",
+		Scope:        "shared",
+		GrantID:      "shared-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sharedFolder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, sharedFolder.FolderID, "shared@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("shared-only connection error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "mailbox@example.com",
+		GrantID:      "mailbox-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "mailbox-grant" {
+		t.Fatalf("connection = %+v, want non-shared mailbox fallback", connection)
 	}
 }
 

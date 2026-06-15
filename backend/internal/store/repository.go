@@ -1506,6 +1506,7 @@ type UserEmailConnectionInput struct {
 	UserID       string
 	Provider     string
 	AccountEmail string
+	Scope        string
 	GrantID      string
 	Status       string
 }

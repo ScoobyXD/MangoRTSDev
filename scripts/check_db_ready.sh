@@ -77,6 +77,15 @@ begin
   ) then
     raise exception 'user_email_connections primary key is not per account; run apply_db_migrations';
   end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'user_email_connections'
+      and column_name = 'connection_scope'
+  ) then
+    raise exception 'missing column user_email_connections.connection_scope; run apply_db_migrations';
+  end if;
   if to_regclass('public.auth_external_identity_deletions') is null then
     raise exception 'missing table auth_external_identity_deletions; run apply_db_migrations';
   end if;

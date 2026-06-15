@@ -145,6 +145,7 @@ type CommunicationsStatus = {
   connection?: {
     provider?: string;
     account_email?: string;
+    scope?: string;
     status?: string;
   };
 };
@@ -406,7 +407,7 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/connect-google") {
-    return <ConnectGooglePage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+    return <ConnectGooglePage onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
   }
 
   if (normalizedPath === "/logic-gate-arena") {
@@ -1032,7 +1033,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
   );
 }
 
-function ConnectGooglePage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+function ConnectGooglePage({ onNavigate, onLogout }: { onNavigate: (path: string) => void; onLogout: () => void }) {
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [error, setError] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1062,7 +1063,7 @@ function ConnectGooglePage({ me, onNavigate, onLogout }: { me: CurrentUserRespon
     setBusy(true);
     setError("");
     try {
-      const query = new URLSearchParams({ provider: "google", account_email: normalizeEmailInput(me.user.email) });
+      const query = new URLSearchParams({ provider: "google" });
       const payload = await apiFetchJSON<{ auth_url: string }>(`/v1/communications/auth-url?${query.toString()}`);
       window.location.assign(payload.auth_url);
     } catch (connectError) {
