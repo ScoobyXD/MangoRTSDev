@@ -142,6 +142,12 @@ function MessageReadStatusText({ message }: { message: EmailMessage }) {
   return <span style={messageReadStatusStyle} title={title}>{label}</span>;
 }
 
+function MessageAttachmentCount({ message }: { message: EmailMessage }) {
+  const count = message.attachments?.length ?? 0;
+  if (count <= 0) return null;
+  return <span style={messageReadStatusStyle}>{count === 1 ? "1 file" : `${count} files`}</span>;
+}
+
 function isDraftMessage(message: EmailMessage): boolean {
   return (message.folders ?? []).some((folder) => {
     const value = folder.trim().toLowerCase();
@@ -160,6 +166,7 @@ export function HomeMailWorkspace({
   archiveAvailable,
   archiveLabel,
   busy,
+  companyID,
   compose,
   draftCount,
   emailSignature,
@@ -224,6 +231,7 @@ export function HomeMailWorkspace({
   archiveAvailable: boolean;
   archiveLabel: string;
   busy: string;
+  companyID: string;
   compose: ComposeState;
   draftCount: number;
   emailSignature: string;
@@ -612,6 +620,8 @@ export function HomeMailWorkspace({
                       </span>
                       <span style={triageMessageMetaStyle}>
                         <span style={messageTimestampStatusRowStyle}>
+                          {showReadStatus && <MessageReadStatusText message={message} />}
+                          <MessageAttachmentCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                         </span>
                         {!draftRow && (
@@ -634,7 +644,6 @@ export function HomeMailWorkspace({
                             </button>
                           </span>
                         )}
-                        {showReadStatus && <MessageReadStatusText message={message} />}
                       </span>
                     </>
                   ) : (
@@ -643,6 +652,7 @@ export function HomeMailWorkspace({
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span style={messageTimestampStatusRowStyle}>
                           {showReadStatus && <MessageReadStatusText message={message} />}
+                          <MessageAttachmentCount message={message} />
                           <span>{formatMessageDate(message.date)}</span>
                         </span>
                       </span>
@@ -685,6 +695,8 @@ export function HomeMailWorkspace({
         ) : selectedMessage ? (
           <MessageDetail
             message={selectedMessage}
+            companyID={companyID}
+            sharedInboxID={activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined}
             loading={loadingDetail}
             archiveAvailable={archiveAvailable}
             archiveLabel={archiveLabel}

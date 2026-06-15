@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	nylasMessageListSelect   = "id,thread_id,subject,snippet,date,unread,starred,from,to,cc,bcc,reply_to,folders"
-	nylasMessageDetailSelect = "id,thread_id,subject,snippet,body,date,unread,starred,from,to,cc,bcc,reply_to,folders"
+	nylasMessageListSelect   = "id,thread_id,subject,snippet,date,unread,starred,from,to,cc,bcc,reply_to,attachments,folders"
+	nylasMessageDetailSelect = "id,thread_id,subject,snippet,body,date,unread,starred,from,to,cc,bcc,reply_to,attachments,folders"
 )
 
 type NylasConfig struct {
@@ -137,6 +137,7 @@ type NylasClient interface {
 	ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error)
 	GetThread(ctx context.Context, grantID, threadID string) (NylasThread, error)
 	GetMessage(ctx context.Context, grantID, messageID string) (NylasMessage, error)
+	DownloadAttachment(ctx context.Context, grantID, messageID, attachmentID string) ([]byte, error)
 	UpdateMessage(ctx context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error)
 	DeleteMessage(ctx context.Context, grantID, messageID string) error
 	SendMessage(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error)
@@ -445,6 +446,13 @@ func (c *NylasRESTClient) GetMessage(ctx context.Context, grantID, messageID str
 	return response.Data, nil
 }
 
+func (c *NylasRESTClient) DownloadAttachment(ctx context.Context, grantID, messageID, attachmentID string) ([]byte, error) {
+	values := url.Values{}
+	values.Set("message_id", strings.TrimSpace(messageID))
+	raw, _, err := c.doBytes(ctx, http.MethodGet, grantPath(grantID, "attachments", attachmentID, "download"), values, true, communicationsAttachmentDownloadMaxBytes)
+	return raw, err
+}
+
 func (c *NylasRESTClient) UpdateMessage(ctx context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error) {
 	var response struct {
 		Data NylasMessage `json:"data"`
@@ -607,6 +615,44 @@ func (c *NylasRESTClient) do(ctx context.Context, method, path string, query url
 		return err
 	}
 	return nil
+}
+
+func (c *NylasRESTClient) doBytes(ctx context.Context, method, path string, query url.Values, authorize bool, maxBytes int64) ([]byte, http.Header, error) {
+	if c == nil || c.apiBase == "" {
+		return nil, nil, NylasAPIError{StatusCode: http.StatusServiceUnavailable, Code: "nylas_not_configured"}
+	}
+	endpoint := c.apiBase + path
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if authorize {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	limit := maxBytes
+	if limit <= 0 {
+		limit = 8 << 20
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, resp.Header.Clone(), NylasAPIError{StatusCode: http.StatusRequestEntityTooLarge, Code: "attachment_too_large"}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.Header.Clone(), parseNylasAPIError(resp.StatusCode, resp.Header, raw)
+	}
+	return raw, resp.Header.Clone(), nil
 }
 
 func parseNylasAPIError(statusCode int, headers http.Header, raw []byte) error {

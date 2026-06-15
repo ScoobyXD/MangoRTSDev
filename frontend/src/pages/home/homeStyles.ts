@@ -2109,6 +2109,79 @@ export const iframeStyle: React.CSSProperties = {
   boxShadow: HOME_KEY_SHADOW,
 };
 
+export const mailAttachmentSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  minWidth: 0,
+};
+
+export const mailAttachmentHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 760,
+};
+
+export const mailAttachmentGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(142px, 1fr))",
+  gap: 8,
+  minWidth: 0,
+};
+
+export const mailAttachmentTileStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 6,
+  alignContent: "start",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: HOME_KEY_ELEVATED_RADIUS,
+  background: HOME_KEY_SURFACE,
+  boxShadow: HOME_KEY_SHADOW,
+  padding: 7,
+};
+
+export const mailAttachmentThumbnailStyle: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: "4 / 3",
+  objectFit: "cover",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: 6,
+  background: "#ffffff",
+};
+
+export const mailAttachmentFileIconStyle: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: "4 / 3",
+  display: "grid",
+  placeItems: "center",
+  border: `1px solid ${HOME_KEY_SOFT_BORDER}`,
+  borderRadius: 6,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 249, 0.9))",
+  color: "#475569",
+  fontSize: 11,
+  fontWeight: 780,
+};
+
+export const mailAttachmentNameStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#0f172a",
+  fontSize: 11,
+  fontWeight: 720,
+};
+
+export const mailAttachmentMetaStyle: React.CSSProperties = {
+  color: "rgba(15, 23, 42, 0.58)",
+  fontSize: 10.5,
+  fontWeight: 620,
+};
+
 export const mailComposeOriginalFrameStyle: React.CSSProperties = {
   ...iframeStyle,
   minHeight: 180,

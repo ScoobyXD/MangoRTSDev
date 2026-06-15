@@ -1,4 +1,4 @@
-import { apiFetchJSON, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON, getApiAccessToken, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
@@ -266,7 +266,7 @@ type CacheEntry<T> = {
 const STATUS_CACHE_TTL_MS = 60_000;
 const WORKDAY_EMAIL_CACHE_TTL_MS = 10 * 60 * 60_000;
 const FOLDERS_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
-const MESSAGE_PAGE_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
+const MESSAGE_PAGE_CACHE_TTL_MS = 30_000;
 const MESSAGE_DETAIL_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS = 24 * 60 * 60_000;
 const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
@@ -449,6 +449,26 @@ export async function getEmailThread(threadID: string, companyID?: string, share
     draft_ids: payload.thread.draft_ids ? [...payload.thread.draft_ids] : undefined,
     latest_draft_or_message: payload.thread.latest_draft_or_message ? cloneMessage(payload.thread.latest_draft_or_message) : undefined,
   };
+}
+
+export async function downloadEmailAttachment(messageID: string, attachmentID: string, companyID?: string, sharedInboxID?: string): Promise<Blob> {
+  const cleanMessageID = messageID.trim();
+  const cleanAttachmentID = attachmentID.trim();
+  if (!cleanMessageID || !cleanAttachmentID) throw new Error("email_attachment_id_required");
+  const queryParams = new URLSearchParams();
+  if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
+  if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
+  const query = queryParams.toString();
+  const path = `/v1/communications/messages/${encodeURIComponent(cleanMessageID)}/attachments/${encodeURIComponent(cleanAttachmentID)}${query ? `?${query}` : ""}`;
+  const headers = new Headers({ Accept: "application/octet-stream" });
+  const token = await getApiAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${readAuthConfig().apiBase}${path}`, { headers });
+  if (!response.ok) {
+    const text = (await response.text()).trim();
+    throw new Error(text || `Failed to download attachment (${response.status})`);
+  }
+  return response.blob();
 }
 
 export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {

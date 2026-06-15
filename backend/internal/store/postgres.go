@@ -10,6 +10,8 @@ type PostgresRepo struct {
 
 	communicationsMessageReadStatusSchemaOnce sync.Once
 	communicationsMessageReadStatusSchemaErr  error
+	userEmailConnectionsPerAccountSchemaOnce  sync.Once
+	userEmailConnectionsPerAccountSchemaErr   error
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {

@@ -74,6 +74,36 @@ func TestNylasRESTClientUpdateMessageRequestsListShapedResponse(t *testing.T) {
 	}
 }
 
+func TestNylasRESTClientDownloadAttachment(t *testing.T) {
+	t.Parallel()
+
+	var gotMessageID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/grants/grant-1/attachments/attachment-1/download" {
+			t.Fatalf("path = %q, want attachment download path", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		gotMessageID = r.URL.Query().Get("message_id")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	content, err := client.DownloadAttachment(context.Background(), "grant-1", "message-1", "attachment-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMessageID != "message-1" {
+		t.Fatalf("message_id = %q, want message-1", gotMessageID)
+	}
+	if string(content) != "image-bytes" {
+		t.Fatalf("content = %q, want image-bytes", string(content))
+	}
+}
+
 func TestNylasRESTClientSendMessageIncludesTrackingOptions(t *testing.T) {
 	t.Parallel()
 
