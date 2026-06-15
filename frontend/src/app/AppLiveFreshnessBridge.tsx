@@ -37,6 +37,9 @@ type WorkspaceStreamEnvelope = {
   type?: string;
 };
 
+const NOTIFICATION_REALTIME_REFRESH_DEBOUNCE_MS = 150;
+const notificationRealtimeRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export function AppLiveFreshnessBridge() {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
@@ -147,7 +150,18 @@ function markNotificationCachesStaleForRealtimeMessage(messageCompanyID: string 
   const cleanMessageCompanyID = messageCompanyID?.trim() ?? "";
   const cleanActiveCompanyID = activeCompanyID.trim();
   if (cleanMessageCompanyID && cleanMessageCompanyID !== cleanActiveCompanyID) return;
-  emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID);
+  scheduleNotificationCachesStale(cleanMessageCompanyID || cleanActiveCompanyID);
+}
+
+function scheduleNotificationCachesStale(companyID: string): void {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return;
+  const existing = notificationRealtimeRefreshTimers.get(cleanCompanyID);
+  if (existing !== undefined) clearTimeout(existing);
+  notificationRealtimeRefreshTimers.set(cleanCompanyID, setTimeout(() => {
+    notificationRealtimeRefreshTimers.delete(cleanCompanyID);
+    emitNotificationsUpdated(cleanCompanyID);
+  }, NOTIFICATION_REALTIME_REFRESH_DEBOUNCE_MS));
 }
 
 function markWorkspaceCachesStaleForEvent(event: StreamEvent, apiBase: string, companyID: string, scopes: WorkspaceReconciliationScope[] = []): void {
