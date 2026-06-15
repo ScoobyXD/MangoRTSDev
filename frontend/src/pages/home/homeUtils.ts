@@ -925,7 +925,7 @@ export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {
 }
 
 export function canDragTriageMessageFromMailbox(mailbox: EmailMailbox): boolean {
-  return mailbox === "primary" || mailbox === "starred" || mailbox === "all" || mailbox === "archive";
+  return mailbox === "primary" || mailbox === "starred" || mailbox === "all" || mailbox === "archive" || mailbox === "sent";
 }
 
 export function messageListFilterKey(companyID: string, viewID: HomeViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
