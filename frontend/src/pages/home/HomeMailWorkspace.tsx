@@ -37,6 +37,7 @@ import {
   messageContextMenuStyle,
   messageListStyle,
   messageReadStatusStyle,
+  messageReadStatusSlotStyle,
   messageRowStyle,
   messageRowTopStyle,
   messageStarButtonStyle,
@@ -50,6 +51,7 @@ import {
   triageMessageContentStyle,
   triageMessageActionRowStyle,
   triageMessageMetaStyle,
+  triageMessageReadStatusSlotStyle,
   triageMessageRowStyle,
   triageSenderStyle,
   triageSubjectStyle,
@@ -620,7 +622,6 @@ export function HomeMailWorkspace({
                       </span>
                       <span style={triageMessageMetaStyle}>
                         <span style={messageTimestampStatusRowStyle}>
-                          {showReadStatus && <MessageReadStatusText message={message} />}
                           <MessageAttachmentCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                         </span>
@@ -644,6 +645,11 @@ export function HomeMailWorkspace({
                             </button>
                           </span>
                         )}
+                        {showReadStatus && (
+                          <span style={triageMessageReadStatusSlotStyle}>
+                            <MessageReadStatusText message={message} />
+                          </span>
+                        )}
                       </span>
                     </>
                   ) : (
@@ -651,13 +657,17 @@ export function HomeMailWorkspace({
                       <span style={messageRowTopStyle}>
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span style={messageTimestampStatusRowStyle}>
-                          {showReadStatus && <MessageReadStatusText message={message} />}
                           <MessageAttachmentCount message={message} />
                           <span>{formatMessageDate(message.date)}</span>
                         </span>
                       </span>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
                       <span style={snippetStyle}>{message.snippet || ""}</span>
+                      {showReadStatus && (
+                        <span style={messageReadStatusSlotStyle}>
+                          <MessageReadStatusText message={message} />
+                        </span>
+                      )}
                     </>
                   )}
                 </div>

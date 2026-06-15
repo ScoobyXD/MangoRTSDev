@@ -2005,6 +2005,12 @@ export const messageReadStatusStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+export const messageReadStatusSlotStyle: React.CSSProperties = {
+  justifySelf: "end",
+  alignSelf: "end",
+  maxWidth: "100%",
+};
+
 export const messageTimestampStatusRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
@@ -2016,9 +2022,12 @@ export const messageTimestampStatusRowStyle: React.CSSProperties = {
 
 export const triageMessageMetaStyle: React.CSSProperties = {
   display: "grid",
+  gridTemplateRows: "auto auto minmax(0, 1fr) auto",
   justifyItems: "end",
-  alignContent: "start",
+  alignContent: "stretch",
+  alignSelf: "stretch",
   gap: 6,
+  height: "100%",
   minWidth: 104,
 };
 
@@ -2027,6 +2036,12 @@ export const triageMessageActionRowStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "flex-end",
   gap: 6,
+};
+
+export const triageMessageReadStatusSlotStyle: React.CSSProperties = {
+  alignSelf: "end",
+  justifySelf: "end",
+  maxWidth: "100%",
 };
 
 export function messageStarButtonStyle(highlighted: boolean, hovered = false, flaring = false): React.CSSProperties {
