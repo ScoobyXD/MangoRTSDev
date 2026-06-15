@@ -155,7 +155,12 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`insert into user_email_connections (user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp)
+		`with cleared_duplicate_grant as (
+		   delete from user_email_connections
+		   where grant_id = $5
+		     and (user_id <> $1::uuid or account_email <> $3)
+		 )
+		 insert into user_email_connections (user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4, $5, $6, now(), now())
 		 on conflict (user_id, account_email) do update set
 		   provider = excluded.provider,

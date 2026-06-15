@@ -96,7 +96,13 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	}
 
 	now := time.Now().UTC()
-	connection := r.emailConnections[emailConnectionKey(userID, accountEmail)]
+	connectionKey := emailConnectionKey(userID, accountEmail)
+	for existingKey, existing := range r.emailConnections {
+		if existing.GrantID == grantID && existingKey != connectionKey {
+			delete(r.emailConnections, existingKey)
+		}
+	}
+	connection := r.emailConnections[connectionKey]
 	if connection.CreatedTimestamp.IsZero() {
 		connection.CreatedTimestamp = now
 	}
@@ -107,7 +113,7 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.GrantID = grantID
 	connection.Status = status
 	connection.UpdatedTimestamp = now
-	r.emailConnections[emailConnectionKey(userID, accountEmail)] = connection
+	r.emailConnections[connectionKey] = connection
 	return connection, nil
 }
 
