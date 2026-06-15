@@ -15,7 +15,6 @@ import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, 
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
-import { ExplorerRowIcon } from "./CompanyExplorerIcons";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
   collectFolderSubtreeIDs,
@@ -3442,78 +3441,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>All</button>
     </div>
   ) : undefined;
-  const explorerCreateControlsStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    gap: 4,
-    minWidth: 0,
-  };
-  const explorerCreateButtonStyle = (width: number): React.CSSProperties => ({
-    minWidth: 0,
-    width,
-    height: 29,
-    display: "grid",
-    gridTemplateColumns: "15px minmax(0, 1fr)",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
-    border: "1px solid rgba(148, 163, 184, 0.34)",
-    borderRadius: 7,
-    background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.88) 100%)",
-    color: "#111827",
-    cursor: "pointer",
-    fontFamily: "var(--mango-font-family)",
-    fontSize: 10.5,
-    fontWeight: 720,
-    letterSpacing: 0,
-    padding: "0 5px",
-    overflow: "hidden",
-    boxShadow: "3px 3px 8px rgba(174, 174, 192, 0.18), -3px -3px 8px rgba(255, 255, 255, 0.76)",
-  });
-  const explorerCreateButtonTextStyle: React.CSSProperties = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  };
-  const getToolbarCreationTargets = useCallback(() => {
-    const contextRow = selectedTree && (!isProtectedRaciRoleRow(selectedTree) || selectedTree.folderID) ? selectedTree : null;
-    return resolveExplorerCreationTargets(contextRow);
-  }, [selectedTree]);
-  const createToolbarFolder = useCallback(() => {
-    const targets = getToolbarCreationTargets();
-    void createFolder(targets.preferredFolderKind, targets.preferredFolderParentID, undefined, targets.folderScopeType, targets.folderScopeID);
-  }, [createFolder, getToolbarCreationTargets]);
-  const createToolbarLogicGate = useCallback(() => {
-    const targets = getToolbarCreationTargets();
-    const raciRole = isLogicGateRaciRole(selectedTree?.raciRole) ? selectedTree.raciRole : undefined;
-    void createLogicGateAtFolder(targets.logicGateParentFolderID, undefined, raciRole);
-  }, [createLogicGateAtFolder, getToolbarCreationTargets, selectedTree]);
-  const createToolbarNode = useCallback(() => {
-    if (selectedTree?.kind === "logic_gate" && selectedTree.logicGateID) {
-      void createNodeAtFolder("", undefined, selectedTree.logicGateID, selectedTree.id, 3);
-      return;
-    }
-    const targets = getToolbarCreationTargets();
-    void createNodeAtFolder(targets.nodeParentFolderID);
-  }, [createNodeAtFolder, getToolbarCreationTargets, selectedTree]);
-  const explorerCreateControls = (
-    <div data-frame-interactive="true" style={explorerCreateControlsStyle} aria-label="Create Explorer item">
-      <button type="button" title="Create Folder" aria-label="Create Folder" style={explorerCreateButtonStyle(82)} onClick={createToolbarFolder}>
-        <ExplorerRowIcon kind="folder" tone="orange" />
-        <span style={explorerCreateButtonTextStyle}>Folder</span>
-      </button>
-      <button type="button" title="Create Logic Gate" aria-label="Create Logic Gate" style={explorerCreateButtonStyle(102)} onClick={createToolbarLogicGate}>
-        <ExplorerRowIcon kind="logic_gate" />
-        <span style={explorerCreateButtonTextStyle}>Logic Gate</span>
-      </button>
-      <button type="button" title="Create Node" aria-label="Create Node" style={explorerCreateButtonStyle(73)} onClick={createToolbarNode}>
-        <ExplorerRowIcon kind="node" />
-        <span style={explorerCreateButtonTextStyle}>Node</span>
-      </button>
-    </div>
-  );
 
   return (
     <div
@@ -3545,7 +3472,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         isDarkTheme={isDarkTheme}
         elevatedControls={elevatedExplorerControls}
         topControlsAccessory={scopeControls}
-        topControlsActions={explorerCreateControls}
         hideTopControls={hideTopControls}
         useParentScroll={useParentScroll}
         treeViewportRef={treeViewportRef}
