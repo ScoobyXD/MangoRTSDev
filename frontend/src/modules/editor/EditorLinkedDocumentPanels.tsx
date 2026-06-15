@@ -10,6 +10,7 @@ import {
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
   KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_REQUESTED_COLOR,
   KANBAN_LOGIC_GATE_VERIFY_COLOR,
 } from "../kanban/shared";
 import {
@@ -71,9 +72,10 @@ type EditorLinkedDocumentPanelsProps = {
 
 const NODE_PRIORITY_OPTIONS = KANBAN_NODE_PRIORITY_STYLE_OPTIONS;
 
-type NodeStatusValue = "backlog" | "pending" | "in_progress" | "verify" | "done";
+type NodeStatusValue = "requested" | "backlog" | "pending" | "in_progress" | "verify" | "done";
 
 const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string; storageStatus: string; color: string }> = [
+  { value: "requested", label: "Requested", storageStatus: "Requested", color: KANBAN_LOGIC_GATE_REQUESTED_COLOR },
   { value: "backlog", label: "Backlog", storageStatus: "Backlog", color: KANBAN_LOGIC_GATE_BACKLOG_COLOR },
   { value: "pending", label: "Pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
   { value: "in_progress", label: "In Progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
@@ -128,6 +130,7 @@ function validHexColor(value: string): string {
 
 function normalizeNodeStatusValue(value: string): NodeStatusValue | "" {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "requested" || normalized === "request" || normalized === "requests" || normalized === "r") return "requested";
   if (normalized === "backlog" || normalized === "backlogs" || normalized === "b") return "backlog";
   if (normalized === "pending" || normalized === "p") return "pending";
   if (normalized === "in_progress" || normalized === "ip") return "in_progress";

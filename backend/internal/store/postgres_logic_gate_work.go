@@ -44,6 +44,7 @@ select
   projection.title,
   case
     when projection.is_issue then 'Issue'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 'Requested'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 'Backlogs'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
@@ -52,11 +53,12 @@ select
   end as status,
   case
     when projection.is_issue then '#ffd400'
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then $3
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $4
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $5
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then $6
-    else $7
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then $3
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then $4
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $5
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $6
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then $7
+    else $8
   end as status_color,
   projection.due_date::text,
   projection.priority,
@@ -88,16 +90,17 @@ where projection.company_id = $1::uuid
   and projection.logic_gate_id = $2::uuid
 order by
   case
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 0
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 1
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 2
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 3
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 4
-    else 1
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 0
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 1
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 2
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 3
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 4
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 5
+    else 2
   end asc,
   projection.position asc,
   projection.assignment_created_timestamp asc,
-  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultBacklogColor, KanbanDefaultInProgressColor, KanbanDefaultVerifyColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
+  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultRequestedColor, KanbanDefaultBacklogColor, KanbanDefaultInProgressColor, KanbanDefaultVerifyColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
 	}

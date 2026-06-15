@@ -39,6 +39,11 @@ type KanbanCardViewProps = {
   onDragOver: React.DragEventHandler<HTMLElement>;
   onDragLeave: React.DragEventHandler<HTMLElement>;
   onDrop: React.DragEventHandler<HTMLElement>;
+  requestedActions?: {
+    busy: boolean;
+    onAccept: () => void;
+    onDecline: () => void;
+  };
 };
 
 export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
@@ -67,11 +72,28 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   onDragOver,
   onDragLeave,
   onDrop,
+  requestedActions,
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
   const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
+  const showRequestedActions = Boolean(requestedActions);
+  const requestedActionButtonBase: React.CSSProperties = {
+    width: 24,
+    height: 24,
+    border: "1px solid rgba(255,255,255,0.72)",
+    borderRadius: 7,
+    display: "grid",
+    placeItems: "center",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 900,
+    lineHeight: 1,
+    cursor: requestedActions?.busy ? "wait" : "pointer",
+    boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.78)",
+    opacity: requestedActions?.busy ? 0.64 : 1,
+  };
 
   return (
     <article
@@ -116,7 +138,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       >
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}
       <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
-      <div style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: showRequestedActions ? "20px minmax(0, 1fr) 24px 24px" : "20px minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
         <span title="Node" style={{ width: 20, height: 20, marginTop: 0, display: "grid", placeItems: "center" }}>
           <NodeDocumentIcon color={color} />
         </span>
@@ -165,6 +187,40 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           />
         ) : (
           <div style={{ fontSize: 12, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+        )}
+        {requestedActions && (
+          <>
+            <button
+              type="button"
+              title="Decline request"
+              aria-label={`Decline ${card.node_title}`}
+              disabled={requestedActions.busy}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                requestedActions.onDecline();
+              }}
+              style={{ ...requestedActionButtonBase, background: "linear-gradient(135deg, rgba(254,226,226,0.96), rgba(255,255,255,0.84))", color: "#b91c1c" }}
+            >
+              X
+            </button>
+            <button
+              type="button"
+              title="Accept request"
+              aria-label={`Accept ${card.node_title}`}
+              disabled={requestedActions.busy}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                requestedActions.onAccept();
+              }}
+              style={{ ...requestedActionButtonBase, background: "linear-gradient(135deg, rgba(220,252,231,0.96), rgba(255,255,255,0.84))", color: "#15803d" }}
+            >
+              ✓
+            </button>
+          </>
         )}
       </div>
       {description && (

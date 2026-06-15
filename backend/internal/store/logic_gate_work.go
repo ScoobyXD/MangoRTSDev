@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	LogicGateWorkStatusRequested  = "requested"
 	LogicGateWorkStatusBacklog    = "backlog"
 	LogicGateWorkStatusPending    = "pending"
 	LogicGateWorkStatusInProgress = "in_progress"
@@ -23,6 +24,7 @@ type logicGateWorkStatusSpec struct {
 }
 
 var logicGateWorkStatusSpecs = []logicGateWorkStatusSpec{
+	{Key: LogicGateWorkStatusRequested, Title: "Requested", Color: KanbanDefaultRequestedColor, Position: 250},
 	{Key: LogicGateWorkStatusBacklog, Title: "Backlogs", Color: KanbanDefaultBacklogColor, Position: 500},
 	{Key: LogicGateWorkStatusPending, Title: "Pending", Color: KanbanDefaultPendingColor, Position: 1000},
 	{Key: LogicGateWorkStatusInProgress, Title: "In Progress", Color: KanbanDefaultInProgressColor, Position: 2000},
@@ -38,6 +40,8 @@ func NormalizeLogicGateWorkStatusKey(status string) (string, bool) {
 	switch status {
 	case "":
 		return "", true
+	case "requested", "request", "requests", "r":
+		return LogicGateWorkStatusRequested, true
 	case "backlog", "backlogs", "b":
 		return LogicGateWorkStatusBacklog, true
 	case "pending", "p":

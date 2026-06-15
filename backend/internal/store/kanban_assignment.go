@@ -171,6 +171,8 @@ func NormalizeLogicGateAssignmentStatusTitle(status string) string {
 	switch logicGateAssignmentStatusKey(status) {
 	case "":
 		return ""
+	case "requested", "request", "requests", "r":
+		return "Requested"
 	case "backlog", "backlogs", "b":
 		return "Backlogs"
 	case "pending", "p":
