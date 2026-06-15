@@ -33,6 +33,14 @@ type realtimeNotificationDeletedMessage struct {
 	TS             time.Time `json:"ts"`
 }
 
+type realtimeNotificationsClearedMessage struct {
+	Type         string    `json:"type"`
+	CompanyID    string    `json:"company_id,omitempty"`
+	Scope        string    `json:"scope"`
+	DeletedCount int       `json:"deleted_count"`
+	TS           time.Time `json:"ts"`
+}
+
 const editorRichTextPrefix = "<!-- mango-editor-html-v1 -->"
 const editorNodeTextBlockPrefix = "<!-- mango-node-text-block-v1 -->"
 
@@ -125,7 +133,7 @@ func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_notifications")
 		return
 	}
-	s.publishNotificationDeletions(deleted)
+	s.publishNotificationsCleared(deleted)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted_count": len(deleted)})
 }
 
@@ -352,6 +360,28 @@ func (s *Server) publishNotificationDeletions(items []domain.Notification) {
 	}
 }
 
+func (s *Server) publishNotificationsCleared(items []domain.Notification) {
+	if len(items) > 0 {
+		s.recordOperationalMetric("notifications.deleted_count", "", int64(len(items)), 0)
+	}
+	type clearGroup struct {
+		companyID string
+		userID    string
+	}
+	counts := map[clearGroup]int{}
+	for _, item := range items {
+		companyID := strings.TrimSpace(item.CompanyID)
+		userID := strings.TrimSpace(item.RecipientUserID)
+		if companyID == "" || userID == "" {
+			continue
+		}
+		counts[clearGroup{companyID: companyID, userID: userID}]++
+	}
+	for group, count := range counts {
+		s.publishNotificationsClearedRealtime(group.companyID, group.userID, count)
+	}
+}
+
 func (s *Server) publishNotificationCreatedRealtime(item domain.Notification) {
 	if s == nil || s.realtimeRegistry == nil {
 		return
@@ -392,6 +422,28 @@ func (s *Server) publishNotificationDeletedRealtime(item domain.Notification) {
 		return
 	}
 	s.realtimeRegistry.publish(item.CompanyID, scope, payload)
+}
+
+func (s *Server) publishNotificationsClearedRealtime(companyID, recipientUserID string, deletedCount int) {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	companyID = strings.TrimSpace(companyID)
+	scope := realtimeNotificationScope(recipientUserID)
+	if scope == "" || companyID == "" || deletedCount <= 0 {
+		return
+	}
+	payload, err := json.Marshal(realtimeNotificationsClearedMessage{
+		Type:         realtimeMessageNotificationsCleared,
+		CompanyID:    companyID,
+		Scope:        scope,
+		DeletedCount: deletedCount,
+		TS:           time.Now().UTC(),
+	})
+	if err != nil {
+		return
+	}
+	s.realtimeRegistry.publish(companyID, scope, payload)
 }
 
 func notificationActorPayload(r *http.Request) (string, string) {

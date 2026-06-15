@@ -10,6 +10,7 @@ export type RealtimeMessageType =
   | "workspace.event"
   | "notification.created"
   | "notification.deleted"
+  | "notifications.cleared"
   | "communications.event"
   | "snapshot.refetch"
   | "permission.revoked"
@@ -90,6 +91,14 @@ export type RealtimeNotificationDeletedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
+export type RealtimeNotificationsClearedMessage = RealtimeBaseMessage & {
+  type: "notifications.cleared";
+  company_id: string;
+  scope: string;
+  deleted_count: number;
+  ts?: string;
+};
+
 export type RealtimeCommunicationsEventEnvelope = {
   user_id?: string;
   type?: string;
@@ -134,6 +143,7 @@ export type RealtimeInboundMessage =
   | RealtimeWorkspaceEventMessage
   | RealtimeNotificationCreatedMessage
   | RealtimeNotificationDeletedMessage
+  | RealtimeNotificationsClearedMessage
   | RealtimeCommunicationsEventMessage
   | RealtimeSnapshotRefetchMessage
   | RealtimePermissionRevokedMessage
@@ -150,6 +160,7 @@ export type RealtimeSubscriptionHandlers = {
   onWorkspaceEvent?: (message: RealtimeWorkspaceEventMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
   onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
+  onNotificationsCleared?: (message: RealtimeNotificationsClearedMessage) => void;
   onCommunicationsEvent?: (message: RealtimeCommunicationsEventMessage) => void;
   onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
   onPermissionRevoked?: (message: RealtimePermissionRevokedMessage) => void;
@@ -297,6 +308,20 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         company_id: companyID,
         scope,
         notification_id: notificationID,
+        ts: stringValue(payload.ts) || undefined,
+      };
+    }
+    case "notifications.cleared": {
+      const scope = stringValue(payload.scope);
+      if (!scope) throw new Error("realtime_scope_required");
+      const companyID = stringValue(payload.company_id);
+      if (!companyID) throw new Error("realtime_company_id_required");
+      return {
+        ...base,
+        type,
+        company_id: companyID,
+        scope,
+        deleted_count: optionalNumber(payload.deleted_count) ?? 0,
         ts: stringValue(payload.ts) || undefined,
       };
     }
@@ -559,6 +584,9 @@ export class MangoRealtimeClient {
           break;
         case "notification.deleted":
           sub.onNotificationDeleted?.(message);
+          break;
+        case "notifications.cleared":
+          sub.onNotificationsCleared?.(message);
           break;
         case "communications.event":
           sub.onCommunicationsEvent?.(message);

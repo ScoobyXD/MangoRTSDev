@@ -41,6 +41,7 @@ const (
 	realtimeMessageWorkspaceEvent       = "workspace.event"
 	realtimeMessageNotificationCreated  = "notification.created"
 	realtimeMessageNotificationDeleted  = "notification.deleted"
+	realtimeMessageNotificationsCleared = "notifications.cleared"
 	realtimeMessageCommunicationsEvent  = "communications.event"
 	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
 	realtimeMessagePermissionRevoked    = "permission.revoked"
