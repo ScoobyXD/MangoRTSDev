@@ -88,19 +88,34 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	logicGateRelationships = filterLogicGateRelationshipsByVisibleGates(logicGateRelationships, logicGateIDs)
-	nodeFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "node")
+	var nodeFolders []domain.CompanyExplorerFolder
+	if userID != "" {
+		nodeFolders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "node", userID)
+	} else {
+		nodeFolders, err = s.repo.ListCompanyExplorerFolders(companyID, "node")
+	}
 	if err != nil {
 		log.Printf("workspace snapshot: failed to list node company explorer folders company_id=%s: %v", companyID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 		return
 	}
-	logicGateFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	var logicGateFolders []domain.CompanyExplorerFolder
+	if userID != "" {
+		logicGateFolders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "logic_gate", userID)
+	} else {
+		logicGateFolders, err = s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	}
 	if err != nil {
 		log.Printf("workspace snapshot: failed to list logic_gate company explorer folders company_id=%s: %v", companyID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 		return
 	}
-	projectFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "project")
+	var projectFolders []domain.CompanyExplorerFolder
+	if userID != "" {
+		projectFolders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "project", userID)
+	} else {
+		projectFolders, err = s.repo.ListCompanyExplorerFolders(companyID, "project")
+	}
 	if err != nil {
 		log.Printf("workspace snapshot: failed to list project company explorer folders company_id=%s: %v", companyID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
@@ -262,7 +277,11 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 			return
 		}
-		folders, err = s.repo.ListCompanyExplorerFolders(companyID, "node")
+		if userID != "" {
+			folders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "node", userID)
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolders(companyID, "node")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
@@ -296,7 +315,11 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 			return
 		}
-		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "node")
+		if userID != "" {
+			folders, err = s.repo.ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, "node", userID)
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "node")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
@@ -563,7 +586,11 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 			return
 		}
-		folders, err = s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+		if userID != "" {
+			folders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "logic_gate", userID)
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
@@ -597,7 +624,11 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 			return
 		}
-		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "logic_gate")
+		if userID != "" {
+			folders, err = s.repo.ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, "logic_gate", userID)
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "logic_gate")
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return

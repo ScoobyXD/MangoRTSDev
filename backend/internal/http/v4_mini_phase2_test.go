@@ -34,6 +34,10 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
 	}
+	hiddenFolder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Hidden V4 Mini Folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder hidden: %v", err)
+	}
 	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", visibleNode.NodeID, 1000); err != nil {
 		t.Fatalf("Assign visible folder item: %v", err)
 	}
@@ -63,6 +67,15 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions hidden node: %v", err)
+	}
+	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeCompanyExplorerFolder,
+		EntityID:         hiddenFolder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden folder: %v", err)
 	}
 
 	repo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: base}
@@ -95,6 +108,7 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		t.Fatalf("workspace snapshot status = %d body=%s", snapshotRec.Code, snapshotRec.Body.String())
 	}
 	var snapshot struct {
+		Folders     []domain.CompanyExplorerFolder     `json:"folders"`
 		Nodes       []domain.Node                      `json:"nodes"`
 		FolderItems []domain.CompanyExplorerFolderItem `json:"folder_items"`
 	}
@@ -106,6 +120,26 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	}
 	if containsFolderItem(snapshot.FolderItems, hiddenNode.NodeID) || !containsFolderItem(snapshot.FolderItems, visibleNode.NodeID) {
 		t.Fatalf("snapshot folder_items = %+v, want visible item only", snapshot.FolderItems)
+	}
+	if containsFolderID(snapshot.Folders, hiddenFolder.FolderID) || !containsFolderID(snapshot.Folders, folder.FolderID) {
+		t.Fatalf("snapshot folders = %+v, want visible folder only", snapshot.Folders)
+	}
+
+	nodeMapReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map", nil)
+	nodeMapReq = requestWithLogicGateWorkActorForTest(nodeMapReq, viewer, companyID)
+	nodeMapRec := httptest.NewRecorder()
+	handler.ServeHTTP(nodeMapRec, nodeMapReq)
+	if nodeMapRec.Code != http.StatusOK {
+		t.Fatalf("node map workspace snapshot status = %d body=%s", nodeMapRec.Code, nodeMapRec.Body.String())
+	}
+	var nodeMapSnapshot struct {
+		Folders []domain.CompanyExplorerFolder `json:"folders"`
+	}
+	if err := json.NewDecoder(nodeMapRec.Body).Decode(&nodeMapSnapshot); err != nil {
+		t.Fatalf("decode node map workspace snapshot: %v", err)
+	}
+	if containsFolderID(nodeMapSnapshot.Folders, hiddenFolder.FolderID) || !containsFolderID(nodeMapSnapshot.Folders, folder.FolderID) {
+		t.Fatalf("node map snapshot folders = %+v, want visible folder only", nodeMapSnapshot.Folders)
 	}
 
 	hiddenReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+hiddenNode.NodeID+"?company_id="+companyID, nil)
@@ -283,6 +317,15 @@ func assertGenericActionDenied(t *testing.T, rec *httptest.ResponseRecorder, lea
 func containsNodeID(nodes []domain.Node, nodeID string) bool {
 	for _, node := range nodes {
 		if node.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFolderID(folders []domain.CompanyExplorerFolder, folderID string) bool {
+	for _, folder := range folders {
+		if folder.FolderID == folderID {
 			return true
 		}
 	}

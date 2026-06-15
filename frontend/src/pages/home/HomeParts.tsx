@@ -5462,7 +5462,6 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
           {messageDate && (
             <div style={{ ...mutedSmallStyle, ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
               <span>{messageDate}</span>
-              {messageIsSent(message) && <MessageReadStatusText message={message} />}
             </div>
           )}
         </div>
@@ -5521,6 +5520,11 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
           </div>
         ))}
       </div>
+      {messageIsSent(message) && (
+        <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-end" }}>
+          <MessageReadStatusText message={message} />
+        </div>
+      )}
     </div>
   );
 }
