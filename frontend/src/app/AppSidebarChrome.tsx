@@ -503,7 +503,7 @@ export function AppSidebar({
   const clearNotificationMenu = useCallback(() => {
     const menu = notificationMenu;
     if (!menu || menu.loading || menu.items.length === 0) return;
-    setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
+    setNotificationMenu(null);
     void deleteNotifications({
       companyID,
       type: menu.type,
@@ -511,7 +511,11 @@ export function AppSidebar({
       role: menu.role,
     }).catch((error) => {
       console.error("Failed to clear notifications", error);
-      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+      setNotificationMenu({
+        ...menu,
+        loading: false,
+        error: error instanceof Error ? error.message : "Failed to clear notifications",
+      });
     });
   }, [companyID, notificationMenu]);
 

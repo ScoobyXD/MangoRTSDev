@@ -4,6 +4,7 @@ import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_CLOSE_GRACE_MS = 1500;
+const NOTIFICATION_SUMMARY_REALTIME_DEBOUNCE_MS = 150;
 
 type NotificationSummaryListener = (summary: NotificationSummary) => void;
 type TimerID = ReturnType<typeof setTimeout>;
@@ -20,6 +21,7 @@ type NotificationSummaryEntry = {
 };
 
 const notificationSummaryEntries = new Map<string, NotificationSummaryEntry>();
+const notificationSummaryRealtimeTimers = new Map<string, TimerID>();
 let notificationUpdateListener: ((event: Event) => void) | undefined;
 
 export function useNotificationSummary(companyID: string): NotificationSummary {
@@ -86,10 +88,10 @@ function ensureNotificationRealtime(entry: NotificationSummaryEntry): void {
       if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
       entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
         onNotificationCreated(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+          scheduleNotificationSummaryRealtimeLoad(message.company_id || entry.companyID);
         },
         onNotificationDeleted(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+          scheduleNotificationSummaryRealtimeLoad(message.company_id || entry.companyID);
         },
         onError(error) {
           console.error("Notification realtime failed", error);
@@ -149,6 +151,17 @@ function requestNotificationSummaryLoadsForCompany(companyID: string): void {
   }
   const entry = notificationSummaryEntries.get(cleanCompanyID);
   if (entry && entry.listeners.size > 0) requestNotificationSummaryLoad(entry);
+}
+
+function scheduleNotificationSummaryRealtimeLoad(companyID: string): void {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return;
+  const existing = notificationSummaryRealtimeTimers.get(cleanCompanyID);
+  if (existing !== undefined) clearTimeout(existing);
+  notificationSummaryRealtimeTimers.set(cleanCompanyID, setTimeout(() => {
+    notificationSummaryRealtimeTimers.delete(cleanCompanyID);
+    requestNotificationSummaryLoadsForCompany(cleanCompanyID);
+  }, NOTIFICATION_SUMMARY_REALTIME_DEBOUNCE_MS));
 }
 
 function requestNotificationSummaryLoad(entry: NotificationSummaryEntry, options: { queueWhileLoading?: boolean } = {}): void {
