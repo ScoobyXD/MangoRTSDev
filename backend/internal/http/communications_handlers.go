@@ -34,6 +34,7 @@ func (s *Server) handleCommunicationsStatus(w http.ResponseWriter, r *http.Reque
 	}
 	connection, err := s.repo.GetUserEmailConnection(actor.User.UserID)
 	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("communications_status outcome=not_connected reason=no_personal_connection request_id=%s user_id=%s user_email=%s configured=%t", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), s.nylasConfig.IsConfigured())
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"configured": s.nylasConfig.IsConfigured(),
 			"connected":  false,
@@ -42,13 +43,16 @@ func (s *Server) handleCommunicationsStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if errors.Is(err, store.ErrInvalid) {
+		log.Printf("communications_status outcome=error reason=invalid_user_id request_id=%s user_id=%s user_email=%s", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email))
 		writeError(w, http.StatusBadRequest, "user_id_required")
 		return
 	}
 	if err != nil {
+		log.Printf("communications_status outcome=error reason=repo_error request_id=%s user_id=%s user_email=%s err=%v", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 		return
 	}
+	log.Printf("communications_status outcome=connected request_id=%s user_id=%s user_email=%s configured=%t provider=%s account_email=%s scope=%s status=%s grant=%s", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), s.nylasConfig.IsConfigured(), connection.Provider, connection.AccountEmail, connection.Scope, connection.Status, grantIDLogValue(connection.GrantID))
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"configured": s.nylasConfig.IsConfigured(),
 		"connected":  connection.Status == "connected",
@@ -105,9 +109,11 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err != nil {
+		log.Printf("communications_auth_url outcome=error reason=hosted_auth_url_failed request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t err=%v", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, requestedAccountEmail != "", err)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_auth_url")
 		return
 	}
+	log.Printf("communications_auth_url outcome=created request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, requestedAccountEmail != "")
 	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
 }
 
@@ -123,23 +129,27 @@ func (s *Server) handleCommunicationsDisconnect(w http.ResponseWriter, r *http.R
 	}
 	connection, err := s.repo.GetUserEmailConnection(actor.User.UserID)
 	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("communications_disconnect outcome=noop reason=no_personal_connection request_id=%s user_id=%s user_email=%s", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email))
 		writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 		return
 	}
 	if err != nil {
+		log.Printf("communications_disconnect outcome=error reason=repo_error request_id=%s user_id=%s user_email=%s err=%v", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 		return
 	}
 	if s.nylasClient != nil && strings.TrimSpace(connection.GrantID) != "" {
 		if err := s.nylasClient.DeleteGrant(r.Context(), connection.GrantID); err != nil {
-			log.Printf("failed to delete nylas grant user_id=%s provider=%s: %v", actor.User.UserID, connection.Provider, err)
+			log.Printf("communications_disconnect outcome=warning reason=delete_nylas_grant_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), actor.User.UserID, connection.Provider, connection.AccountEmail, connection.Scope, grantIDLogValue(connection.GrantID), err)
 		}
 	}
 	if err := s.repo.DeleteUserEmailConnection(actor.User.UserID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		log.Printf("communications_disconnect outcome=error reason=delete_repo_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), actor.User.UserID, connection.Provider, connection.AccountEmail, connection.Scope, grantIDLogValue(connection.GrantID), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_email_connection")
 		return
 	}
 	s.commCache.invalidateUser(actor.User.UserID)
+	log.Printf("communications_disconnect outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), actor.User.UserID, connection.Provider, connection.AccountEmail, connection.Scope, grantIDLogValue(connection.GrantID))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
@@ -846,43 +856,62 @@ func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) st
 	return "personal"
 }
 
+func grantIDLogValue(grantID string) string {
+	grantID = strings.TrimSpace(grantID)
+	if grantID == "" {
+		return "empty"
+	}
+	if len(grantID) <= 8 {
+		return "present"
+	}
+	return "present_suffix_" + grantID[len(grantID)-8:]
+}
+
 func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	if !s.nylasConfig.IsConfigured() || s.nylasClient == nil {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=nylas_not_configured request_id=%s configured=%t client_present=%t", requestCorrelationID(r), s.nylasConfig.IsConfigured(), s.nylasClient != nil)
 		s.redirectCommunications(w, r, "nylas_not_configured")
 		return
 	}
 	if oauthError := strings.TrimSpace(r.URL.Query().Get("error")); oauthError != "" {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=provider_error request_id=%s oauth_error=%s", requestCorrelationID(r), oauthError)
 		s.redirectCommunications(w, r, "nylas_oauth_"+oauthError)
 		return
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=missing_code request_id=%s state_present=%t", requestCorrelationID(r), strings.TrimSpace(r.URL.Query().Get("state")) != "")
 		s.redirectCommunications(w, r, "nylas_code_required")
 		return
 	}
 	state, err := parseNylasOAuthState(s.nylasConfig.StateSecret, r.URL.Query().Get("state"), time.Now())
 	if errors.Is(err, errExpiredNylasState) {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=state_expired request_id=%s", requestCorrelationID(r))
 		s.redirectCommunications(w, r, "nylas_state_expired")
 		return
 	}
 	if err != nil {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=state_invalid request_id=%s err=%v", requestCorrelationID(r), err)
 		s.redirectCommunications(w, r, "nylas_state_invalid")
 		return
 	}
+	log.Printf("nylas_oauth_callback outcome=state_valid request_id=%s user_id=%s provider=%s requested_email=%s strict_email=%t scope=%s", requestCorrelationID(r), state.UserID, state.Provider, state.Email, state.StrictEmail, communicationsConnectionScopeForOAuthState(state))
 	grant, err := s.nylasClient.ExchangeCode(r.Context(), code, s.nylasConfig.RedirectURI)
 	if err != nil {
-		log.Printf("nylas token exchange failed user_id=%s provider=%s: %v", state.UserID, state.Provider, err)
+		log.Printf("nylas_oauth_callback outcome=redirect reason=token_exchange_failed request_id=%s user_id=%s provider=%s requested_email=%s strict_email=%t err=%v", requestCorrelationID(r), state.UserID, state.Provider, state.Email, state.StrictEmail, err)
 		s.redirectCommunications(w, r, "nylas_token_exchange_failed")
 		return
 	}
+	log.Printf("nylas_oauth_callback outcome=grant_received request_id=%s user_id=%s state_provider=%s grant_provider=%s requested_email=%s grant_email=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, state.Provider, grant.Provider, state.Email, normalizeEmailForCompare(grant.Email), state.StrictEmail, grantIDLogValue(grant.GrantID))
 	if state.StrictEmail && normalizeEmailForCompare(grant.Email) != state.Email {
 		if strings.TrimSpace(grant.GrantID) != "" {
 			_ = s.nylasClient.DeleteGrant(r.Context(), grant.GrantID)
 		}
+		log.Printf("nylas_oauth_callback outcome=redirect reason=email_mismatch request_id=%s user_id=%s provider=%s requested_email=%s grant_email=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, state.Provider, state.Email, normalizeEmailForCompare(grant.Email), state.StrictEmail, grantIDLogValue(grant.GrantID))
 		s.redirectCommunications(w, r, "nylas_email_mismatch")
 		return
 	}
@@ -899,15 +928,17 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		Status:       "connected",
 	})
 	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("nylas_oauth_callback outcome=redirect reason=mango_user_not_found request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), grantIDLogValue(grant.GrantID))
 		s.redirectCommunications(w, r, "mango_user_not_found")
 		return
 	}
 	if err != nil {
-		log.Printf("failed to store nylas grant user_id=%s provider=%s: %v", state.UserID, provider, err)
+		log.Printf("nylas_oauth_callback outcome=redirect reason=connection_store_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), grantIDLogValue(grant.GrantID), err)
 		s.redirectCommunications(w, r, "nylas_connection_store_failed")
 		return
 	}
 	s.commCache.invalidateUser(state.UserID)
+	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), state.StrictEmail, grantIDLogValue(grant.GrantID))
 	s.redirectCommunicationsSuccess(w, r)
 }
 

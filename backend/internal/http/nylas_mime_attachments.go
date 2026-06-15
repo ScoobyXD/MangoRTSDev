@@ -23,14 +23,16 @@ func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connecti
 	}
 	rawMIME, err := s.nylasClient.GetMessageRawMIME(ctx, connection.GrantID, message.ID)
 	if err != nil {
-		log.Printf("failed to fetch nylas raw mime attachments user_id=%s message_id=%s: %v", connection.UserID, message.ID, err)
+		log.Printf("communications_attachment_raw_mime outcome=fetch_failed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s err=%v", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), err)
 		return message
 	}
 	attachments := nylasAttachmentsFromRawMIME(rawMIME)
 	if len(attachments) == 0 {
+		log.Printf("communications_attachment_raw_mime outcome=no_attachments user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(rawMIME))
 		return message
 	}
 	message.Attachments = attachments
+	log.Printf("communications_attachment_raw_mime outcome=attachments_recovered user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
 	return message
 }
 
