@@ -57,6 +57,8 @@ import type { NodeRecord } from "../node-map/shared.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
 import {
   addProjectInformation,
+  deleteProjectManagementLogicGate,
+  deleteProjectManagementNode,
   createProjectLogicGate,
   createProjectNode,
   deleteProjectProjection,
@@ -114,9 +116,12 @@ type RelationshipCanvasContextMenuState = {
   relationship?: {
     relationshipID: string;
     resourceType: "logic_gate" | "node";
+    resourceID: string;
     displayTitle: string;
   };
 };
+
+type RelationshipContextTarget = NonNullable<RelationshipCanvasContextMenuState["relationship"]>;
 
 type ProjectRelationshipNodeDragPayload = {
   nodeID: string;
@@ -186,6 +191,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
+  const [selectedRelationshipNodeIDs, setSelectedRelationshipNodeIDs] = useState<Set<string>>(() => new Set());
+  const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -267,6 +274,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       .filter((item) => item.resource_type === "node" && !groupedNodeIDs.has(item.relationship_id))
       .sort(compareRelationshipProjection);
   }, [relationshipGroups, relationships]);
+  const visibleRelationshipNodeIDs = useMemo(() => {
+    const ordered: string[] = [];
+    for (const group of relationshipGroups) {
+      if (collapsedGateRelationshipIDs.has(group.gate.relationship_id)) continue;
+      ordered.push(...group.nodes.map((node) => node.relationship_id));
+    }
+    ordered.push(...ungroupedNodes.map((node) => node.relationship_id));
+    return ordered;
+  }, [collapsedGateRelationshipIDs, relationshipGroups, ungroupedNodes]);
   const chatMessagesByBlockID = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
     for (const message of chatMessages) {
@@ -276,6 +292,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     return grouped;
   }, [chatMessages]);
+
+  useEffect(() => {
+    const visible = new Set(visibleRelationshipNodeIDs);
+    setSelectedRelationshipNodeIDs((current) => {
+      const next = new Set(Array.from(current).filter((relationshipID) => visible.has(relationshipID)));
+      return next.size === current.size ? current : next;
+    });
+    setSelectionAnchorRelationshipNodeID((current) => (current && !visible.has(current) ? "" : current));
+  }, [visibleRelationshipNodeIDs]);
   const attachedEmailsByBlockID = useMemo(() => {
     const grouped = new Map<string, EditorAttachedEmail[]>();
     for (const email of attachedEmails) {
@@ -566,6 +591,46 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [assignmentAccountIDs, assignmentTeamIDs, companyID, loadProject, project, projectID]);
 
+  const selectRelationshipNode = useCallback((relationshipID: string, event: React.MouseEvent<HTMLElement>) => {
+    const next = buildProjectRelationshipNodeSelectionUpdate({
+      orderedIDs: visibleRelationshipNodeIDs,
+      selectedIDs: selectedRelationshipNodeIDs,
+      anchorID: selectionAnchorRelationshipNodeID,
+      clickedID: relationshipID,
+      shiftKey: event.shiftKey,
+      additiveKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedRelationshipNodeIDs(next.selectedIDs);
+    setSelectionAnchorRelationshipNodeID(next.anchorID);
+  }, [selectedRelationshipNodeIDs, selectionAnchorRelationshipNodeID, visibleRelationshipNodeIDs]);
+
+  const openRelationshipNodeContextMenu = useCallback((
+    event: React.MouseEvent<HTMLElement>,
+    node: ProjectRelationshipProjection,
+    logicGateID = "",
+  ) => {
+    const relationshipID = node.relationship_id.trim();
+    const resourceID = (node.node_id || node.resource_id || "").trim();
+    if (!relationshipID || !resourceID) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!selectedRelationshipNodeIDs.has(relationshipID)) {
+      setSelectedRelationshipNodeIDs(new Set([relationshipID]));
+      setSelectionAnchorRelationshipNodeID(relationshipID);
+    }
+    setRelationshipContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      logicGateID,
+      relationship: {
+        relationshipID,
+        resourceType: "node",
+        resourceID,
+        displayTitle: node.display_title,
+      },
+    });
+  }, [selectedRelationshipNodeIDs]);
+
   const createRelationshipResource = useCallback(async (resourceType: "logic_gate" | "node") => {
     setRelationshipContextMenu(null);
     setError("");
@@ -598,26 +663,59 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const removeRelationshipFromProject = useCallback(async () => {
     const target = relationshipContextMenu?.relationship;
     if (!target) return;
+    const targets = relationshipTargetsForContext(target, relationships, selectedRelationshipNodeIDs);
+    if (targets.length === 0) return;
     setRelationshipContextMenu(null);
     setError("");
     try {
-      await deleteProjectRelationship({
+      await Promise.all(targets.map((item) => deleteProjectRelationship({
         companyID,
         projectID,
-        relationshipID: target.relationshipID,
-      });
-      setRelationships((current) => current.filter((item) => item.relationship_id !== target.relationshipID));
+        relationshipID: item.relationshipID,
+      })));
+      const removedRelationshipIDs = new Set(targets.map((item) => item.relationshipID));
+      setRelationships((current) => current.filter((item) => !removedRelationshipIDs.has(item.relationship_id)));
+      setSelectedRelationshipNodeIDs((current) => new Set(Array.from(current).filter((relationshipID) => !removedRelationshipIDs.has(relationshipID))));
+      setSelectionAnchorRelationshipNodeID((current) => (removedRelationshipIDs.has(current) ? "" : current));
       setCollapsedGateRelationshipIDs((current) => {
-        if (!current.has(target.relationshipID)) return current;
+        if (!Array.from(removedRelationshipIDs).some((relationshipID) => current.has(relationshipID))) return current;
         const next = new Set(current);
-        next.delete(target.relationshipID);
+        for (const relationshipID of removedRelationshipIDs) next.delete(relationshipID);
         return next;
       });
     } catch (removeError) {
       const label = target.resourceType === "logic_gate" ? "logic gate" : "node";
       setError(removeError instanceof Error ? removeError.message : `Failed to remove ${label} from project`);
     }
-  }, [companyID, projectID, relationshipContextMenu?.relationship]);
+  }, [companyID, projectID, relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
+
+  const deleteRelationshipResource = useCallback(async () => {
+    const target = relationshipContextMenu?.relationship;
+    if (!target) return;
+    const targets = relationshipTargetsForContext(target, relationships, selectedRelationshipNodeIDs);
+    if (targets.length === 0) return;
+    const isLogicGate = target.resourceType === "logic_gate";
+    const uniqueResourceIDs = Array.from(new Set(targets.map((item) => item.resourceID).filter(Boolean)));
+    if (uniqueResourceIDs.length === 0) return;
+    const label = isLogicGate
+      ? "logic gate"
+      : `${uniqueResourceIDs.length} node${uniqueResourceIDs.length === 1 ? "" : "s"}`;
+    if (!window.confirm(`Delete ${label}? This moves the underlying ${label} to the recycle bin.`)) return;
+    setRelationshipContextMenu(null);
+    setError("");
+    try {
+      if (isLogicGate) {
+        await deleteProjectManagementLogicGate(companyID, uniqueResourceIDs[0]);
+      } else {
+        await Promise.all(uniqueResourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID)));
+      }
+      setSelectedRelationshipNodeIDs(new Set());
+      setSelectionAnchorRelationshipNodeID("");
+      await loadProject({ showLoading: false });
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : `Failed to delete ${isLogicGate ? "logic gate" : "node"}`);
+    }
+  }, [companyID, loadProject, relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
 
   const saveProjectTitle = useCallback(async () => {
     if (!project) return;
@@ -1013,6 +1111,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               event.stopPropagation();
               setRelationshipContextMenu({ x: event.clientX, y: event.clientY });
             }}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || event.target !== event.currentTarget) return;
+              setSelectedRelationshipNodeIDs(new Set());
+              setSelectionAnchorRelationshipNodeID("");
+            }}
             onDragOver={(event) => {
               if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
               event.preventDefault();
@@ -1049,6 +1152,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       relationship: {
                         relationshipID: group.gate.relationship_id,
                         resourceType: "logic_gate",
+                        resourceID: gateLogicGateID,
                         displayTitle: group.gate.display_title,
                       },
                     });
@@ -1099,25 +1203,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                           key={node.relationship_id}
                           type="button"
                           draggable={Boolean(node.node_id || node.resource_id)}
-                          style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id)}
+                          style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id, selectedRelationshipNodeIDs.has(node.relationship_id))}
+                          onClick={(event) => selectRelationshipNode(node.relationship_id, event)}
                           onDragStart={(event) => startProjectRelationshipNodeDrag(event, node, gateLogicGateID)}
                           onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
                           onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
                           onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setRelationshipContextMenu({
-                              x: event.clientX,
-                              y: event.clientY,
-                              logicGateID: gateLogicGateID,
-                              relationship: {
-                                relationshipID: node.relationship_id,
-                                resourceType: "node",
-                                displayTitle: node.display_title,
-                              },
-                            });
-                          }}
+                          onContextMenu={(event) => openRelationshipNodeContextMenu(event, node, gateLogicGateID)}
                         >
                           <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                           <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
@@ -1136,23 +1228,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   <button
                     key={node.relationship_id}
                     type="button"
-                    style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id)}
+                    style={logicGateNodeRowStyle(hoveredRelationshipNodeID === node.relationship_id, selectedRelationshipNodeIDs.has(node.relationship_id))}
+                    onClick={(event) => selectRelationshipNode(node.relationship_id, event)}
                     onMouseEnter={() => setHoveredRelationshipNodeID(node.relationship_id)}
                     onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === node.relationship_id ? "" : current)}
                     onDoubleClick={() => node.node_id && onNodeOpen?.(node.node_id)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setRelationshipContextMenu({
-                        x: event.clientX,
-                        y: event.clientY,
-                        relationship: {
-                          relationshipID: node.relationship_id,
-                          resourceType: "node",
-                          displayTitle: node.display_title,
-                        },
-                      });
-                    }}
+                    onContextMenu={(event) => openRelationshipNodeContextMenu(event, node)}
                   >
                     <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                     <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
@@ -1184,7 +1265,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               ) : null}
               {relationshipContextMenu.relationship ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={() => void removeRelationshipFromProject()}>
-                  {relationshipContextMenu.relationship.resourceType === "logic_gate" ? "Remove logic gate from project" : "Remove node from project"}
+                  {relationshipContextMenu.relationship.resourceType === "logic_gate"
+                    ? "Remove logic gate from project"
+                    : selectedRelationshipNodeIDs.has(relationshipContextMenu.relationship.relationshipID) && selectedRelationshipNodeIDs.size > 1
+                      ? `Remove ${selectedRelationshipNodeIDs.size} nodes from project`
+                      : "Remove node from project"}
+                </button>
+              ) : null}
+              {relationshipContextMenu.relationship ? (
+                <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={() => void deleteRelationshipResource()}>
+                  {relationshipContextMenu.relationship.resourceType === "logic_gate"
+                    ? "Delete logic gate"
+                    : selectedRelationshipNodeIDs.has(relationshipContextMenu.relationship.relationshipID) && selectedRelationshipNodeIDs.size > 1
+                      ? `Delete ${selectedRelationshipNodeIDs.size} nodes`
+                      : "Delete node"}
                 </button>
               ) : null}
             </div>
@@ -1252,6 +1346,58 @@ function mergeProjectRelationships(
     byID.set(relationship.relationship_id, relationship);
   }
   return Array.from(byID.values()).sort(compareRelationshipProjection);
+}
+
+function buildProjectRelationshipNodeSelectionUpdate(args: {
+  orderedIDs: string[];
+  selectedIDs: Set<string>;
+  anchorID: string;
+  clickedID: string;
+  shiftKey?: boolean;
+  additiveKey?: boolean;
+}): { selectedIDs: Set<string>; anchorID: string } {
+  if (!args.orderedIDs.includes(args.clickedID)) {
+    return { selectedIDs: new Set(args.selectedIDs), anchorID: args.anchorID };
+  }
+  if (args.shiftKey && args.anchorID && args.orderedIDs.includes(args.anchorID)) {
+    const anchorIndex = args.orderedIDs.indexOf(args.anchorID);
+    const clickedIndex = args.orderedIDs.indexOf(args.clickedID);
+    const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+    const selected = new Set(args.selectedIDs);
+    for (const relationshipID of args.orderedIDs.slice(start, end + 1)) selected.add(relationshipID);
+    return { selectedIDs: new Set(args.orderedIDs.filter((relationshipID) => selected.has(relationshipID))), anchorID: args.anchorID };
+  }
+  if (args.additiveKey) {
+    const selected = new Set(args.selectedIDs);
+    if (selected.has(args.clickedID)) selected.delete(args.clickedID);
+    else selected.add(args.clickedID);
+    return { selectedIDs: new Set(args.orderedIDs.filter((relationshipID) => selected.has(relationshipID))), anchorID: args.clickedID };
+  }
+  return { selectedIDs: new Set([args.clickedID]), anchorID: args.clickedID };
+}
+
+function relationshipTargetsForContext(
+  target: RelationshipContextTarget,
+  relationships: ProjectRelationshipProjection[],
+  selectedRelationshipNodeIDs: Set<string>,
+): RelationshipContextTarget[] {
+  if (target.resourceType === "logic_gate") return [target];
+  const selectedIDs = selectedRelationshipNodeIDs.has(target.relationshipID)
+    ? selectedRelationshipNodeIDs
+    : new Set([target.relationshipID]);
+  const targets: RelationshipContextTarget[] = [];
+  for (const relationship of relationships) {
+    if (relationship.resource_type !== "node" || !selectedIDs.has(relationship.relationship_id)) continue;
+    const resourceID = (relationship.node_id || relationship.resource_id || "").trim();
+    if (!resourceID) continue;
+    targets.push({
+      relationshipID: relationship.relationship_id,
+      resourceType: "node",
+      resourceID,
+      displayTitle: relationship.display_title,
+    });
+  }
+  return targets;
 }
 
 function startProjectRelationshipNodeDrag(
@@ -2159,12 +2305,12 @@ const logicGateNodeListStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const logicGateNodeRowStyle = (hovered: boolean): React.CSSProperties => ({
+const logicGateNodeRowStyle = (hovered: boolean, selected: boolean): React.CSSProperties => ({
   minHeight: 24,
   minWidth: 0,
-  border: `1px solid ${hovered ? "#19a8ff" : "transparent"}`,
+  border: `1px solid ${selected ? "#2563eb" : hovered ? "#19a8ff" : "transparent"}`,
   borderRadius: 6,
-  background: hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
+  background: selected ? "#eff6ff" : hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
   color: "#111827",
   display: "grid",
   gridTemplateColumns: "16px minmax(0, 1fr) auto",
@@ -2173,7 +2319,7 @@ const logicGateNodeRowStyle = (hovered: boolean): React.CSSProperties => ({
   padding: "3px 5px",
   textAlign: "left",
   cursor: "grab",
-  boxShadow: hovered ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "none",
+  boxShadow: selected ? "0 0 0 1px rgba(37, 99, 235, 0.12)" : hovered ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "none",
   transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
 });
 
