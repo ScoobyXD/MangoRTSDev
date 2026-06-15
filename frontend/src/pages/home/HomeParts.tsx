@@ -973,8 +973,11 @@ export function HomeSidebar({
   const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [sharedCreateDialog, setSharedCreateDialog] = useState<{ parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
+  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; detail: string; label: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
@@ -1029,6 +1032,14 @@ export function HomeSidebar({
   }, [sharedEmailDialog?.folder.folder_id]);
 
   useEffect(() => {
+    if (!sharedCreateDialog) return;
+    window.setTimeout(() => {
+      sharedCreateNameInputRef.current?.focus();
+      sharedCreateNameInputRef.current?.select();
+    }, 0);
+  }, [sharedCreateDialog?.parentFolderID]);
+
+  useEffect(() => {
     if (activeViewID.startsWith("shared:")) return;
     setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
     setSharedSelectionAnchorTreeID("");
@@ -1073,6 +1084,39 @@ export function HomeSidebar({
     setRenameDraft(folder.name);
   }, [onCreateSharedInbox]);
 
+  const openSharedInboxCreateDialog = useCallback((parentFolder: CommunicationsSharedInbox | null) => {
+    setSharedContextMenu(null);
+    setSharedCreateDialog({
+      parentFolderID: parentFolder?.folder_id ?? "",
+      parentName: parentFolder?.name ?? "",
+      name: "",
+      accountEmail: cleanConnectedAccountEmail,
+      error: "",
+    });
+  }, [cleanConnectedAccountEmail]);
+
+  const submitSharedInboxCreateDialog = useCallback(async () => {
+    if (!sharedCreateDialog || sharedBusy) return;
+    const name = sharedCreateDialog.name.trim();
+    const accountEmail = sharedCreateDialog.accountEmail.trim().toLowerCase();
+    if (!name) {
+      setSharedCreateDialog((current) => current ? { ...current, error: "Enter a shared inbox name." } : current);
+      return;
+    }
+    if (!isValidSharedInboxEmail(accountEmail)) {
+      setSharedCreateDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
+      return;
+    }
+    const parentFolderID = sharedCreateDialog.parentFolderID;
+    setSharedCreateDialog(null);
+    const folder = await onCreateSharedInbox(parentFolderID, name, accountEmail);
+    if (!folder) return;
+    if (parentFolderID) {
+      setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
+    }
+    setSharedRootOpen(true);
+  }, [onCreateSharedInbox, sharedBusy, sharedCreateDialog]);
+
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     setSharedContextMenu(null);
     if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
@@ -1111,9 +1155,8 @@ export function HomeSidebar({
     const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
     const label = folder.name.trim() || "this folder";
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    if (!window.confirm(`Delete ${detail}: ${label}?`)) return;
-    await onDeleteSharedInbox(folder.folder_id);
-  }, [onDeleteSharedInbox, sharedInboxes]);
+    setSharedDeleteDialog({ folder, detail, label });
+  }, [sharedInboxes]);
 
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
@@ -1401,6 +1444,14 @@ export function HomeSidebar({
               type="button"
               style={sharedInboxContextMenuButtonStyle}
               disabled={sharedBusy}
+              onClick={() => openSharedInboxCreateDialog(contextFolder)}
+            >
+              Create new shared inbox
+            </button>
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              disabled={sharedBusy}
               onClick={() => void createSharedFolder(contextFolder?.folder_id ?? "")}
             >
               {contextFolder ? "New Child Folder" : "New Folder"}
@@ -1447,6 +1498,20 @@ export function HomeSidebar({
           </FrameRightClickMenu>
         );
       })()}
+      {sharedCreateDialog && (
+        <SharedInboxCreateDialog
+          nameInputRef={sharedCreateNameInputRef}
+          parentName={sharedCreateDialog.parentName}
+          name={sharedCreateDialog.name}
+          accountEmail={sharedCreateDialog.accountEmail}
+          error={sharedCreateDialog.error}
+          busy={sharedBusy}
+          onNameChange={(name) => setSharedCreateDialog((current) => current ? { ...current, name, error: "" } : current)}
+          onAccountEmailChange={(accountEmail) => setSharedCreateDialog((current) => current ? { ...current, accountEmail, error: "" } : current)}
+          onCancel={() => setSharedCreateDialog(null)}
+          onSubmit={() => { void submitSharedInboxCreateDialog(); }}
+        />
+      )}
       {sharedEmailDialog && (
         <SharedInboxEmailDialog
           inputRef={sharedEmailInputRef}
@@ -1457,6 +1522,19 @@ export function HomeSidebar({
           onDraftChange={(draft) => setSharedEmailDialog((current) => current ? { ...current, draft, error: "" } : current)}
           onCancel={() => setSharedEmailDialog(null)}
           onSubmit={submitSharedEmailDialog}
+        />
+      )}
+      {sharedDeleteDialog && (
+        <SharedInboxDeleteDialog
+          label={sharedDeleteDialog.label}
+          detail={sharedDeleteDialog.detail}
+          busy={sharedBusy}
+          onCancel={() => setSharedDeleteDialog(null)}
+          onConfirm={() => {
+            const folderID = sharedDeleteDialog.folder.folder_id;
+            setSharedDeleteDialog(null);
+            void onDeleteSharedInbox(folderID);
+          }}
         />
       )}
     </aside>
@@ -1507,6 +1585,93 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
           <button type="submit" disabled={busy} style={primaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail, error, busy, onNameChange, onAccountEmailChange, onSubmit, onCancel }: {
+  nameInputRef: React.RefObject<HTMLInputElement>;
+  parentName: string;
+  name: string;
+  accountEmail: string;
+  error: string;
+  busy: boolean;
+  onNameChange: (name: string) => void;
+  onAccountEmailChange: (accountEmail: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const parentLabel = parentName.trim();
+  return (
+    <div style={deleteModalBackdropStyle} onPointerDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create shared inbox"
+        style={deleteModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700 }}>Create shared inbox</div>
+        <div style={deleteModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Triage"}</div>
+        <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
+          <span>Name</span>
+          <input
+            ref={nameInputRef}
+            value={name}
+            onChange={(event) => onNameChange(event.target.value)}
+            placeholder="Support inbox"
+            disabled={busy}
+            style={inputStyle}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 5, minWidth: 0, fontSize: 11, fontWeight: 700 }}>
+          <span>Email</span>
+          <input
+            type="email"
+            value={accountEmail}
+            onChange={(event) => onAccountEmailChange(event.target.value)}
+            placeholder="support@example.com"
+            disabled={busy}
+            style={inputStyle}
+          />
+        </label>
+        {error && <div style={{ color: "#8b123f", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>
+          <button type="submit" disabled={busy} style={primaryButtonStyle}>{busy ? "Creating" : "Create"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SharedInboxDeleteDialog({ label, detail, busy, onConfirm, onCancel }: {
+  label: string;
+  detail: string;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={deleteModalBackdropStyle} onPointerDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Delete shared inbox"
+        style={deleteModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700 }}>Delete shared inbox</div>
+        <div style={deleteModalDetailStyle}>Delete {detail}: {label}?</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>
+          <button type="button" disabled={busy} onClick={onConfirm} style={dangerButtonStyle}>{busy ? "Deleting" : "Delete"}</button>
+        </div>
+      </div>
     </div>
   );
 }

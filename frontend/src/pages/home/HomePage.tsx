@@ -169,27 +169,8 @@ function homeCompanyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name"
   return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID.trim() || "User";
 }
 
-function promptEmailProviderForConnection(): EmailProvider | "" {
-  const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
-  if (raw === "google" || raw === "gmail") return "google";
-  if (raw === "microsoft" || raw === "outlook" || raw === "office365") return "microsoft";
-  if (raw) window.alert("Enter google or microsoft.");
-  return "";
-}
-
 function isSharedInboxEmailConnectionError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("shared_inbox_email_account_not_connected");
-}
-
-async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
-  const cleanAccountEmail = accountEmail.trim().toLowerCase();
-  if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(error)) return false;
-  if (!window.confirm(`${cleanAccountEmail} is not connected yet. Connect it through Nylas now?`)) return true;
-  const provider = promptEmailProviderForConnection();
-  if (!provider) return true;
-  const authURL = await fetchCommunicationsAuthURL(provider, cleanAccountEmail);
-  window.location.assign(authURL);
-  return true;
 }
 
 type PrefetchedMessagePage = {
@@ -202,6 +183,17 @@ type QueuedArchiveBatch = {
   companyID: string;
   sharedInboxID?: string;
   messageIDs: string[];
+};
+
+type SharedInboxEmailConnectionDialogState = {
+  accountEmail: string;
+};
+
+type SharedInboxEmailAssignmentDialogState = {
+  folderID: string;
+  folderName: string;
+  draft: string;
+  error: string;
 };
 
 type MailboxCountOverrideKey = Extract<EmailMailbox, "primary" | "starred">;
@@ -330,6 +322,8 @@ export function HomePage({
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [sharedInboxPermissionsFolderID, setSharedInboxPermissionsFolderID] = useState("");
   const [sharedInboxRaciFolderID, setSharedInboxRaciFolderID] = useState("");
+  const [sharedInboxEmailConnectionDialog, setSharedInboxEmailConnectionDialog] = useState<SharedInboxEmailConnectionDialogState | null>(null);
+  const [sharedInboxEmailAssignmentDialog, setSharedInboxEmailAssignmentDialog] = useState<SharedInboxEmailAssignmentDialogState | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2023,6 +2017,25 @@ export function HomePage({
       setBusy("");
     }
   };
+  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string): boolean => {
+    const cleanAccountEmail = accountEmail.trim().toLowerCase();
+    if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
+    setSharedInboxEmailConnectionDialog({ accountEmail: cleanAccountEmail });
+    return true;
+  }, []);
+  const startSharedInboxEmailConnection = useCallback(async (provider: EmailProvider) => {
+    const accountEmail = sharedInboxEmailConnectionDialog?.accountEmail.trim().toLowerCase() ?? "";
+    if (!accountEmail) return;
+    setBusy("shared-inbox-connect");
+    setError("");
+    try {
+      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail);
+      window.location.assign(authURL);
+    } catch (connectError) {
+      setBusy("");
+      setError(formatError(connectError, "Failed to start shared inbox email connection"));
+    }
+  }, [sharedInboxEmailConnectionDialog?.accountEmail]);
   const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder", accountEmail = ""): Promise<CommunicationsSharedInbox | null> => {
     setBusy("shared-inbox");
     setError("");
@@ -2039,13 +2052,13 @@ export function HomePage({
       selectMailbox("primary");
       return folder;
     } catch (sharedInboxError) {
-      if (await offerNylasConnectionForSharedInboxEmail(sharedInboxError, accountEmail)) return null;
+      if (requestSharedInboxEmailConnection(sharedInboxError, accountEmail)) return null;
       setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
       return null;
     } finally {
       setBusy("");
     }
-  }, [companyID, selectMailbox]);
+  }, [companyID, requestSharedInboxEmailConnection, selectMailbox]);
 
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
     if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
@@ -2062,12 +2075,12 @@ export function HomePage({
       setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
       if (result.notice) setNotice(result.notice);
     } catch (sharedInboxError) {
-      if (await offerNylasConnectionForSharedInboxEmail(sharedInboxError, accountEmail)) return;
+      if (requestSharedInboxEmailConnection(sharedInboxError, accountEmail)) return;
       setError(formatError(sharedInboxError, "Failed to update Shared Triage email"));
     } finally {
       setBusy("");
     }
-  }, [companyID, sharedInboxes]);
+  }, [companyID, requestSharedInboxEmailConnection, sharedInboxes]);
 
   const assignActiveSharedInboxEmail = useCallback(() => {
     if (!activeSharedInbox) return;
@@ -2076,15 +2089,24 @@ export function HomePage({
       return;
     }
     const initialEmail = (activeSharedInbox.account_email ?? connection?.account_email ?? "").trim().toLowerCase();
-    const rawEmail = window.prompt("Email for shared inbox", initialEmail);
-    if (rawEmail === null) return;
-    const accountEmail = rawEmail.trim().toLowerCase();
+    setSharedInboxEmailAssignmentDialog({
+      folderID: activeSharedInbox.folder_id,
+      folderName: activeSharedInbox.name,
+      draft: initialEmail,
+      error: "",
+    });
+  }, [activeSharedInbox, activeSharedInboxIsParent, connection?.account_email]);
+  const submitSharedInboxEmailAssignment = useCallback(() => {
+    if (!sharedInboxEmailAssignmentDialog || busy === "shared-inbox") return;
+    const accountEmail = sharedInboxEmailAssignmentDialog.draft.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)) {
-      setError("Enter a valid email address.");
+      setSharedInboxEmailAssignmentDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
       return;
     }
-    void setSharedInboxAccountEmail(activeSharedInbox.folder_id, accountEmail);
-  }, [activeSharedInbox, activeSharedInboxIsParent, connection?.account_email, setSharedInboxAccountEmail]);
+    const folderID = sharedInboxEmailAssignmentDialog.folderID;
+    setSharedInboxEmailAssignmentDialog(null);
+    void setSharedInboxAccountEmail(folderID, accountEmail);
+  }, [busy, setSharedInboxAccountEmail, sharedInboxEmailAssignmentDialog]);
   const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
     setBusy("shared-inbox");
     setError("");
@@ -3893,6 +3915,25 @@ export function HomePage({
           onConfirm={() => { void deleteHomeEntities(entityDeleteConfirmation.targets); }}
         />
       )}
+      {sharedInboxEmailAssignmentDialog && (
+        <SharedInboxEmailAssignmentDialog
+          folderName={sharedInboxEmailAssignmentDialog.folderName}
+          draft={sharedInboxEmailAssignmentDialog.draft}
+          error={sharedInboxEmailAssignmentDialog.error}
+          busy={busy === "shared-inbox"}
+          onDraftChange={(draft) => setSharedInboxEmailAssignmentDialog((current) => current ? { ...current, draft, error: "" } : current)}
+          onCancel={() => setSharedInboxEmailAssignmentDialog(null)}
+          onSubmit={submitSharedInboxEmailAssignment}
+        />
+      )}
+      {sharedInboxEmailConnectionDialog && (
+        <SharedInboxEmailConnectionDialog
+          accountEmail={sharedInboxEmailConnectionDialog.accountEmail}
+          busy={busy === "shared-inbox-connect"}
+          onCancel={() => setSharedInboxEmailConnectionDialog(null)}
+          onConnect={(provider) => { void startSharedInboxEmailConnection(provider); }}
+        />
+      )}
       {nodeEditorOverlay && (
         <NodeEditorPopup
           nodeID={nodeEditorOverlay.nodeID}
@@ -3909,6 +3950,152 @@ export function HomePage({
     </div>
   );
 }
+
+function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDraftChange, onSubmit, onCancel }: {
+  folderName: string;
+  draft: string;
+  error: string;
+  busy: boolean;
+  onDraftChange: (draft: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={homeDialogBackdropStyle} onPointerDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Assign shared inbox email"
+        style={homeDialogStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div style={homeDialogTitleStyle}>Assign shared inbox email</div>
+        <div style={homeDialogDetailStyle}>{folderName.trim() || "Shared Triage"}</div>
+        <input
+          autoFocus
+          type="email"
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          placeholder="name@example.com"
+          disabled={busy}
+          style={homeDialogInputStyle}
+        />
+        {error && <div style={homeDialogErrorStyle}>{error}</div>}
+        <div style={homeDialogButtonRowStyle}>
+          <button type="button" disabled={busy} onClick={onCancel} style={homeDialogSecondaryButtonStyle}>Cancel</button>
+          <button type="submit" disabled={busy} style={homeDialogPrimaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCancel }: {
+  accountEmail: string;
+  busy: boolean;
+  onConnect: (provider: EmailProvider) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={homeDialogBackdropStyle} onPointerDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Connect shared inbox email"
+        style={homeDialogStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div style={homeDialogTitleStyle}>Connect shared inbox email</div>
+        <div style={homeDialogDetailStyle}>{accountEmail} is not connected yet.</div>
+        <div style={homeDialogButtonRowStyle}>
+          <button type="button" disabled={busy} onClick={() => onConnect("google")} style={homeDialogPrimaryButtonStyle}>Google</button>
+          <button type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={homeDialogPrimaryButtonStyle}>Microsoft</button>
+        </div>
+        <button type="button" disabled={busy} onClick={onCancel} style={homeDialogSecondaryButtonStyle}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+const homeDialogBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 80,
+  display: "grid",
+  placeItems: "center",
+  padding: 20,
+  background: "rgba(15, 23, 42, 0.42)",
+};
+
+const homeDialogStyle: React.CSSProperties = {
+  width: "min(420px, 100%)",
+  display: "grid",
+  gap: 12,
+  padding: 16,
+  borderRadius: 8,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  background: "#ffffff",
+  boxShadow: "0 18px 48px rgba(15, 23, 42, 0.22)",
+};
+
+const homeDialogTitleStyle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  color: "#0f172a",
+};
+
+const homeDialogDetailStyle: React.CSSProperties = {
+  fontSize: 12,
+  lineHeight: 1.45,
+  color: "#475569",
+};
+
+const homeDialogInputStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: 36,
+  borderRadius: 6,
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  padding: "0 10px",
+  fontSize: 13,
+  color: "#0f172a",
+};
+
+const homeDialogErrorStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#8b123f",
+};
+
+const homeDialogButtonRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+};
+
+const homeDialogPrimaryButtonStyle: React.CSSProperties = {
+  minHeight: 34,
+  borderRadius: 6,
+  border: "1px solid #0891b2",
+  background: "#0891b2",
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const homeDialogSecondaryButtonStyle: React.CSSProperties = {
+  minHeight: 34,
+  borderRadius: 6,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  background: "#ffffff",
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
 export const HomeFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = () => (
   <HomePage embedded />
 );

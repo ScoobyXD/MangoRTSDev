@@ -1109,7 +1109,7 @@ func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
 	if connection.Provider != "google" || connection.AccountEmail != "user@example.com" || connection.GrantID != "grant-1" || connection.Status != "connected" {
 		t.Fatalf("connection = %+v, want normalized connected google grant", connection)
 	}
-	updated, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "reauth_required")
+	updated, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "user@example.com", "reauth_required")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1121,6 +1121,71 @@ func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
 	}
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject-email", "user@example.com", "Email User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "user@example.com",
+		GrantID:      "personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "shared@example.com",
+		GrantID:      "shared-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	personal, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal.AccountEmail != "user@example.com" || personal.GrantID != "personal-grant" {
+		t.Fatalf("personal connection = %+v, want user@example.com personal-grant", personal)
+	}
+	shared, err := repo.GetUserEmailConnectionByGrantID("shared-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.AccountEmail != "shared@example.com" {
+		t.Fatalf("shared connection = %+v, want shared account", shared)
+	}
+	if _, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "shared@example.com", "reauth_required"); err != nil {
+		t.Fatal(err)
+	}
+	personal, err = repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal.Status != "connected" {
+		t.Fatalf("personal status = %q, want connected after shared reauth", personal.Status)
+	}
+	if err := repo.DeleteUserEmailConnection(user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("personal after delete error = %v, want ErrNotFound", err)
+	}
+	shared, err = repo.GetUserEmailConnectionByGrantID("shared-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.Status != "reauth_required" {
+		t.Fatalf("shared status = %q, want reauth_required after personal delete", shared.Status)
 	}
 }
 

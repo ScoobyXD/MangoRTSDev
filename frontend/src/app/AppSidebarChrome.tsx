@@ -158,6 +158,21 @@ type SidebarExplorerTriagePriorityMenuState = {
   messageIDs: string[];
 };
 
+type SidebarSharedInboxCreateDialogState = {
+  parentFolderID: string;
+  parentName: string;
+  name: string;
+  accountEmail: string;
+  error: string;
+};
+
+type SidebarSharedInboxDeleteDialogState = {
+  folder: CommunicationsSharedInbox;
+  detail: string;
+  label: string;
+  subtreeIDs: Set<string>;
+};
+
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
@@ -199,27 +214,8 @@ function isValidSharedInboxEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
-function promptEmailProviderForConnection(): EmailProvider | "" {
-  const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
-  if (raw === "google" || raw === "gmail") return "google";
-  if (raw === "microsoft" || raw === "outlook" || raw === "office365") return "microsoft";
-  if (raw) window.alert("Enter google or microsoft.");
-  return "";
-}
-
 function isSharedInboxEmailConnectionError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("shared_inbox_email_account_not_connected");
-}
-
-async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
-  const cleanAccountEmail = accountEmail.trim().toLowerCase();
-  if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(error)) return false;
-  if (!window.confirm(`${cleanAccountEmail} is not connected yet. Connect it through Nylas now?`)) return true;
-  const provider = promptEmailProviderForConnection();
-  if (!provider) return true;
-  const authURL = await fetchCommunicationsAuthURL(provider, cleanAccountEmail);
-  window.location.assign(authURL);
-  return true;
 }
 
 function formatSidebarSharedInboxError(error: unknown, fallback: string): string {
@@ -299,7 +295,10 @@ export function AppSidebar({
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [sharedCreateDialog, setSharedCreateDialog] = useState<SidebarSharedInboxCreateDialogState | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
+  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<SidebarSharedInboxDeleteDialogState | null>(null);
+  const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
@@ -311,6 +310,7 @@ export function AppSidebar({
   const [collapsedExplorerSearchTreeIDs, setCollapsedExplorerSearchTreeIDs] = useState<Set<string>>(new Set());
   const [explorerSearchSelectionRequest, setExplorerSearchSelectionRequest] = useState<CompanyExplorerSearchSelectionRequest | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const keyViewsSectionRef = useRef<HTMLElement | null>(null);
   const notificationMenuRequestRef = useRef(0);
@@ -398,7 +398,7 @@ export function AppSidebar({
       });
     } catch (error) {
       console.error("Failed to assign triage email from sidebar Explorer", error);
-      window.alert(error instanceof Error ? error.message : "Failed to assign email.");
+      setSharedError(error instanceof Error ? error.message : "Failed to assign email.");
     } finally {
       setExplorerTriageBusy(false);
     }
@@ -710,6 +710,14 @@ export function AppSidebar({
     }, 0);
   }, [sharedEmailDialog?.folder.folder_id]);
 
+  useEffect(() => {
+    if (!sharedCreateDialog) return;
+    window.setTimeout(() => {
+      sharedCreateNameInputRef.current?.focus();
+      sharedCreateNameInputRef.current?.select();
+    }, 0);
+  }, [sharedCreateDialog?.parentFolderID]);
+
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
@@ -739,13 +747,34 @@ export function AppSidebar({
     setSharedInboxes((previous) => previous.map((folder) => folder.folder_id === updated.folder_id ? updated : folder));
   }, []);
 
-  const createSharedFolder = useCallback(async (parentFolderID: string, accountEmail = "") => {
+  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string): boolean => {
+    const cleanAccountEmail = accountEmail.trim().toLowerCase();
+    if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
+    setSharedEmailConnectionDialog({ accountEmail: cleanAccountEmail });
+    return true;
+  }, []);
+
+  const startSharedInboxEmailConnection = useCallback(async (provider: EmailProvider) => {
+    const accountEmail = sharedEmailConnectionDialog?.accountEmail.trim().toLowerCase() ?? "";
+    if (!accountEmail || sharedBusy) return;
+    setSharedBusy(true);
+    setSharedError("");
+    try {
+      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail);
+      window.location.assign(authURL);
+    } catch (error) {
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to start shared inbox email connection"));
+      setSharedBusy(false);
+    }
+  }, [sharedBusy, sharedEmailConnectionDialog?.accountEmail]);
+
+  const createSharedFolder = useCallback(async (parentFolderID: string, accountEmail = "", rawName = "") => {
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     setSharedBusy(true);
     setSharedError("");
     try {
-      const name = accountEmail.trim() || "New Folder";
+      const name = rawName.trim() || accountEmail.trim() || "New Folder";
       const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name, accountEmail });
       setSharedInboxes((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
       if (parentFolderID) setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
@@ -756,13 +785,41 @@ export function AppSidebar({
       }
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
-      if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
+      if (requestSharedInboxEmailConnection(error, accountEmail)) return;
       setSharedError(formatSidebarSharedInboxError(error, "Failed to create Shared Triage folder"));
       console.error("Failed to create shared triage folder", error);
     } finally {
       setSharedBusy(false);
     }
-  }, [companyID, onHomeViewSelect, sharedBusy]);
+  }, [companyID, onHomeViewSelect, requestSharedInboxEmailConnection, sharedBusy]);
+
+  const openSharedInboxCreateDialog = useCallback((parentFolder: CommunicationsSharedInbox | null) => {
+    setSharedContextMenu(null);
+    setSharedCreateDialog({
+      parentFolderID: parentFolder?.folder_id ?? "",
+      parentName: parentFolder?.name ?? "",
+      name: "",
+      accountEmail: cleanConnectedAccountEmail,
+      error: "",
+    });
+  }, [cleanConnectedAccountEmail]);
+
+  const submitSharedInboxCreateDialog = useCallback(async () => {
+    if (!companyID || !sharedCreateDialog || sharedBusy) return;
+    const name = sharedCreateDialog.name.trim();
+    const accountEmail = sharedCreateDialog.accountEmail.trim().toLowerCase();
+    if (!name) {
+      setSharedCreateDialog((current) => current ? { ...current, error: "Enter a shared inbox name." } : current);
+      return;
+    }
+    if (!isValidSharedInboxEmail(accountEmail)) {
+      setSharedCreateDialog((current) => current ? { ...current, error: "Enter a valid email address." } : current);
+      return;
+    }
+    const parentFolderID = sharedCreateDialog.parentFolderID;
+    setSharedCreateDialog(null);
+    await createSharedFolder(parentFolderID, accountEmail, name);
+  }, [companyID, createSharedFolder, sharedBusy, sharedCreateDialog]);
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     if (!companyID || sharedBusy) return;
@@ -778,13 +835,13 @@ export function AppSidebar({
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, accountEmail });
       replaceSharedFolder(updated);
     } catch (error) {
-      if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
+      if (requestSharedInboxEmailConnection(error, accountEmail)) return;
       setSharedError(formatSidebarSharedInboxError(error, "Failed to update Shared Triage email"));
       console.error("Failed to update shared triage email account", error);
     } finally {
       setSharedBusy(false);
     }
-  }, [companyID, replaceSharedFolder, sharedBusy, sharedInboxes]);
+  }, [companyID, replaceSharedFolder, requestSharedInboxEmailConnection, sharedBusy, sharedInboxes]);
 
   const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
     if (sharedInboxes.some((item) => (item.parent_folder_id ?? "").trim() === folder.folder_id)) {
@@ -875,21 +932,27 @@ export function AppSidebar({
     const count = subtreeIDs.size || 1;
     const label = folder.name.trim() || "this folder";
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    if (!window.confirm(`Delete ${detail}: ${label}?`)) return;
+    setSharedDeleteDialog({ folder, detail, label, subtreeIDs });
+  }, [companyID, sharedBusy, sharedInboxes]);
+
+  const confirmDeleteSharedFolder = useCallback(async () => {
+    const dialog = sharedDeleteDialog;
+    if (!companyID || !dialog || sharedBusy) return;
+    setSharedDeleteDialog(null);
     setSharedBusy(true);
     setSharedError("");
     try {
-      await deleteCommunicationsSharedInbox(companyID, folder.folder_id);
-      setSharedInboxes((previous) => previous.filter((item) => !subtreeIDs.has(item.folder_id)));
+      await deleteCommunicationsSharedInbox(companyID, dialog.folder.folder_id);
+      setSharedInboxes((previous) => previous.filter((item) => !dialog.subtreeIDs.has(item.folder_id)));
       const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
-      if (activeFolderID && subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
+      if (activeFolderID && dialog.subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
     } catch (error) {
       setSharedError(formatSidebarSharedInboxError(error, "Failed to delete Shared Triage folder"));
       console.error("Failed to delete shared triage folder", error);
     } finally {
       setSharedBusy(false);
     }
-  }, [activeHomeView, companyID, onHomeViewSelect, sharedBusy, sharedInboxes]);
+  }, [activeHomeView, companyID, onHomeViewSelect, sharedBusy, sharedDeleteDialog]);
 
   const selectSharedFolderRow = useCallback((row: SharedInboxTreeRow, event?: React.MouseEvent) => {
     const orderedIDs = sharedRows.map((item) => item.treeID);
@@ -1436,6 +1499,14 @@ export function AppSidebar({
               type="button"
               style={appSidebarContextMenuButtonStyle}
               disabled={sharedBusy}
+              onClick={() => openSharedInboxCreateDialog(contextFolder)}
+            >
+              Create new shared inbox
+            </button>
+            <button
+              type="button"
+              style={appSidebarContextMenuButtonStyle}
+              disabled={sharedBusy}
               onClick={() => void createSharedFolder(contextFolder?.folder_id ?? "")}
             >
               {contextFolder ? "New Child Folder" : "New Folder"}
@@ -1482,6 +1553,20 @@ export function AppSidebar({
           </FrameRightClickMenu>
         );
       })()}
+      {sharedCreateDialog && (
+        <SharedInboxCreateDialog
+          nameInputRef={sharedCreateNameInputRef}
+          parentName={sharedCreateDialog.parentName}
+          name={sharedCreateDialog.name}
+          accountEmail={sharedCreateDialog.accountEmail}
+          error={sharedCreateDialog.error}
+          busy={sharedBusy}
+          onNameChange={(name) => setSharedCreateDialog((current) => current ? { ...current, name, error: "" } : current)}
+          onAccountEmailChange={(accountEmail) => setSharedCreateDialog((current) => current ? { ...current, accountEmail, error: "" } : current)}
+          onCancel={() => setSharedCreateDialog(null)}
+          onSubmit={() => { void submitSharedInboxCreateDialog(); }}
+        />
+      )}
       {sharedEmailDialog && (
         <SharedInboxEmailDialog
           inputRef={sharedEmailInputRef}
@@ -1492,6 +1577,23 @@ export function AppSidebar({
           onDraftChange={(draft) => setSharedEmailDialog((current) => current ? { ...current, draft, error: "" } : current)}
           onCancel={() => setSharedEmailDialog(null)}
           onSubmit={submitSharedEmailDialog}
+        />
+      )}
+      {sharedDeleteDialog && (
+        <SharedInboxDeleteDialog
+          label={sharedDeleteDialog.label}
+          detail={sharedDeleteDialog.detail}
+          busy={sharedBusy}
+          onCancel={() => setSharedDeleteDialog(null)}
+          onConfirm={() => { void confirmDeleteSharedFolder(); }}
+        />
+      )}
+      {sharedEmailConnectionDialog && (
+        <SharedInboxEmailConnectionDialog
+          accountEmail={sharedEmailConnectionDialog.accountEmail}
+          busy={sharedBusy}
+          onCancel={() => setSharedEmailConnectionDialog(null)}
+          onConnect={(provider) => { void startSharedInboxEmailConnection(provider); }}
         />
       )}
       {pinContextMenu && (
@@ -1817,6 +1919,120 @@ function SharedInboxEmailDialog({ inputRef, folderName, draft, error, busy, onDr
           <button type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Saving" : "Save"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SharedInboxCreateDialog({ nameInputRef, parentName, name, accountEmail, error, busy, onNameChange, onAccountEmailChange, onSubmit, onCancel }: {
+  nameInputRef: React.RefObject<HTMLInputElement>;
+  parentName: string;
+  name: string;
+  accountEmail: string;
+  error: string;
+  busy: boolean;
+  onNameChange: (name: string) => void;
+  onAccountEmailChange: (accountEmail: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const parentLabel = parentName.trim();
+  return (
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create shared inbox"
+        style={sharedInboxEmailModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div style={sharedInboxEmailModalTitleStyle}>Create shared inbox</div>
+        <div style={sharedInboxEmailModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Triage"}</div>
+        <label style={sharedInboxEmailModalLabelStyle}>
+          <span>Name</span>
+          <input
+            ref={nameInputRef}
+            value={name}
+            onChange={(event) => onNameChange(event.target.value)}
+            placeholder="Support inbox"
+            disabled={busy}
+            style={sharedInboxEmailModalInputStyle}
+          />
+        </label>
+        <label style={sharedInboxEmailModalLabelStyle}>
+          <span>Email</span>
+          <input
+            type="email"
+            value={accountEmail}
+            onChange={(event) => onAccountEmailChange(event.target.value)}
+            placeholder="support@example.com"
+            disabled={busy}
+            style={sharedInboxEmailModalInputStyle}
+          />
+        </label>
+        {error && <div style={sharedInboxEmailModalErrorStyle}>{error}</div>}
+        <div style={sharedInboxEmailModalActionsStyle}>
+          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+          <button type="submit" disabled={busy} style={sharedInboxEmailModalPrimaryButtonStyle}>{busy ? "Creating" : "Create"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SharedInboxDeleteDialog({ label, detail, busy, onConfirm, onCancel }: {
+  label: string;
+  detail: string;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  return (
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Delete shared inbox"
+        style={sharedInboxEmailModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div style={sharedInboxEmailModalTitleStyle}>Delete shared inbox</div>
+        <div style={sharedInboxEmailModalDetailStyle}>Delete {detail}: {label}?</div>
+        <div style={sharedInboxEmailModalActionsStyle}>
+          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+          <button type="button" disabled={busy} onClick={onConfirm} style={{ ...sharedInboxEmailModalPrimaryButtonStyle, borderColor: "#be123c", background: "#be123c" }}>{busy ? "Deleting" : "Delete"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCancel }: {
+  accountEmail: string;
+  busy: boolean;
+  onConnect: (provider: EmailProvider) => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  return (
+    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Connect shared inbox email"
+        style={sharedInboxEmailModalStyle}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div style={sharedInboxEmailModalTitleStyle}>Connect shared inbox email</div>
+        <div style={sharedInboxEmailModalDetailStyle}>{accountEmail} is not connected yet.</div>
+        <div style={sharedInboxEmailModalActionsStyle}>
+          <button type="button" disabled={busy} onClick={() => onConnect("google")} style={sharedInboxEmailModalPrimaryButtonStyle}>Google</button>
+          <button type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={sharedInboxEmailModalPrimaryButtonStyle}>Microsoft</button>
+        </div>
+        <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
+      </div>
     </div>
   );
 }
