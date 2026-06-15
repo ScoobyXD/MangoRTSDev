@@ -35,8 +35,12 @@ type fakeNylasClient struct {
 	updateErrByID            map[string]error
 	downloadContent          []byte
 	downloadErr              error
+	rawMIME                  string
+	rawMIMEErr               error
 	lastQuery                NylasMessageQuery
 	lastMessageGrantID       string
+	lastRawMIMEGrantID       string
+	lastRawMIMEMessageID     string
 	lastDownloadGrantID      string
 	lastDownloadMessageID    string
 	lastDownloadAttachmentID string
@@ -115,6 +119,17 @@ func (f *fakeNylasClient) GetMessage(_ context.Context, _, messageID string) (Ny
 		}
 	}
 	return f.message, nil
+}
+
+func (f *fakeNylasClient) GetMessageRawMIME(_ context.Context, grantID, messageID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastRawMIMEGrantID = grantID
+	f.lastRawMIMEMessageID = messageID
+	if f.rawMIMEErr != nil {
+		return "", f.rawMIMEErr
+	}
+	return f.rawMIME, nil
 }
 
 func (f *fakeNylasClient) DownloadAttachment(_ context.Context, grantID, messageID, attachmentID string) ([]byte, error) {
@@ -247,6 +262,9 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	if state.UserID != user.UserID || state.Email != "user@example.com" || state.Provider != "google" {
 		t.Fatalf("state = %+v, want user-bound google state", state)
 	}
+	if state.StrictEmail {
+		t.Fatalf("state.StrictEmail = true, want false for personal auth URL")
+	}
 }
 
 func TestNylasGoogleScopesNormalizeShorthandEnvValues(t *testing.T) {
@@ -339,9 +357,10 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	mismatchState, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
-		UserID:   mismatchUser.UserID,
-		Email:    mismatchUser.Email,
-		Provider: "google",
+		UserID:      mismatchUser.UserID,
+		Email:       mismatchUser.Email,
+		Provider:    "google",
+		StrictEmail: true,
 	}, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -368,6 +387,47 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 	}
 }
 
+func TestNylasCallbackAllowsPersonalAccountEmailReturnedByProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject", "profile@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:   user.UserID,
+		Email:    user.Email,
+		Provider: "google",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: "mailbox@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Header().Get("Location"), "nylas_error=") {
+		t.Fatalf("callback redirect = %s, want success", rec.Header().Get("Location"))
+	}
+	connection, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "grant-1" {
+		t.Fatalf("connection = %+v, want provider-returned account", connection)
+	}
+}
+
 func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t *testing.T) {
 	t.Parallel()
 
@@ -387,9 +447,10 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	}
 	config := testNylasConfig()
 	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
-		UserID:   user.UserID,
-		Email:    "shared@example.com",
-		Provider: "google",
+		UserID:      user.UserID,
+		Email:       "shared@example.com",
+		Provider:    "google",
+		StrictEmail: true,
 	}, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -489,6 +550,80 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("connection after disconnect error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		message: NylasMessage{ID: "message-1", Subject: "Photos", Body: "Body"},
+		rawMIME: strings.Join([]string{
+			"From: Sender <sender@example.com>",
+			"To: User <user@example.com>",
+			"Subject: Photos",
+			"MIME-Version: 1.0",
+			`Content-Type: multipart/mixed; boundary="mango-boundary"`,
+			"",
+			"--mango-boundary",
+			"Content-Type: text/plain; charset=utf-8",
+			"",
+			"Body",
+			"--mango-boundary",
+			`Content-Type: image/png; name="photo.png"`,
+			`Content-Disposition: attachment; filename="photo.png"`,
+			"Content-Transfer-Encoding: base64",
+			"",
+			"aW1hZ2UtYnl0ZXM=",
+			"--mango-boundary--",
+			"",
+		}, "\r\n"),
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
+		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
+	}
+	if len(payload.Message.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want one raw MIME attachment", payload.Message.Attachments)
+	}
+	attachment := payload.Message.Attachments[0]
+	if attachment.Filename != "photo.png" || attachment.ContentType != "image/png" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || attachment.Size != int64(len("image-bytes")) {
+		t.Fatalf("attachment = %+v, want png content from raw MIME", attachment)
 	}
 }
 

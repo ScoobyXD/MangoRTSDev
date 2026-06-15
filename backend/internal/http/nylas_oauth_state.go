@@ -19,10 +19,11 @@ var (
 )
 
 type nylasOAuthStatePayload struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email"`
-	Provider string `json:"provider"`
-	IssuedAt int64  `json:"issued_at"`
+	UserID      string `json:"user_id"`
+	Email       string `json:"email"`
+	Provider    string `json:"provider"`
+	StrictEmail bool   `json:"strict_email,omitempty"`
+	IssuedAt    int64  `json:"issued_at"`
 }
 
 func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time.Time) (string, error) {

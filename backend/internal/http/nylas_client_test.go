@@ -104,6 +104,36 @@ func TestNylasRESTClientDownloadAttachment(t *testing.T) {
 	}
 }
 
+func TestNylasRESTClientGetMessageRawMIME(t *testing.T) {
+	t.Parallel()
+
+	var gotFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/grants/grant-1/messages/message-1" {
+			t.Fatalf("path = %q, want message path", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		gotFields = r.URL.Query().Get("fields")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"raw_mime":"From: sender@example.com\r\n\r\nBody"}}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	rawMIME, err := client.GetMessageRawMIME(context.Background(), "grant-1", "message-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFields != "raw_mime" {
+		t.Fatalf("fields = %q, want raw_mime", gotFields)
+	}
+	if rawMIME != "From: sender@example.com\r\n\r\nBody" {
+		t.Fatalf("rawMIME = %q, want raw MIME response", rawMIME)
+	}
+}
+
 func TestNylasRESTClientSendMessageIncludesTrackingOptions(t *testing.T) {
 	t.Parallel()
 

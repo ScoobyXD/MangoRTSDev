@@ -137,6 +137,7 @@ type NylasClient interface {
 	ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error)
 	GetThread(ctx context.Context, grantID, threadID string) (NylasThread, error)
 	GetMessage(ctx context.Context, grantID, messageID string) (NylasMessage, error)
+	GetMessageRawMIME(ctx context.Context, grantID, messageID string) (string, error)
 	DownloadAttachment(ctx context.Context, grantID, messageID, attachmentID string) ([]byte, error)
 	UpdateMessage(ctx context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error)
 	DeleteMessage(ctx context.Context, grantID, messageID string) error
@@ -444,6 +445,19 @@ func (c *NylasRESTClient) GetMessage(ctx context.Context, grantID, messageID str
 		return NylasMessage{}, err
 	}
 	return response.Data, nil
+}
+
+func (c *NylasRESTClient) GetMessageRawMIME(ctx context.Context, grantID, messageID string) (string, error) {
+	var response struct {
+		Data struct {
+			RawMIME string `json:"raw_mime"`
+		} `json:"data"`
+	}
+	values := url.Values{"fields": []string{"raw_mime"}}
+	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "messages", messageID), values, nil, &response, true); err != nil {
+		return "", err
+	}
+	return response.Data.RawMIME, nil
 }
 
 func (c *NylasRESTClient) DownloadAttachment(ctx context.Context, grantID, messageID, attachmentID string) ([]byte, error) {

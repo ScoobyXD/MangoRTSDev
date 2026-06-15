@@ -11,6 +11,7 @@ export type EmailConnection = {
   user_id: string;
   provider: EmailProvider;
   account_email: string;
+  scope?: "personal" | "shared" | string;
   status: "connected" | "disconnected" | "reauth_required";
   created_timestamp: string;
   updated_timestamp: string;

@@ -14,22 +14,49 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	if userID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
-		 from user_email_connections
-		 where user_id = $1
-		   and account_email = (
-		     select lower(btrim(email))
-		     from users
-		     where user_id = $1
-		   )`,
+		`with candidate_connections as (
+		   select 0 as match_rank, connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id,
+		          connection.status, connection.created_timestamp, connection.updated_timestamp
+		   from user_email_connections connection
+		   where connection.user_id = $1
+		     and connection.connection_scope = 'personal'
+		     and connection.account_email = (
+		       select lower(btrim(email))
+		       from users
+		       where user_id = $1
+		     )
+		   union all
+		   select 1 as match_rank, connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id,
+		          connection.status, connection.created_timestamp, connection.updated_timestamp
+		   from user_email_connections connection
+		   where connection.user_id = $1
+		     and connection.connection_scope = 'personal'
+		     and not exists (
+		       select 1
+		       from company_memberships membership
+		       join company_explorer_folders folder
+		         on folder.company_id = membership.company_id
+		        and folder.folder_kind = 'communications'
+		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
+		       where membership.user_id = connection.user_id
+		     )
+		 )
+		 select user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp
+		 from candidate_connections
+		 order by match_rank asc, updated_timestamp desc
+		 limit 1`,
 		userID,
 	).Scan(
 		&connection.UserID,
 		&connection.Provider,
 		&connection.AccountEmail,
+		&connection.Scope,
 		&connection.GrantID,
 		&connection.Status,
 		&connection.CreatedTimestamp,
@@ -47,10 +74,13 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accoun
 	if companyID == "" || accountEmail == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`select connection.user_id, connection.provider, connection.account_email, connection.grant_id, connection.status,
+		`select connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id, connection.status,
 		        connection.created_timestamp, connection.updated_timestamp
 		 from user_email_connections connection
 		 join company_memberships membership
@@ -66,6 +96,7 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accoun
 		&connection.UserID,
 		&connection.Provider,
 		&connection.AccountEmail,
+		&connection.Scope,
 		&connection.GrantID,
 		&connection.Status,
 		&connection.CreatedTimestamp,
@@ -82,10 +113,13 @@ func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.U
 	if grantID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
+		`select user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp
 		 from user_email_connections
 		 where grant_id = $1`,
 		grantID,
@@ -93,6 +127,7 @@ func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.U
 		&connection.UserID,
 		&connection.Provider,
 		&connection.AccountEmail,
+		&connection.Scope,
 		&connection.GrantID,
 		&connection.Status,
 		&connection.CreatedTimestamp,
@@ -108,9 +143,10 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	userID := strings.TrimSpace(input.UserID)
 	provider := normalizeEmailProvider(input.Provider)
 	accountEmail := normalizeEmail(input.AccountEmail)
+	scope := normalizeEmailConnectionScope(input.Scope)
 	grantID := strings.TrimSpace(input.GrantID)
 	status := normalizeEmailConnectionStatus(input.Status)
-	if userID == "" || provider == "" || accountEmail == "" || grantID == "" || status == "" {
+	if userID == "" || provider == "" || accountEmail == "" || scope == "" || grantID == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
@@ -119,23 +155,26 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`insert into user_email_connections (user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, now(), now())
+		`insert into user_email_connections (user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, $5, $6, now(), now())
 		 on conflict (user_id, account_email) do update set
 		   provider = excluded.provider,
+		   connection_scope = excluded.connection_scope,
 		   grant_id = excluded.grant_id,
 		   status = excluded.status,
 		   updated_timestamp = now()
-		 returning user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp`,
+		 returning user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp`,
 		userID,
 		provider,
 		accountEmail,
+		scope,
 		grantID,
 		status,
 	).Scan(
 		&connection.UserID,
 		&connection.Provider,
 		&connection.AccountEmail,
+		&connection.Scope,
 		&connection.GrantID,
 		&connection.Status,
 		&connection.CreatedTimestamp,
@@ -151,6 +190,9 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 	if userID == "" || accountEmail == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
@@ -159,7 +201,7 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 		     updated_timestamp = now()
 		 where user_id = $1
 		   and account_email = $3
-		 returning user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp`,
+		 returning user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp`,
 		userID,
 		status,
 		accountEmail,
@@ -167,6 +209,7 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 		&connection.UserID,
 		&connection.Provider,
 		&connection.AccountEmail,
+		&connection.Scope,
 		&connection.GrantID,
 		&connection.Status,
 		&connection.CreatedTimestamp,
@@ -183,12 +226,45 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 	if userID == "" {
 		return ErrInvalid
 	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return err
+	}
 	result, err := r.db.Exec(
-		`delete from user_email_connections connection
-		 using users user_row
-		 where connection.user_id = $1
-		   and user_row.user_id = connection.user_id
-		   and connection.account_email = lower(btrim(user_row.email))`,
+		`with candidate_connections as (
+		   select 0 as match_rank, connection.user_id, connection.account_email, connection.updated_timestamp
+		   from user_email_connections connection
+		   where connection.user_id = $1
+		     and connection.connection_scope = 'personal'
+		     and connection.account_email = (
+		       select lower(btrim(email))
+		       from users
+		       where user_id = $1
+		     )
+		   union all
+		   select 1 as match_rank, connection.user_id, connection.account_email, connection.updated_timestamp
+		   from user_email_connections connection
+		   where connection.user_id = $1
+		     and connection.connection_scope = 'personal'
+		     and not exists (
+		       select 1
+		       from company_memberships membership
+		       join company_explorer_folders folder
+		         on folder.company_id = membership.company_id
+		        and folder.folder_kind = 'communications'
+		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
+		       where membership.user_id = connection.user_id
+		     )
+		 ),
+		 target_connection as (
+		   select user_id, account_email
+		   from candidate_connections
+		   order by match_rank asc, updated_timestamp desc
+		   limit 1
+		 )
+		 delete from user_email_connections connection
+		 using target_connection
+		 where connection.user_id = target_connection.user_id
+		   and connection.account_email = target_connection.account_email`,
 		userID,
 	)
 	if err != nil {
@@ -217,6 +293,19 @@ declare
 begin
   if to_regclass('public.user_email_connections') is null then
     return;
+  end if;
+
+  alter table public.user_email_connections
+    add column if not exists connection_scope text not null default 'personal';
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.user_email_connections'::regclass
+      and conname = 'user_email_connections_scope_chk'
+  ) then
+    alter table public.user_email_connections
+      add constraint user_email_connections_scope_chk check (connection_scope in ('personal', 'shared'));
   end if;
 
   select conname, pg_get_constraintdef(oid)

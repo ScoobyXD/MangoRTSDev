@@ -349,7 +349,7 @@ func (r *MemoryRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Compa
 		}
 		email := normalizeEmail(user.Email)
 		invitation := latestInvitationByEmail[email]
-		connection := r.emailConnections[user.UserID]
+		connection, _, _ := r.personalEmailConnectionForUserLocked(user.UserID)
 		item := domain.CompanyUserOnboarding{
 			CompanyID:                    companyID,
 			Email:                        email,
