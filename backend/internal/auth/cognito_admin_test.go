@@ -28,8 +28,8 @@ func TestCognitoAdminCreateUserSendsInitialInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "created" || result.TemporaryPassword == "" {
-		t.Fatalf("result = %+v, want created status and temporary password", result)
+	if result.Status != "created" {
+		t.Fatalf("result = %+v, want created status", result)
 	}
 	if len(transport.requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(transport.requests))
@@ -40,8 +40,8 @@ func TestCognitoAdminCreateUserSendsInitialInvite(t *testing.T) {
 	if action := stringField(t, transport.requests[0], "MessageAction"); action != "SUPPRESS" {
 		t.Fatalf("MessageAction = %q, want SUPPRESS", action)
 	}
-	if password := stringField(t, transport.requests[0], "TemporaryPassword"); password == "" {
-		t.Fatal("TemporaryPassword is empty")
+	if _, ok := transport.requests[0]["TemporaryPassword"]; ok {
+		t.Fatalf("TemporaryPassword was sent: %+v", transport.requests[0])
 	}
 }
 
@@ -52,7 +52,6 @@ func TestCognitoAdminCreateUserResendsExistingInvite(t *testing.T) {
 	transport := &recordingRoundTripper{
 		responses: []roundTripResponse{
 			{status: http.StatusBadRequest, body: `{"__type":"UsernameExistsException","message":"User account already exists"}`},
-			{status: http.StatusOK, body: `{}`},
 		},
 	}
 	client := &CognitoAdminClient{
@@ -65,20 +64,52 @@ func TestCognitoAdminCreateUserResendsExistingInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "resent" || result.TemporaryPassword == "" {
-		t.Fatalf("result = %+v, want resent status and temporary password", result)
+	if result.Status != "resent" {
+		t.Fatalf("result = %+v, want resent status", result)
 	}
-	if len(transport.requests) != 2 {
-		t.Fatalf("requests = %d, want 2", len(transport.requests))
+	if len(transport.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(transport.requests))
 	}
 	if action := stringField(t, transport.requests[0], "MessageAction"); action != "SUPPRESS" {
 		t.Fatalf("first MessageAction = %q, want SUPPRESS", action)
 	}
-	if action := stringField(t, transport.requests[1], "MessageAction"); action != "RESEND" {
-		t.Fatalf("second MessageAction = %q, want RESEND", action)
+}
+
+func TestCognitoAdminAcceptInvitationSetsPermanentPasswordAndReturnsSubject(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+	transport := &recordingRoundTripper{
+		responses: []roundTripResponse{
+			{status: http.StatusBadRequest, body: `{"__type":"UsernameExistsException","message":"User account already exists"}`},
+			{status: http.StatusOK, body: `{}`},
+			{status: http.StatusOK, body: `{"Username":"user@example.com","UserAttributes":[{"Name":"sub","Value":"subject-123"},{"Name":"email","Value":"USER@EXAMPLE.COM"}]}`},
+		},
 	}
-	if password := stringField(t, transport.requests[1], "TemporaryPassword"); password == "" {
-		t.Fatal("second TemporaryPassword is empty")
+	client := &CognitoAdminClient{
+		Region:     "us-west-1",
+		UserPoolID: "us-west-1_test",
+		HTTPClient: &http.Client{Transport: transport},
+	}
+
+	result, err := client.AdminAcceptInvitation(context.Background(), "USER@EXAMPLE.COM", "NewPassw0rd!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject != "subject-123" || result.Email != "user@example.com" {
+		t.Fatalf("result = %+v, want subject and lowercased email", result)
+	}
+	if len(transport.requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(transport.requests))
+	}
+	if password := stringField(t, transport.requests[1], "Password"); password != "NewPassw0rd!" {
+		t.Fatalf("Password = %q, want submitted password", password)
+	}
+	if permanent, _ := transport.requests[1]["Permanent"].(bool); !permanent {
+		t.Fatalf("Permanent = %v, want true", transport.requests[1]["Permanent"])
+	}
+	if username := stringField(t, transport.requests[2], "Username"); username != "user@example.com" {
+		t.Fatalf("AdminGetUser Username = %q, want lowercased email", username)
 	}
 }
 

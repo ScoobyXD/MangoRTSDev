@@ -384,7 +384,7 @@ export default function AuthGate() {
 
   if (!me || isAuthPath(normalizedPath)) {
     if (normalizedPath === "/accept-invite") {
-      return <AcceptInvitePage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
+      return <AcceptInvitePage onAuthenticated={loadMe} onNavigate={navigate} />;
     }
     if (normalizedPath === "/complete-account") {
       return <CompleteAccountPage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
@@ -460,7 +460,7 @@ function inviteStatusMessage(payload: InviteCreateResponse): string {
   const emailStatus = payload.invite_email_status || payload.invitation.invite_email_status || "not_configured";
   if (emailStatus === "sent") {
     if (cognitoStatus === "existing_mango_user") return "Invite email sent. The user can accept with their existing Mango password.";
-    return "Invite email sent with the accept link and temporary password.";
+    return "Invite email sent with the accept link.";
   }
   if (emailStatus === "failed") {
     return "Mango created the invite and Cognito user, but the invite email failed. Check backend email configuration and resend.";
@@ -474,14 +474,6 @@ function formatInviteError(error: unknown): string {
     return "This user already exists.";
   }
   return formatAuthError(error, "Invite failed");
-}
-
-function invitePasswordError(error: unknown): Error {
-  const message = error instanceof Error ? error.message.trim() : "";
-  if (message === "Incorrect email or password.") {
-    return new Error("The temporary or current password is incorrect for that invited email.");
-  }
-  return error instanceof Error ? error : new Error("The temporary password check failed.");
 }
 
 function companyName(company?: Company | null): string {
@@ -816,7 +808,7 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
   if (!pendingChallenge) {
     return (
       <AuthPanel title="Complete Account" error={error}>
-        <div style={authInfoMessageStyle}>Sign in with your temporary password first.</div>
+        <div style={authInfoMessageStyle}>Sign in first to complete account setup.</div>
         <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
       </AuthPanel>
     );
@@ -852,21 +844,18 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
   );
 }
 
-function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
+function AcceptInvitePage({ onAuthenticated, onNavigate }: { onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const params = new URLSearchParams(window.location.search);
   const initialToken = params.get("token") ?? "";
   const tokenFromURL = Boolean(initialToken.trim());
   const [token, setToken] = useState(initialToken);
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState(pendingChallenge?.username ?? "");
+  const [email, setEmail] = useState("");
   const [invitedEmail, setInvitedEmail] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [passwordStepComplete, setPasswordStepComplete] = useState(() => hasStoredToken());
-  const showPasswordStep = !passwordStepComplete && !hasStoredToken();
   const requireNewPasswordMatch = () => {
     if (!newPassword.trim()) {
       throw new Error("Enter a new password.");
@@ -905,46 +894,21 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           if (!displayName.trim()) {
             throw new Error("Enter your full name.");
           }
-          if (showPasswordStep && (newPassword.length > 0 || confirmNewPassword.length > 0) && newPassword !== confirmNewPassword) {
-            throw new Error("Passwords are not the same.");
-          }
           const invitation = await validateInvitationToken(token);
           const invitedEmail = normalizeEmailInput(invitation.email);
-          if (hasStoredToken()) {
-            onChallenge(null);
-            setPasswordStepComplete(true);
-          } else {
-            if (pendingChallenge) {
-              if (invitedEmail && normalizeEmailInput(pendingChallenge.username) !== invitedEmail) {
-                throw new Error("This Mango invite token belongs to a different email address.");
-              }
-              requireNewPasswordMatch();
-              await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
-            } else {
-              if (!email.trim()) {
-                throw new Error("Enter the invited email address.");
-              }
-              if (!temporaryPassword.trim()) {
-                throw new Error("Enter the Cognito temporary password from the invite email, or your current password if you already changed it.");
-              }
-              if (invitedEmail && normalizeEmailInput(email) !== invitedEmail) {
-                throw new Error("This Mango invite token belongs to a different email address.");
-              }
-              let result: LoginResult;
-              try {
-                result = await loginWithPassword(email, temporaryPassword);
-              } catch (passwordError) {
-                throw invitePasswordError(passwordError);
-              }
-              if (result.status === "new_password_required") {
-                requireNewPasswordMatch();
-                await completeNewPassword(result.username, result.session, newPassword);
-              }
-            }
-            onChallenge(null);
-            setPasswordStepComplete(true);
+          const normalizedEmail = normalizeEmailInput(email);
+          if (!normalizedEmail) {
+            throw new Error("Enter the invited email address.");
           }
-          await acceptInvitation(token, displayName);
+          if (invitedEmail && normalizedEmail !== invitedEmail) {
+            throw new Error("This Mango invite token belongs to a different email address.");
+          }
+          requireNewPasswordMatch();
+          await acceptInvitation(token, displayName, normalizedEmail, newPassword);
+          const result = await loginWithPassword(normalizedEmail, newPassword);
+          if (result.status !== "authenticated") {
+            throw new Error("Sign in with the new password to continue.");
+          }
           await onAuthenticated();
           onNavigate("/connect-google");
         } catch (inviteError) {
@@ -957,10 +921,9 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
         {tokenFromURL && invitedEmail && <div style={authInfoMessageStyle}>Invitation for {invitedEmail}.</div>}
         {!tokenFromURL && <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />}
         <AuthTextField label="Your full name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your full name" autoComplete="name" />
-        {showPasswordStep && !pendingChallenge && <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />}
-        {showPasswordStep && !pendingChallenge && <AuthTextField label="Temporary or current password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary password from invite email" autoComplete="current-password" />}
-        {showPasswordStep && <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
-        {showPasswordStep && <AuthTextField label="Confirm password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} type="password" placeholder="Confirm password" autoComplete="new-password" />}
+        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
+        <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+        <AuthTextField label="Confirm password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} type="password" placeholder="Confirm password" autoComplete="new-password" />
         <AuthPrimaryButton disabled={busy}>{busy ? "Accepting" : "Accept invite"}</AuthPrimaryButton>
       </form>
       <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>

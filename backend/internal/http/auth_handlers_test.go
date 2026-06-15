@@ -14,11 +14,14 @@ import (
 )
 
 type recordingCognitoAdmin struct {
-	emails             []string
-	temporaryPasswords []string
-	deleted            []string
-	createErr          error
-	status             string
+	emails          []string
+	acceptedEmails  []string
+	acceptedPasses  []string
+	acceptedSubject string
+	acceptErr       error
+	deleted         []string
+	createErr       error
+	status          string
 }
 
 func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string) (authpkg.CognitoAdminCreateUserResult, error) {
@@ -30,9 +33,20 @@ func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string)
 	if status == "" {
 		status = "created"
 	}
-	password := "TempPassw0rd!"
-	c.temporaryPasswords = append(c.temporaryPasswords, password)
-	return authpkg.CognitoAdminCreateUserResult{Status: status, TemporaryPassword: password}, nil
+	return authpkg.CognitoAdminCreateUserResult{Status: status}, nil
+}
+
+func (c *recordingCognitoAdmin) AdminAcceptInvitation(_ context.Context, email, password string) (authpkg.CognitoAdminAcceptInvitationResult, error) {
+	c.acceptedEmails = append(c.acceptedEmails, email)
+	c.acceptedPasses = append(c.acceptedPasses, password)
+	if c.acceptErr != nil {
+		return authpkg.CognitoAdminAcceptInvitationResult{}, c.acceptErr
+	}
+	subject := c.acceptedSubject
+	if subject == "" {
+		subject = "accepted-subject"
+	}
+	return authpkg.CognitoAdminAcceptInvitationResult{Subject: subject, Email: email}, nil
 }
 
 func (c *recordingCognitoAdmin) AdminDeleteUser(_ context.Context, username string) error {
@@ -220,8 +234,8 @@ func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
 	if payload.CognitoInviteStatus != "created" {
 		t.Fatalf("cognito status = %q, want created", payload.CognitoInviteStatus)
 	}
-	if len(cognito.temporaryPasswords) != 1 || cognito.temporaryPasswords[0] == "" {
-		t.Fatalf("temporary passwords = %v, want one generated password", cognito.temporaryPasswords)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("accepted emails = %v, want none before invite acceptance", cognito.acceptedEmails)
 	}
 }
 
@@ -281,14 +295,80 @@ func TestCreateInvitationSendsMangoOwnedInviteEmail(t *testing.T) {
 	if sent.Email != "new@example.com" || sent.CompanyName != "Acme Systems" {
 		t.Fatalf("invite email = %+v, want target email and company", sent)
 	}
-	if len(cognito.temporaryPasswords) != 1 || sent.TemporaryPassword == "" || sent.TemporaryPassword != cognito.temporaryPasswords[0] {
-		t.Fatalf("invite temporary password = %q, cognito passwords=%v", sent.TemporaryPassword, cognito.temporaryPasswords)
-	}
 	if !strings.HasPrefix(sent.AcceptURL, "https://app.example.com/accept-invite?") || !strings.Contains(sent.AcceptURL, "token=") {
 		t.Fatalf("accept url = %q, want app accept-invite link with token", sent.AcceptURL)
 	}
 	if payload.AcceptURL != sent.AcceptURL || payload.Invitation.Token == "" {
 		t.Fatalf("response accept_url/token = %q/%q, want dev fallback token and email URL", payload.AcceptURL, payload.Invitation.Token)
+	}
+}
+
+func TestAcceptInvitationSetsCognitoPasswordFromToken(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	const invitedSubject = "invited-subject"
+	repo.EnsureCompany(companyID, "Acme Systems")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	cognito := &recordingCognitoAdmin{acceptedSubject: invitedSubject}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
+	}).Routes()
+
+	inviteReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/invitations",
+		strings.NewReader(`{"company_id":"`+companyID+`","email":"new@example.com","role":"company_user"}`),
+	)
+	inviteReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	inviteRes := httptest.NewRecorder()
+	handler.ServeHTTP(inviteRes, inviteReq)
+	if inviteRes.Code != http.StatusCreated {
+		t.Fatalf("invite status = %d, want %d, body=%s", inviteRes.Code, http.StatusCreated, strings.TrimSpace(inviteRes.Body.String()))
+	}
+	var invitePayload struct {
+		Invitation struct {
+			Token string `json:"token"`
+		} `json:"invitation"`
+	}
+	if err := json.NewDecoder(inviteRes.Body).Decode(&invitePayload); err != nil {
+		t.Fatal(err)
+	}
+
+	acceptReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/invitations/accept",
+		strings.NewReader(`{"token":"`+invitePayload.Invitation.Token+`","email":"new@example.com","display_name":"New User","password":"NewPassw0rd!"}`),
+	)
+	acceptRes := httptest.NewRecorder()
+	handler.ServeHTTP(acceptRes, acceptReq)
+	if acceptRes.Code != http.StatusOK {
+		t.Fatalf("accept status = %d, want %d, body=%s", acceptRes.Code, http.StatusOK, strings.TrimSpace(acceptRes.Body.String()))
+	}
+	if len(cognito.acceptedEmails) != 1 || cognito.acceptedEmails[0] != "new@example.com" {
+		t.Fatalf("accepted emails = %v, want [new@example.com]", cognito.acceptedEmails)
+	}
+	if len(cognito.acceptedPasses) != 1 || cognito.acceptedPasses[0] != "NewPassw0rd!" {
+		t.Fatalf("accepted passwords = %v, want submitted password", cognito.acceptedPasses)
+	}
+	user, err := repo.GetAuthUser(invitedSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Email != "new@example.com" || user.DisplayName != "New User" {
+		t.Fatalf("accepted user = %+v, want invite email and display name", user)
+	}
+	if _, err := repo.GetCompanyUser(companyID, user.UserID); err != nil {
+		t.Fatalf("membership was not created: %v", err)
 	}
 }
 

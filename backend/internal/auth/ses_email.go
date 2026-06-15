@@ -23,11 +23,10 @@ type SESEmailSender struct {
 }
 
 type InvitationEmailInput struct {
-	Email             string
-	CompanyName       string
-	AcceptURL         string
-	TemporaryPassword string
-	ExpiresAt         time.Time
+	Email       string
+	CompanyName string
+	AcceptURL   string
+	ExpiresAt   time.Time
 }
 
 func NewSESEmailSender(region, fromEmailAddress string) *SESEmailSender {
@@ -50,14 +49,7 @@ func (s *SESEmailSender) SendInvitation(ctx context.Context, input InvitationEma
 	body.WriteString(companyName)
 	body.WriteString(".\n\nOpen this link to accept the invitation:\n")
 	body.WriteString(acceptURL)
-	body.WriteString("\n\n")
-	if password := strings.TrimSpace(input.TemporaryPassword); password != "" {
-		body.WriteString("Temporary password:\n")
-		body.WriteString(password)
-		body.WriteString("\n\nUse this temporary password once, then set a new password on the invite page.\n")
-	} else {
-		body.WriteString("Sign in with your existing MangoRTS password when prompted.\n")
-	}
+	body.WriteString("\n\nUse the invite token on that page to set your MangoRTS password.\n")
 	if !input.ExpiresAt.IsZero() {
 		body.WriteString("\nThis invitation expires on ")
 		body.WriteString(input.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))

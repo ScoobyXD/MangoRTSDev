@@ -55,7 +55,7 @@ export type CurrentUserResponse = {
 
 const TOKEN_KEY = "mangorts:cognito-token-v2";
 const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
-const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/password-resets/request"]);
+const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/invitations/accept", "/v1/password-resets/request"]);
 const CURRENT_USER_CACHE_TTL_MS = 30_000;
 
 let currentUserCache: { value: CurrentUserResponse; fetchedAt: number } | null = null;
@@ -182,10 +182,10 @@ export async function validateInvitationToken(token: string): Promise<MangoInvit
   return payload.invitation;
 }
 
-export async function acceptInvitation(token: string, displayName: string): Promise<void> {
+export async function acceptInvitation(token: string, displayName: string, email: string, password: string): Promise<void> {
   await apiFetchJSON("/v1/invitations/accept", {
     method: "POST",
-    body: JSON.stringify({ token: token.trim(), display_name: displayName.trim() }),
+    body: JSON.stringify({ token: token.trim(), display_name: displayName.trim(), email: normalizeEmail(email), password }),
   });
 }
 
@@ -403,6 +403,10 @@ function friendlyApiError(code: string): string {
   switch (code) {
     case "failed_to_create_cognito_user":
       return "Mango created the invite, but Cognito did not create the user. Check backend logs, AWS credentials, and onboarding status, then resend.";
+    case "failed_to_set_cognito_password":
+      return "Mango could not set the invited user's password. Check backend logs, AWS credentials, and Cognito password policy.";
+    case "cognito_admin_not_configured":
+      return "Invite acceptance is not configured for Cognito in this environment.";
     case "failed_to_list_company_users":
       return "Company users could not be loaded. Run pending database migrations, then refresh.";
     case "failed_to_list_onboarding":
@@ -412,6 +416,8 @@ function friendlyApiError(code: string): string {
       return "User groups could not be loaded. Run pending database migrations, then refresh.";
     case "invitation_email_mismatch":
       return "This Mango invite token belongs to a different email address.";
+    case "password_required":
+      return "Enter a new password.";
     case "invitation_token_required":
       return "Enter the Mango invite token.";
     case "invitation_bad_token":
@@ -425,7 +431,7 @@ function friendlyApiError(code: string): string {
     case "invitation_not_found":
       return "The Mango invite token is not valid.";
     case "unauthorized":
-      return "You are not signed in. Sign in or complete the temporary password step first.";
+      return "You are not signed in.";
     case "authenticated_email_required":
       return "The signed-in Cognito session does not include an email address.";
     case "company_admin_required":
@@ -442,8 +448,6 @@ function friendlyApiError(code: string): string {
       return "Enter your full name.";
     case "password_reset_user_not_found":
       return "You are not a user.";
-    case "cognito_admin_not_configured":
-      return "Cognito admin actions are not configured.";
     case "nylas_rate_limited":
       return "Nylas is rate limiting this mailbox. Wait a moment, then refresh.";
     case "nylas_request_failed":

@@ -156,7 +156,7 @@ func (s *Server) maybeBootstrapDevAdmin(claims auth.Claims) (bool, error) {
 
 func isPublicAuthEndpoint(path string) bool {
 	switch path {
-	case "/v1/password-resets/request", "/v1/invitations/validate":
+	case "/v1/password-resets/request", "/v1/invitations/validate", "/v1/invitations/accept":
 		return true
 	default:
 		return false

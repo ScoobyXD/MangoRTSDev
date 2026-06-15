@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,8 +38,12 @@ type awsCredentials struct {
 }
 
 type CognitoAdminCreateUserResult struct {
-	Status            string
-	TemporaryPassword string
+	Status string
+}
+
+type CognitoAdminAcceptInvitationResult struct {
+	Subject string
+	Email   string
 }
 
 func NewCognitoAdminClient(region, userPoolID string) *CognitoAdminClient {
@@ -57,33 +59,39 @@ func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) 
 	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" {
 		return CognitoAdminCreateUserResult{}, ErrCognitoAdminUnavailable
 	}
-	temporaryPassword, err := newCognitoTemporaryPassword()
-	if err != nil {
-		return CognitoAdminCreateUserResult{}, err
-	}
-	userExists, err := c.adminCreateUser(ctx, email, temporaryPassword, "SUPPRESS")
+	userExists, err := c.adminCreateUser(ctx, email, "SUPPRESS")
 	if err != nil {
 		return CognitoAdminCreateUserResult{}, err
 	}
 	if !userExists {
-		return CognitoAdminCreateUserResult{Status: "created", TemporaryPassword: temporaryPassword}, nil
+		return CognitoAdminCreateUserResult{Status: "created"}, nil
 	}
-	userExists, err = c.adminCreateUser(ctx, email, temporaryPassword, "RESEND")
-	if err != nil {
-		if resetErr := c.adminSetUserPassword(ctx, email, temporaryPassword, false); resetErr != nil {
-			return CognitoAdminCreateUserResult{}, err
-		}
-		return CognitoAdminCreateUserResult{Status: "resent", TemporaryPassword: temporaryPassword}, nil
-	}
-	if userExists {
-		if err := c.adminSetUserPassword(ctx, email, temporaryPassword, false); err != nil {
-			return CognitoAdminCreateUserResult{}, err
-		}
-	}
-	return CognitoAdminCreateUserResult{Status: "resent", TemporaryPassword: temporaryPassword}, nil
+	return CognitoAdminCreateUserResult{Status: "resent"}, nil
 }
 
-func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, temporaryPassword, messageAction string) (bool, error) {
+func (c *CognitoAdminClient) AdminAcceptInvitation(ctx context.Context, email, password string) (CognitoAdminAcceptInvitationResult, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	password = strings.TrimSpace(password)
+	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" || password == "" {
+		return CognitoAdminAcceptInvitationResult{}, ErrCognitoAdminUnavailable
+	}
+	if _, err := c.adminCreateUser(ctx, email, "SUPPRESS"); err != nil {
+		return CognitoAdminAcceptInvitationResult{}, err
+	}
+	if err := c.adminSetUserPassword(ctx, email, password, true); err != nil {
+		return CognitoAdminAcceptInvitationResult{}, err
+	}
+	user, err := c.adminGetUser(ctx, email)
+	if err != nil {
+		return CognitoAdminAcceptInvitationResult{}, err
+	}
+	if strings.TrimSpace(user.Subject) == "" {
+		return CognitoAdminAcceptInvitationResult{}, fmt.Errorf("cognito admin get user missing sub")
+	}
+	return user, nil
+}
+
+func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, messageAction string) (bool, error) {
 	payload := map[string]any{
 		"UserPoolId": c.UserPoolID,
 		"Username":   email,
@@ -91,9 +99,6 @@ func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, tempora
 			{"Name": "email", "Value": email},
 			{"Name": "email_verified", "Value": "true"},
 		},
-	}
-	if temporaryPassword != "" {
-		payload["TemporaryPassword"] = temporaryPassword
 	}
 	if messageAction != "SUPPRESS" {
 		payload["DesiredDeliveryMediums"] = []string{"EMAIL"}
@@ -137,6 +142,45 @@ func (c *CognitoAdminClient) adminSetUserPassword(ctx context.Context, email, pa
 	return fmt.Errorf("cognito admin set user password failed: status=%d", statusCode)
 }
 
+func (c *CognitoAdminClient) adminGetUser(ctx context.Context, email string) (CognitoAdminAcceptInvitationResult, error) {
+	payload := map[string]any{
+		"UserPoolId": c.UserPoolID,
+		"Username":   email,
+	}
+	statusCode, _, raw, err := c.cognitoPost(ctx, "AdminGetUser", payload)
+	if err != nil {
+		return CognitoAdminAcceptInvitationResult{}, err
+	}
+	if statusCode < 200 || statusCode > 299 {
+		if detail := strings.TrimSpace(string(raw)); detail != "" {
+			return CognitoAdminAcceptInvitationResult{}, fmt.Errorf("cognito admin get user failed: status=%d body=%s", statusCode, detail)
+		}
+		return CognitoAdminAcceptInvitationResult{}, fmt.Errorf("cognito admin get user failed: status=%d", statusCode)
+	}
+	var response struct {
+		Username       string `json:"Username"`
+		UserAttributes []struct {
+			Name  string `json:"Name"`
+			Value string `json:"Value"`
+		} `json:"UserAttributes"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return CognitoAdminAcceptInvitationResult{}, err
+	}
+	result := CognitoAdminAcceptInvitationResult{Email: email}
+	for _, attribute := range response.UserAttributes {
+		switch attribute.Name {
+		case "sub":
+			result.Subject = strings.TrimSpace(attribute.Value)
+		case "email":
+			if value := strings.ToLower(strings.TrimSpace(attribute.Value)); value != "" {
+				result.Email = value
+			}
+		}
+	}
+	return result, nil
+}
+
 func (c *CognitoAdminClient) AdminDeleteUser(ctx context.Context, username string) error {
 	username = normalizeCognitoUsername(username)
 	if c == nil || c.Region == "" || c.UserPoolID == "" || username == "" {
@@ -168,49 +212,6 @@ func normalizeCognitoUsername(value string) string {
 		return strings.ToLower(value)
 	}
 	return value
-}
-
-func newCognitoTemporaryPassword() (string, error) {
-	const length = 24
-	charsets := []string{
-		"ABCDEFGHJKLMNPQRSTUVWXYZ",
-		"abcdefghijkmnopqrstuvwxyz",
-		"23456789",
-		"!@#%&*?_-",
-	}
-	all := strings.Join(charsets, "")
-	password := make([]byte, 0, length)
-	for _, charset := range charsets {
-		char, err := randomPasswordChar(charset)
-		if err != nil {
-			return "", err
-		}
-		password = append(password, char)
-	}
-	for len(password) < length {
-		char, err := randomPasswordChar(all)
-		if err != nil {
-			return "", err
-		}
-		password = append(password, char)
-	}
-	for i := len(password) - 1; i > 0; i-- {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
-		if err != nil {
-			return "", err
-		}
-		j := int(n.Int64())
-		password[i], password[j] = password[j], password[i]
-	}
-	return string(password), nil
-}
-
-func randomPasswordChar(charset string) (byte, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
-	if err != nil {
-		return 0, err
-	}
-	return charset[n.Int64()], nil
 }
 
 func (c *CognitoAdminClient) cognitoPost(ctx context.Context, action string, payload map[string]any) (int, http.Header, []byte, error) {

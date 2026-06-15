@@ -51,6 +51,7 @@ data "aws_iam_policy_document" "ecs_task_cognito" {
     actions = [
       "cognito-idp:AdminCreateUser",
       "cognito-idp:AdminSetUserPassword",
+      "cognito-idp:AdminGetUser",
       "cognito-idp:AdminDeleteUser"
     ]
     resources = [aws_cognito_user_pool.main.arn]
