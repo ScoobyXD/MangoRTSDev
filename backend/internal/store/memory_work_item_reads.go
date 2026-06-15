@@ -118,7 +118,7 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != racioProjectionResourceLogicGate {
 			continue
 		}
-		roles := logicGateRaciRolesForUser(assignmentsByGate[row.ResourceID], query.UserID, allowedRoles)
+		roles := r.logicGateRaciRolesForUserLocked(query.CompanyID, assignmentsByGate[row.ResourceID], query.UserID, allowedRoles)
 		if len(roles) == 0 {
 			continue
 		}
@@ -204,7 +204,7 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateI
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) {
-	users := racioAssignmentChangedUserSet(before, after)
+	users := r.racioAssignmentChangedUserSetLocked(companyID, before, after)
 	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
 }
 
@@ -534,25 +534,16 @@ func (r *MemoryRepo) logicGateRaciAssignmentsByGateLocked(companyID string) map[
 }
 
 func (r *MemoryRepo) logicGateRaciUserIDsLocked(companyID, logicGateID string) []string {
-	return mapKeys(racioAssignmentUserSet(r.logicGateRaci[key(companyID, logicGateID)]))
+	return mapKeys(r.logicGateRaciAssignmentUserSetLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)]))
 }
 
 func (r *MemoryRepo) logicGateUserHasRoleLocked(companyID, logicGateID, userID, role string) bool {
-	for _, assignment := range r.logicGateRaci[key(companyID, logicGateID)] {
-		if strings.TrimSpace(assignment.UserID) == userID && assignment.Role == role {
-			return true
-		}
-	}
-	return false
+	roles := r.logicGateRaciRolesForUserLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)], userID, map[string]bool{role: true})
+	return len(roles) > 0
 }
 
 func (r *MemoryRepo) logicGateUserHasAnyRaciLocked(companyID, logicGateID, userID string) bool {
-	for _, assignment := range r.logicGateRaci[key(companyID, logicGateID)] {
-		if strings.TrimSpace(assignment.UserID) == userID {
-			return true
-		}
-	}
-	return false
+	return r.logicGateRaciAssignmentUserSetLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)])[strings.TrimSpace(userID)]
 }
 
 func (r *MemoryRepo) nodeIDsAssignedToLogicGateLocked(companyID, logicGateID string) []string {
@@ -583,20 +574,30 @@ func racioProjectionKey(companyID, userID, resourceType, resourceID string) stri
 	return companyID + ":" + userID + ":" + resourceType + ":" + resourceID
 }
 
-func racioAssignmentUserSet(assignments []domain.LogicGateRaciAssignment) map[string]bool {
+func (r *MemoryRepo) logicGateRaciAssignmentUserSetLocked(companyID string, assignments []domain.LogicGateRaciAssignment) map[string]bool {
 	users := map[string]bool{}
 	for _, assignment := range assignments {
-		userID := strings.TrimSpace(assignment.UserID)
-		if userID != "" {
-			users[userID] = true
+		subjectType, subjectID := logicGateRaciAssignmentSubject(assignment)
+		switch subjectType {
+		case EntityPermissionSubjectUser:
+			if subjectID != "" {
+				users[subjectID] = true
+			}
+		case EntityPermissionSubjectGroup:
+			groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, subjectID)
+			for _, member := range r.userGroupMembers {
+				if member.CompanyID == companyID && groupIDs[member.GroupID] && strings.TrimSpace(member.UserID) != "" {
+					users[member.UserID] = true
+				}
+			}
 		}
 	}
 	return users
 }
 
-func racioAssignmentChangedUserSet(before, after []domain.LogicGateRaciAssignment) map[string]bool {
-	beforeRoles := racioAssignmentRoleSetByUser(before)
-	afterRoles := racioAssignmentRoleSetByUser(after)
+func (r *MemoryRepo) racioAssignmentChangedUserSetLocked(companyID string, before, after []domain.LogicGateRaciAssignment) map[string]bool {
+	beforeRoles := r.racioAssignmentRoleSetByUserLocked(companyID, before)
+	afterRoles := r.racioAssignmentRoleSetByUserLocked(companyID, after)
 	users := map[string]bool{}
 	for userID, roles := range beforeRoles {
 		if !stringSetEqual(roles, afterRoles[userID]) {
@@ -611,18 +612,19 @@ func racioAssignmentChangedUserSet(before, after []domain.LogicGateRaciAssignmen
 	return users
 }
 
-func racioAssignmentRoleSetByUser(assignments []domain.LogicGateRaciAssignment) map[string]map[string]bool {
+func (r *MemoryRepo) racioAssignmentRoleSetByUserLocked(companyID string, assignments []domain.LogicGateRaciAssignment) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, assignment := range assignments {
-		userID := strings.TrimSpace(assignment.UserID)
 		role := strings.TrimSpace(assignment.Role)
-		if userID == "" || role == "" {
+		if role == "" {
 			continue
 		}
-		if out[userID] == nil {
-			out[userID] = map[string]bool{}
+		for userID := range r.logicGateRaciAssignmentUserSetLocked(companyID, []domain.LogicGateRaciAssignment{assignment}) {
+			if out[userID] == nil {
+				out[userID] = map[string]bool{}
+			}
+			out[userID][role] = true
 		}
-		out[userID][role] = true
 	}
 	return out
 }
@@ -639,7 +641,7 @@ func stringSetEqual(left, right map[string]bool) bool {
 	return true
 }
 
-func logicGateRaciRolesForUser(assignments []domain.LogicGateRaciAssignment, userID string, allowedRoles map[string]bool) []string {
+func (r *MemoryRepo) logicGateRaciRolesForUserLocked(companyID string, assignments []domain.LogicGateRaciAssignment, userID string, allowedRoles map[string]bool) []string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil
@@ -647,7 +649,10 @@ func logicGateRaciRolesForUser(assignments []domain.LogicGateRaciAssignment, use
 	seen := map[string]bool{}
 	for _, assignment := range assignments {
 		role := strings.TrimSpace(assignment.Role)
-		if strings.TrimSpace(assignment.UserID) != userID || role == "" || seen[role] {
+		if role == "" || seen[role] {
+			continue
+		}
+		if !r.logicGateRaciAssignmentUserSetLocked(companyID, []domain.LogicGateRaciAssignment{assignment})[userID] {
 			continue
 		}
 		if allowedRoles != nil && !allowedRoles[role] {

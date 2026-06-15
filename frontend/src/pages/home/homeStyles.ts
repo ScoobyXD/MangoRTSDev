@@ -2051,25 +2051,6 @@ export function messageStarButtonStyle(highlighted: boolean, hovered = false, fl
   };
 }
 
-export function messageNodeButtonStyle(highlighted: boolean, hovered = false, busy = false): React.CSSProperties {
-  return {
-    ...mailPanelSmallButtonStyle,
-    width: 28,
-    height: 28,
-    minHeight: 28,
-    padding: 0,
-    display: "grid",
-    placeItems: "center",
-    color: highlighted ? "#0891b2" : "rgba(15, 23, 42, 0.52)",
-    border: `1px solid ${highlighted ? "rgba(8, 145, 178, 0.48)" : HOME_KEY_SOFT_BORDER}`,
-    background: HOME_KEY_SURFACE,
-    opacity: busy ? 0.62 : 1,
-    boxShadow: hovered || highlighted
-      ? "5px 5px 12px rgba(174, 174, 192, 0.3), -5px -5px 12px rgba(255, 255, 255, 0.94), 0 0 0 3px rgba(8, 145, 178, 0.12), inset 1px 1px 0 rgba(255, 255, 255, 0.9)"
-      : "4px 4px 9px rgba(174, 174, 192, 0.24), -4px -4px 9px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
-    transform: hovered ? "translateY(-1px)" : "translateY(0)",
-  };
-}
 
 export const messageArchiveButtonStyle: React.CSSProperties = {
   ...smallButtonStyle,

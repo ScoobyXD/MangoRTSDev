@@ -34,7 +34,7 @@ func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkIt
 		roleFilter = `and entry.logic_gate_id is not null
   and exists (
     select 1
-    from logic_gate_raci_assignments assignment
+    from logic_gate_raci_users assignment
     where assignment.company_id=entry.company_id
       and assignment.logic_gate_id=entry.logic_gate_id
       and assignment.user_id=entry.user_id
@@ -42,6 +42,7 @@ func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkIt
   )`
 	}
 	rows, err := r.db.QueryContext(ctx, `
+with recursive `+postgresLogicGateRaciUsersCTE+`
 select
   entry.company_id::text,
   entry.resource_id::text,
@@ -108,6 +109,7 @@ func (r *PostgresRepo) listRacioProjectedLogicGates(ctx context.Context, query W
 		roleFilter = "\n  and assignment.role in ('accountable', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
+with recursive `+postgresLogicGateRaciUsersCTE+`
 select
   entry.company_id::text,
   entry.resource_id::text,
@@ -123,7 +125,7 @@ select
     end
   ), '[]'::jsonb)::text as roles_json
 from racio_matrix_projection_table entry
-join logic_gate_raci_assignments assignment
+join logic_gate_raci_users assignment
   on assignment.company_id=entry.company_id
  and assignment.logic_gate_id=entry.resource_id
  and assignment.user_id=entry.user_id
@@ -176,47 +178,5 @@ limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 }
 
 func (r *PostgresRepo) listProjectedLogicGateRaciAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRaciAssignment, error) {
-	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
-	if len(logicGateIDs) == 0 {
-		return assignmentsByGate, nil
-	}
-	rows, err := r.db.QueryContext(ctx, `
-select
-  assignment.company_id::text,
-  assignment.logic_gate_id::text,
-  assignment.role,
-  assignment.user_id::text,
-  nullif(app_user.display_name, ''),
-  nullif(app_user.email, ''),
-  assignment.created_timestamp
-from logic_gate_raci_assignments assignment
-join company_memberships membership
-  on membership.company_id=assignment.company_id
- and membership.user_id=assignment.user_id
-join users app_user
-  on app_user.user_id=assignment.user_id
-where assignment.company_id=$1::uuid
-  and assignment.logic_gate_id = any(string_to_array($2, ',')::uuid[])
-order by assignment.logic_gate_id::text asc,
-  case assignment.role
-    when 'responsible' then 1
-    when 'accountable' then 2
-    when 'consulted' then 3
-    when 'informed' then 4
-    else 5
-  end,
-  lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.user_id::text)) asc,
-  assignment.user_id::text asc`, companyID, strings.Join(logicGateIDs, ","))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		item, err := scanLogicGateRaciAssignment(rows)
-		if err != nil {
-			return nil, err
-		}
-		assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
-	}
-	return assignmentsByGate, rows.Err()
+	return r.listLogicGateRaciAssignments(ctx, companyID, logicGateIDs)
 }

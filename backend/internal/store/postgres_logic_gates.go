@@ -65,13 +65,122 @@ func scanLogicGateRaciAssignment(row interface {
 	if email.Valid {
 		item.UserEmail = email.String
 	}
+	item.SubjectType = EntityPermissionSubjectUser
+	item.SubjectID = strings.TrimSpace(item.UserID)
+	item.SubjectName = strings.TrimSpace(item.UserDisplayName)
+	if item.SubjectName == "" {
+		item.SubjectName = strings.TrimSpace(item.UserEmail)
+	}
 	return item, err
+}
+
+func appendLogicGateRaciAssignment(assignmentsByGate map[string][]domain.LogicGateRaciAssignment, item domain.LogicGateRaciAssignment) {
+	subjectType, subjectID := logicGateRaciAssignmentSubject(item)
+	if item.LogicGateID == "" || item.Role == "" || subjectID == "" {
+		return
+	}
+	item.SubjectType = subjectType
+	item.SubjectID = subjectID
+	for _, existing := range assignmentsByGate[item.LogicGateID] {
+		existingSubjectType, existingSubjectID := logicGateRaciAssignmentSubject(existing)
+		if existing.Role == item.Role && existingSubjectType == subjectType && existingSubjectID == subjectID {
+			return
+		}
+	}
+	assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
 }
 
 func (r *PostgresRepo) listLogicGateRaciAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRaciAssignment, error) {
 	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
 	if len(logicGateIDs) == 0 {
 		return assignmentsByGate, nil
+	}
+	genericRows, err := r.db.QueryContext(ctx, `
+select
+  assignment.company_id::text,
+  assignment.resource_id::text,
+  assignment.role,
+  assignment.subject_type,
+  assignment.subject_id::text,
+  coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
+  coalesce(app_user.user_id::text, ''),
+  nullif(app_user.display_name, ''),
+  nullif(app_user.email, ''),
+  assignment.created_timestamp
+from resource_raci_assignments assignment
+left join company_memberships membership
+  on assignment.subject_type='user'
+ and membership.company_id=assignment.company_id
+ and membership.user_id=assignment.subject_id
+left join users app_user
+  on assignment.subject_type='user'
+ and app_user.user_id=assignment.subject_id
+left join company_user_groups user_group
+  on assignment.subject_type='group'
+ and user_group.company_id=assignment.company_id
+ and user_group.group_id=assignment.subject_id
+where assignment.company_id=$1::uuid
+  and assignment.resource_type=$3
+  and assignment.resource_id=any(string_to_array($2, ',')::uuid[])
+  and (
+    (assignment.subject_type='user' and membership.user_id is not null)
+    or (assignment.subject_type='group' and user_group.group_id is not null)
+  )
+order by assignment.resource_id::text asc,
+  case assignment.role
+    when 'responsible' then 1
+    when 'accountable' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  assignment.subject_type asc,
+  lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.subject_id::text)) asc,
+  assignment.subject_id::text asc`,
+		companyID, strings.Join(logicGateIDs, ","), EntityTypeLogicGate,
+	)
+	if err != nil {
+		if !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+			return nil, err
+		}
+	} else {
+		defer genericRows.Close()
+		for genericRows.Next() {
+			var item domain.LogicGateRaciAssignment
+			var subjectName sql.NullString
+			var displayName sql.NullString
+			var email sql.NullString
+			if err := genericRows.Scan(
+				&item.CompanyID,
+				&item.LogicGateID,
+				&item.Role,
+				&item.SubjectType,
+				&item.SubjectID,
+				&subjectName,
+				&item.UserID,
+				&displayName,
+				&email,
+				&item.CreatedTimestamp,
+			); err != nil {
+				return nil, err
+			}
+			if subjectName.Valid {
+				item.SubjectName = subjectName.String
+			}
+			if displayName.Valid {
+				item.UserDisplayName = displayName.String
+			}
+			if email.Valid {
+				item.UserEmail = email.String
+			}
+			if item.SubjectType == EntityPermissionSubjectUser && item.UserID == "" {
+				item.UserID = item.SubjectID
+			}
+			appendLogicGateRaciAssignment(assignmentsByGate, item)
+		}
+		if err := genericRows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
@@ -114,9 +223,15 @@ order by assignment.logic_gate_id::text asc,
 		if err != nil {
 			return nil, err
 		}
-		assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
+		appendLogicGateRaciAssignment(assignmentsByGate, item)
 	}
-	return assignmentsByGate, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for logicGateID := range assignmentsByGate {
+		sortLogicGateRaciAssignments(assignmentsByGate[logicGateID])
+	}
+	return assignmentsByGate, nil
 }
 
 func (r *PostgresRepo) attachLogicGateRaciAssignments(ctx context.Context, companyID string, gates []domain.LogicGate) ([]domain.LogicGate, error) {
@@ -626,37 +741,81 @@ func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignment
 	} else if err != nil {
 		return nil, err
 	}
-	type normalizedAssignment struct {
-		role   string
-		userID string
-	}
-	normalized := make([]normalizedAssignment, 0, len(input.Assignments))
+	normalized := make([]normalizedLogicGateRaciCommandAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
-		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
-		userID := strings.TrimSpace(assignment.UserID)
-		if !ok || userID == "" {
-			return nil, ErrInvalid
+		normalizedAssignment, err := normalizeLogicGateRaciAssignmentInput(assignment)
+		if err != nil {
+			return nil, err
 		}
-		key := role + ":" + userID
+		key := normalizedAssignment.role + ":" + normalizedAssignment.subjectType + ":" + normalizedAssignment.subjectID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 
-		var userInCompany bool
-		if err := tx.QueryRowContext(ctx, `
+		switch normalizedAssignment.subjectType {
+		case EntityPermissionSubjectUser:
+			var userInCompany bool
+			if err := tx.QueryRowContext(ctx, `
 select exists(
   select 1
   from company_memberships
   where company_id=$1 and user_id::text=$2
-)`, companyID, userID).Scan(&userInCompany); err != nil {
+)`, companyID, normalizedAssignment.subjectID).Scan(&userInCompany); err != nil {
+				return nil, err
+			}
+			if !userInCompany {
+				return nil, ErrAssigneeNotInCompany
+			}
+		case EntityPermissionSubjectGroup:
+			var groupInCompany bool
+			if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_user_groups
+  where company_id=$1 and group_id::text=$2
+)`, companyID, normalizedAssignment.subjectID).Scan(&groupInCompany); err != nil {
+				return nil, err
+			}
+			if !groupInCompany {
+				return nil, ErrAssigneeNotInCompany
+			}
+		default:
+			return nil, ErrInvalid
+		}
+		normalized = append(normalized, normalizedAssignment)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_raci_assignments
+where company_id=$1 and resource_type=$2 and resource_id=$3`,
+		companyID, EntityTypeLogicGate, logicGateID,
+	); err != nil {
+		if isPostgresUndefinedTable(err, "resource_raci_assignments") {
+			return nil, ErrRaciStorageUnavailable
+		}
+		return nil, err
+	}
+	for _, assignment := range normalized {
+		if _, err := tx.ExecContext(ctx, `
+insert into resource_raci_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  subject_type,
+  subject_id,
+  created_timestamp
+) values ($1, $2, $3, $4, $5, $6, now())
+on conflict (company_id, resource_type, resource_id, role, subject_type, subject_id) do nothing`,
+			companyID, EntityTypeLogicGate, logicGateID, assignment.role, assignment.subjectType, assignment.subjectID,
+		); err != nil {
+			if isPostgresUndefinedTable(err, "resource_raci_assignments") {
+				return nil, ErrRaciStorageUnavailable
+			}
 			return nil, err
 		}
-		if !userInCompany {
-			return nil, ErrAssigneeNotInCompany
-		}
-		normalized = append(normalized, normalizedAssignment{role: role, userID: userID})
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -669,6 +828,9 @@ select exists(
 		return nil, err
 	}
 	for _, assignment := range normalized {
+		if assignment.subjectType != EntityPermissionSubjectUser {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `
 insert into logic_gate_raci_assignments (
   company_id,
@@ -678,7 +840,7 @@ insert into logic_gate_raci_assignments (
   created_timestamp
 ) values ($1, $2, $3, $4, now())
 on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
-			companyID, logicGateID, assignment.role, assignment.userID,
+			companyID, logicGateID, assignment.role, assignment.subjectID,
 		); err != nil {
 			if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
 				return nil, ErrRaciStorageUnavailable

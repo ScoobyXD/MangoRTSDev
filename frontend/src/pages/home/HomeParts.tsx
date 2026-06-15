@@ -1686,7 +1686,7 @@ function sharedInboxRaciAssignmentLabel(
   if ((assignment.subject_type ?? "user") === "group") {
     const groupID = assignment.subject_id?.trim() ?? "";
     const group = groupByID.get(groupID);
-    return assignment.subject_name?.trim() || (group ? companyGroupLabel(group) : groupID || "Department");
+    return assignment.subject_name?.trim() || (group ? companyGroupLabel(group) : groupID || "Group");
   }
   const user = userByID.get(assignment.user_id);
   return assignment.user_display_name?.trim() || assignment.user_email?.trim() || (user ? companyUserLabel(user) : assignment.user_id);
@@ -1767,8 +1767,8 @@ export function SharedInboxRaciSettingsModal({
       })
       .catch((error) => {
         if (cancelled) return;
-        console.error("Failed to load shared inbox RACI departments", error);
-        setLoadError("Departments could not be loaded.");
+        console.error("Failed to load shared inbox RACI groups", error);
+        setLoadError("User groups could not be loaded.");
       })
       .finally(() => {
         if (!cancelled) setLoadingGroups(false);
@@ -1880,7 +1880,7 @@ export function SharedInboxRaciSettingsModal({
                       disabled={busy || loadingGroups || selectableGroups.length === 0}
                       onChange={(event) => updateGroupDraft(role, event.target.value)}
                     >
-                      <option value="">{selectableGroups.length === 0 ? "All departments added" : "Add department"}</option>
+                      <option value="">{selectableGroups.length === 0 ? "All groups added" : "Add group"}</option>
                       {groupOptions(selectableGroupIDs)}
                     </select>
                     <button
