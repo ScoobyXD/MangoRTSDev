@@ -76,7 +76,7 @@ import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResize
 import { CustomMatrixView } from "./CustomMatrixView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
-import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, MESSAGE_POLL_REFRESH_INTERVAL_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
@@ -326,6 +326,10 @@ export function HomePage({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [preserveInitialOAuthError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return Boolean(params.get("nylas_error")?.trim());
+  });
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -731,9 +735,9 @@ export function HomePage({
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
-  const loadStatus = useCallback(async (): Promise<CommunicationsStatus | null> => {
+  const loadStatus = useCallback(async (options: { clearError?: boolean } = {}): Promise<CommunicationsStatus | null> => {
     setLoadingStatus(true);
-    setError("");
+    if (options.clearError !== false) setError("");
     try {
       const next = await fetchCommunicationsStatus();
       setStatus(next);
@@ -1284,7 +1288,7 @@ export function HomePage({
     }
     queueArchiveMessages([messageID]);
   }, [queueArchiveMessages, removeMessagesFromVisibleMailList, removePendingAutoArchiveMessages]);
-  useEffect(() => { void loadStatus(); }, [loadStatus]);
+  useEffect(() => { void loadStatus({ clearError: !preserveInitialOAuthError }); }, [loadStatus, preserveInitialOAuthError]);
   useEffect(() => { if (status?.connected && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeViewID, loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { if (status?.connected || isInboxMatrixView) void loadCompanyUsers(); }, [isInboxMatrixView, loadCompanyUsers, status?.connected]);
@@ -1301,7 +1305,7 @@ export function HomePage({
     if (!isWorkspacePanelHomeViewID(activeViewID)) return;
     void loadLogicGatePanel();
   }, [activeViewID, loadLogicGatePanel]);
-  useEffect(() => { void loadMessages(); }, [loadMessages]);
+  useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
   }, [companyID]);
@@ -1356,7 +1360,7 @@ export function HomePage({
         const trigger = envelope.trigger?.trim().toLowerCase() ?? "";
         const messageID = envelope.message_id?.trim() ?? "";
         if (trigger.startsWith("triage.")) {
-          if (activeViewIDRef.current === "my-triage") void loadMessages();
+          if (activeViewIDRef.current === "my-triage") void loadMessages({ refresh: true });
           return;
         }
         if (trigger.startsWith("folder.")) {
@@ -1364,12 +1368,12 @@ export function HomePage({
           return;
         }
         if (!trigger.startsWith("message.")) return;
-        if (trigger.startsWith("message.opened")) {
+        if (trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted") || trigger.startsWith("message.opened")) {
           invalidateCommunicationsCache({ messagePages: true, messages: true });
         }
         if (!messageID) {
           if (trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted")) {
-            scheduleMessageListRefresh();
+            scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
           }
           return;
         }
@@ -1399,7 +1403,12 @@ export function HomePage({
           unread: true,
           starred: false,
         }, params);
-        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) return;
+        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) {
+          if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) {
+            scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
+          }
+          return;
+        }
         void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
           .then((message) => {
             primeEmailMessageCache(message);
@@ -1415,6 +1424,9 @@ export function HomePage({
             ) {
               scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS);
             }
+            if (trigger.startsWith("message.created")) {
+              scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
+            }
           })
           .catch((messageError) => {
             if (isEmailAccessExpiredError(messageError)) {
@@ -1422,7 +1434,7 @@ export function HomePage({
               return;
             }
             if (trigger.startsWith("message.deleted")) removeEmailMessageFromCache(messageID);
-            if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) scheduleMessageListRefresh();
+            if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
           });
       },
       onError() {
@@ -1437,6 +1449,21 @@ export function HomePage({
       }
     };
   }, [apiBase, companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
+  useEffect(() => {
+    if (!status?.connected) return undefined;
+    const refreshVisibleMailbox = () => {
+      if (document.visibilityState === "hidden") return;
+      scheduleMessageListRefresh(0, { refresh: true });
+    };
+    const intervalID = window.setInterval(refreshVisibleMailbox, MESSAGE_POLL_REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", refreshVisibleMailbox);
+    document.addEventListener("visibilitychange", refreshVisibleMailbox);
+    return () => {
+      window.clearInterval(intervalID);
+      window.removeEventListener("focus", refreshVisibleMailbox);
+      document.removeEventListener("visibilitychange", refreshVisibleMailbox);
+    };
+  }, [scheduleMessageListRefresh, status?.connected]);
   useEffect(() => {
     if (!companyID || !currentUserID) return undefined;
     const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {
@@ -3729,6 +3756,7 @@ export function HomePage({
             archiveAvailable={canMutateCurrentMailView}
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
+            companyID={companyID}
             compose={compose}
             draftCount={mailDrafts.length}
             emailSignature={emailSignature}

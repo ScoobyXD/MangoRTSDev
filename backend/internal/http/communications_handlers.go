@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"mime"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -349,7 +350,12 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	if len(parts) == 2 {
 		action = strings.TrimSpace(parts[1])
 	}
-	if messageID == "" || len(parts) > 2 || (len(parts) == 2 && action != "archive" && action != "unarchive") {
+	attachmentID := ""
+	if len(parts) == 3 && strings.TrimSpace(parts[1]) == "attachments" {
+		action = "attachment"
+		attachmentID = strings.TrimSpace(parts[2])
+	}
+	if messageID == "" || len(parts) > 3 || (len(parts) == 2 && action != "archive" && action != "unarchive") || (len(parts) == 3 && action != "attachment") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -401,6 +407,14 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			return
 		}
 		s.unarchiveCommunicationsMessage(w, r, connection, messageID)
+		return
+	}
+	if action == "attachment" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		s.downloadCommunicationsAttachment(w, r, connection, messageID, attachmentID)
 		return
 	}
 
@@ -466,6 +480,51 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID, attachmentID string) {
+	messageID = strings.TrimSpace(messageID)
+	attachmentID = strings.TrimSpace(attachmentID)
+	if messageID == "" || attachmentID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	message, err := s.communicationsMessage(r.Context(), connection, messageID)
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+	attachment, ok := findNylasAttachmentByID(message.Attachments, attachmentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "email_attachment_not_found")
+		return
+	}
+
+	var content []byte
+	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		content, err = s.nylasClient.DownloadAttachment(ctx, connection.GrantID, messageID, attachmentID)
+		return err
+	})
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(attachment.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	filename := strings.TrimSpace(attachment.Filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
@@ -996,12 +1055,13 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 }
 
 const (
-	communicationsNylasDefaultMessageLimit = 20
-	communicationsNylasMaxMessageLimit     = 20
-	communicationsNylasMinRequestInterval  = 200 * time.Millisecond
-	communicationsNylasMaxInFlightPerGrant = 2
-	communicationsArchiveBatchConcurrency  = 4
-	communicationsAttachmentMaxTotalBytes  = 24_000_000
+	communicationsNylasDefaultMessageLimit   = 20
+	communicationsNylasMaxMessageLimit       = 20
+	communicationsNylasMinRequestInterval    = 200 * time.Millisecond
+	communicationsNylasMaxInFlightPerGrant   = 2
+	communicationsArchiveBatchConcurrency    = 4
+	communicationsAttachmentMaxTotalBytes    = 24_000_000
+	communicationsAttachmentDownloadMaxBytes = 32_000_000
 )
 
 func communicationsConnectionCacheScope(connection domain.UserEmailConnection) string {
@@ -1015,6 +1075,19 @@ func communicationsConnectionCacheScope(connection domain.UserEmailConnection) s
 		return "provider:" + provider
 	}
 	return "default"
+}
+
+func findNylasAttachmentByID(attachments []NylasAttachment, attachmentID string) (NylasAttachment, bool) {
+	attachmentID = strings.TrimSpace(attachmentID)
+	if attachmentID == "" {
+		return NylasAttachment{}, false
+	}
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.ID) == attachmentID {
+			return attachment, true
+		}
+	}
+	return NylasAttachment{}, false
 }
 
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {

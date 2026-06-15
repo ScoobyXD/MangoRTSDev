@@ -20,28 +20,33 @@ import (
 )
 
 type fakeNylasClient struct {
-	mu                 sync.Mutex
-	grant              NylasGrant
-	deletedGrants      []string
-	folders            []NylasFolder
-	messages           []NylasMessage
-	messagesByGrantID  map[string][]NylasMessage
-	messagesByID       map[string]NylasMessage
-	thread             NylasThread
-	message            NylasMessage
-	sent               NylasSendMessageRequest
-	update             NylasMessageUpdate
-	updateCalls        []fakeNylasUpdateCall
-	updateErrByID      map[string]error
-	lastQuery          NylasMessageQuery
-	lastMessageGrantID string
-	lastFolderGrantID  string
-	lastSendGrantID    string
-	folderCalls        int
-	messageCalls       int
-	detailCalls        int
-	listErr            error
-	exchangeErr        error
+	mu                       sync.Mutex
+	grant                    NylasGrant
+	deletedGrants            []string
+	folders                  []NylasFolder
+	messages                 []NylasMessage
+	messagesByGrantID        map[string][]NylasMessage
+	messagesByID             map[string]NylasMessage
+	thread                   NylasThread
+	message                  NylasMessage
+	sent                     NylasSendMessageRequest
+	update                   NylasMessageUpdate
+	updateCalls              []fakeNylasUpdateCall
+	updateErrByID            map[string]error
+	downloadContent          []byte
+	downloadErr              error
+	lastQuery                NylasMessageQuery
+	lastMessageGrantID       string
+	lastDownloadGrantID      string
+	lastDownloadMessageID    string
+	lastDownloadAttachmentID string
+	lastFolderGrantID        string
+	lastSendGrantID          string
+	folderCalls              int
+	messageCalls             int
+	detailCalls              int
+	listErr                  error
+	exchangeErr              error
 }
 
 type fakeNylasUpdateCall struct {
@@ -110,6 +115,18 @@ func (f *fakeNylasClient) GetMessage(_ context.Context, _, messageID string) (Ny
 		}
 	}
 	return f.message, nil
+}
+
+func (f *fakeNylasClient) DownloadAttachment(_ context.Context, grantID, messageID, attachmentID string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastDownloadGrantID = grantID
+	f.lastDownloadMessageID = messageID
+	f.lastDownloadAttachmentID = attachmentID
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
+	return append([]byte(nil), f.downloadContent...), nil
 }
 
 func (f *fakeNylasClient) UpdateMessage(_ context.Context, _, messageID string, update NylasMessageUpdate) (NylasMessage, error) {
@@ -425,9 +442,10 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{
-		folders:  []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
-		messages: []NylasMessage{{ID: "message-1", Subject: "Hello", Unread: true}},
-		message:  NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true},
+		folders:         []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
+		messages:        []NylasMessage{{ID: "message-1", Subject: "Hello", Unread: true, Attachments: []NylasAttachment{{ID: "attachment-1", Filename: "photo.jpg", ContentType: "image/jpeg", Size: 12}}}},
+		message:         NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true, Attachments: []NylasAttachment{{ID: "attachment-1", Filename: "photo.jpg", ContentType: "image/jpeg", Size: 12}}},
+		downloadContent: []byte("photo-bytes"),
 	}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
@@ -440,6 +458,19 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?limit=5&unread=true", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
+	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/attachment-1", nil)
+	attachmentReq.Header.Set("Authorization", token)
+	attachmentRec := httptest.NewRecorder()
+	handler.ServeHTTP(attachmentRec, attachmentReq)
+	if attachmentRec.Code != http.StatusOK {
+		t.Fatalf("attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
+	}
+	if attachmentRec.Header().Get("Content-Type") != "image/jpeg" || attachmentRec.Body.String() != "photo-bytes" {
+		t.Fatalf("attachment content-type=%q body=%q, want image/jpeg photo-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
+	}
+	if nylas.lastDownloadGrantID != "grant-1" || nylas.lastDownloadMessageID != "message-1" || nylas.lastDownloadAttachmentID != "attachment-1" {
+		t.Fatalf("download scope grant=%q message=%q attachment=%q", nylas.lastDownloadGrantID, nylas.lastDownloadMessageID, nylas.lastDownloadAttachmentID)
+	}
 	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", `{"unread":false,"folders":["archive"]}`, token, http.StatusOK)
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
@@ -900,16 +931,29 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 
-	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
+	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.opened", MessageID: "message-1"})
 
 	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message webhook invalidated folders; want folder cache preserved")
 	}
 	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message webhook invalidated message page; want list cache preserved")
+		t.Fatal("message.opened invalidated message page; want list cache preserved")
 	}
 	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message webhook preserved detail; want changed message detail invalidated")
+		t.Fatal("message.opened preserved detail; want changed message detail invalidated")
+	}
+
+	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
+	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message.updated invalidated folders; want folder cache preserved")
+	}
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.updated preserved message page; want list cache invalidated")
+	}
+	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message.updated preserved detail; want changed message detail invalidated")
 	}
 
 	cache = newCommunicationsCache()

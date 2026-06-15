@@ -5,7 +5,7 @@ import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
-import { parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRaciRole, type CommunicationsSharedInboxRaciSubjectType, type CompanyUser, type EmailAddress, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRaciRole, type CommunicationsSharedInboxRaciSubjectType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
@@ -18,7 +18,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -4798,6 +4798,120 @@ function formatComposeAttachmentSize(size: number): string {
   return `${size} B`;
 }
 
+function emailAttachmentFileName(attachment: EmailAttachment): string {
+  return attachment.filename?.trim() || "attachment";
+}
+
+function emailAttachmentContentType(attachment: EmailAttachment): string {
+  return attachment.content_type?.trim() || "application/octet-stream";
+}
+
+function emailAttachmentIsImage(attachment: EmailAttachment): boolean {
+  return emailAttachmentContentType(attachment).toLowerCase().startsWith("image/");
+}
+
+function emailAttachmentDataURL(attachment: EmailAttachment): string {
+  const content = attachment.content?.trim() ?? "";
+  if (!content) return "";
+  return `data:${emailAttachmentContentType(attachment)};base64,${content}`;
+}
+
+function downloadURL(url: string, filename: string, revoke = false): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  if (revoke) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }: {
+  messageID: string;
+  attachment: EmailAttachment;
+  companyID: string;
+  sharedInboxID?: string;
+}) {
+  const [previewURL, setPreviewURL] = React.useState("");
+  const [loadingPreview, setLoadingPreview] = React.useState(false);
+  const [previewFailed, setPreviewFailed] = React.useState(false);
+  const attachmentID = attachment.id?.trim() ?? "";
+  const filename = emailAttachmentFileName(attachment);
+  const isImage = emailAttachmentIsImage(attachment);
+  const canDownload = !!attachmentID || !!attachment.content?.trim();
+
+  React.useEffect(() => {
+    if (!isImage) {
+      setPreviewURL("");
+      setLoadingPreview(false);
+      setPreviewFailed(false);
+      return undefined;
+    }
+    const inlineURL = emailAttachmentDataURL(attachment);
+    if (inlineURL) {
+      setPreviewURL(inlineURL);
+      setLoadingPreview(false);
+      setPreviewFailed(false);
+      return undefined;
+    }
+    if (!attachmentID) {
+      setPreviewURL("");
+      setLoadingPreview(false);
+      setPreviewFailed(true);
+      return undefined;
+    }
+    let cancelled = false;
+    let objectURL = "";
+    setPreviewURL("");
+    setLoadingPreview(true);
+    setPreviewFailed(false);
+    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
+      .then((blob) => {
+        if (cancelled) return;
+        objectURL = URL.createObjectURL(blob);
+        setPreviewURL(objectURL);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPreview(false);
+      });
+    return () => {
+      cancelled = true;
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [attachment, attachmentID, companyID, isImage, messageID, sharedInboxID]);
+
+  const handleDownload = React.useCallback(() => {
+    const inlineURL = emailAttachmentDataURL(attachment);
+    if (inlineURL) {
+      downloadURL(inlineURL, filename);
+      return;
+    }
+    if (!attachmentID) return;
+    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
+      .then((blob) => {
+        const objectURL = URL.createObjectURL(blob);
+        downloadURL(objectURL, filename, true);
+      });
+  }, [attachment, attachmentID, companyID, filename, messageID, sharedInboxID]);
+
+  return (
+    <div style={mailAttachmentTileStyle}>
+      {isImage && previewURL ? (
+        <img src={previewURL} alt={filename} style={mailAttachmentThumbnailStyle} />
+      ) : (
+        <div style={mailAttachmentFileIconStyle}>{loadingPreview ? "Loading" : previewFailed ? "Preview unavailable" : emailAttachmentContentType(attachment).split("/")[1]?.toUpperCase() || "FILE"}</div>
+      )}
+      <div style={mailAttachmentNameStyle} title={filename}>{filename}</div>
+      <div style={mailAttachmentMetaStyle}>{formatComposeAttachmentSize(attachment.size ?? 0) || emailAttachmentContentType(attachment)}</div>
+      <button type="button" style={mailPanelSmallButtonStyle} disabled={!canDownload} onClick={handleDownload}>Download</button>
+    </div>
+  );
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -5318,8 +5432,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   );
 }
 
-export function MessageDetail({ message, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
+  companyID: string;
+  sharedInboxID?: string;
   loading: boolean;
   archiveAvailable: boolean;
   archiveLabel: string;
@@ -5334,6 +5450,7 @@ export function MessageDetail({ message, loading, archiveAvailable, archiveLabel
   const messageDate = formatMessageDate(message.date);
   const localReplies = message.local_replies ?? [];
   const hasLocalReplies = localReplies.length > 0;
+  const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
   const bodyFrameStyle = hasLocalReplies ? { ...iframeStyle, minHeight: 320, height: 320 } : iframeStyle;
   const replyFrameStyle = { ...iframeStyle, minHeight: 220, height: 220, boxShadow: "none" };
   return (
@@ -5366,6 +5483,24 @@ export function MessageDetail({ message, loading, archiveAvailable, archiveLabel
         alignContent: "start",
       } : { minHeight: 0 }}>
         <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
+        {attachments.length > 0 && (
+          <div style={mailAttachmentSectionStyle}>
+            <div style={mailAttachmentHeaderStyle}>
+              <span>{attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}</span>
+            </div>
+            <div style={mailAttachmentGridStyle}>
+              {attachments.map((attachment, index) => (
+                <EmailAttachmentTile
+                  key={attachment.id?.trim() || `${attachment.filename}:${index}`}
+                  messageID={message.id}
+                  attachment={attachment}
+                  companyID={companyID}
+                  sharedInboxID={sharedInboxID}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         {localReplies.map((reply) => (
           <div key={reply.id} style={{
             display: "grid",

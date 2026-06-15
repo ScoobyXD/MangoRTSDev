@@ -350,7 +350,9 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 	connectionAccountEmail := `''::text`
 	memberUpdatedTimestamp := `greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp))`
 	if hasEmailConnections {
-		connectionJoin = `left join user_email_connections connection on connection.user_id = u.user_id`
+		connectionJoin = `left join user_email_connections connection
+		  on connection.user_id = u.user_id
+		 and connection.account_email = lower(btrim(u.email))`
 		connectionStatus = `case
 		       when connection.provider = 'google' and connection.status = 'connected' then 'connected'
 		       when connection.provider = 'google' and connection.status = 'reauth_required' then 'reauth_required'
