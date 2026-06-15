@@ -19,7 +19,12 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	err := r.db.QueryRow(
 		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
 		 from user_email_connections
-		 where user_id = $1`,
+		 where user_id = $1
+		   and account_email = (
+		     select lower(btrim(email))
+		     from users
+		     where user_id = $1
+		   )`,
 		userID,
 	).Scan(
 		&connection.UserID,
@@ -113,9 +118,8 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	err := r.db.QueryRow(
 		`insert into user_email_connections (user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4, $5, now(), now())
-		 on conflict (user_id) do update set
+		 on conflict (user_id, account_email) do update set
 		   provider = excluded.provider,
-		   account_email = excluded.account_email,
 		   grant_id = excluded.grant_id,
 		   status = excluded.status,
 		   updated_timestamp = now()
@@ -137,10 +141,11 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	return connection, err
 }
 
-func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error) {
+func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error) {
 	userID = strings.TrimSpace(userID)
+	accountEmail = normalizeEmail(accountEmail)
 	status = normalizeEmailConnectionStatus(status)
-	if userID == "" || status == "" {
+	if userID == "" || accountEmail == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 
@@ -150,9 +155,11 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, status string) (d
 		 set status = $2,
 		     updated_timestamp = now()
 		 where user_id = $1
+		   and account_email = $3
 		 returning user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp`,
 		userID,
 		status,
+		accountEmail,
 	).Scan(
 		&connection.UserID,
 		&connection.Provider,
@@ -173,7 +180,14 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 	if userID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.Exec(`delete from user_email_connections where user_id = $1`, userID)
+	result, err := r.db.Exec(
+		`delete from user_email_connections connection
+		 using users user_row
+		 where connection.user_id = $1
+		   and user_row.user_id = connection.user_id
+		   and connection.account_email = lower(btrim(user_row.email))`,
+		userID,
+	)
 	if err != nil {
 		return err
 	}

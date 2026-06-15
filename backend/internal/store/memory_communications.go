@@ -15,7 +15,11 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	connection, ok := r.emailConnections[userID]
+	user, ok := r.userByIDLocked(userID)
+	if !ok {
+		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	connection, ok := r.emailConnections[emailConnectionKey(userID, user.Email)]
 	if !ok {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
@@ -87,7 +91,7 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	}
 
 	now := time.Now().UTC()
-	connection := r.emailConnections[userID]
+	connection := r.emailConnections[emailConnectionKey(userID, accountEmail)]
 	if connection.CreatedTimestamp.IsZero() {
 		connection.CreatedTimestamp = now
 	}
@@ -97,27 +101,28 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.GrantID = grantID
 	connection.Status = status
 	connection.UpdatedTimestamp = now
-	r.emailConnections[userID] = connection
+	r.emailConnections[emailConnectionKey(userID, accountEmail)] = connection
 	return connection, nil
 }
 
-func (r *MemoryRepo) UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error) {
+func (r *MemoryRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error) {
 	userID = strings.TrimSpace(userID)
+	accountEmail = normalizeEmail(accountEmail)
 	status = normalizeEmailConnectionStatus(status)
-	if userID == "" || status == "" {
+	if userID == "" || accountEmail == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	connection, ok := r.emailConnections[userID]
+	connection, ok := r.emailConnections[emailConnectionKey(userID, accountEmail)]
 	if !ok {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
 	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
-	r.emailConnections[userID] = connection
+	r.emailConnections[emailConnectionKey(userID, accountEmail)] = connection
 	return connection, nil
 }
 
@@ -130,10 +135,15 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.emailConnections[userID]; !ok {
+	user, ok := r.userByIDLocked(userID)
+	if !ok {
 		return ErrNotFound
 	}
-	delete(r.emailConnections, userID)
+	key := emailConnectionKey(userID, user.Email)
+	if _, ok := r.emailConnections[key]; !ok {
+		return ErrNotFound
+	}
+	delete(r.emailConnections, key)
 	return nil
 }
 
@@ -220,12 +230,21 @@ func (r *MemoryRepo) ListCommunicationsMessageReadStatuses(userID string, messag
 }
 
 func (r *MemoryRepo) userIDExistsLocked(userID string) bool {
+	_, ok := r.userByIDLocked(userID)
+	return ok
+}
+
+func (r *MemoryRepo) userByIDLocked(userID string) (domain.User, bool) {
 	for _, user := range r.users {
 		if user.UserID == userID {
-			return true
+			return user, true
 		}
 	}
-	return false
+	return domain.User{}, false
+}
+
+func emailConnectionKey(userID, accountEmail string) string {
+	return strings.TrimSpace(userID) + "\x1f" + normalizeEmail(accountEmail)
 }
 
 func normalizeEmailProvider(provider string) string {

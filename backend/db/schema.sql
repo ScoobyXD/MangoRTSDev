@@ -156,12 +156,15 @@ create table if not exists user_email_connections (
   constraint user_email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
   constraint user_email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
   constraint user_email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
-  primary key (user_id),
+  primary key (user_id, account_email),
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
 create unique index if not exists idx_user_email_connections_grant_id
   on user_email_connections(grant_id);
+
+create index if not exists idx_user_email_connections_user_updated
+  on user_email_connections(user_id, updated_timestamp desc);
 
 create table if not exists communications_message_read_statuses (
   user_id uuid not null,

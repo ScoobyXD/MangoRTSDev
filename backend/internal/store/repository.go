@@ -90,7 +90,7 @@ type IdentityRepository interface {
 	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error)
 	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
-	UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error)
+	UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error)
 	DeleteUserEmailConnection(userID string) error
 }
 

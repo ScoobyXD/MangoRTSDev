@@ -343,6 +343,60 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 	}
 }
 
+func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject", "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:   user.UserID,
+		Email:    "shared@example.com",
+		Provider: "google",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-grant", Email: "shared@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	personal, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal.AccountEmail != user.Email || personal.GrantID != "personal-grant" {
+		t.Fatalf("personal connection = %+v, want unchanged personal grant", personal)
+	}
+	shared, err := repo.GetUserEmailConnectionByGrantID("shared-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.UserID != user.UserID || shared.AccountEmail != "shared@example.com" {
+		t.Fatalf("shared connection = %+v, want separate shared account grant", shared)
+	}
+}
+
 func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	t.Parallel()
 
@@ -616,12 +670,17 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusCreated)
+	largeContent := strings.Repeat("QUJD", 280000)
+	largeBody := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body","attachments":[{"filename":"shared-large.txt","content":"` + largeContent + `"}]}`
+	assertJSONStatus(t, handler, http.MethodPost, path, largeBody, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-support" {
 		t.Fatalf("send grant = %q, want shared inbox grant", nylas.lastSendGrantID)
 	}
 	if nylas.sent.To[0].Email != "customer@example.com" || nylas.sent.Subject != "Shared hello" {
 		t.Fatalf("sent = %+v, want shared inbox send payload", nylas.sent)
+	}
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "shared-large.txt" {
+		t.Fatalf("attachments = %+v, want shared inbox attachment", nylas.sent.Attachments)
 	}
 }
 
