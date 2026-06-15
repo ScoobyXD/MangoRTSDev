@@ -219,6 +219,95 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	}
 }
 
+func TestMemoryVisibleCompanyExplorerFoldersUseFolderPermissions(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "22222222-2222-4222-8222-222222222305"
+	repo.EnsureCompany(companyID, "Visible Folder Permissions Co")
+
+	viewer := mustCreateInboxReadCompanyUser(t, repo, "visible-folder-permissions-viewer", companyID, "visible-folder-permissions-viewer@example.com", "Visible Folder Permissions Viewer")
+	visibleNodeFolder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Visible node folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder visible node: %v", err)
+	}
+	hiddenNodeFolder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Hidden node folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder hidden node: %v", err)
+	}
+	visibleChildUnderHiddenNodeFolder, err := repo.CreateCompanyExplorerFolder(companyID, hiddenNodeFolder.FolderID, "node", "Visible child under hidden node folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder visible child under hidden node: %v", err)
+	}
+	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Responsible")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic parent: %v", err)
+	}
+	hiddenNestedLogicFolder, err := repo.CreateCompanyExplorerFolder(companyID, logicParent.FolderID, "logic_gate", "Hidden nested logic folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder hidden nested logic: %v", err)
+	}
+
+	visibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Visible folder node")
+	hiddenFolderNode := mustCreateVisibleQueryNode(t, repo, companyID, "Hidden folder node")
+	visibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Visible parent gate")
+	hiddenNestedGate := mustCreateVisibleQueryGate(t, repo, companyID, "Hidden nested gate")
+
+	mustAssignVisibleQueryFolderItem(t, repo, companyID, visibleNodeFolder.FolderID, "node", visibleNode.NodeID)
+	mustAssignVisibleQueryFolderItem(t, repo, companyID, hiddenNodeFolder.FolderID, "node", hiddenFolderNode.NodeID)
+	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicParent.FolderID, "logic_gate", visibleGate.LogicGateID)
+	mustAssignVisibleQueryFolderItem(t, repo, companyID, hiddenNestedLogicFolder.FolderID, "logic_gate", hiddenNestedGate.LogicGateID)
+
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenFolderNode.NodeID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenNestedGate.LogicGateID, viewer.UserID, EntityPermissionView)
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeCompanyExplorerFolder, hiddenNodeFolder.FolderID, ResourceDefaultAccessNoAccess)
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeCompanyExplorerFolder, hiddenNestedLogicFolder.FolderID, ResourceDefaultAccessNoAccess)
+
+	folders, err := repo.ListVisibleCompanyExplorerFolders(companyID, "", viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerFolders: %v", err)
+	}
+	assertVisibleQueryFoldersContain(t, folders, visibleNodeFolder.FolderID, logicParent.FolderID)
+	assertVisibleQueryFoldersDoNotContain(t, folders, hiddenNodeFolder.FolderID, visibleChildUnderHiddenNodeFolder.FolderID, hiddenNestedLogicFolder.FolderID)
+
+	folderItems, err := repo.ListVisibleCompanyExplorerFolderItems(companyID, "", "", viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerFolderItems: %v", err)
+	}
+	assertVisibleQueryFolderItemIDs(t, folderItems, "node", visibleNode.NodeID, "logic_gate", visibleGate.LogicGateID)
+	assertVisibleQueryFolderItemsDoNotContain(t, folderItems, "node", hiddenFolderNode.NodeID, "logic_gate", hiddenNestedGate.LogicGateID)
+
+	hiddenNodeSubtreeItems, err := repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, hiddenNodeFolder.FolderID, "node", viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerFolderItemsInFolderSubtree hidden node: %v", err)
+	}
+	if len(hiddenNodeSubtreeItems) != 0 {
+		t.Fatalf("hidden node folder subtree items = %+v, want none", hiddenNodeSubtreeItems)
+	}
+	hiddenNodeSubtree, err := repo.ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, hiddenNodeFolder.FolderID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerNodeSummariesInFolderSubtree hidden node: %v", err)
+	}
+	assertVisibleQueryNodesDoNotContain(t, hiddenNodeSubtree, hiddenFolderNode.NodeID)
+	if len(hiddenNodeSubtree) != 0 {
+		t.Fatalf("hidden node folder subtree nodes = %+v, want none", hiddenNodeSubtree)
+	}
+
+	logicParentSubtree, err := repo.ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, logicParent.FolderID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree parent: %v", err)
+	}
+	assertVisibleQueryLogicGateIDs(t, logicParentSubtree, visibleGate.LogicGateID)
+	assertVisibleQueryLogicGatesDoNotContain(t, logicParentSubtree, hiddenNestedGate.LogicGateID)
+	hiddenNestedSubtree, err := repo.ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, hiddenNestedLogicFolder.FolderID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree hidden nested: %v", err)
+	}
+	if len(hiddenNestedSubtree) != 0 {
+		t.Fatalf("hidden nested logic folder subtree gates = %+v, want none", hiddenNestedSubtree)
+	}
+}
+
 func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	nodeRaw, err := os.ReadFile("postgres_nodes.go")
 	if err != nil {
@@ -451,6 +540,19 @@ func assertVisibleQueryFolderIDs(t *testing.T, folders []domain.CompanyExplorerF
 	for _, wantID := range wantIDs {
 		if !got[wantID] {
 			t.Fatalf("visible folder IDs = %+v, want %s", got, wantID)
+		}
+	}
+}
+
+func assertVisibleQueryFoldersContain(t *testing.T, folders []domain.CompanyExplorerFolder, wantIDs ...string) {
+	t.Helper()
+	got := map[string]bool{}
+	for _, folder := range folders {
+		got[folder.FolderID] = true
+	}
+	for _, wantID := range wantIDs {
+		if !got[wantID] {
+			t.Fatalf("visible folder IDs = %+v, want to contain %s", got, wantID)
 		}
 	}
 }
