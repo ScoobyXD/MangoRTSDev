@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 
 export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "project" | "kanban";
 
@@ -11,6 +11,8 @@ export type ExplorerCreationContextRow = {
   kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  folderScopeType?: CompanyExplorerFolderScopeType;
+  folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
   syntheticKind?: string;
   raciRole?: string;
@@ -96,6 +98,8 @@ export type ExplorerSearchRow = ExplorerCreationContextRow & {
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
+  folderScopeType?: CompanyExplorerFolderScopeType;
+  folderScopeID?: string;
   nodeFolderParentID: string;
   logicGateFolderParentID: string;
   projectFolderParentID: string;
@@ -252,10 +256,14 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const logicGateFolderParentID = containingFolderID;
   const projectFolderParentID = containingFolderID;
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind ?? (row?.kind === "project" ? "project" : row?.kind === "node" ? "node" : "logic_gate");
+  const folderScopeType = row?.folderScopeType;
+  const folderScopeID = row?.folderScopeID;
 
   return {
     preferredFolderKind,
     preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : preferredFolderKind === "project" ? projectParentFolderID : nodeParentFolderID,
+    folderScopeType,
+    folderScopeID,
     nodeFolderParentID,
     logicGateFolderParentID,
     projectFolderParentID,

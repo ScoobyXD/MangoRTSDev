@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolderKind, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRaciRole } from "../logic-gate-map/shared.js";
 import type {
   ExplorerCreationTargets,
@@ -22,6 +22,8 @@ export type ExplorerTreeNode = {
   folderID?: string;
   parentFolderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  folderScopeType?: CompanyExplorerFolderScopeType;
+  folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
   folderLabel?: string;
   scopeLevel: number;
@@ -68,6 +70,8 @@ export type CompanyExplorerContextMenuState = {
   createNodeLogicGateID: string;
   createNodeLogicGateTreeID: string;
   createLogicGateRaciRole: LogicGateRaciRole | "";
+  createFolderScopeType?: CompanyExplorerFolderScopeType;
+  createFolderScopeID?: string;
   canCreateBothFolderTypes: boolean;
   canCreateFolder: boolean;
   canCreateNode: boolean;

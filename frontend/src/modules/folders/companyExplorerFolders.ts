@@ -4,6 +4,7 @@ import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 export type CompanyExplorerFolderKind = "node" | "logic_gate" | "project";
 export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
 export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "active_logic_gates" | "active_projects" | "history";
+export type CompanyExplorerFolderScopeType = "company" | "user" | "team";
 
 export type CompanyExplorerFolder = {
   company_id: string;
@@ -12,6 +13,8 @@ export type CompanyExplorerFolder = {
   folder_kind: CompanyExplorerFolderKind;
   system_key?: CompanyExplorerSystemFolderKey;
   name: string;
+  scope_type?: CompanyExplorerFolderScopeType;
+  scope_id?: string | null;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;

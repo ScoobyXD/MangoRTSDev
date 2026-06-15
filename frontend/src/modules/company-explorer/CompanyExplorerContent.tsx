@@ -5,7 +5,7 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_LOGI
 import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
-import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
+import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type RacioMatrixProjectionRow } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
@@ -593,7 +593,6 @@ function buildRaciCompanyExplorerRows(input: {
   customFolderProjects?: ProjectRecord[];
   includeCustomRootFolders?: boolean;
   customRootOwnerUserIDs?: Set<string>;
-  unclaimedCustomRootOwnerUserID?: string;
   treeIDPrefix?: string;
   depthOffset?: number;
 }): ExplorerTreeNode[] {
@@ -618,6 +617,11 @@ function buildRaciCompanyExplorerRows(input: {
   const customProjectByID = new Map(projectByID);
   for (const project of input.customFolderProjects ?? []) customProjectByID.set(project.project_id, project);
   const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
+  const folderScopeForFolder = (folder?: CompanyExplorerFolder) => ({
+    folderScopeType: folder?.scope_type,
+    folderScopeID: folder?.scope_id?.trim() || undefined,
+  });
+  const folderScopeForID = (folderID: string) => folderScopeForFolder(folderByID.get(folderID));
   const roleRootByRole = new Map<CompanyExplorerRaciFolderRole, CompanyExplorerFolder>();
   const roleByRootFolderID = new Map<string, CompanyExplorerRaciFolderRole>();
   for (const folder of RACI_FOLDER_ROWS) {
@@ -705,16 +709,22 @@ function buildRaciCompanyExplorerRows(input: {
       ownerIDsByRoot.set(rootID, bucket);
     }
     const requestedOwnerIDs = input.customRootOwnerUserIDs;
-    const unclaimedOwnerUserID = cleanExplorerID(input.unclaimedCustomRootOwnerUserID);
     for (const rootID of customRootCandidateIDs) {
+      const rootFolder = folderByID.get(rootID);
+      const rootScopeType = rootFolder?.scope_type;
+      const rootScopeID = cleanExplorerID(rootFolder?.scope_id);
       const ownerIDs = ownerIDsByRoot.get(rootID) ?? new Set<string>();
       if (!requestedOwnerIDs) {
         customRootFolderIDs.add(rootID);
         continue;
       }
+      if (rootScopeType === "user" && rootScopeID) {
+        if (requestedOwnerIDs.has(rootScopeID)) customRootFolderIDs.add(rootID);
+        continue;
+      }
+      if (rootScopeType === "team" && rootScopeID) continue;
       const hasRequestedOwner = [...ownerIDs].some((ownerID) => requestedOwnerIDs.has(ownerID));
-      const isUnclaimedForCurrentUser = ownerIDs.size === 0 && unclaimedOwnerUserID && requestedOwnerIDs.has(unclaimedOwnerUserID);
-      if (hasRequestedOwner || isUnclaimedForCurrentUser) customRootFolderIDs.add(rootID);
+      if (hasRequestedOwner) customRootFolderIDs.add(rootID);
     }
   }
 
@@ -810,6 +820,7 @@ function buildRaciCompanyExplorerRows(input: {
       logicGateID: logicGate.logic_gate_id,
       folderID,
       folderKind,
+      ...folderScopeForID(folderID),
       scopeLevel: rowDepth(depth),
       position,
       createdTimestamp,
@@ -904,6 +915,7 @@ function buildRaciCompanyExplorerRows(input: {
           folderID: folder.folder_id,
           parentFolderID: folder.parent_folder_id ?? "",
           folderKind: folder.folder_kind as CompanyExplorerFolderKind,
+          ...folderScopeForFolder(folder),
           scopeLevel: rowDepth(depth),
           position: folder.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: folder.created_timestamp,
@@ -930,6 +942,7 @@ function buildRaciCompanyExplorerRows(input: {
           nodeID: node.node_id,
           folderID: parentFolderID,
           folderKind: parentFolderKind as CompanyExplorerFolderKind,
+          ...folderScopeForID(parentFolderID),
           scopeLevel: rowDepth(depth),
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
@@ -947,6 +960,7 @@ function buildRaciCompanyExplorerRows(input: {
           projectID: project.project_id,
           folderID: parentFolderID,
           folderKind: parentFolderKind as CompanyExplorerFolderKind,
+          ...folderScopeForID(parentFolderID),
           scopeLevel: rowDepth(depth),
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
@@ -975,6 +989,7 @@ function buildRaciCompanyExplorerRows(input: {
         folderID: folder.folder_id,
         parentFolderID: "",
         folderKind: folder.folder_kind as CompanyExplorerFolderKind,
+        ...folderScopeForFolder(folder),
         folderLabel: folder.name,
         scopeLevel: rowDepth(0),
         position: folder.position || TREE_ROW_POSITION_STEP,
@@ -1030,6 +1045,7 @@ function buildRaciCompanyExplorerRows(input: {
       folderID: visualRootFolderID || undefined,
       parentFolderID: "",
       folderKind: "logic_gate",
+      ...folderScopeForFolder(visualRootFolder),
       scopeLevel: rowDepth(1),
       position: (folderIndex + 1) * TREE_ROW_POSITION_STEP,
       createdTimestamp: visualRootFolder?.created_timestamp ?? "",
@@ -1089,6 +1105,7 @@ function buildRaciCompanyExplorerRows(input: {
         logicGateID: logicGate.logic_gate_id,
         folderID: visualRootFolderID || undefined,
         folderKind: visualRootFolderID ? "logic_gate" : undefined,
+        ...folderScopeForFolder(visualRootFolder),
         scopeLevel: rowDepth(2),
         position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
@@ -1195,7 +1212,6 @@ function buildTeamRaciExplorerRows(input: {
       customFolderProjects: input.fallbackProjects,
       includeCustomRootFolders: true,
       customRootOwnerUserIDs: new Set([cleanExplorerID(user.userID)].filter(Boolean)),
-      unclaimedCustomRootOwnerUserID: input.currentUserID,
       treeIDPrefix: userRowID,
       depthOffset: 2,
     }));
@@ -1275,7 +1291,6 @@ function buildCompanyRaciExplorerRows(input: {
       customFolderProjects: input.fallbackProjects,
       includeCustomRootFolders: true,
       customRootOwnerUserIDs: new Set([cleanExplorerID(user.userID)].filter(Boolean)),
-      unclaimedCustomRootOwnerUserID: input.currentUserID,
       treeIDPrefix: userRowID,
       depthOffset: userDepth + 1,
     }));
@@ -1549,6 +1564,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return () => { cancelled = true; };
   }, [companyID, scopeViewsEnabled]);
   const teamMemberUserIDs = useMemo(() => teamMemberUserIDsForCurrentUser(companyGroups, groupMembers, currentUserID), [companyGroups, currentUserID, groupMembers]);
+  const currentTeamScopeID = useMemo(() => (
+    groupMembers
+      .filter((member) => cleanExplorerID(member.user_id) === cleanExplorerID(currentUserID))
+      .map((member) => cleanExplorerID(member.group_id))
+      .filter(Boolean)
+      .sort()[0] ?? ""
+  ), [currentUserID, groupMembers]);
   const companyUserByID = useMemo(() => new Map(companyUsers.map((user) => [cleanExplorerID(user.user_id), user])), [companyUsers]);
   const teamUsers = useMemo(() => (
     sortExplorerUsers(Array.from(teamMemberUserIDs).map((userID) => explorerUserSummaryForID(userID, companyUserByID, groupMembers)))
@@ -1805,7 +1827,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               customFolderProjects: projects,
               includeCustomRootFolders: true,
               customRootOwnerUserIDs: new Set([cleanExplorerID(currentUserID)].filter(Boolean)),
-              unclaimedCustomRootOwnerUserID: currentUserID,
             }),
           ]
       : teamCompanyExplorerActive && scopeView === "team"
@@ -2160,9 +2181,43 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     };
   }, [apiBase, companyID, folderSnapshotLoaded, requestJSON, scopedKind, scopedRootFolder, scopedRootName]);
 
-  const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => {
+  const resolveCreateFolderScope = useCallback((
+    parentFolderID: string,
+    requestedScopeType?: CompanyExplorerFolderScopeType,
+    requestedScopeID?: string,
+  ): { scope_type: CompanyExplorerFolderScopeType; scope_id?: string } | null => {
+    const cleanRequestedScopeID = cleanExplorerID(requestedScopeID);
+    if ((requestedScopeType === "user" || requestedScopeType === "team") && cleanRequestedScopeID) {
+      return { scope_type: requestedScopeType, scope_id: cleanRequestedScopeID };
+    }
+    if (requestedScopeType === "company") return { scope_type: "company" };
+    const parentFolder = folders.find((folder) => folder.folder_id === parentFolderID);
+    const parentScopeType = parentFolder?.scope_type;
+    const parentScopeID = cleanExplorerID(parentFolder?.scope_id);
+    if ((parentScopeType === "user" || parentScopeType === "team") && parentScopeID) {
+      return { scope_type: parentScopeType, scope_id: parentScopeID };
+    }
+    if (scopeViewsEnabled && scopeView === "mine") {
+      const userID = cleanExplorerID(currentUserID);
+      if (userID) return { scope_type: "user", scope_id: userID };
+    }
+    if (scopeViewsEnabled && scopeView === "team") {
+      const teamID = cleanExplorerID(currentTeamScopeID);
+      if (teamID) return { scope_type: "team", scope_id: teamID };
+    }
+    return null;
+  }, [currentTeamScopeID, currentUserID, folders, scopeView, scopeViewsEnabled]);
+
+  const createFolder = useCallback(async (
+    folderKind: CompanyExplorerFolderKind,
+    parentFolderID: string,
+    position?: number,
+    requestedScopeType?: CompanyExplorerFolderScopeType,
+    requestedScopeID?: string,
+  ) => {
     setError("");
     try {
+      const folderScope = resolveCreateFolderScope(parentFolderID, requestedScopeType, requestedScopeID);
       let folder = await requestJSON<CompanyExplorerFolder>("/v1/company-explorer/folders", {
         method: "POST",
         body: JSON.stringify({
@@ -2170,6 +2225,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           parent_folder_id: parentFolderID,
           folder_kind: folderKind,
           name: "New Folder",
+          ...(folderScope ? { scope_type: folderScope.scope_type, scope_id: folderScope.scope_id ?? "" } : {}),
         }),
       });
       if (position && position > 0) {
@@ -2198,7 +2254,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
-  }, [apiBase, companyID, requestJSON]);
+  }, [apiBase, companyID, requestJSON, resolveCreateFolderScope]);
 
   const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
     const normalizedAssignments = assignments.filter((assignment) => (
@@ -3173,6 +3229,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const createNodeLogicGateTreeID = creationTargetRow?.kind === "logic_gate" && createNodeLogicGateID ? (creationTargetRow.id ?? "") : "";
     const createLogicGateRaciRole = isLogicGateRaciRole(creationTargetRow?.raciRole) ? creationTargetRow.raciRole : "";
     const targets = resolveExplorerCreationTargets(creationTargetRow ?? null);
+    const createFolderScope = resolveCreateFolderScope(targets.preferredFolderParentID, targets.folderScopeType, targets.folderScopeID);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
     const shareTarget = !protectedRaciRow && row?.kind === "folder" && row.folderID && !row.systemKey
@@ -3204,12 +3261,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       createNodeLogicGateID,
       createNodeLogicGateTreeID,
       createLogicGateRaciRole,
+      createFolderScopeType: createFolderScope?.scope_type,
+      createFolderScopeID: createFolderScope?.scope_id,
       canCreateBothFolderTypes: !contextKind && !scopedKind,
       canCreateFolder: canCreateForContext && (!scopedKind || Boolean(scopedRootFolder)),
       canCreateNode: canCreateForContext && !scopedKind,
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
     });
-  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, raciExplorerActive, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
+  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, raciExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.

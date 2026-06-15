@@ -120,6 +120,7 @@ func (r *MemoryRepo) createCompanyExplorerDefaultFolderTreeLocked(companyID, fol
 			ParentFolderID:   parent,
 			FolderKind:       folderKind,
 			Name:             seed.Name,
+			ScopeType:        CompanyExplorerFolderScopeCompany,
 			Position:         startPosition + index*1000,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
@@ -153,6 +154,7 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 				FolderKind:       seed.FolderKind,
 				SystemKey:        &systemKey,
 				Name:             seed.Name,
+				ScopeType:        CompanyExplorerFolderScopeCompany,
 				Position:         seed.Position,
 				CreatedTimestamp: now,
 				UpdatedTimestamp: now,
@@ -170,6 +172,7 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 			FolderID:         newUUIDv7String(),
 			FolderKind:       "logic_gate",
 			Name:             "Logic Gates",
+			ScopeType:        CompanyExplorerFolderScopeCompany,
 			Position:         rootPosition,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
@@ -183,6 +186,7 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 				ParentFolderID:   &parentID,
 				FolderKind:       "logic_gate",
 				Name:             name,
+				ScopeType:        CompanyExplorerFolderScopeCompany,
 				Position:         (index + 1) * 1000,
 				CreatedTimestamp: now,
 				UpdatedTimestamp: now,
@@ -219,6 +223,7 @@ func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKe
 		FolderKind:       seed.FolderKind,
 		SystemKey:        &systemKeyValue,
 		Name:             seed.Name,
+		ScopeType:        CompanyExplorerFolderScopeCompany,
 		Position:         seed.Position,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
@@ -312,12 +317,17 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 	foldersSnapshot := cloneMemoryMap(r.folders)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	var parent *string
+	scopeType := CompanyExplorerFolderScopeCompany
+	var scopeID *string
 	if parentFolderID != "" {
-		if _, ok := r.folders[key(companyID, parentFolderID)]; !ok {
+		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
+		if !ok {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parentValue := parentFolderID
 		parent = &parentValue
+		scopeType = companyExplorerFolderScopeType(parentFolder)
+		scopeID = companyExplorerFolderScopeID(parentFolder)
 	}
 
 	now := time.Now().UTC()
@@ -328,6 +338,8 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		FolderKind:       folderKind,
 		Name:             name,
 		DefaultAccess:    ResourceDefaultAccessEdit,
+		ScopeType:        scopeType,
+		ScopeID:          scopeID,
 		Position:         nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, folderKind, parentFolderID),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
@@ -350,6 +362,26 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 			return domain.CompanyExplorerFolder{}, err
 		}
 	}
+	return r.withSharedInboxRaciLocked(item), nil
+}
+
+func (r *MemoryRepo) SetCompanyExplorerFolderScope(companyID, folderID, scopeType, scopeID string) (domain.CompanyExplorerFolder, error) {
+	normalizedScopeType, normalizedScopeID, err := normalizeCompanyExplorerFolderScope(scopeType, scopeID)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	item, ok := r.folders[key(companyID, folderID)]
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	item.ScopeType = normalizedScopeType
+	item.ScopeID = normalizedScopeID
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.folders[key(companyID, item.FolderID)] = item
 	return r.withSharedInboxRaciLocked(item), nil
 }
 
@@ -581,7 +613,8 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		parent = nil
 	}
 	if parentFolderID != nil && targetParentID != "" {
-		if _, ok := r.folders[key(companyID, targetParentID)]; !ok {
+		parentFolder, ok := r.folders[key(companyID, targetParentID)]
+		if !ok {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		// A folder cannot be moved under one of its descendants; that would
@@ -605,6 +638,8 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		}
 		parentValue := targetParentID
 		parent = &parentValue
+		item.ScopeType = companyExplorerFolderScopeType(parentFolder)
+		item.ScopeID = companyExplorerFolderScopeID(parentFolder)
 	}
 	if position <= 0 {
 		if parentChanged {
