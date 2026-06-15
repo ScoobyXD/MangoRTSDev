@@ -52,16 +52,16 @@ func newCommunicationsCache() *communicationsCache {
 	}
 }
 
-func (c *communicationsCache) getFolders(userID string, maxAge time.Duration, now time.Time) ([]NylasFolder, bool) {
+func (c *communicationsCache) getFolders(userID, accountScope string, maxAge time.Duration, now time.Time) ([]NylasFolder, bool) {
 	if c == nil {
 		return nil, false
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	if key == "" {
 		return nil, false
 	}
 	c.mu.RLock()
-	entry, ok := c.folders[userID]
+	entry, ok := c.folders[key]
 	c.mu.RUnlock()
 	if !ok || now.Sub(entry.fetchedAt) > maxAge {
 		return nil, false
@@ -69,26 +69,26 @@ func (c *communicationsCache) getFolders(userID string, maxAge time.Duration, no
 	return cloneNylasFolders(entry.folders), true
 }
 
-func (c *communicationsCache) setFolders(userID string, folders []NylasFolder, now time.Time) {
+func (c *communicationsCache) setFolders(userID, accountScope string, folders []NylasFolder, now time.Time) {
 	if c == nil {
 		return
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	key := communicationsAccountScopedCacheKey(userID, accountScope)
+	if key == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.folders[userID] = cachedCommunicationsFolders{folders: cloneNylasFolders(folders), fetchedAt: now}
+	c.folders[key] = cachedCommunicationsFolders{folders: cloneNylasFolders(folders), fetchedAt: now}
 	c.evictExpiredFoldersLocked(now, communicationsFoldersCacheTTL+communicationsMaxStaleTTL)
 	c.evictOldestFoldersLocked(communicationsMaxCachedFolderUsers)
 }
 
-func (c *communicationsCache) getMessagePage(userID string, query NylasMessageQuery, maxAge time.Duration, now time.Time) (NylasMessagePage, bool) {
+func (c *communicationsCache) getMessagePage(userID, accountScope string, query NylasMessageQuery, maxAge time.Duration, now time.Time) (NylasMessagePage, bool) {
 	if c == nil {
 		return NylasMessagePage{}, false
 	}
-	key := communicationsMessagePageCacheKey(userID, query)
+	key := communicationsMessagePageCacheKey(userID, accountScope, query)
 	if key == "" {
 		return NylasMessagePage{}, false
 	}
@@ -101,11 +101,11 @@ func (c *communicationsCache) getMessagePage(userID string, query NylasMessageQu
 	return cloneNylasMessagePage(entry.page), true
 }
 
-func (c *communicationsCache) setMessagePage(userID string, query NylasMessageQuery, page NylasMessagePage, now time.Time) {
+func (c *communicationsCache) setMessagePage(userID, accountScope string, query NylasMessageQuery, page NylasMessagePage, now time.Time) {
 	if c == nil {
 		return
 	}
-	key := communicationsMessagePageCacheKey(userID, query)
+	key := communicationsMessagePageCacheKey(userID, accountScope, query)
 	if key == "" {
 		return
 	}
@@ -113,15 +113,15 @@ func (c *communicationsCache) setMessagePage(userID string, query NylasMessageQu
 	defer c.mu.Unlock()
 	c.messagePages[key] = cachedCommunicationsMessagePage{page: cloneNylasMessagePage(page), fetchedAt: now}
 	c.evictExpiredMessagePagesLocked(now, communicationsMessagesCacheTTL+communicationsMaxStaleTTL)
-	c.evictOldestMessagePagesForUserLocked(userID, communicationsMaxMessagePagesPerUser)
+	c.evictOldestMessagePagesForUserLocked(strings.TrimSpace(userID), communicationsMaxMessagePagesPerUser)
 	c.evictOldestMessagePagesLocked(communicationsMaxMessagePageEntries)
 }
 
-func (c *communicationsCache) getMessage(userID, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
+func (c *communicationsCache) getMessage(userID, accountScope, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
 	if c == nil {
 		return NylasMessage{}, false
 	}
-	key := communicationsMessageCacheKey(userID, messageID)
+	key := communicationsMessageCacheKey(userID, accountScope, messageID)
 	if key == "" {
 		return NylasMessage{}, false
 	}
@@ -134,18 +134,19 @@ func (c *communicationsCache) getMessage(userID, messageID string, maxAge time.D
 	return cloneNylasMessage(entry.message), true
 }
 
-func (c *communicationsCache) getMessageFromPages(userID, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
+func (c *communicationsCache) getMessageFromPages(userID, accountScope, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
 	if c == nil {
 		return NylasMessage{}, false
 	}
 	userID = strings.TrimSpace(userID)
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
 	messageID = strings.TrimSpace(messageID)
 	if userID == "" || messageID == "" {
 		return NylasMessage{}, false
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	prefix := userID + communicationsCacheKeySeparator
+	prefix := userID + communicationsCacheKeySeparator + accountScope + communicationsCacheKeySeparator
 	for key, entry := range c.messagePages {
 		if !strings.HasPrefix(key, prefix) || now.Sub(entry.fetchedAt) > maxAge {
 			continue
@@ -159,11 +160,11 @@ func (c *communicationsCache) getMessageFromPages(userID, messageID string, maxA
 	return NylasMessage{}, false
 }
 
-func (c *communicationsCache) setMessage(userID string, message NylasMessage, now time.Time) {
+func (c *communicationsCache) setMessage(userID, accountScope string, message NylasMessage, now time.Time) {
 	if c == nil {
 		return
 	}
-	key := communicationsMessageCacheKey(userID, message.ID)
+	key := communicationsMessageCacheKey(userID, accountScope, message.ID)
 	if key == "" {
 		return
 	}
@@ -171,7 +172,7 @@ func (c *communicationsCache) setMessage(userID string, message NylasMessage, no
 	defer c.mu.Unlock()
 	c.messages[key] = cachedCommunicationsMessage{message: cloneNylasMessage(message), fetchedAt: now}
 	c.evictExpiredMessagesLocked(now, communicationsMessageCacheTTL+communicationsMaxStaleTTL)
-	c.evictOldestMessagesForUserLocked(userID, communicationsMaxMessageDetailsPerUser)
+	c.evictOldestMessagesForUserLocked(strings.TrimSpace(userID), communicationsMaxMessageDetailsPerUser)
 	c.evictOldestMessagesLocked(communicationsMaxMessageEntries)
 }
 
@@ -185,12 +186,12 @@ func (c *communicationsCache) invalidateUser(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.folders, userID)
+	c.deleteFoldersForUserLocked(userID)
 	c.deleteMessagePagesForUserLocked(userID)
 	c.deleteMessagesForUserLocked(userID)
 }
 
-func (c *communicationsCache) invalidateFolders(userID string) {
+func (c *communicationsCache) invalidateFolders(userID string, accountScope ...string) {
 	if c == nil {
 		return
 	}
@@ -200,7 +201,11 @@ func (c *communicationsCache) invalidateFolders(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.folders, userID)
+	if len(accountScope) > 0 && strings.TrimSpace(accountScope[0]) != "" {
+		delete(c.folders, communicationsAccountScopedCacheKey(userID, accountScope[0]))
+		return
+	}
+	c.deleteFoldersForUserLocked(userID)
 }
 
 func (c *communicationsCache) invalidateMessagePages(userID string) {
@@ -216,24 +221,34 @@ func (c *communicationsCache) invalidateMessagePages(userID string) {
 	c.deleteMessagePagesForUserLocked(userID)
 }
 
-func (c *communicationsCache) invalidateMessage(userID, messageID string) {
-	if c == nil {
-		return
-	}
-	key := communicationsMessageCacheKey(userID, messageID)
-	if key == "" {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.messages, key)
-}
-
-func (c *communicationsCache) patchMessagePages(userID string, message NylasMessage, now time.Time) {
+func (c *communicationsCache) invalidateMessage(userID, accountScope, messageID string) {
 	if c == nil {
 		return
 	}
 	userID = strings.TrimSpace(userID)
+	messageID = strings.TrimSpace(messageID)
+	if userID == "" || messageID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if strings.TrimSpace(accountScope) != "" {
+		delete(c.messages, communicationsMessageCacheKey(userID, accountScope, messageID))
+		return
+	}
+	for key := range c.messages {
+		if communicationsCacheKeyUserID(key) == userID && communicationsMessageIDFromCacheKey(key) == messageID {
+			delete(c.messages, key)
+		}
+	}
+}
+
+func (c *communicationsCache) patchMessagePages(userID, accountScope string, message NylasMessage, now time.Time) {
+	if c == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	accountScope = strings.TrimSpace(accountScope)
 	message.ID = strings.TrimSpace(message.ID)
 	if userID == "" || message.ID == "" {
 		return
@@ -242,6 +257,9 @@ func (c *communicationsCache) patchMessagePages(userID string, message NylasMess
 	defer c.mu.Unlock()
 	for key, entry := range c.messagePages {
 		if communicationsCacheKeyUserID(key) != userID {
+			continue
+		}
+		if accountScope != "" && communicationsCacheKeyAccountScope(key) != communicationsNormalizeCacheAccountScope(accountScope) {
 			continue
 		}
 		query, ok := communicationsMessagePageQueryFromCacheKey(key)
@@ -268,11 +286,12 @@ func (c *communicationsCache) patchMessagePages(userID string, message NylasMess
 	}
 }
 
-func (c *communicationsCache) removeMessagesFromPages(userID string, messageIDs []string, mailbox string, now time.Time) {
+func (c *communicationsCache) removeMessagesFromPages(userID, accountScope string, messageIDs []string, mailbox string, now time.Time) {
 	if c == nil {
 		return
 	}
 	userID = strings.TrimSpace(userID)
+	accountScope = strings.TrimSpace(accountScope)
 	if userID == "" {
 		return
 	}
@@ -291,6 +310,9 @@ func (c *communicationsCache) removeMessagesFromPages(userID string, messageIDs 
 	defer c.mu.Unlock()
 	for key, entry := range c.messagePages {
 		if communicationsCacheKeyUserID(key) != userID {
+			continue
+		}
+		if accountScope != "" && communicationsCacheKeyAccountScope(key) != communicationsNormalizeCacheAccountScope(accountScope) {
 			continue
 		}
 		query, ok := communicationsMessagePageQueryFromCacheKey(key)
@@ -326,6 +348,15 @@ func (c *communicationsCache) deleteMessagePagesForUserLocked(userID string) {
 	}
 }
 
+func (c *communicationsCache) deleteFoldersForUserLocked(userID string) {
+	prefix := userID + communicationsCacheKeySeparator
+	for key := range c.folders {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.folders, key)
+		}
+	}
+}
+
 func (c *communicationsCache) deleteMessagesForUserLocked(userID string) {
 	prefix := userID + communicationsCacheKeySeparator
 	for key := range c.messages {
@@ -335,11 +366,28 @@ func (c *communicationsCache) deleteMessagesForUserLocked(userID string) {
 	}
 }
 
-func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) string {
+func communicationsAccountScopedCacheKey(userID, accountScope string) string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ""
 	}
+	return userID + communicationsCacheKeySeparator + communicationsNormalizeCacheAccountScope(accountScope)
+}
+
+func communicationsNormalizeCacheAccountScope(accountScope string) string {
+	accountScope = strings.TrimSpace(accountScope)
+	if accountScope == "" {
+		return "default"
+	}
+	return accountScope
+}
+
+func communicationsMessagePageCacheKey(userID, accountScope string, query NylasMessageQuery) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
 	unread := ""
 	if query.Unread != nil {
 		unread = strconv.FormatBool(*query.Unread)
@@ -350,6 +398,7 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 	}
 	return strings.Join([]string{
 		userID,
+		accountScope,
 		strconv.Itoa(query.Limit),
 		strings.TrimSpace(query.PageToken),
 		strings.TrimSpace(query.FolderID),
@@ -364,39 +413,40 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 
 func communicationsMessagePageQueryFromCacheKey(key string) (NylasMessageQuery, bool) {
 	parts := strings.Split(key, communicationsCacheKeySeparator)
-	if len(parts) != 10 || strings.TrimSpace(parts[0]) == "" {
+	if len(parts) != 11 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return NylasMessageQuery{}, false
 	}
-	limit, _ := strconv.Atoi(parts[1])
+	limit, _ := strconv.Atoi(parts[2])
 	query := NylasMessageQuery{
 		Limit:             limit,
-		PageToken:         strings.TrimSpace(parts[2]),
-		FolderID:          strings.TrimSpace(parts[3]),
-		ThreadID:          strings.TrimSpace(parts[4]),
-		Query:             strings.TrimSpace(parts[5]),
-		SearchQueryNative: strings.TrimSpace(parts[6]),
-		Mailbox:           strings.TrimSpace(parts[7]),
-	}
-	if parts[8] != "" {
-		if value, err := strconv.ParseBool(parts[8]); err == nil {
-			query.Unread = &value
-		}
+		PageToken:         strings.TrimSpace(parts[3]),
+		FolderID:          strings.TrimSpace(parts[4]),
+		ThreadID:          strings.TrimSpace(parts[5]),
+		Query:             strings.TrimSpace(parts[6]),
+		SearchQueryNative: strings.TrimSpace(parts[7]),
+		Mailbox:           strings.TrimSpace(parts[8]),
 	}
 	if parts[9] != "" {
 		if value, err := strconv.ParseBool(parts[9]); err == nil {
+			query.Unread = &value
+		}
+	}
+	if parts[10] != "" {
+		if value, err := strconv.ParseBool(parts[10]); err == nil {
 			query.Starred = &value
 		}
 	}
 	return query, true
 }
 
-func communicationsMessageCacheKey(userID, messageID string) string {
+func communicationsMessageCacheKey(userID, accountScope, messageID string) string {
 	userID = strings.TrimSpace(userID)
+	accountScope = communicationsNormalizeCacheAccountScope(accountScope)
 	messageID = strings.TrimSpace(messageID)
 	if userID == "" || messageID == "" {
 		return ""
 	}
-	return userID + communicationsCacheKeySeparator + messageID
+	return strings.Join([]string{userID, accountScope, messageID}, communicationsCacheKeySeparator)
 }
 
 func communicationsCacheKeyUserID(key string) string {
@@ -405,6 +455,22 @@ func communicationsCacheKeyUserID(key string) string {
 		return ""
 	}
 	return key[:index]
+}
+
+func communicationsCacheKeyAccountScope(key string) string {
+	parts := strings.SplitN(key, communicationsCacheKeySeparator, 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return communicationsNormalizeCacheAccountScope(parts[1])
+}
+
+func communicationsMessageIDFromCacheKey(key string) string {
+	parts := strings.SplitN(key, communicationsCacheKeySeparator, 3)
+	if len(parts) != 3 {
+		return ""
+	}
+	return strings.TrimSpace(parts[2])
 }
 
 func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessageQuery) bool {

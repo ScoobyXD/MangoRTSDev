@@ -773,6 +773,11 @@ export function AppSidebar({
 
   const createSharedFolder = useCallback(async (parentFolderID: string, accountEmail = "", rawName = "") => {
     if (!companyID || sharedBusy) return;
+    if (!accountEmail.trim()) {
+      setSharedContextMenu(null);
+      setSharedError("Enter an email address to create a shared inbox.");
+      return;
+    }
     setSharedContextMenu(null);
     setSharedBusy(true);
     setSharedError("");
@@ -782,10 +787,6 @@ export function AppSidebar({
       setSharedInboxes((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
       if (parentFolderID) setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
       setSharedTriageOpen(true);
-      if (!accountEmail.trim()) {
-        setRenamingSharedFolderID(folder.folder_id);
-        setRenameDraft(folder.name);
-      }
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
       if (requestSharedInboxEmailConnection(error, accountEmail)) return;
@@ -1505,14 +1506,6 @@ export function AppSidebar({
               onClick={() => openSharedInboxCreateDialog(contextFolder)}
             >
               Create new shared inbox
-            </button>
-            <button
-              type="button"
-              style={appSidebarContextMenuButtonStyle}
-              disabled={sharedBusy}
-              onClick={() => void createSharedFolder(contextFolder?.folder_id ?? "")}
-            >
-              {contextFolder ? "New Child Folder" : "New Folder"}
             </button>
             {contextFolder && (
               <>

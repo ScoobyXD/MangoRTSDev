@@ -285,11 +285,12 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 	}
 	if len(result.ArchivedIDs) > 0 {
 		now := time.Now().UTC()
-		s.commCache.removeMessagesFromPages(connection.UserID, result.ArchivedIDs, "primary", now)
+		cacheScope := communicationsConnectionCacheScope(connection)
+		s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, result.ArchivedIDs, "primary", now)
 		for _, message := range result.Messages {
-			s.commCache.patchMessagePages(connection.UserID, message, now)
+			s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 		}
-		s.invalidateCommunicationsMessageMutations(connection.UserID, result.ArchivedIDs, true)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
 		for _, messageID := range result.ArchivedIDs {
 			s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", messageID)
 		}
@@ -444,8 +445,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			return
 		}
 		now := time.Now().UTC()
-		s.commCache.patchMessagePages(connection.UserID, message, now)
-		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, req.Folders != nil)
+		cacheScope := communicationsConnectionCacheScope(connection)
+		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, req.Folders != nil)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
@@ -456,8 +458,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			return
 		}
 		now := time.Now().UTC()
-		s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "", now)
-		s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
+		cacheScope := communicationsConnectionCacheScope(connection)
+		s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "", now)
+		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.deleted", messageID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
@@ -486,9 +489,10 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 		return
 	}
 	now := time.Now().UTC()
-	s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "primary", now)
-	s.commCache.patchMessagePages(connection.UserID, archived, now)
-	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
+	cacheScope := communicationsConnectionCacheScope(connection)
+	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "primary", now)
+	s.commCache.patchMessagePages(connection.UserID, cacheScope, archived, now)
+	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", archived.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
 }
@@ -514,9 +518,10 @@ func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 	now := time.Now().UTC()
-	s.commCache.removeMessagesFromPages(connection.UserID, []string{messageID}, "archive", now)
-	s.commCache.patchMessagePages(connection.UserID, restored, now)
-	s.invalidateCommunicationsMessageMutations(connection.UserID, []string{messageID}, true)
+	cacheScope := communicationsConnectionCacheScope(connection)
+	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "archive", now)
+	s.commCache.patchMessagePages(connection.UserID, cacheScope, restored, now)
+	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", restored.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
 }
@@ -670,24 +675,25 @@ func (s *Server) unarchiveCommunicationsMessageByID(ctx context.Context, connect
 
 func (s *Server) communicationsMessageForFolderMutation(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
-	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok && message.Folders != nil {
+	cacheScope := communicationsConnectionCacheScope(connection)
+	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok && message.Folders != nil {
 		return message, nil
 	}
-	if message, ok := s.commCache.getMessageFromPages(connection.UserID, messageID, communicationsMessagesCacheTTL, now); ok && message.Folders != nil {
+	if message, ok := s.commCache.getMessageFromPages(connection.UserID, cacheScope, messageID, communicationsMessagesCacheTTL, now); ok && message.Folders != nil {
 		return message, nil
 	}
 	return s.communicationsMessage(ctx, connection, messageID)
 }
 
-func (s *Server) invalidateCommunicationsMessageMutations(userID string, messageIDs []string, foldersChanged bool) {
+func (s *Server) invalidateCommunicationsMessageMutations(userID, accountScope string, messageIDs []string, foldersChanged bool) {
 	if s.commCache == nil {
 		return
 	}
 	if foldersChanged {
-		s.commCache.invalidateFolders(userID)
+		s.commCache.invalidateFolders(userID, accountScope)
 	}
 	for _, messageID := range messageIDs {
-		s.commCache.invalidateMessage(userID, messageID)
+		s.commCache.invalidateMessage(userID, accountScope, messageID)
 	}
 }
 
@@ -761,8 +767,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, req.Subject)
 	}
 	now := time.Now().UTC()
-	s.commCache.patchMessagePages(connection.UserID, message, now)
-	s.commCache.invalidateMessage(connection.UserID, message.ID)
+	cacheScope := communicationsConnectionCacheScope(connection)
+	s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
+	s.commCache.invalidateMessage(connection.UserID, cacheScope, message.ID)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
@@ -997,14 +1004,28 @@ const (
 	communicationsAttachmentMaxTotalBytes  = 24_000_000
 )
 
+func communicationsConnectionCacheScope(connection domain.UserEmailConnection) string {
+	if grantID := strings.TrimSpace(connection.GrantID); grantID != "" {
+		return "grant:" + grantID
+	}
+	if accountEmail := normalizeEmailForCompare(connection.AccountEmail); accountEmail != "" {
+		return "account:" + accountEmail
+	}
+	if provider := strings.TrimSpace(connection.Provider); provider != "" {
+		return "provider:" + provider
+	}
+	return "default"
+}
+
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {
 	now := time.Now().UTC()
-	if folders, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL, now); ok {
+	cacheScope := communicationsConnectionCacheScope(connection)
+	if folders, ok := s.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL, now); ok {
 		return folders, nil
 	}
 	var folders []NylasFolder
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-		if cached, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL, time.Now().UTC()); ok {
+		if cached, ok := s.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL, time.Now().UTC()); ok {
 			folders = cached
 			return nil
 		}
@@ -1014,22 +1035,23 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL+communicationsMaxStaleTTL, now); ok {
+			if cached, ok := s.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL+communicationsMaxStaleTTL, now); ok {
 				return cached, nil
 			}
 		}
 		return nil, err
 	}
-	s.commCache.setFolders(connection.UserID, folders, now)
+	s.commCache.setFolders(connection.UserID, cacheScope, folders, now)
 	return folders, nil
 }
 
 func (s *Server) communicationsMessagePage(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
 	now := time.Now().UTC()
+	cacheScope := communicationsConnectionCacheScope(connection)
 	cacheQuery := query
 	cacheQuery.Refresh = false
 	if !query.Refresh {
-		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL, now); ok {
+		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, now); ok {
 			return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
 		}
 	}
@@ -1037,7 +1059,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	var page NylasMessagePage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
 		if !query.Refresh {
-			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
 				page = cached
 				return nil
 			}
@@ -1048,23 +1070,24 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
 				return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, cached), nil
 			}
 		}
 		return NylasMessagePage{}, err
 	}
-	s.commCache.setMessagePage(connection.UserID, cacheQuery, page, now)
+	s.commCache.setMessagePage(connection.UserID, cacheScope, cacheQuery, page, now)
 	return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
 }
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
-	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok {
+	cacheScope := communicationsConnectionCacheScope(connection)
+	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok {
 		return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
 	}
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-		if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, time.Now().UTC()); ok {
+		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, time.Now().UTC()); ok {
 			message = cached
 			return nil
 		}
@@ -1074,13 +1097,13 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
+			if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
 				return s.enrichCommunicationsMessageReadStatus(connection.UserID, cached), nil
 			}
 		}
 		return NylasMessage{}, err
 	}
-	s.commCache.setMessage(connection.UserID, message, now)
+	s.commCache.setMessage(connection.UserID, cacheScope, message, now)
 	return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
 }
 
