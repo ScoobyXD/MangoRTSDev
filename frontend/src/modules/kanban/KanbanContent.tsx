@@ -2314,6 +2314,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       label="Accounts"
       placeholder="Filter accounts"
       compact
+      showLabel={!arenaMode}
       style={arenaMode ? { width: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX, maxWidth: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX } : { maxWidth: "min(420px, 100%)" }}
     />
   );
@@ -2391,7 +2392,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         {arenaMode && (
           <div style={{ position: "relative", minWidth: boardColumnsMinWidth > 0 ? boardColumnsMinWidth : undefined, minHeight: KANBAN_ARENA_TOP_CONTROL_HEIGHT_PX, display: "flex", alignItems: "end", zIndex: 8 }}>
             <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={toggleArenaGroupingOpen} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />
-            <div style={{ position: "absolute", top: 0, left: arenaAccountFilterLeftPx, width: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX, zIndex: 9 }}>
+            <div style={{ position: "absolute", bottom: 4, left: arenaAccountFilterLeftPx, width: KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX, zIndex: 9 }}>
               {accountFilterControl}
             </div>
           </div>
