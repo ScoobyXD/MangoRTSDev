@@ -1275,6 +1275,52 @@ func TestMemoryRepoUserEmailConnectionDoesNotUseSharedInboxFallback(t *testing.T
 	}
 }
 
+func TestMemoryRepoUserEmailConnectionReclaimsDuplicateGrant(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	oldUser, err := repo.UpsertAuthUser("old-subject", "old@example.com", "Old User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newUser, err := repo.UpsertAuthUser("new-subject", "new@example.com", "New User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       oldUser.UserID,
+		Provider:     "google",
+		AccountEmail: "old@example.com",
+		GrantID:      "same-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       newUser.UserID,
+		Provider:     "google",
+		AccountEmail: "new@example.com",
+		GrantID:      "same-grant",
+		Status:       "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.UserID != newUser.UserID || connection.AccountEmail != "new@example.com" || connection.GrantID != "same-grant" {
+		t.Fatalf("connection = %+v, want grant reassigned to new user", connection)
+	}
+	if _, err := repo.GetUserEmailConnection(oldUser.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old user connection error = %v, want ErrNotFound", err)
+	}
+	loaded, err := repo.GetUserEmailConnectionByGrantID("same-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UserID != newUser.UserID {
+		t.Fatalf("grant owner = %s, want %s", loaded.UserID, newUser.UserID)
+	}
+}
+
 func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
