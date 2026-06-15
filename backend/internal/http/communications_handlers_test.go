@@ -265,8 +265,8 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	if state.UserEmail != "user@example.com" {
 		t.Fatalf("state.UserEmail = %q, want user@example.com", state.UserEmail)
 	}
-	if state.StrictEmail {
-		t.Fatalf("state.StrictEmail = true, want false for personal auth URL")
+	if !state.StrictEmail {
+		t.Fatalf("state.StrictEmail = false, want true for personal auth URL")
 	}
 }
 
@@ -327,9 +327,11 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 	}
 	config := testNylasConfig()
 	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
-		UserID:   user.UserID,
-		Email:    user.Email,
-		Provider: "microsoft",
+		UserID:      user.UserID,
+		Email:       user.Email,
+		UserEmail:   user.Email,
+		Provider:    "microsoft",
+		StrictEmail: true,
 	}, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -390,7 +392,7 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 	}
 }
 
-func TestNylasCallbackAllowsPersonalAccountEmailReturnedByProvider(t *testing.T) {
+func TestNylasCallbackRejectsPersonalAccountEmailMismatch(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -400,14 +402,57 @@ func TestNylasCallbackAllowsPersonalAccountEmailReturnedByProvider(t *testing.T)
 	}
 	config := testNylasConfig()
 	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
-		UserID:   user.UserID,
-		Email:    user.Email,
-		Provider: "google",
+		UserID:    user.UserID,
+		Email:     user.Email,
+		UserEmail: user.Email,
+		Provider:  "google",
 	}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: "mailbox@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "nylas_error=nylas_email_mismatch") {
+		t.Fatalf("callback redirect = %s, want email mismatch", rec.Header().Get("Location"))
+	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("connection error = %v, want ErrNotFound", err)
+	}
+	if len(nylas.deletedGrants) != 1 || nylas.deletedGrants[0] != "grant-1" {
+		t.Fatalf("deleted grants = %v, want mismatched grant cleanup", nylas.deletedGrants)
+	}
+}
+
+func TestNylasCallbackRecoversPersonalUserByEmailWhenStateUserIDIsStale(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("new-subject", "profile@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:      "deleted-user-id",
+		Email:       user.Email,
+		UserEmail:   user.Email,
+		Provider:    "google",
+		StrictEmail: true,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: user.Email, Provider: "google"}}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
@@ -426,8 +471,46 @@ func TestNylasCallbackAllowsPersonalAccountEmailReturnedByProvider(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "grant-1" {
-		t.Fatalf("connection = %+v, want provider-returned account", connection)
+	if connection.UserID != user.UserID || connection.AccountEmail != user.Email || connection.GrantID != "grant-1" {
+		t.Fatalf("connection = %+v, want recovered user connection", connection)
+	}
+	if len(nylas.deletedGrants) != 0 {
+		t.Fatalf("deleted grants = %v, want none", nylas.deletedGrants)
+	}
+}
+
+func TestNylasCallbackDeletesGrantWhenConnectionStoreFails(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:      "missing-user-id",
+		Email:       "missing@example.com",
+		UserEmail:   "missing@example.com",
+		Provider:    "google",
+		StrictEmail: true,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "orphan-grant", Email: "missing@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "nylas_error=mango_user_not_found") {
+		t.Fatalf("callback redirect = %s, want mango_user_not_found", rec.Header().Get("Location"))
+	}
+	if len(nylas.deletedGrants) != 1 || nylas.deletedGrants[0] != "orphan-grant" {
+		t.Fatalf("deleted grants = %v, want orphan grant cleanup", nylas.deletedGrants)
 	}
 }
 

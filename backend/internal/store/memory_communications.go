@@ -30,6 +30,27 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	return connection, nil
 }
 
+func (r *MemoryRepo) ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if !r.userIDExistsLocked(userID) {
+		return nil, ErrNotFound
+	}
+	connections := make([]domain.UserEmailConnection, 0)
+	for _, connection := range r.emailConnections {
+		if connection.UserID == userID {
+			connections = append(connections, connection)
+		}
+	}
+	return connections, nil
+}
+
 func (r *MemoryRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error) {
 	companyID = strings.TrimSpace(companyID)
 	accountEmail = normalizeEmail(accountEmail)

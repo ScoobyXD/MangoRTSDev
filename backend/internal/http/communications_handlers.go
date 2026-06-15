@@ -93,12 +93,13 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid_account_email")
 		return
 	}
+	strictEmail := true
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
 		UserID:      actor.User.UserID,
 		Email:       accountEmail,
 		UserEmail:   actor.User.Email,
 		Provider:    provider,
-		StrictEmail: requestedAccountEmail != "",
+		StrictEmail: strictEmail,
 	}, time.Now())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_state")
@@ -110,11 +111,11 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err != nil {
-		log.Printf("communications_auth_url outcome=error reason=hosted_auth_url_failed request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t err=%v", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, requestedAccountEmail != "", err)
+		log.Printf("communications_auth_url outcome=error reason=hosted_auth_url_failed request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t err=%v", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, strictEmail, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_auth_url")
 		return
 	}
-	log.Printf("communications_auth_url outcome=created request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, requestedAccountEmail != "")
+	log.Printf("communications_auth_url outcome=created request_id=%s user_id=%s user_email=%s provider=%s requested_account_present=%t login_hint=%s strict_email=%t", requestCorrelationID(r), actor.User.UserID, normalizeEmailForCompare(actor.User.Email), provider, requestedAccountEmail != "", accountEmail, strictEmail)
 	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
 }
 
@@ -851,7 +852,7 @@ func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
 }
 
 func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) string {
-	if state.StrictEmail {
+	if state.StrictEmail && normalizeEmailForCompare(state.Email) != "" && normalizeEmailForCompare(state.Email) != normalizeEmailForCompare(state.UserEmail) {
 		return "shared"
 	}
 	return "personal"
@@ -864,6 +865,19 @@ func communicationsConnectionScopeForOAuthGrant(state nylasOAuthStatePayload, ac
 	return "personal"
 }
 
+func communicationsOAuthStateRequiresEmailMatch(state nylasOAuthStatePayload) bool {
+	if state.StrictEmail {
+		return true
+	}
+	return communicationsOAuthStateTargetsPersonalMailbox(state)
+}
+
+func communicationsOAuthStateTargetsPersonalMailbox(state nylasOAuthStatePayload) bool {
+	requestedEmail := normalizeEmailForCompare(state.Email)
+	userEmail := normalizeEmailForCompare(state.UserEmail)
+	return requestedEmail != "" && userEmail != "" && requestedEmail == userEmail
+}
+
 func grantIDLogValue(grantID string) string {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
@@ -873,6 +887,15 @@ func grantIDLogValue(grantID string) string {
 		return "present"
 	}
 	return "present_suffix_" + grantID[len(grantID)-8:]
+}
+
+func (s *Server) deleteNylasOAuthGrantBestEffort(ctx context.Context, requestID, cleanupReason string, grant NylasGrant) {
+	if s.nylasClient == nil || strings.TrimSpace(grant.GrantID) == "" {
+		return
+	}
+	if err := s.nylasClient.DeleteGrant(ctx, grant.GrantID); err != nil {
+		log.Printf("nylas_oauth_callback outcome=warning reason=delete_grant_failed cleanup_reason=%s request_id=%s grant=%s err=%v", cleanupReason, requestID, grantIDLogValue(grant.GrantID), err)
+	}
 }
 
 func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -915,10 +938,8 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	log.Printf("nylas_oauth_callback outcome=grant_received request_id=%s user_id=%s state_provider=%s grant_provider=%s requested_email=%s grant_email=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, state.Provider, grant.Provider, state.Email, normalizeEmailForCompare(grant.Email), state.StrictEmail, grantIDLogValue(grant.GrantID))
-	if state.StrictEmail && normalizeEmailForCompare(grant.Email) != state.Email {
-		if strings.TrimSpace(grant.GrantID) != "" {
-			_ = s.nylasClient.DeleteGrant(r.Context(), grant.GrantID)
-		}
+	if communicationsOAuthStateRequiresEmailMatch(state) && normalizeEmailForCompare(grant.Email) != normalizeEmailForCompare(state.Email) {
+		s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "email_mismatch", grant)
 		log.Printf("nylas_oauth_callback outcome=redirect reason=email_mismatch request_id=%s user_id=%s provider=%s requested_email=%s grant_email=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, state.Provider, state.Email, normalizeEmailForCompare(grant.Email), state.StrictEmail, grantIDLogValue(grant.GrantID))
 		s.redirectCommunications(w, r, "nylas_email_mismatch")
 		return
@@ -928,20 +949,32 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		provider = state.Provider
 	}
 	connectionScope := communicationsConnectionScopeForOAuthGrant(state, grant.Email)
-	connection, err := s.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+	connectionInput := store.UserEmailConnectionInput{
 		UserID:       state.UserID,
 		Provider:     provider,
 		AccountEmail: grant.Email,
 		Scope:        connectionScope,
 		GrantID:      grant.GrantID,
 		Status:       "connected",
-	})
+	}
+	connection, err := s.repo.UpsertUserEmailConnection(connectionInput)
+	if errors.Is(err, store.ErrNotFound) && communicationsOAuthStateTargetsPersonalMailbox(state) && normalizeEmailForCompare(grant.Email) == normalizeEmailForCompare(state.Email) {
+		if recoveredUser, lookupErr := s.repo.GetAuthUserByEmail(state.Email); lookupErr == nil && strings.TrimSpace(recoveredUser.UserID) != "" {
+			log.Printf("nylas_oauth_callback outcome=recovering reason=state_user_not_found_by_email request_id=%s original_user_id=%s recovered_user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, recoveredUser.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
+			connectionInput.UserID = recoveredUser.UserID
+			connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
+		} else if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
+			log.Printf("nylas_oauth_callback outcome=warning reason=recover_user_by_email_failed request_id=%s original_user_id=%s provider=%s account_email=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), grantIDLogValue(grant.GrantID), lookupErr)
+		}
+	}
 	if errors.Is(err, store.ErrNotFound) {
+		s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "mango_user_not_found", grant)
 		log.Printf("nylas_oauth_callback outcome=redirect reason=mango_user_not_found request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
 		s.redirectCommunications(w, r, "mango_user_not_found")
 		return
 	}
 	if err != nil {
+		s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "connection_store_failed", grant)
 		log.Printf("nylas_oauth_callback outcome=redirect reason=connection_store_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), err)
 		s.redirectCommunications(w, r, "nylas_connection_store_failed")
 		return

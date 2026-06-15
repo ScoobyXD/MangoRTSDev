@@ -178,6 +178,20 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusConflict, "cannot_delete_self")
 		return
 	}
+	var emailConnections []domain.UserEmailConnection
+	if s.nylasClient != nil {
+		emailConnections, err = s.repo.ListUserEmailConnections(userID)
+		if errors.Is(err, store.ErrNotFound) {
+			emailConnections = nil
+		} else if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "user_id_required")
+			return
+		} else if err != nil {
+			log.Printf("failed to list user email connections before user deletion company_id=%s user_id=%s target_email=%s actor_user_id=%s: %v", companyID, userID, target.Email, actor.User.UserID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_load_user_email_connections")
+			return
+		}
+	}
 	result, err := s.repo.DeleteCompanyUser(companyID, userID, actor.IsDevAdmin)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "company_user_not_found")
@@ -191,6 +205,12 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 	s.authCache.invalidateSubject(result.User.CognitoSubject)
 	s.authCache.invalidateUser(result.User.UserID)
 	s.authCache.invalidateCompany(companyID)
+	nylasGrantsDeleted := 0
+	nylasGrantDeleteFailures := 0
+	if result.DeleteExternalIdentity {
+		s.commCache.invalidateUser(result.User.UserID)
+		nylasGrantsDeleted, nylasGrantDeleteFailures = s.deleteUserNylasGrantsBestEffort(r, result.User, emailConnections)
+	}
 	cognitoDeleted := false
 	if result.DeleteExternalIdentity {
 		if s.cognitoAdmin == nil {
@@ -209,7 +229,33 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		"user":                              result.User,
 		"cognito_user_deleted":              cognitoDeleted,
 		"external_identity_deletion_queued": result.DeleteExternalIdentity && !cognitoDeleted,
+		"nylas_grants_deleted":              nylasGrantsDeleted,
+		"nylas_grant_delete_failures":       nylasGrantDeleteFailures,
 	})
+}
+
+func (s *Server) deleteUserNylasGrantsBestEffort(r *http.Request, user domain.CompanyUser, connections []domain.UserEmailConnection) (int, int) {
+	if s.nylasClient == nil || len(connections) == 0 {
+		return 0, 0
+	}
+	seen := map[string]bool{}
+	deleted := 0
+	failures := 0
+	for _, connection := range connections {
+		grantID := strings.TrimSpace(connection.GrantID)
+		if grantID == "" || seen[grantID] {
+			continue
+		}
+		seen[grantID] = true
+		if err := s.nylasClient.DeleteGrant(r.Context(), grantID); err != nil {
+			failures++
+			log.Printf("company_user_delete outcome=warning reason=delete_nylas_grant_failed request_id=%s user_id=%s user_email=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), user.UserID, normalizeEmailForCompare(user.Email), connection.Provider, normalizeEmailForCompare(connection.AccountEmail), connection.Scope, grantIDLogValue(grantID), err)
+			continue
+		}
+		deleted++
+		log.Printf("company_user_delete outcome=nylas_grant_deleted request_id=%s user_id=%s user_email=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), user.UserID, normalizeEmailForCompare(user.Email), connection.Provider, normalizeEmailForCompare(connection.AccountEmail), connection.Scope, grantIDLogValue(grantID))
+	}
+	return deleted, failures
 }
 
 func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *http.Request, companyID string, parts []string) {
