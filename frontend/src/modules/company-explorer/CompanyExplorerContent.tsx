@@ -602,12 +602,21 @@ function buildRaciCompanyExplorerRows(input: {
   const prefixTreeID = (treeID: string): string => treeIDPrefix ? `${treeIDPrefix}:${treeID}` : treeID;
   const rowDepth = (depth: number): number => depth + depthOffset;
   const isExpanded = (treeID: string): boolean => input.expanded.has(treeID) || input.expanded.has("*");
+  const currentRaciUserID = cleanExplorerID(input.currentUserID);
+  const raciCreationScope = currentRaciUserID
+    ? { folderScopeType: "user" as const, folderScopeID: currentRaciUserID }
+    : {};
+  const emptyProjectByID = new Map<string, ProjectRecord>();
   const nodeByID = new Map<string, NodeRecord>();
   for (const node of input.folderNodes) nodeByID.set(node.node_id, node);
   for (const node of input.nodes) nodeByID.set(node.node_id, node);
+  const raciNodeByID = new Map<string, NodeRecord>();
+  for (const node of input.nodes) raciNodeByID.set(node.node_id, node);
   const logicGateByID = new Map<string, ExplorerLogicGateRecord>();
   for (const logicGate of input.folderLogicGates) logicGateByID.set(logicGate.logic_gate_id, logicGate);
   for (const logicGate of input.logicGates) logicGateByID.set(logicGate.logic_gate_id, logicGate);
+  const raciLogicGateByID = new Map<string, ExplorerLogicGateRecord>();
+  for (const logicGate of input.logicGates) raciLogicGateByID.set(logicGate.logic_gate_id, logicGate);
   const projectByID = new Map<string, ProjectRecord>();
   for (const project of input.projects ?? []) projectByID.set(project.project_id, project);
   const customNodeByID = new Map(nodeByID);
@@ -621,7 +630,12 @@ function buildRaciCompanyExplorerRows(input: {
     folderScopeType: folder?.scope_type,
     folderScopeID: folder?.scope_id?.trim() || undefined,
   });
-  const folderScopeForID = (folderID: string) => folderScopeForFolder(folderByID.get(folderID));
+  const raciFolderScopeForFolder = (folder?: CompanyExplorerFolder) => {
+    const scope = folderScopeForFolder(folder);
+    if ((scope.folderScopeType === "user" || scope.folderScopeType === "team") && scope.folderScopeID) return scope;
+    return raciCreationScope;
+  };
+  const raciFolderScopeForID = (folderID: string) => raciFolderScopeForFolder(folderByID.get(folderID));
   const roleRootByRole = new Map<CompanyExplorerRaciFolderRole, CompanyExplorerFolder>();
   const roleByRootFolderID = new Map<string, CompanyExplorerRaciFolderRole>();
   for (const folder of RACI_FOLDER_ROWS) {
@@ -774,8 +788,10 @@ function buildRaciCompanyExplorerRows(input: {
     if (!role && !customRootID) continue;
     for (const placementRole of role ? [role] : RACI_FOLDER_ROWS.map((folder) => folder.role)) {
       const placement = placementForRole(placementRole);
-      if (item.item_type === "logic_gate" && (customRootID ? customLogicGateByID : logicGateByID).has(item.item_id)) placement.logicGateIDs.add(item.item_id);
-      if (item.item_type === "node" && (customRootID ? customNodeByID : nodeByID).has(item.item_id)) placement.nodeIDs.add(item.item_id);
+      const placementLogicGateByID = role ? raciLogicGateByID : customLogicGateByID;
+      const placementNodeByID = role ? raciNodeByID : customNodeByID;
+      if (item.item_type === "logic_gate" && placementLogicGateByID.has(item.item_id)) placement.logicGateIDs.add(item.item_id);
+      if (item.item_type === "node" && placementNodeByID.has(item.item_id)) placement.nodeIDs.add(item.item_id);
     }
   }
 
@@ -792,6 +808,37 @@ function buildRaciCompanyExplorerRows(input: {
       || (item.item_type === "project" && sourceProjectByID.has(item.item_id))
     ));
   };
+  const folderMatchesCurrentRaciUserScope = (folder?: CompanyExplorerFolder): boolean => (
+    Boolean(folder)
+    && folder?.scope_type === "user"
+    && Boolean(currentRaciUserID)
+    && cleanExplorerID(folder.scope_id) === currentRaciUserID
+  );
+  function visualFolderHasRaciVisibleChildren(
+    folderID: string,
+    sourceNodeByID = raciNodeByID,
+    sourceLogicGateByID = raciLogicGateByID,
+    sourceProjectByID = emptyProjectByID,
+  ): boolean {
+    for (const child of foldersByParent.get(folderID) ?? []) {
+      if (visualFolderVisibleForCurrentRaciUser(child, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)) return true;
+    }
+    return (itemsByFolder.get(folderID) ?? []).some((item) => (
+      (item.item_type === "logic_gate" && sourceLogicGateByID.has(item.item_id))
+      || (item.item_type === "node" && sourceNodeByID.has(item.item_id))
+      || (item.item_type === "project" && sourceProjectByID.has(item.item_id))
+    ));
+  }
+  function visualFolderVisibleForCurrentRaciUser(
+    folder: CompanyExplorerFolder,
+    sourceNodeByID = raciNodeByID,
+    sourceLogicGateByID = raciLogicGateByID,
+    sourceProjectByID = emptyProjectByID,
+  ): boolean {
+    if (folderMatchesCurrentRaciUserScope(folder)) return true;
+    if (folder.scope_type === "user" || folder.scope_type === "team") return false;
+    return visualFolderHasRaciVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID);
+  }
 
   const pushVisualLogicGateBranch = (
     role: CompanyExplorerRaciFolderRole,
@@ -820,7 +867,7 @@ function buildRaciCompanyExplorerRows(input: {
       logicGateID: logicGate.logic_gate_id,
       folderID,
       folderKind,
-      ...folderScopeForID(folderID),
+      ...raciFolderScopeForID(folderID),
       scopeLevel: rowDepth(depth),
       position,
       createdTimestamp,
@@ -854,6 +901,7 @@ function buildRaciCompanyExplorerRows(input: {
     sourceLogicGateByID = logicGateByID,
     sourceNodesByLogicGateID = nodesByLogicGateID,
     sourceProjectByID = projectByID,
+    filterFoldersToCurrentRaciUser = false,
   ) => {
     const parentFolderKind = folderByID.get(parentFolderID)?.folder_kind ?? "logic_gate";
     const branchRows: Array<
@@ -861,6 +909,7 @@ function buildRaciCompanyExplorerRows(input: {
       | { kind: "item"; item: CompanyExplorerFolderItem; position: number; createdTimestamp: string; label: string }
     > = [];
     for (const folder of foldersByParent.get(parentFolderID) ?? []) {
+      if (filterFoldersToCurrentRaciUser && !visualFolderVisibleForCurrentRaciUser(folder, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)) continue;
       branchRows.push({
         kind: "folder",
         folder,
@@ -915,15 +964,17 @@ function buildRaciCompanyExplorerRows(input: {
           folderID: folder.folder_id,
           parentFolderID: folder.parent_folder_id ?? "",
           folderKind: folder.folder_kind as CompanyExplorerFolderKind,
-          ...folderScopeForFolder(folder),
+          ...raciFolderScopeForFolder(folder),
           scopeLevel: rowDepth(depth),
           position: folder.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: folder.created_timestamp,
-          hasChildren: visualFolderHasChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID),
+          hasChildren: filterFoldersToCurrentRaciUser
+            ? visualFolderHasRaciVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)
+            : visualFolderHasChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID),
           raciRole: role,
           syntheticKind: "logic_gate_children",
         });
-        if (isExpanded(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1, sourceNodeByID, sourceLogicGateByID, sourceNodesByLogicGateID, sourceProjectByID);
+        if (isExpanded(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1, sourceNodeByID, sourceLogicGateByID, sourceNodesByLogicGateID, sourceProjectByID, filterFoldersToCurrentRaciUser);
         continue;
       }
       const item = entry.item;
@@ -942,7 +993,7 @@ function buildRaciCompanyExplorerRows(input: {
           nodeID: node.node_id,
           folderID: parentFolderID,
           folderKind: parentFolderKind as CompanyExplorerFolderKind,
-          ...folderScopeForID(parentFolderID),
+          ...raciFolderScopeForID(parentFolderID),
           scopeLevel: rowDepth(depth),
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
@@ -960,7 +1011,7 @@ function buildRaciCompanyExplorerRows(input: {
           projectID: project.project_id,
           folderID: parentFolderID,
           folderKind: parentFolderKind as CompanyExplorerFolderKind,
-          ...folderScopeForID(parentFolderID),
+          ...raciFolderScopeForID(parentFolderID),
           scopeLevel: rowDepth(depth),
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
@@ -1022,7 +1073,7 @@ function buildRaciCompanyExplorerRows(input: {
     const folderID = prefixTreeID(raciFolderTreeID(folder.role));
     const visualRootFolder = roleRootByRole.get(folder.role);
     const visualRootFolderID = visualRootFolder?.folder_id ?? "";
-    const visualRootHasChildren = visualRootFolderID ? visualFolderHasChildren(visualRootFolderID) : false;
+    const visualRootHasChildren = visualRootFolderID ? visualFolderHasRaciVisibleChildren(visualRootFolderID, raciNodeByID, raciLogicGateByID, emptyProjectByID) : false;
     const placed = placementForRole(folder.role);
     const noLogicGateNodes = folder.role === "other"
       ? [...nodesWithoutLogicGate].filter((node) => !placed.nodeIDs.has(node.node_id)).sort((a, b) => (
@@ -1045,7 +1096,7 @@ function buildRaciCompanyExplorerRows(input: {
       folderID: visualRootFolderID || undefined,
       parentFolderID: "",
       folderKind: "logic_gate",
-      ...folderScopeForFolder(visualRootFolder),
+      ...raciCreationScope,
       scopeLevel: rowDepth(1),
       position: (folderIndex + 1) * TREE_ROW_POSITION_STEP,
       createdTimestamp: visualRootFolder?.created_timestamp ?? "",
@@ -1055,7 +1106,7 @@ function buildRaciCompanyExplorerRows(input: {
     });
     if (!isExpanded(folderID)) continue;
 
-    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 2);
+    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 2, raciNodeByID, raciLogicGateByID, nodesByLogicGateID, emptyProjectByID, true);
 
     if (noLogicGateNodes.length > 0) {
       rows.push({
@@ -1064,6 +1115,7 @@ function buildRaciCompanyExplorerRows(input: {
         depth: rowDepth(2),
         kind: "folder",
         folderKind: "node",
+        ...raciCreationScope,
         scopeLevel: rowDepth(2),
         position: TREE_ROW_POSITION_STEP,
         createdTimestamp: "",
@@ -1105,7 +1157,7 @@ function buildRaciCompanyExplorerRows(input: {
         logicGateID: logicGate.logic_gate_id,
         folderID: visualRootFolderID || undefined,
         folderKind: visualRootFolderID ? "logic_gate" : undefined,
-        ...folderScopeForFolder(visualRootFolder),
+        ...raciFolderScopeForFolder(visualRootFolder),
         scopeLevel: rowDepth(2),
         position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
@@ -3429,7 +3481,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [selectedTree]);
   const createToolbarFolder = useCallback(() => {
     const targets = getToolbarCreationTargets();
-    void createFolder(targets.preferredFolderKind, targets.preferredFolderParentID);
+    void createFolder(targets.preferredFolderKind, targets.preferredFolderParentID, undefined, targets.folderScopeType, targets.folderScopeID);
   }, [createFolder, getToolbarCreationTargets]);
   const createToolbarLogicGate = useCallback(() => {
     const targets = getToolbarCreationTargets();
@@ -3541,8 +3593,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         menu={explorerContextMenu}
         buttonStyle={explorerMenuButtonStyle}
         onClose={() => setExplorerContextMenu(null)}
-        onCreateFolder={(folderKind, parentFolderID, position) => {
-          void createFolder(folderKind, parentFolderID, position);
+        onCreateFolder={(folderKind, parentFolderID, position, scopeType, scopeID) => {
+          void createFolder(folderKind, parentFolderID, position, scopeType, scopeID);
           setExplorerContextMenu(null);
         }}
         onCreateNode={(parentFolderID, position, logicGateID, logicGateTreeID, priority) => {
