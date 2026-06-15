@@ -215,7 +215,7 @@ func requestCompanyID(r *http.Request) (string, error) {
 	if r.Body == nil || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch) {
 		return queryCompanyID, nil
 	}
-	if queryCompanyID != "" && requestBodyCompanyIDIgnoredByHandler(r) {
+	if requestBodyCompanyIDIgnoredByHandler(r) {
 		return queryCompanyID, nil
 	}
 	bodyCompanyID, found, err := readCompanyIDFromJSONBody(r, maxCompanyIDPayloadScanBytes)
