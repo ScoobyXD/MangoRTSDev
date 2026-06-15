@@ -63,9 +63,13 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return LogicGateRaciAssignmentCommandResult{}, ErrNotFound
 	}
+	effectiveCommandAssignments, err := r.expandedLogicGateRaciCommandAssignmentsLocked(companyID, commandAssignments)
+	if err != nil {
+		return LogicGateRaciAssignmentCommandResult{}, err
+	}
 	assignmentsByKey := map[string]domain.LogicGateRaciAssignment{}
 	now := time.Now().UTC()
-	for _, assignment := range commandAssignments {
+	for _, assignment := range effectiveCommandAssignments {
 		assignmentKey := assignment.role + ":" + assignment.subjectType + ":" + assignment.subjectID
 		if _, ok := assignmentsByKey[assignmentKey]; ok {
 			continue
@@ -89,7 +93,7 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	changed := false
 	switch operation {
 	case LogicGateRaciCommandAdd:
-		for _, commandAssignment := range commandAssignments {
+		for _, commandAssignment := range effectiveCommandAssignments {
 			assignmentKey := commandAssignment.role + ":" + commandAssignment.subjectType + ":" + commandAssignment.subjectID
 			if existing[assignmentKey] {
 				continue
@@ -103,6 +107,9 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		for _, commandAssignment := range commandAssignments {
 			remove[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
 		}
+		for _, commandAssignment := range effectiveCommandAssignments {
+			remove[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
+		}
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			if remove[logicGateRaciAssignmentSubjectKey(assignment)] {
@@ -114,6 +121,25 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		assignments = filtered
 	default:
 		return LogicGateRaciAssignmentCommandResult{}, ErrInvalid
+	}
+	if operation == LogicGateRaciCommandAdd {
+		staleGroupAssignments := map[string]bool{}
+		for _, commandAssignment := range commandAssignments {
+			if commandAssignment.subjectType == EntityPermissionSubjectGroup {
+				staleGroupAssignments[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
+			}
+		}
+		if len(staleGroupAssignments) > 0 {
+			filtered := assignments[:0]
+			for _, assignment := range assignments {
+				if staleGroupAssignments[logicGateRaciAssignmentSubjectKey(assignment)] {
+					changed = true
+					continue
+				}
+				filtered = append(filtered, assignment)
+			}
+			assignments = filtered
+		}
 	}
 
 	sortLogicGateRaciAssignments(assignments)

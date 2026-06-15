@@ -27,7 +27,6 @@ type CompanyExplorerTreeProps = {
   isDarkTheme: boolean;
   elevatedControls?: boolean;
   topControlsAccessory?: React.ReactNode;
-  topControlsActions?: React.ReactNode;
   hideTopControls: boolean;
   useParentScroll: boolean;
   treeViewportRef: React.RefObject<HTMLDivElement>;
@@ -102,7 +101,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   isDarkTheme,
   elevatedControls = false,
   topControlsAccessory,
-  topControlsActions,
   hideTopControls,
   useParentScroll,
   treeViewportRef,
@@ -257,7 +255,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         <div style={topControlsStyle}>
           <div style={titleStyle}>Explorer</div>
           {topControlsAccessory}
-          {topControlsActions}
         </div>
       )}
       {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}

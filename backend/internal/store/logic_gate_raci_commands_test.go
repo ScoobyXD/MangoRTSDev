@@ -106,6 +106,70 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
 }
 
+func TestMemoryLogicGateRaciCommandsExpandGroupAssignments(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-raci-command-group"
+	repo.EnsureCompany(companyID, "RACI Command Group Company")
+	logicGate, err := repo.CreateLogicGate(companyID, "Group Command Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	member, err := repo.UpsertAuthUser("raci-command-group-member", "group-member-command@example.com", "Group Command Member")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser member: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-command-group-member", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership member: %v", err)
+	}
+	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup parent: %v", err)
+	}
+	childGroup, err := repo.CreateCompanyUserGroup(companyID, parentGroup.GroupID, "Escalations")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup child: %v", err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{member.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers child: %v", err)
+	}
+
+	added, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:        domain.LogicGateRaciRoleResponsible,
+			SubjectType: EntityPermissionSubjectGroup,
+			SubjectID:   parentGroup.GroupID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddLogicGateRaciAssignments group: %v", err)
+	}
+	if !added.Changed || len(added.RaciAssignments) != 1 ||
+		added.RaciAssignments[0].SubjectType != EntityPermissionSubjectUser ||
+		added.RaciAssignments[0].UserID != member.UserID {
+		t.Fatalf("added group result = %+v, want expanded member assignment", added)
+	}
+
+	removed, err := repo.RemoveLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:        domain.LogicGateRaciRoleResponsible,
+			SubjectType: EntityPermissionSubjectGroup,
+			SubjectID:   parentGroup.GroupID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RemoveLogicGateRaciAssignments group: %v", err)
+	}
+	if !removed.Changed || len(removed.RaciAssignments) != 0 {
+		t.Fatalf("removed group result = %+v, want expanded member removed", removed)
+	}
+}
+
 func TestMemoryLogicGateRaciCommandsRejectInvalidRoleUserAndCompany(t *testing.T) {
 	t.Parallel()
 
