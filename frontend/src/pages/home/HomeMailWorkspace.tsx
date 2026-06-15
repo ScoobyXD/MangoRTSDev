@@ -612,7 +612,6 @@ export function HomeMailWorkspace({
                       </span>
                       <span style={triageMessageMetaStyle}>
                         <span style={messageTimestampStatusRowStyle}>
-                          {showReadStatus && <MessageReadStatusText message={message} />}
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                         </span>
                         {!draftRow && (
@@ -635,6 +634,7 @@ export function HomeMailWorkspace({
                             </button>
                           </span>
                         )}
+                        {showReadStatus && <MessageReadStatusText message={message} />}
                       </span>
                     </>
                   ) : (

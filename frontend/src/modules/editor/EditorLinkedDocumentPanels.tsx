@@ -98,6 +98,14 @@ const RACI_ROLE_ACCENTS: Record<LogicGateRaciRole, string> = {
   informed: "#059669",
 };
 
+type LogicGateRaciSubjectPickerOption = {
+  subjectType: LogicGateRaciSubjectType;
+  subjectID: string;
+  label: string;
+  meta: string;
+  depth: number;
+};
+
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
   const name = (user.display_name ?? "").trim();
   const email = (user.email ?? "").trim();
@@ -131,20 +139,6 @@ function raciAssignmentLabel(assignment: LogicGateRaciAssignment): string {
   const name = (assignment.user_display_name ?? "").trim();
   const email = (assignment.user_email ?? "").trim();
   return assignment.subject_name?.trim() || name || email || logicGateRaciAssignmentSubjectID(assignment) || assignment.user_id;
-}
-
-function findCompanyUserByDraft(users: Array<{ user_id: string; email?: string; display_name?: string }>, draft: string) {
-  const value = draft.trim().toLowerCase();
-  if (!value) return null;
-  return users.find((user) => {
-    const labels = [
-      companyUserOptionLabel(user),
-      user.display_name ?? "",
-      user.email ?? "",
-      user.user_id,
-    ];
-    return labels.some((label) => label.trim().toLowerCase() === value);
-  }) ?? null;
 }
 
 function validHexColor(value: string): string {
@@ -945,21 +939,13 @@ function LogicGateRaciRoleEditor({
 }) {
   const inputID = useId();
   const [draft, setDraft] = useState("");
-  const [groupDraft, setGroupDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [assignedOpen, setAssignedOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedSubjectKeys = useMemo(() => new Set(assignments.map(logicGateRaciAssignmentSubjectKey)), [assignments]);
   const roleAccent = RACI_ROLE_ACCENTS[role];
-  const matches = useMemo(() => {
+  const subjectMatches = useMemo(() => {
     const query = draft.trim().toLowerCase();
-    const candidates = companyUsers.filter((user) => !assignedSubjectKeys.has(`user:${user.user_id}`));
-    const filtered = query
-      ? candidates.filter((user) => companyUserOptionLabel(user).toLowerCase().includes(query) || (user.email ?? "").toLowerCase().includes(query) || (user.display_name ?? "").toLowerCase().includes(query))
-      : candidates;
-    return filtered.slice(0, 8);
-  }, [assignedSubjectKeys, companyUsers, draft]);
-  const groupOptions = useMemo(() => {
     const childrenByParent = new Map<string, Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>>();
     for (const group of companyUserGroups) {
       const parentID = group.parent_group_id?.trim() ?? "";
@@ -970,18 +956,44 @@ function LogicGateRaciRoleEditor({
     for (const bucket of childrenByParent.values()) {
       bucket.sort((left, right) => (left.position - right.position) || companyGroupLabel(left, left.group_id).localeCompare(companyGroupLabel(right, right.group_id), undefined, { numeric: true, sensitivity: "base" }) || left.group_id.localeCompare(right.group_id));
     }
-    const options: Array<{ groupID: string; label: string; depth: number }> = [];
+    const options: LogicGateRaciSubjectPickerOption[] = [];
+    for (const user of companyUsers) {
+      if (assignedSubjectKeys.has(`user:${user.user_id}`)) continue;
+      const label = companyUserOptionLabel(user);
+      const name = (user.display_name ?? "").trim();
+      const email = (user.email ?? "").trim();
+      const fields = [label, name, email, user.user_id].map((field) => field.trim().toLowerCase());
+      if (!query || fields.some((field) => field.includes(query))) {
+        options.push({
+          subjectType: "user",
+          subjectID: user.user_id,
+          label: name || label,
+          meta: email,
+          depth: 0,
+        });
+      }
+    }
     const visit = (parentID: string, depth: number) => {
       for (const group of childrenByParent.get(parentID) ?? []) {
         if (!assignedSubjectKeys.has(`group:${group.group_id}`)) {
-          options.push({ groupID: group.group_id, label: companyGroupLabel(group, group.group_id), depth });
+          const groupLabel = companyGroupLabel(group, group.group_id);
+          const fields = [groupLabel, group.group_id].map((field) => field.trim().toLowerCase());
+          if (!query || fields.some((field) => field.includes(query))) {
+            options.push({
+              subjectType: "group",
+              subjectID: group.group_id,
+              label: groupLabel,
+              meta: "User group",
+              depth,
+            });
+          }
         }
         visit(group.group_id, depth + 1);
       }
     };
     visit("", 0);
-    return options;
-  }, [assignedSubjectKeys, companyUserGroups]);
+    return options.slice(0, 10);
+  }, [assignedSubjectKeys, companyUserGroups, companyUsers, draft]);
 
   useEffect(() => {
     if (!open && !assignedOpen) return;
@@ -1008,32 +1020,26 @@ function LogicGateRaciRoleEditor({
     if (canEdit) return;
     setOpen(false);
     setDraft("");
-    setGroupDraft("");
   }, [canEdit]);
 
-  const addUser = (userID: string) => {
-    if (!canEdit) return;
-    onAddSubject(role, "user", userID);
+  const addSubjectOption = (option: LogicGateRaciSubjectPickerOption) => {
+    if (!canEdit || assignedSubjectKeys.has(`${option.subjectType}:${option.subjectID}`)) return;
+    onAddSubject(role, option.subjectType, option.subjectID);
     setDraft("");
-    setOpen(false);
-    setAssignedOpen(false);
-  };
-
-  const addGroup = (groupID: string) => {
-    if (!canEdit) return;
-    const cleanGroupID = groupID.trim();
-    if (!cleanGroupID || assignedSubjectKeys.has(`group:${cleanGroupID}`)) return;
-    onAddSubject(role, "group", cleanGroupID);
-    setGroupDraft("");
     setOpen(false);
     setAssignedOpen(false);
   };
 
   const commitDraft = () => {
     if (!canEdit) return;
-    const selected = findCompanyUserByDraft(companyUsers, draft) ?? matches[0] ?? null;
-    if (!selected || assignedSubjectKeys.has(`user:${selected.user_id}`)) return;
-    addUser(selected.user_id);
+    const value = draft.trim().toLowerCase();
+    const selected = subjectMatches.find((option) => (
+      option.label.trim().toLowerCase() === value
+      || option.meta.trim().toLowerCase() === value
+      || option.subjectID.trim().toLowerCase() === value
+    )) ?? subjectMatches[0] ?? null;
+    if (!selected) return;
+    addSubjectOption(selected);
   };
 
   return (
@@ -1140,8 +1146,6 @@ function LogicGateRaciRoleEditor({
             setDraft(next);
             setAssignedOpen(false);
             setOpen(true);
-            const exact = findCompanyUserByDraft(companyUsers, next);
-            if (exact && !assignedSubjectKeys.has(`user:${exact.user_id}`) && companyUserOptionLabel(exact) === next) addUser(exact.user_id);
           }}
           onKeyDown={(event) => {
             if (!canEdit) {
@@ -1153,8 +1157,8 @@ function LogicGateRaciRoleEditor({
               commitDraft();
             }
           }}
-          placeholder="Add person"
-          aria-label={`Add ${label} person`}
+          placeholder="Add"
+          aria-label={`Add ${label} assignee`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
@@ -1164,32 +1168,31 @@ function LogicGateRaciRoleEditor({
           <div
             id={`${inputID}-options`}
             role="listbox"
-            aria-label={`${label} people`}
+            aria-label={`${label} people and groups`}
             style={{ position: "absolute", zIndex: 30, top: "calc(100% + 6px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
-            {matches.length === 0 ? (
-              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>{companyUsers.every((user) => assignedSubjectKeys.has(`user:${user.user_id}`)) ? "All people added" : "No matches"}</div>
-            ) : matches.map((user) => {
-              const optionLabel = companyUserOptionLabel(user);
-              const name = (user.display_name ?? "").trim() || optionLabel;
-              const email = (user.email ?? "").trim();
-              const optionAccent = userAccentForName(name || user.user_id);
+            {subjectMatches.length === 0 ? (
+              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
+                {companyUsers.every((user) => assignedSubjectKeys.has(`user:${user.user_id}`)) && companyUserGroups.every((group) => assignedSubjectKeys.has(`group:${group.group_id}`)) ? "All assignees added" : "No matches"}
+              </div>
+            ) : subjectMatches.map((option) => {
+              const optionAccent = option.subjectType === "group" ? roleAccent : userAccentForName(option.label || option.subjectID);
               return (
                 <button
-                  key={user.user_id}
+                  key={`${option.subjectType}:${option.subjectID}`}
                   type="button"
                   role="option"
                   aria-selected={false}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addUser(user.user_id)}
+                  onClick={() => addSubjectOption(option)}
                   style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}` }}
                 >
-                  <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name || user.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
-                    {initialsForName(name || user.user_id)}
+                  <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: option.subjectType === "group" ? hexWithAlpha(roleAccent, "bb") : avatarBackgroundForName(option.label || option.subjectID), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                    {option.subjectType === "group" ? "GR" : initialsForName(option.label || option.subjectID)}
                   </span>
                   <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent }}>{name}</span>
-                    {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent, paddingLeft: option.subjectType === "group" ? option.depth * 8 : 0 }}>{option.label}</span>
+                    {option.meta && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{option.meta}</span>}
                   </span>
                 </button>
               );
@@ -1197,24 +1200,6 @@ function LogicGateRaciRoleEditor({
           </div>
         )}
       </div>
-      <select
-        value={groupDraft}
-        disabled={!canEdit}
-        onChange={(event) => {
-          const groupID = event.currentTarget.value;
-          setGroupDraft(groupID);
-          if (groupID) addGroup(groupID);
-        }}
-        aria-label={`Add ${label} group`}
-        style={{ width: "min(156px, 100%)", minWidth: 0, minHeight: 29, justifySelf: "start", boxSizing: "border-box", border: `1px solid ${hexWithAlpha(roleAccent, "46")}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "4px 8px", outline: "none", cursor: canEdit ? "pointer" : "default", boxShadow: "4px 4px 12px rgba(174,174,192,0.20), -4px -4px 12px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
-      >
-        <option value="">{groupOptions.length === 0 ? "All groups added" : "Add group"}</option>
-        {groupOptions.map((group) => (
-          <option key={group.groupID} value={group.groupID}>
-            {`${"  ".repeat(group.depth)}${group.label}`}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
