@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import type { CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
+import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType } from "../folders/companyExplorerFolders";
 import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../kanban/shared";
 import type {
   CompanyExplorerContextMenuState,
@@ -16,7 +16,7 @@ type CompanyExplorerContextMenuProps = {
   menu: CompanyExplorerContextMenuState | null;
   buttonStyle: React.CSSProperties;
   onClose: () => void;
-  onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => void;
+  onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number, scopeType?: CompanyExplorerFolderScopeType, scopeID?: string) => void;
   onCreateNode: (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => void;
   onCreateLogicGate: (parentFolderID: string, position?: number, raciRole?: string) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
@@ -133,7 +133,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       {menu.canCreateBothFolderTypes ? (
         <>
           {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID)}>
               Create New Folder
             </button>
           )}
@@ -149,7 +149,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       ) : (
         <>
           {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID)}>
               Create New Folder
             </button>
           )}

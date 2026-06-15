@@ -70,6 +70,8 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 		FolderKind     string `json:"folder_kind"`
 		Name           string `json:"name"`
 		AccountEmail   string `json:"account_email"`
+		ScopeType      string `json:"scope_type"`
+		ScopeID        string `json:"scope_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -80,6 +82,8 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	req.FolderKind = strings.TrimSpace(req.FolderKind)
 	req.Name = strings.TrimSpace(req.Name)
 	req.AccountEmail = strings.ToLower(strings.TrimSpace(req.AccountEmail))
+	req.ScopeType = strings.TrimSpace(req.ScopeType)
+	req.ScopeID = strings.TrimSpace(req.ScopeID)
 	if req.CompanyID == "" || req.Name == "" || !isValidCompanyExplorerFolderKind(req.FolderKind) {
 		writeError(w, http.StatusBadRequest, "company_id_folder_kind_name_required")
 		return
@@ -92,6 +96,22 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_folder")
 		return
+	}
+	if req.ScopeType != "" || req.ScopeID != "" {
+		item, err = s.repo.SetCompanyExplorerFolderScope(req.CompanyID, item.FolderID, req.ScopeType, req.ScopeID)
+		if err != nil {
+			_ = s.repo.DeleteCompanyExplorerFolder(req.CompanyID, item.FolderID)
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_scope")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed_to_scope_company_explorer_folder")
+			return
+		}
 	}
 	if req.AccountEmail != "" {
 		item, err = s.repo.SetCommunicationsSharedInboxAccountEmail(req.CompanyID, item.FolderID, req.AccountEmail)

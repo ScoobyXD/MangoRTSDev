@@ -558,6 +558,8 @@ type CompanyExplorerFolder struct {
 	Name             string                      `json:"name"`
 	DefaultAccess    string                      `json:"default_access,omitempty"`
 	AccountEmail     *string                     `json:"account_email,omitempty"`
+	ScopeType        string                      `json:"scope_type,omitempty"`
+	ScopeID          *string                     `json:"scope_id,omitempty"`
 	Position         int                         `json:"position"`
 	RaciAssignments  []SharedInboxRaciAssignment `json:"raci_assignments,omitempty"`
 	AccessGrants     []EntityPermission          `json:"access_grants,omitempty"`

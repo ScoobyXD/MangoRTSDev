@@ -95,6 +95,10 @@ export function buildCompanyExplorerTreeRows({
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
   const projectByID = new Map(projects.map((project) => [project.project_id, project]));
   const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
+  const folderScopeForFolder = (folder?: CompanyExplorerFolder) => ({
+    folderScopeType: folder?.scope_type,
+    folderScopeID: folder?.scope_id?.trim() || undefined,
+  });
   const folderPathLabelByID = new Map<string, string>();
   const getFolderPathLabel = (folderID: string): string => {
     if (!folderID) return "";
@@ -170,7 +174,9 @@ export function buildCompanyExplorerTreeRows({
   };
 
   const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
-    const parentFolderKind = (folderByID.get(parentFolderID)?.folder_kind ?? folderKind) as CompanyExplorerFolderKind;
+    const parentFolder = folderByID.get(parentFolderID);
+    const parentFolderKind = (parentFolder?.folder_kind ?? folderKind) as CompanyExplorerFolderKind;
+    const parentFolderScope = folderScopeForFolder(parentFolder);
     const directItems = itemsByFolder.get(parentFolderID) ?? [];
     const branchRows: ExplorerTreeNode[] = [];
     let syntheticRootPosition = 0;
@@ -244,6 +250,7 @@ export function buildCompanyExplorerTreeRows({
             nodeID: node.node_id,
             folderID: parentFolderID,
             folderKind: parentFolderKind,
+            ...parentFolderScope,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `node-${node.node_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -261,6 +268,7 @@ export function buildCompanyExplorerTreeRows({
             logicGateID: logicGate.logic_gate_id,
             folderID: parentFolderID,
             folderKind: parentFolderKind,
+            ...parentFolderScope,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -279,6 +287,7 @@ export function buildCompanyExplorerTreeRows({
             projectID: project.project_id,
             folderID: parentFolderID,
             folderKind: parentFolderKind,
+            ...parentFolderScope,
             folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `project-${project.project_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
@@ -302,6 +311,7 @@ export function buildCompanyExplorerTreeRows({
         folderID: folder.folder_id,
         parentFolderID: folder.parent_folder_id ?? "",
         folderKind: childFolderKind,
+        ...folderScopeForFolder(folder),
         systemKey: isExplorerSystemFolderKey(folder.system_key) ? folder.system_key : undefined,
         folderLabel: getFolderPathLabel(folder.folder_id),
         scopeLevel: depth,

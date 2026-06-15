@@ -1286,11 +1286,20 @@ create table if not exists company_explorer_folders (
   name text not null,
   default_access text not null default 'edit',
   account_email text,
+  scope_type text not null default 'company',
+  scope_id text,
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project', 'communications')),
   constraint company_explorer_folders_default_access_chk check (default_access in ('edit', 'no_access')),
+  constraint company_explorer_folders_scope_chk check (
+    scope_type in ('company', 'user', 'team')
+    and (
+      (scope_type = 'company' and scope_id is null)
+      or (scope_type in ('user', 'team') and scope_id is not null and btrim(scope_id) <> '')
+    )
+  ),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_account_email_chk check (
     account_email is null or (
@@ -1315,6 +1324,9 @@ create index if not exists idx_company_explorer_folders_parent_kind
 create index if not exists idx_company_explorer_folders_account_email
   on company_explorer_folders(company_id, account_email)
   where account_email is not null;
+
+create index if not exists idx_company_explorer_folders_scope
+  on company_explorer_folders(company_id, scope_type, scope_id);
 
 create table if not exists communications_shared_inbox_raci_assignments (
   company_id uuid not null,
