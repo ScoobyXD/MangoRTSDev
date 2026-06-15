@@ -8,8 +8,43 @@ import (
 const LogicGateRaciUpdatedEventType = "logic_gate_raci_updated"
 
 type normalizedLogicGateRaciCommandAssignment struct {
-	role   string
-	userID string
+	role        string
+	subjectType string
+	subjectID   string
+	userID      string
+}
+
+func normalizeLogicGateRaciAssignmentInput(assignment LogicGateRaciAssignmentInput) (normalizedLogicGateRaciCommandAssignment, error) {
+	role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+	subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
+	subjectID := strings.TrimSpace(assignment.SubjectID)
+	userID := strings.TrimSpace(assignment.UserID)
+	if subjectType == "" && userID != "" {
+		subjectType = EntityPermissionSubjectUser
+		subjectID = userID
+	}
+	if subjectType == EntityPermissionSubjectUser && subjectID == "" {
+		subjectID = userID
+	}
+	if !ok || subjectID == "" {
+		return normalizedLogicGateRaciCommandAssignment{}, ErrInvalid
+	}
+	switch subjectType {
+	case EntityPermissionSubjectUser:
+		if userID == "" {
+			userID = subjectID
+		}
+	case EntityPermissionSubjectGroup:
+		userID = ""
+	default:
+		return normalizedLogicGateRaciCommandAssignment{}, ErrInvalid
+	}
+	return normalizedLogicGateRaciCommandAssignment{
+		role:        role,
+		subjectType: subjectType,
+		subjectID:   subjectID,
+		userID:      userID,
+	}, nil
 }
 
 func normalizeLogicGateRaciCommandAssignments(assignments []LogicGateRaciAssignmentInput) ([]normalizedLogicGateRaciCommandAssignment, error) {
@@ -19,17 +54,16 @@ func normalizeLogicGateRaciCommandAssignments(assignments []LogicGateRaciAssignm
 	seen := map[string]bool{}
 	out := make([]normalizedLogicGateRaciCommandAssignment, 0, len(assignments))
 	for _, assignment := range assignments {
-		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
-		userID := strings.TrimSpace(assignment.UserID)
-		if !ok || userID == "" {
-			return nil, ErrInvalid
+		normalized, err := normalizeLogicGateRaciAssignmentInput(assignment)
+		if err != nil {
+			return nil, err
 		}
-		key := role + ":" + userID
+		key := normalized.role + ":" + normalized.subjectType + ":" + normalized.subjectID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, normalizedLogicGateRaciCommandAssignment{role: role, userID: userID})
+		out = append(out, normalized)
 	}
 	if len(out) == 0 {
 		return nil, ErrInvalid
@@ -48,7 +82,15 @@ func cloneLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) []dom
 func logicGateRaciCommandAssignmentPayload(assignments []normalizedLogicGateRaciCommandAssignment) []map[string]string {
 	out := make([]map[string]string, 0, len(assignments))
 	for _, assignment := range assignments {
-		out = append(out, map[string]string{"role": assignment.role, "user_id": assignment.userID})
+		payload := map[string]string{
+			"role":         assignment.role,
+			"subject_type": assignment.subjectType,
+			"subject_id":   assignment.subjectID,
+		}
+		if assignment.subjectType == EntityPermissionSubjectUser {
+			payload["user_id"] = assignment.subjectID
+		}
+		out = append(out, payload)
 	}
 	return out
 }

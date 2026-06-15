@@ -163,6 +163,85 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	}
 }
 
+func TestMemoryRepoLogicGateRaciGroupAssignmentsIncludeSubgroups(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "33333333-3333-4333-8333-333333333333"
+	repo.EnsureCompany(companyID, "Group RACI Company")
+
+	user := mustCreateInboxReadCompanyUser(t, repo, "group-raci-user-subject", companyID, "group-raci@example.com", "Group RACI User")
+	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup parent: %v", err)
+	}
+	childGroup, err := repo.CreateCompanyUserGroup(companyID, parentGroup.GroupID, "Escalations")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup child: %v", err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{user.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers child: %v", err)
+	}
+
+	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Parent Group Responsible")
+	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Child Group Accountable")
+	responsibleNode, err := repo.CreateNode(companyID, "Parent group responsible node")
+	if err != nil {
+		t.Fatalf("CreateNode responsible: %v", err)
+	}
+	priority := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: responsibleGate.LogicGateID,
+		NodeID:      responsibleNode.NodeID,
+		Status:      "in progress",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
+	}
+
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{
+		Role:        domain.LogicGateRaciRoleResponsible,
+		SubjectType: EntityPermissionSubjectGroup,
+		SubjectID:   parentGroup.GroupID,
+	}})
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{
+		Role:        domain.LogicGateRaciRoleAccountable,
+		SubjectType: EntityPermissionSubjectGroup,
+		SubjectID:   childGroup.GroupID,
+	}})
+
+	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListResponsibleInboxNodes: %v", err)
+	}
+	if len(responsibleNodes) != 1 || responsibleNodes[0].NodeID != responsibleNode.NodeID {
+		t.Fatalf("responsible nodes = %+v, want parent-group assigned node", responsibleNodes)
+	}
+
+	myGates, err := repo.ListMyLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMyLogicGates: %v", err)
+	}
+	responsibleGateRead := findInboxReadGate(myGates, responsibleGate.LogicGateID)
+	if responsibleGateRead == nil || !inboxReadRolesContain(responsibleGateRead.Roles, domain.LogicGateRaciRoleResponsible) {
+		t.Fatalf("my gates = %+v, want parent group responsible gate", myGates)
+	}
+	if len(responsibleGateRead.RaciAssignments) != 1 ||
+		responsibleGateRead.RaciAssignments[0].SubjectType != EntityPermissionSubjectGroup ||
+		responsibleGateRead.RaciAssignments[0].SubjectID != parentGroup.GroupID {
+		t.Fatalf("responsible gate assignments = %+v, want parent group assignment", responsibleGateRead.RaciAssignments)
+	}
+
+	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListACIInboxLogicGates: %v", err)
+	}
+	aciGateRead := findInboxReadGate(aciGates, aciGate.LogicGateID)
+	if aciGateRead == nil || !inboxReadRolesContain(aciGateRead.Roles, domain.LogicGateRaciRoleAccountable) {
+		t.Fatalf("ACI gates = %+v, want child group accountable gate", aciGates)
+	}
+}
+
 func mustCreateInboxReadCompanyUser(t *testing.T, repo *MemoryRepo, subject, companyID, email, displayName string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, email, displayName)

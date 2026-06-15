@@ -14,9 +14,9 @@ import type {
 } from "./companyExplorerTypes.js";
 
 export const EXPLORER_DRAG_MIME = "application/x-mangorts-company-explorer-row";
-export const TREE_INDENT_PX = 10;
-export const TREE_BASE_LEFT_PX = 4;
-export const TREE_TOGGLE_SLOT_PX = 16;
+export const TREE_INDENT_PX = 8;
+export const TREE_BASE_LEFT_PX = 2;
+export const TREE_TOGGLE_SLOT_PX = 14;
 export const TREE_ROW_POSITION_STEP = 1000;
 
 export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {

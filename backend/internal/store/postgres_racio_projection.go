@@ -8,8 +8,48 @@ import (
 	"strings"
 )
 
+const postgresLogicGateRaciUsersCTE = `
+logic_gate_raci_group_scope(company_id, logic_gate_id, role, group_id, path) as (
+  select assignment.company_id, assignment.resource_id, assignment.role, assignment.subject_id, array[assignment.subject_id]
+  from resource_raci_assignments assignment
+  where assignment.resource_type='logic_gate'
+    and assignment.subject_type='group'
+  union all
+  select scope.company_id, scope.logic_gate_id, scope.role, child.group_id, scope.path || child.group_id
+  from logic_gate_raci_group_scope scope
+  join company_user_groups child
+    on child.company_id=scope.company_id
+   and child.parent_group_id=scope.group_id
+  where not child.group_id = any(scope.path)
+),
+logic_gate_raci_users as (
+  select assignment.company_id, assignment.resource_id as logic_gate_id, assignment.role, assignment.subject_id as user_id
+  from resource_raci_assignments assignment
+  join company_memberships membership
+    on membership.company_id=assignment.company_id
+   and membership.user_id=assignment.subject_id
+  where assignment.resource_type='logic_gate'
+    and assignment.subject_type='user'
+  union
+  select scope.company_id, scope.logic_gate_id, scope.role, member.user_id
+  from logic_gate_raci_group_scope scope
+  join company_user_group_members member
+    on member.company_id=scope.company_id
+   and member.group_id=scope.group_id
+  join company_memberships membership
+    on membership.company_id=scope.company_id
+   and membership.user_id=member.user_id
+  union
+  select assignment.company_id, assignment.logic_gate_id, assignment.role, assignment.user_id
+  from logic_gate_raci_assignments assignment
+  join company_memberships membership
+    on membership.company_id=assignment.company_id
+   and membership.user_id=assignment.user_id
+)`
+
 var postgresRacioNodeProjectionCTE = `
-with node_row as (
+with recursive ` + postgresLogicGateRaciUsersCTE + `,
+node_row as (
   select
     n.company_id,
     n.node_id,
@@ -71,12 +111,9 @@ with node_row as (
     node_row.resource_created_timestamp,
     node_row.accounts
   from node_row
-  join logic_gate_raci_assignments raci
+  join logic_gate_raci_users raci
     on raci.company_id=node_row.company_id
    and raci.logic_gate_id=node_row.logic_gate_id
-  join company_memberships membership
-    on membership.company_id=raci.company_id
-   and membership.user_id=raci.user_id
   where node_row.logic_gate_id is not null
   union all
   select
@@ -104,12 +141,10 @@ with node_row as (
 )`
 
 var postgresRacioLogicGateUserProjectionCTE = `
-with user_raci as (
+with recursive ` + postgresLogicGateRaciUsersCTE + `,
+user_raci as (
   select distinct assignment.user_id
-  from logic_gate_raci_assignments assignment
-  join company_memberships membership
-    on membership.company_id=assignment.company_id
-   and membership.user_id=assignment.user_id
+  from logic_gate_raci_users assignment
   where assignment.company_id=$1::uuid
     and assignment.logic_gate_id=$2::uuid
     and assignment.user_id=$3::uuid
@@ -339,8 +374,7 @@ func syncPostgresRacioProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, 
 }
 
 func syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) error {
-	users := racioAssignmentChangedUserSet(before, after)
-	return syncPostgresRacioProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
+	return syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
 }
 
 func syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) ([]ProjectionDelta, error) {
@@ -758,11 +792,9 @@ where company_id=$1::uuid
 
 func postgresRacioAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
+with recursive `+postgresLogicGateRaciUsersCTE+`
 select distinct assignment.user_id::text
-from logic_gate_raci_assignments assignment
-join company_memberships membership
-  on membership.company_id=assignment.company_id
- and membership.user_id=assignment.user_id
+from logic_gate_raci_users assignment
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$2::uuid`, companyID, logicGateID)
 	if err != nil {

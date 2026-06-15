@@ -376,6 +376,9 @@ type LogicGateRaciAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	LogicGateID      string    `json:"logic_gate_id"`
 	Role             string    `json:"role"`
+	SubjectType      string    `json:"subject_type,omitempty"`
+	SubjectID        string    `json:"subject_id,omitempty"`
+	SubjectName      string    `json:"subject_name,omitempty"`
 	UserID           string    `json:"user_id"`
 	UserDisplayName  string    `json:"user_display_name,omitempty"`
 	UserEmail        string    `json:"user_email,omitempty"`

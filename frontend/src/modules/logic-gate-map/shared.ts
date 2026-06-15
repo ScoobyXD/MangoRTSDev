@@ -84,11 +84,15 @@ export type LogicGateRecord = ResourceAccessFields & {
 };
 
 export type LogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+export type LogicGateRaciSubjectType = "user" | "group";
 
 export type LogicGateRaciAssignment = {
   company_id: string;
   logic_gate_id: string;
   role: LogicGateRaciRole;
+  subject_type?: LogicGateRaciSubjectType;
+  subject_id?: string;
+  subject_name?: string;
   user_id: string;
   user_display_name?: string;
   user_email?: string;

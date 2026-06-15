@@ -63,16 +63,18 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return LogicGateRaciAssignmentCommandResult{}, ErrNotFound
 	}
-	usersByID := map[string]domain.User{}
+	assignmentsByKey := map[string]domain.LogicGateRaciAssignment{}
+	now := time.Now().UTC()
 	for _, assignment := range commandAssignments {
-		if _, ok := usersByID[assignment.userID]; ok {
+		assignmentKey := assignment.role + ":" + assignment.subjectType + ":" + assignment.subjectID
+		if _, ok := assignmentsByKey[assignmentKey]; ok {
 			continue
 		}
-		user, ok := r.companyUserByIDLocked(companyID, assignment.userID)
-		if !ok {
-			return LogicGateRaciAssignmentCommandResult{}, ErrAssigneeNotInCompany
+		item, err := r.logicGateRaciAssignmentForSubjectLocked(companyID, logicGateID, assignment.role, assignment.subjectType, assignment.subjectID, now)
+		if err != nil {
+			return LogicGateRaciAssignmentCommandResult{}, err
 		}
-		usersByID[assignment.userID] = user
+		assignmentsByKey[assignmentKey] = item
 	}
 
 	raciKey := key(companyID, logicGateID)
@@ -81,39 +83,29 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	assignments := cloneLogicGateRaciAssignments(before)
 	existing := map[string]bool{}
 	for _, assignment := range assignments {
-		existing[assignment.Role+":"+assignment.UserID] = true
+		existing[logicGateRaciAssignmentSubjectKey(assignment)] = true
 	}
 
 	changed := false
 	switch operation {
 	case LogicGateRaciCommandAdd:
-		now := time.Now().UTC()
 		for _, commandAssignment := range commandAssignments {
-			assignmentKey := commandAssignment.role + ":" + commandAssignment.userID
+			assignmentKey := commandAssignment.role + ":" + commandAssignment.subjectType + ":" + commandAssignment.subjectID
 			if existing[assignmentKey] {
 				continue
 			}
-			user := usersByID[commandAssignment.userID]
-			assignments = append(assignments, domain.LogicGateRaciAssignment{
-				CompanyID:        companyID,
-				LogicGateID:      logicGateID,
-				Role:             commandAssignment.role,
-				UserID:           user.UserID,
-				UserDisplayName:  strings.TrimSpace(user.DisplayName),
-				UserEmail:        strings.TrimSpace(user.Email),
-				CreatedTimestamp: now,
-			})
+			assignments = append(assignments, assignmentsByKey[assignmentKey])
 			existing[assignmentKey] = true
 			changed = true
 		}
 	case LogicGateRaciCommandRemove:
 		remove := map[string]bool{}
 		for _, commandAssignment := range commandAssignments {
-			remove[commandAssignment.role+":"+commandAssignment.userID] = true
+			remove[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
 		}
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
-			if remove[assignment.Role+":"+assignment.UserID] {
+			if remove[logicGateRaciAssignmentSubjectKey(assignment)] {
 				changed = true
 				continue
 			}

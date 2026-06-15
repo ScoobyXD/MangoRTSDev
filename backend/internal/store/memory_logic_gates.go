@@ -34,6 +34,75 @@ func (r *MemoryRepo) companyUserByIDLocked(companyID, userID string) (domain.Use
 	return domain.User{}, false
 }
 
+func logicGateRaciAssignmentSubject(item domain.LogicGateRaciAssignment) (string, string) {
+	subjectType := strings.TrimSpace(item.SubjectType)
+	subjectID := strings.TrimSpace(item.SubjectID)
+	if subjectType == "" {
+		subjectType = EntityPermissionSubjectUser
+	}
+	if subjectType == EntityPermissionSubjectUser && subjectID == "" {
+		subjectID = strings.TrimSpace(item.UserID)
+	}
+	return subjectType, subjectID
+}
+
+func logicGateRaciAssignmentSubjectKey(item domain.LogicGateRaciAssignment) string {
+	subjectType, subjectID := logicGateRaciAssignmentSubject(item)
+	return strings.TrimSpace(item.Role) + ":" + subjectType + ":" + subjectID
+}
+
+func logicGateRaciAssignmentSortLabel(item domain.LogicGateRaciAssignment) string {
+	label := strings.ToLower(strings.TrimSpace(item.SubjectName))
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserEmail))
+	}
+	if label == "" {
+		_, subjectID := logicGateRaciAssignmentSubject(item)
+		label = strings.ToLower(subjectID)
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserID))
+	}
+	return label
+}
+
+func (r *MemoryRepo) logicGateRaciAssignmentForSubjectLocked(companyID, logicGateID, role, subjectType, subjectID string, created time.Time) (domain.LogicGateRaciAssignment, error) {
+	item := domain.LogicGateRaciAssignment{
+		CompanyID:        companyID,
+		LogicGateID:      logicGateID,
+		Role:             role,
+		SubjectType:      subjectType,
+		SubjectID:        subjectID,
+		CreatedTimestamp: created,
+	}
+	switch subjectType {
+	case EntityPermissionSubjectUser:
+		user, ok := r.companyUserByIDLocked(companyID, subjectID)
+		if !ok {
+			return domain.LogicGateRaciAssignment{}, ErrAssigneeNotInCompany
+		}
+		item.UserID = user.UserID
+		item.UserDisplayName = strings.TrimSpace(user.DisplayName)
+		item.UserEmail = strings.TrimSpace(user.Email)
+		item.SubjectName = item.UserDisplayName
+		if item.SubjectName == "" {
+			item.SubjectName = item.UserEmail
+		}
+	case EntityPermissionSubjectGroup:
+		group, ok := r.userGroups[userGroupKey(companyID, subjectID)]
+		if !ok {
+			return domain.LogicGateRaciAssignment{}, ErrAssigneeNotInCompany
+		}
+		item.SubjectName = strings.TrimSpace(group.Name)
+	default:
+		return domain.LogicGateRaciAssignment{}, ErrInvalid
+	}
+	return item, nil
+}
+
 func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].LogicGateID != items[j].LogicGateID {
@@ -42,24 +111,17 @@ func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
 		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
 			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
 		}
-		iLabel := strings.ToLower(strings.TrimSpace(items[i].UserDisplayName))
-		if iLabel == "" {
-			iLabel = strings.ToLower(strings.TrimSpace(items[i].UserEmail))
-		}
-		if iLabel == "" {
-			iLabel = items[i].UserID
-		}
-		jLabel := strings.ToLower(strings.TrimSpace(items[j].UserDisplayName))
-		if jLabel == "" {
-			jLabel = strings.ToLower(strings.TrimSpace(items[j].UserEmail))
-		}
-		if jLabel == "" {
-			jLabel = items[j].UserID
-		}
+		iLabel := logicGateRaciAssignmentSortLabel(items[i])
+		jLabel := logicGateRaciAssignmentSortLabel(items[j])
 		if iLabel != jLabel {
 			return iLabel < jLabel
 		}
-		return items[i].UserID < items[j].UserID
+		iSubjectType, iSubjectID := logicGateRaciAssignmentSubject(items[i])
+		jSubjectType, jSubjectID := logicGateRaciAssignmentSubject(items[j])
+		if iSubjectType != jSubjectType {
+			return iSubjectType < jSubjectType
+		}
+		return iSubjectID < jSubjectID
 	})
 }
 
@@ -246,17 +308,12 @@ func logicGateMatchesQuery(gate domain.LogicGate, query string) bool {
 		strings.Contains(strings.ToLower(gate.LogicGateID), query)
 }
 
-func logicGateAssignedToUser(assignments []domain.LogicGateRaciAssignment, userID string) bool {
+func (r *MemoryRepo) logicGateAssignedToUserLocked(companyID string, assignments []domain.LogicGateRaciAssignment, userID string) bool {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return true
 	}
-	for _, assignment := range assignments {
-		if strings.TrimSpace(assignment.UserID) == userID {
-			return true
-		}
-	}
-	return false
+	return r.logicGateRaciAssignmentUserSetLocked(companyID, assignments)[userID]
 }
 
 func sortLogicGateQueryResults(items []domain.LogicGate) {
@@ -280,7 +337,7 @@ func (r *MemoryRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]
 			continue
 		}
 		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
-		if !logicGateAssignedToUser(assignments, query.AssignedUserID) {
+		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
 		items = append(items, r.withLogicGateRaciLocked(gate))
@@ -311,7 +368,7 @@ func (r *MemoryRepo) QueryVisibleLogicGates(companyID, userID string, query Logi
 			continue
 		}
 		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
-		if !logicGateAssignedToUser(assignments, query.AssignedUserID) {
+		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
 		items = append(items, r.withLogicGateRaciLocked(gate))
@@ -350,29 +407,20 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	seen := map[string]bool{}
 	assignments := make([]domain.LogicGateRaciAssignment, 0, len(input.Assignments))
 	for _, inputAssignment := range input.Assignments {
-		role, ok := NormalizeLogicGateRaciRole(inputAssignment.Role)
-		userID := strings.TrimSpace(inputAssignment.UserID)
-		if !ok || userID == "" {
-			return nil, ErrInvalid
+		normalized, err := normalizeLogicGateRaciAssignmentInput(inputAssignment)
+		if err != nil {
+			return nil, err
 		}
-		user, ok := r.companyUserByIDLocked(companyID, userID)
-		if !ok {
-			return nil, ErrAssigneeNotInCompany
-		}
-		assignmentKey := role + ":" + userID
+		assignmentKey := normalized.role + ":" + normalized.subjectType + ":" + normalized.subjectID
 		if seen[assignmentKey] {
 			continue
 		}
 		seen[assignmentKey] = true
-		assignments = append(assignments, domain.LogicGateRaciAssignment{
-			CompanyID:        companyID,
-			LogicGateID:      logicGateID,
-			Role:             role,
-			UserID:           user.UserID,
-			UserDisplayName:  strings.TrimSpace(user.DisplayName),
-			UserEmail:        strings.TrimSpace(user.Email),
-			CreatedTimestamp: now,
-		})
+		assignment, err := r.logicGateRaciAssignmentForSubjectLocked(companyID, logicGateID, normalized.role, normalized.subjectType, normalized.subjectID, now)
+		if err != nil {
+			return nil, err
+		}
+		assignments = append(assignments, assignment)
 	}
 	sortLogicGateRaciAssignments(assignments)
 	before := cloneLogicGateRaciAssignments(r.logicGateRaci[key(companyID, logicGateID)])

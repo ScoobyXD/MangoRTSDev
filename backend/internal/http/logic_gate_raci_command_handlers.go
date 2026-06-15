@@ -96,7 +96,18 @@ func parseLogicGateRaciCommandAssignments(fields map[string]json.RawMessage) ([]
 	}
 	role, rolePresent, roleOK := parseRequiredStringJSONField(fields, "role")
 	userID, userPresent, userOK := parseRequiredStringJSONField(fields, "user_id")
-	if !roleOK || !userOK || !rolePresent || !userPresent {
+	subjectType, subjectTypePresent, subjectTypeOK := parseRequiredStringJSONField(fields, "subject_type")
+	subjectID, subjectIDPresent, subjectIDOK := parseRequiredStringJSONField(fields, "subject_id")
+	if !roleOK || !rolePresent || !userOK || !subjectTypeOK || !subjectIDOK {
+		return nil, false
+	}
+	if subjectTypePresent || subjectIDPresent {
+		if !subjectTypePresent || !subjectIDPresent {
+			return nil, false
+		}
+		return []store.LogicGateRaciAssignmentInput{{Role: role, SubjectType: subjectType, SubjectID: subjectID, UserID: userID}}, true
+	}
+	if !userPresent {
 		return nil, false
 	}
 	return []store.LogicGateRaciAssignmentInput{{Role: role, UserID: userID}}, true

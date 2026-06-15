@@ -2935,42 +2935,6 @@ export function HomePage({
       onDelta: applyRealtimeRacioProjectionDelta,
     });
   }, [activeRacioMatrixUserID, apiBase, applyRealtimeRacioProjectionDelta, companyID, currentUserID, isInboxMatrixView, me, requestRacioProjectionRefresh]);
-  const attachMessagesToNode = useCallback(async (logicGateID: string, nodeID: string, messageIDs: string[], priority: number) => {
-    const ids = cleanIDList(messageIDs);
-    const cleanLogicGateID = logicGateID.trim();
-    const cleanNodeID = nodeID.trim();
-    if (!cleanLogicGateID || !cleanNodeID || ids.length === 0) return;
-    setBusy("triage-attach");
-    setError("");
-    try {
-      const conversion = await convertMessagesToLogicGateCommand({
-        apiBase,
-        companyID,
-        logicGateID: cleanLogicGateID,
-        nodeID: cleanNodeID,
-        messageIDs: ids,
-        priority,
-        invalidateKanbanBoardList: invalidateKanbanBoardListCache,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
-        invalidateLogicGateArenaView: invalidateLogicGateArenaViewCache,
-        invalidateNodeRecord: invalidateNodeRecordStoreCaches,
-        upsertNodeRelationshipGraphNode,
-        upsertNodeFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInNodeRelationshipGraph,
-        upsertLogicGateFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph,
-      });
-      if (!conversion) return;
-      for (const node of conversion.result.nodes ?? []) mergeUpdatedNode(node);
-      const converted = conversion.convertedMessageIDs;
-      setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, cleanLogicGateID) : message));
-      setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, cleanLogicGateID) : current);
-      const title = nodeTitle(nodeByID.get(cleanNodeID)) || "node";
-      showNoticeWithResourceAction(converted.length === 1 ? `Attached to ${title}.` : `${converted.length} messages attached to ${title}.`, { kind: "node", nodeID: cleanNodeID });
-    } catch (attachError) {
-      setError(formatError(attachError, "Failed to attach email to node"));
-    } finally {
-      setBusy("");
-    }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID, showNoticeWithResourceAction]);
   const mergeCreatedFolderItems = useCallback((items: CompanyExplorerFolderItem[]) => {
     if (items.length === 0) return;
     setNodeFolderItems((previous) => {
@@ -3744,12 +3708,7 @@ export function HomePage({
             mailboxCounts={mailboxCounts}
             messageListRef={messageListRef}
             messages={messages}
-            currentUserID={currentUserID}
             companyUsers={companyUsers}
-            companyUserGroups={companyUserGroups}
-            companyUserGroupMembers={companyUserGroupMembers}
-            logicGates={logicGates}
-            nodes={nodes}
             notice={notice}
             noticeAction={mailNoticeAction}
             pendingAutoArchiveMessageIDs={pendingAutoArchiveMessageIDs}
@@ -3771,7 +3730,6 @@ export function HomePage({
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}
             onArchiveSelected={archiveSelected}
-            onAttachMessageToNode={attachMessagesToNode}
             onAutoArchiveMessages={autoArchiveScrolledMessages}
             onCancelCompose={closeCompose}
             onColumnResizeStart={startColumnResize}
@@ -3791,7 +3749,6 @@ export function HomePage({
             onEmailSignatureChange={setEmailSignature}
             onSaveEmailSignature={handleSaveEmailSignature}
             onSaveComposeDraft={saveComposeAndStayOpen}
-            onCreateMessageNode={convertMessagesToLogicGate}
             onSearchDraftChange={setSearchDraft}
             onSelectMessage={selectMessageRow}
             onStartMessageDrag={startMessageDrag}

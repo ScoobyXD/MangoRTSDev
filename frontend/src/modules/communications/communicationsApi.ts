@@ -2,7 +2,7 @@ import { apiFetchJSON, getAuthSessionCacheGeneration, readAuthConfig } from "../
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
-import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRaciSubjectType, LogicGateRecord } from "../logic-gate-map/shared.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -677,7 +677,7 @@ export async function listCompanyUserGroups(companyID: string): Promise<CompanyU
 export async function updateLogicGateRaciAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+  assignments: Array<{ role: LogicGateRaciRole; user_id?: string; subject_type?: LogicGateRaciSubjectType; subject_id?: string }>,
 ): Promise<LogicGateRaciAssignment[]> {
   const payload = await apiFetchJSON<{ raci_assignments?: LogicGateRaciAssignment[] }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/raci`, {
     method: "PUT",
@@ -703,7 +703,7 @@ async function commandLogicGateRaciAssignments(
   companyID: string,
   logicGateID: string,
   operation: "add" | "remove",
-  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+  assignments: Array<{ role: LogicGateRaciRole; user_id?: string; subject_type?: LogicGateRaciSubjectType; subject_id?: string }>,
 ): Promise<LogicGateRaciAssignment[]> {
   const payload = await apiFetchJSON<LogicGateRaciAssignmentCommandResult>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/raci/${operation}`, {
     method: "POST",
@@ -720,7 +720,7 @@ async function commandLogicGateRaciAssignments(
 export function addLogicGateRaciAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+  assignments: Array<{ role: LogicGateRaciRole; user_id?: string; subject_type?: LogicGateRaciSubjectType; subject_id?: string }>,
 ): Promise<LogicGateRaciAssignment[]> {
   return commandLogicGateRaciAssignments(companyID, logicGateID, "add", assignments);
 }
@@ -728,7 +728,7 @@ export function addLogicGateRaciAssignments(
 export function removeLogicGateRaciAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+  assignments: Array<{ role: LogicGateRaciRole; user_id?: string; subject_type?: LogicGateRaciSubjectType; subject_id?: string }>,
 ): Promise<LogicGateRaciAssignment[]> {
   return commandLogicGateRaciAssignments(companyID, logicGateID, "remove", assignments);
 }

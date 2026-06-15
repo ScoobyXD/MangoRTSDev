@@ -1432,8 +1432,10 @@ type NodeViewInput struct {
 }
 
 type LogicGateRaciAssignmentInput struct {
-	Role   string `json:"role"`
-	UserID string `json:"user_id"`
+	Role        string `json:"role"`
+	SubjectType string `json:"subject_type"`
+	SubjectID   string `json:"subject_id"`
+	UserID      string `json:"user_id"`
 }
 
 type LogicGateRaciAssignmentUpdateInput struct {
