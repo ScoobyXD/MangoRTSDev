@@ -224,6 +224,61 @@ test("realtime client mints cookie before opening websocket without query creden
   }
 });
 
+test("realtime client ignores stale ticket opens after retain cleanup", async () => {
+  const openedURLs: string[] = [];
+  const ticketResolvers: Array<() => void> = [];
+
+  class FakeStaleOpenWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = FakeStaleOpenWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(url: string) {
+      openedURLs.push(url);
+      queueMicrotask(() => {
+        this.readyState = FakeStaleOpenWebSocket.OPEN;
+        this.onopen?.();
+      });
+    }
+
+    send(_message: string): void {}
+
+    close(): void {
+      this.readyState = FakeStaleOpenWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+
+  const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
+    WebSocketCtor: FakeStaleOpenWebSocket as unknown as typeof WebSocket,
+    getTicket: () => new Promise<void>((resolve) => {
+      ticketResolvers.push(resolve);
+    }),
+    reconnectDelayMs: 60_000,
+  });
+
+  const releaseStaleOpen = client.retain();
+  releaseStaleOpen();
+  const releaseCurrentOpen = client.retain();
+
+  assert.equal(ticketResolvers.length, 2);
+  ticketResolvers[0]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(openedURLs.length, 0);
+
+  ticketResolvers[1]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(openedURLs.length, 1);
+
+  releaseCurrentOpen();
+  client.close();
+});
+
 test("realtime client reuses one websocket for RACIO and notification scopes", async () => {
   const openedURLs: string[] = [];
   const sentMessages: string[] = [];

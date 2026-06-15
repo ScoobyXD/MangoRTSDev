@@ -414,6 +414,7 @@ export class MangoRealtimeClient {
   private keepAliveRefs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private subscriptionsSentForSocket = false;
+  private openAttemptID = 0;
 
   constructor(apiBase: string, companyID: string, options: RealtimeClientOptions = {}) {
     this.apiBase = apiBase;
@@ -459,21 +460,32 @@ export class MangoRealtimeClient {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
+    const attemptID = this.openAttemptID + 1;
+    this.openAttemptID = attemptID;
     void this.getTicket()
       .then(() => {
-        if (this.manualClose) return;
+        if (this.manualClose || attemptID !== this.openAttemptID) return;
         const socket = new this.WebSocketCtor(realtimeWebSocketURL(this.apiBase, this.companyID));
         this.socket = socket;
         this.subscriptionsSentForSocket = false;
         socket.onopen = () => {
+          if (this.socket !== socket || attemptID !== this.openAttemptID) {
+            socket.close();
+            return;
+          }
           this.opening = false;
           this.sendSubscriptionsForCurrentSocket();
         };
-        socket.onmessage = (event) => this.handleMessage(typeof event.data === "string" ? event.data : "");
+        socket.onmessage = (event) => {
+          if (this.socket !== socket) return;
+          this.handleMessage(typeof event.data === "string" ? event.data : "");
+        };
         socket.onerror = () => {
+          if (this.socket !== socket) return;
           this.dispatchError({ type: "error", error: "websocket_error" });
         };
         socket.onclose = () => {
+          if (this.socket !== socket) return;
           this.socket = null;
           this.opening = false;
           this.subscriptionsSentForSocket = false;
@@ -481,6 +493,7 @@ export class MangoRealtimeClient {
         };
       })
       .catch(() => {
+        if (attemptID !== this.openAttemptID) return;
         this.opening = false;
         this.dispatchError({ type: "error", error: "websocket_auth_failed" });
         this.scheduleReconnect();
@@ -489,6 +502,7 @@ export class MangoRealtimeClient {
 
   close(): void {
     this.manualClose = true;
+    this.openAttemptID += 1;
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.socket?.close();
