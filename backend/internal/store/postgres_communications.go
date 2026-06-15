@@ -68,6 +68,58 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	return connection, err
 }
 
+func (r *PostgresRepo) ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrInvalid
+	}
+	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
+		return nil, err
+	}
+
+	var userExists bool
+	if err := r.db.QueryRow(`select exists(select 1 from users where user_id = $1::uuid)`, userID).Scan(&userExists); err != nil {
+		return nil, err
+	}
+	if !userExists {
+		return nil, ErrNotFound
+	}
+
+	rows, err := r.db.Query(
+		`select user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp
+		 from user_email_connections
+		 where user_id = $1::uuid
+		 order by updated_timestamp desc, account_email asc`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	connections := make([]domain.UserEmailConnection, 0)
+	for rows.Next() {
+		var connection domain.UserEmailConnection
+		if err := rows.Scan(
+			&connection.UserID,
+			&connection.Provider,
+			&connection.AccountEmail,
+			&connection.Scope,
+			&connection.GrantID,
+			&connection.Status,
+			&connection.CreatedTimestamp,
+			&connection.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		connections = append(connections, connection)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return connections, nil
+}
+
 func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error) {
 	companyID = strings.TrimSpace(companyID)
 	accountEmail = normalizeEmail(accountEmail)
@@ -151,6 +203,13 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	}
 	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
 		return domain.UserEmailConnection{}, err
+	}
+	var userExists bool
+	if err := r.db.QueryRow(`select exists(select 1 from users where user_id = $1::uuid)`, userID).Scan(&userExists); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
+	if !userExists {
+		return domain.UserEmailConnection{}, ErrNotFound
 	}
 
 	var connection domain.UserEmailConnection

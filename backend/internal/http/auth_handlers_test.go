@@ -828,10 +828,21 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       target.UserID,
+		Provider:     "google",
+		AccountEmail: targetEmail,
+		GrantID:      "target-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	cognito := &recordingCognitoAdmin{}
+	nylas := &fakeNylasClient{}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		CognitoAdmin:  cognito,
+		NylasClient:   nylas,
 	}).Routes()
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/companies/"+companyID+"/users/"+target.UserID, nil)
@@ -843,6 +854,9 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	}
 	if len(cognito.deleted) != 1 || cognito.deleted[0] != targetSubject {
 		t.Fatalf("cognito deletes = %v, want [%s]", cognito.deleted, targetSubject)
+	}
+	if len(nylas.deletedGrants) != 1 || nylas.deletedGrants[0] != "target-grant" {
+		t.Fatalf("nylas deleted grants = %v, want [target-grant]", nylas.deletedGrants)
 	}
 	if _, err := repo.GetAuthUser(targetSubject); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("target user after delete error = %v, want ErrNotFound", err)
@@ -892,8 +906,19 @@ func TestDeleteCompanyUserWithRemainingMembershipKeepsIdentity(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(targetSubject, otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       target.UserID,
+		Provider:     "google",
+		AccountEmail: targetEmail,
+		GrantID:      "target-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
+		NylasClient:   nylas,
 	}).Routes()
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/companies/"+companyID+"/users/"+target.UserID, nil)
@@ -920,6 +945,12 @@ func TestDeleteCompanyUserWithRemainingMembershipKeepsIdentity(t *testing.T) {
 	}
 	if _, err := repo.GetAuthUser(targetSubject); err != nil {
 		t.Fatalf("target identity was not preserved: %v", err)
+	}
+	if _, err := repo.GetUserEmailConnection(target.UserID); err != nil {
+		t.Fatalf("target email connection was not preserved: %v", err)
+	}
+	if len(nylas.deletedGrants) != 0 {
+		t.Fatalf("nylas deleted grants = %v, want none for membership-only removal", nylas.deletedGrants)
 	}
 }
 

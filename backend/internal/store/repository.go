@@ -87,6 +87,7 @@ type IdentityRepository interface {
 	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
 	GetUserEmailConnection(userID string) (domain.UserEmailConnection, error)
+	ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error)
 	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error)
 	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)

@@ -693,7 +693,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.entityPermissions, permissionKey)
 		}
 	}
-	delete(r.emailConnections, userID)
+	for key, connection := range r.emailConnections {
+		if connection.UserID == userID {
+			delete(r.emailConnections, key)
+		}
+	}
 	for key, node := range r.nodes {
 		if node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
 			node.AssigneeUserID = nil
