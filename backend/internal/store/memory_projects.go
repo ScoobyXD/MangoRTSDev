@@ -167,19 +167,16 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerProjectSummariesInFolderSubtree(c
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, EntityTypeProject)
+	folderIDs := r.visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, folderID, EntityTypeProject, userID)
 	visible := map[string]bool{}
 	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == EntityTypeProject && folderIDs[item.FolderID] {
+		if item.CompanyID == companyID && item.ItemType == EntityTypeProject && folderIDs[item.FolderID] && r.companyExplorerFolderItemVisibleLocked(companyID, userID, item) {
 			visible[item.ItemID] = true
 		}
 	}
 	items := make([]domain.Project, 0, len(visible))
 	for _, project := range r.projects {
 		if project.CompanyID != companyID || !visible[project.ProjectID] {
-			continue
-		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeProject, project.ProjectID, EntityPermissionView) {
 			continue
 		}
 		project = r.withProjectReadModelLocked(project)

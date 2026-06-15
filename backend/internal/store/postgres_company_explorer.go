@@ -579,7 +579,7 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		kindParam = folderKind
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`with visible_shared_triage as (
+		`with recursive visible_shared_triage as (
 		   select shared.folder_id as resource_id,
 		          case
 		            when mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, 'admin') then 'admin'
@@ -590,15 +590,60 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		   where shared.company_id=$1::uuid
 		     and shared.folder_kind='communications'
 		     and mangorts_user_can_access_resource(shared.company_id, 'shared_triage_folder', shared.folder_id, $3::uuid, $4)
+		 ), visible_workspace_folder as (
+		   select folder.folder_id as resource_id,
+		          case
+		            when exists (
+		              select 1
+		              from company_memberships membership
+		              where membership.user_id=$3::uuid
+		                and (
+		                  membership.role='dev_admin'
+		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
+		                )
+		            ) then 'admin'
+		            when mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $3::uuid, 'edit') then 'edit'
+		            else 'view'
+		          end as access_level
+		   from company_explorer_folders folder
+		   where folder.company_id=$1::uuid
+		     and folder.folder_kind <> 'communications'
+		     and folder.parent_folder_id is null
+		     and mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $3::uuid, $4)
+		   union all
+		   select child.folder_id as resource_id,
+		          case
+		            when exists (
+		              select 1
+		              from company_memberships membership
+		              where membership.user_id=$3::uuid
+		                and (
+		                  membership.role='dev_admin'
+		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
+		                )
+		            ) then 'admin'
+		            when mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, 'edit') then 'edit'
+		            else 'view'
+		          end as access_level
+		   from company_explorer_folders child
+		   join visible_workspace_folder parent
+		     on parent.resource_id=child.parent_folder_id
+		   where child.company_id=$1::uuid
+		     and child.folder_kind <> 'communications'
+		     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 		 )
 		 select folder.company_id, folder.folder_id, folder.parent_folder_id, folder.folder_kind, folder.system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, `+companyExplorerFolderScopeColumns("folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
-		        visible_shared_triage.access_level
+		        coalesce(visible_shared_triage.access_level, visible_workspace_folder.access_level)
 		 from company_explorer_folders folder
 		 left join visible_shared_triage on visible_shared_triage.resource_id=folder.folder_id
+		 left join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
 		 where folder.company_id=$1::uuid
 		   and ($2::text is null or folder.folder_kind=$2)
 		   and (folder.system_key is null or folder.system_key <> 'kanban_boards')
-		   and (folder.folder_kind <> 'communications' or visible_shared_triage.resource_id is not null)
+		   and (
+		     (folder.folder_kind = 'communications' and visible_shared_triage.resource_id is not null)
+		     or (folder.folder_kind <> 'communications' and visible_workspace_folder.resource_id is not null)
+		   )
 		 order by folder.position asc, folder.created_timestamp asc`,
 		companyID, kindParam, userID, EntityPermissionView,
 	)
@@ -724,6 +769,10 @@ with recursive subtree as (
   where company_id=$1::uuid
     and folder_id=$2::uuid
     and ($3::text is null or folder_kind=$3)
+    and (
+      folder_kind = 'communications'
+      or mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
+    )
   union all
   select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
@@ -731,6 +780,10 @@ with recursive subtree as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where ($3::text is null or child.folder_kind=$3)
+    and (
+      child.folder_kind = 'communications'
+      or mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
+    )
 ), visible_shared_triage as (
   select subtree.folder_id as resource_id,
          case
@@ -741,13 +794,35 @@ with recursive subtree as (
   from subtree
   where subtree.folder_kind='communications'
     and mangorts_user_can_access_resource(subtree.company_id, 'shared_triage_folder', subtree.folder_id, $4::uuid, $5)
+), visible_workspace_folder as (
+  select subtree.folder_id as resource_id,
+         case
+           when exists (
+             select 1
+             from company_memberships membership
+             where membership.user_id=$4::uuid
+               and (
+                 membership.role='dev_admin'
+                 or (membership.company_id=$1::uuid and membership.role='company_admin')
+               )
+           ) then 'admin'
+           when mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $4::uuid, 'edit') then 'edit'
+           else 'view'
+         end as access_level
+  from subtree
+  where subtree.folder_kind <> 'communications'
+    and mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $4::uuid, $5)
 )
 select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.folder_kind, subtree.system_key, subtree.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "subtree")+`, `+companyExplorerFolderScopeColumns("subtree")+`, subtree.position, subtree.created_timestamp, subtree.updated_timestamp,
-       visible_shared_triage.access_level
+       coalesce(visible_shared_triage.access_level, visible_workspace_folder.access_level)
 from subtree
 left join visible_shared_triage on visible_shared_triage.resource_id=subtree.folder_id
+left join visible_workspace_folder on visible_workspace_folder.resource_id=subtree.folder_id
 where (subtree.system_key is null or subtree.system_key <> 'kanban_boards')
-  and (subtree.folder_kind <> 'communications' or visible_shared_triage.resource_id is not null)
+  and (
+    (subtree.folder_kind = 'communications' and visible_shared_triage.resource_id is not null)
+    or (subtree.folder_kind <> 'communications' and visible_workspace_folder.resource_id is not null)
+  )
 order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, kindParam, userID, EntityPermissionView)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
@@ -1871,10 +1946,17 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 	rows, err := r.db.QueryContext(ctx,
 		`select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
 		 from company_explorer_folder_items item
+		 join company_explorer_folders folder
+		   on folder.company_id=item.company_id
+		  and folder.folder_id=item.folder_id
 		 where item.company_id=$1::uuid
 		   and ($2::uuid is null or item.folder_id=$2::uuid)
 		   and ($3::text is null or item.item_type=$3)
 		   and item.item_type <> 'kanban'
+		   and (
+		     (folder.folder_kind = 'communications' and mangorts_user_can_access_resource(item.company_id, 'shared_triage_folder', item.folder_id, $4::uuid, $5))
+		     or (folder.folder_kind <> 'communications' and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5))
+		   )
 		   and (
 		     item.item_type not in ('node', 'logic_gate', 'project')
 		     or mangorts_user_can_access_resource(
@@ -1989,18 +2071,33 @@ with recursive subtree as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
+    and (
+      folder_kind = 'communications'
+      or mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
+    )
   union all
   select child.folder_id
   from company_explorer_folders child
   join subtree parent on child.parent_folder_id=parent.folder_id
   where child.company_id=$1::uuid
+    and (
+      child.folder_kind = 'communications'
+      or mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
+    )
 )
 select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
 from company_explorer_folder_items item
 join subtree folder_scope on folder_scope.folder_id=item.folder_id
+join company_explorer_folders folder
+  on folder.company_id=item.company_id
+ and folder.folder_id=item.folder_id
 where item.company_id=$1::uuid
   and ($3::text is null or item.item_type=$3)
   and item.item_type <> 'kanban'
+  and (
+    (folder.folder_kind = 'communications' and mangorts_user_can_access_resource(item.company_id, 'shared_triage_folder', item.folder_id, $4::uuid, $5))
+    or (folder.folder_kind <> 'communications' and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5))
+  )
   and (
     item.item_type not in ('node', 'logic_gate', 'project')
     or mangorts_user_can_access_resource(
@@ -2136,6 +2233,7 @@ with recursive folder_scope as (
   where company_id=$1::uuid
     and folder_id=$2::uuid
     and folder_kind='node'
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
@@ -2143,6 +2241,7 @@ with recursive folder_scope as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where child.folder_kind='node'
+    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 ), folder_nodes as (
   select distinct item.item_id::uuid as node_id
   from company_explorer_folder_items item
@@ -2278,6 +2377,7 @@ with recursive folder_scope as (
   where company_id=$1::uuid
     and folder_id=$2::uuid
     and folder_kind='logic_gate'
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
@@ -2285,6 +2385,7 @@ with recursive folder_scope as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where child.folder_kind='logic_gate'
+    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 ), folder_gates as (
   select distinct item.item_id::uuid as logic_gate_id
   from company_explorer_folder_items item

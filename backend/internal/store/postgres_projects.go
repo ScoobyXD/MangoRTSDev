@@ -450,6 +450,7 @@ with recursive folder_scope as (
   where company_id=$1::uuid
     and folder_id=$2::uuid
     and folder_kind='project'
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4::text)
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
@@ -457,6 +458,7 @@ with recursive folder_scope as (
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
   where child.folder_kind='project'
+    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4::text)
 )
 select `+projectSelectColumns+`
 from projects project
