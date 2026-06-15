@@ -21,6 +21,7 @@ var (
 type nylasOAuthStatePayload struct {
 	UserID      string `json:"user_id"`
 	Email       string `json:"email"`
+	UserEmail   string `json:"user_email,omitempty"`
 	Provider    string `json:"provider"`
 	StrictEmail bool   `json:"strict_email,omitempty"`
 	IssuedAt    int64  `json:"issued_at"`
@@ -30,6 +31,7 @@ func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time
 	secret = strings.TrimSpace(secret)
 	payload.UserID = strings.TrimSpace(payload.UserID)
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
+	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
 	if secret == "" || payload.UserID == "" || payload.Email == "" || payload.Provider == "" {
 		return "", errInvalidNylasState
@@ -68,6 +70,7 @@ func parseNylasOAuthState(secret, rawState string, now time.Time) (nylasOAuthSta
 	}
 	payload.UserID = strings.TrimSpace(payload.UserID)
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
+	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
 	if payload.UserID == "" || payload.Email == "" || payload.Provider == "" || payload.IssuedAt <= 0 {
 		return nylasOAuthStatePayload{}, errInvalidNylasState

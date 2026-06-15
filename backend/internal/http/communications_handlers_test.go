@@ -262,6 +262,9 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	if state.UserID != user.UserID || state.Email != "user@example.com" || state.Provider != "google" {
 		t.Fatalf("state = %+v, want user-bound google state", state)
 	}
+	if state.UserEmail != "user@example.com" {
+		t.Fatalf("state.UserEmail = %q, want user@example.com", state.UserEmail)
+	}
 	if state.StrictEmail {
 		t.Fatalf("state.StrictEmail = true, want false for personal auth URL")
 	}
@@ -449,6 +452,7 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
 		UserID:      user.UserID,
 		Email:       "shared@example.com",
+		UserEmail:   user.Email,
 		Provider:    "google",
 		StrictEmail: true,
 	}, time.Now())
@@ -467,6 +471,13 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	if rec.Code != http.StatusFound {
 		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
 	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redirect.Query().Get("nylas_scope") != "shared" || redirect.Query().Get("nylas_account_email") != "shared@example.com" {
+		t.Fatalf("callback redirect = %s, want shared scope and account email", redirect.String())
+	}
 	personal, err := repo.GetUserEmailConnection(user.UserID)
 	if err != nil {
 		t.Fatal(err)
@@ -480,6 +491,63 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	}
 	if shared.UserID != user.UserID || shared.AccountEmail != "shared@example.com" {
 		t.Fatalf("shared connection = %+v, want separate shared account grant", shared)
+	}
+}
+
+func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject", "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		Scope:        "personal",
+		GrantID:      "old-personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:      user.UserID,
+		Email:       user.Email,
+		UserEmail:   user.Email,
+		Provider:    "google",
+		StrictEmail: true,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "new-grant", Email: user.Email, Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	connection, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.Scope != "personal" || connection.AccountEmail != user.Email || connection.GrantID != "new-grant" {
+		t.Fatalf("connection = %+v, want updated personal user mailbox grant", connection)
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redirect.Query().Get("nylas_scope") != "personal" || redirect.Query().Get("nylas_account_email") != user.Email {
+		t.Fatalf("callback redirect = %s, want personal scope and account email", redirect.String())
 	}
 }
 
