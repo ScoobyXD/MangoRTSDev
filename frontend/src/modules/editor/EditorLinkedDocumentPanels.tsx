@@ -919,7 +919,8 @@ function LogicGateRaciRoleEditor({
   const inputID = useId();
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [assignedOpen, setAssignedOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedIDs = useMemo(() => new Set(assignments.map((assignment) => assignment.user_id)), [assignments]);
   const roleAccent = RACI_ROLE_ACCENTS[role];
   const matches = useMemo(() => {
@@ -932,13 +933,17 @@ function LogicGateRaciRoleEditor({
   }, [assignedIDs, companyUsers, draft]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !assignedOpen) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
+      if (containerRef.current?.contains(event.target as Node)) return;
       setOpen(false);
+      setAssignedOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        setAssignedOpen(false);
+      }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown, true);
@@ -946,7 +951,7 @@ function LogicGateRaciRoleEditor({
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [open]);
+  }, [assignedOpen, open]);
 
   useEffect(() => {
     if (canEdit) return;
@@ -959,6 +964,7 @@ function LogicGateRaciRoleEditor({
     onAddUser(role, userID);
     setDraft("");
     setOpen(false);
+    setAssignedOpen(false);
   };
 
   const commitDraft = () => {
@@ -970,7 +976,9 @@ function LogicGateRaciRoleEditor({
 
   return (
     <div
+      ref={containerRef}
       style={{
+        position: "relative",
         minWidth: 0,
         display: "grid",
         gap: 6,
@@ -986,37 +994,66 @@ function LogicGateRaciRoleEditor({
         <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: roleAccent, boxShadow: `0 0 12px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div style={{ minHeight: 28, display: "flex", flexWrap: "wrap", gap: 4, alignContent: "start" }}>
-        {assignments.length === 0 ? (
-          <span style={{ color: "rgba(15,23,42,0.52)", fontSize: 11, fontWeight: 650 }}>No people</span>
-        ) : assignments.map((assignment) => {
-          const assignmentLabel = raciAssignmentLabel(assignment);
-          const assignmentAccent = userAccentForName(assignmentLabel || assignment.user_id);
-          return (
-            <span
-              key={`${assignment.role}:${assignment.user_id}`}
-              title={assignment.user_email || assignment.user_id}
-              style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: canEdit ? "16px minmax(0, 1fr) 14px" : "16px minmax(0, 1fr)", alignItems: "center", gap: 4, border: `1px solid ${hexWithAlpha(roleAccent, "30")}`, borderRadius: 999, background: EDITOR_NEU_SURFACE, padding: canEdit ? "2px 3px" : "2px 6px 2px 3px", color: "inherit", boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
-            >
-              <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 7, fontWeight: 900 }}>
-                {initialsForName(assignmentLabel || assignment.user_id)}
-              </span>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
-              {canEdit && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${assignmentLabel} from ${label}`}
-                  onClick={() => onRemoveUser(role, assignment.user_id)}
-                  style={{ width: 14, height: 14, display: "grid", placeItems: "center", border: "none", borderRadius: 5, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 10, fontWeight: 800 }}
+      <div style={{ position: "relative", minHeight: 28, minWidth: 0 }}>
+        <button
+          type="button"
+          aria-label={`${label} users`}
+          aria-haspopup="listbox"
+          aria-expanded={assignedOpen}
+          aria-controls={`${inputID}-assigned-users`}
+          onClick={() => {
+            setAssignedOpen((current) => !current);
+            setOpen(false);
+          }}
+          style={{ width: "fit-content", maxWidth: "100%", minHeight: 27, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "7a" : "34")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "3px 8px", font: "inherit", fontSize: 11, fontWeight: 800, boxShadow: assignedOpen ? `0 8px 18px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "3px 3px 9px rgba(174,174,192,0.17), -3px -3px 9px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+        >
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Users ({assignments.length})</span>
+          <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedOpen ? "^" : "v"}</span>
+        </button>
+        {assignedOpen && (
+          <div
+            id={`${inputID}-assigned-users`}
+            role="listbox"
+            aria-label={`${label} assigned users`}
+            style={{ position: "absolute", zIndex: 32, top: "calc(100% + 6px)", left: 0, width: "min(320px, 86vw)", maxHeight: 240, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+          >
+            {assignments.length === 0 ? (
+              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>No people assigned</div>
+            ) : assignments.map((assignment) => {
+              const assignmentLabel = raciAssignmentLabel(assignment);
+              const assignmentAccent = userAccentForName(assignmentLabel || assignment.user_id);
+              return (
+                <div
+                  key={`${assignment.role}:${assignment.user_id}`}
+                  role="option"
+                  aria-selected="true"
+                  title={assignment.user_email || assignment.user_id}
+                  style={{ minWidth: 0, minHeight: 34, display: "grid", gridTemplateColumns: canEdit ? "24px minmax(0, 1fr) 22px" : "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", padding: "5px 7px", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}` }}
                 >
-                  x
-                </button>
-              )}
-            </span>
-          );
-        })}
+                  <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(assignmentLabel || assignment.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                    {initialsForName(assignmentLabel || assignment.user_id)}
+                  </span>
+                  <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
+                    {assignment.user_email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{assignment.user_email}</span>}
+                  </span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      aria-label={`Remove ${assignmentLabel} from ${label}`}
+                      onClick={() => onRemoveUser(role, assignment.user_id)}
+                      style={{ width: 22, height: 22, display: "grid", placeItems: "center", border: "none", borderRadius: 7, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 900 }}
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      <div ref={menuRef} style={{ position: "relative", minWidth: 0 }}>
+      <div style={{ position: "relative", minWidth: 0, width: "min(156px, 100%)", justifySelf: "start" }}>
         <input
           id={inputID}
           name={`${inputID}-raci-person`}
@@ -1027,11 +1064,17 @@ function LogicGateRaciRoleEditor({
           autoCorrect="off"
           autoCapitalize="none"
           spellCheck={false}
-          onFocus={() => { if (canEdit) setOpen(true); }}
+          onFocus={() => {
+            if (canEdit) {
+              setAssignedOpen(false);
+              setOpen(true);
+            }
+          }}
           onChange={(event) => {
             if (!canEdit) return;
             const next = event.currentTarget.value;
             setDraft(next);
+            setAssignedOpen(false);
             setOpen(true);
             const exact = findCompanyUserByDraft(companyUsers, next);
             if (exact && !assignedIDs.has(exact.user_id) && companyUserOptionLabel(exact) === next) addUser(exact.user_id);

@@ -9,8 +9,7 @@ import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
-import { TREE_BASE_LEFT_PX, TREE_INDENT_PX, TREE_TOGGLE_SLOT_PX } from "../modules/company-explorer/companyExplorerDragDrop";
-import type { CompanyExplorerSearchResultSummary, CompanyExplorerSearchSelectionRequest, CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
+import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
@@ -240,25 +239,6 @@ function usePersistedSidebarSectionOpen(sectionID: SidebarSectionID, fallback: b
   return [open, setOpen];
 }
 
-function filterExplorerSearchResultsForCollapsedBranches(
-  results: CompanyExplorerSearchResultSummary[],
-  collapsedTreeIDs: Set<string>,
-): CompanyExplorerSearchResultSummary[] {
-  if (collapsedTreeIDs.size === 0) return results;
-  const visible: CompanyExplorerSearchResultSummary[] = [];
-  let collapsedDepth = -1;
-  for (const result of results) {
-    const depth = Math.max(0, result.depth);
-    if (collapsedDepth >= 0) {
-      if (depth > collapsedDepth) continue;
-      collapsedDepth = -1;
-    }
-    visible.push(result);
-    if (result.hasChildren && collapsedTreeIDs.has(result.treeID)) collapsedDepth = depth;
-  }
-  return visible;
-}
-
 export function AppSidebar({
   accountChrome,
   activePage,
@@ -306,9 +286,6 @@ export function AppSidebar({
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
-  const [explorerSearchResults, setExplorerSearchResults] = useState<CompanyExplorerSearchResultSummary[]>([]);
-  const [collapsedExplorerSearchTreeIDs, setCollapsedExplorerSearchTreeIDs] = useState<Set<string>>(new Set());
-  const [explorerSearchSelectionRequest, setExplorerSearchSelectionRequest] = useState<CompanyExplorerSearchSelectionRequest | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -359,22 +336,6 @@ export function AppSidebar({
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
 
-  const handleExplorerSearchResultsChange = useCallback((results: CompanyExplorerSearchResultSummary[]) => {
-    setExplorerSearchResults(results);
-  }, []);
-
-  const visibleExplorerSearchResults = useMemo(
-    () => filterExplorerSearchResultsForCollapsedBranches(explorerSearchResults, collapsedExplorerSearchTreeIDs),
-    [collapsedExplorerSearchTreeIDs, explorerSearchResults],
-  );
-
-  const requestExplorerSearchResultSelection = useCallback((result: CompanyExplorerSearchResultSummary) => {
-    setExplorerSearchSelectionRequest((current) => ({
-      treeID: result.treeID,
-      requestID: (current?.requestID ?? 0) + 1,
-    }));
-  }, []);
-
   const requestExplorerTriageMessageDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
@@ -403,31 +364,6 @@ export function AppSidebar({
       setExplorerTriageBusy(false);
     }
   }, [companyID, explorerTriageBusy, explorerTriagePriorityMenu]);
-
-  const toggleExplorerSearchResultBranch = useCallback((treeID: string) => {
-    setCollapsedExplorerSearchTreeIDs((previous) => {
-      const next = new Set(previous);
-      if (next.has(treeID)) next.delete(treeID);
-      else next.add(treeID);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    setCollapsedExplorerSearchTreeIDs(new Set());
-  }, [explorerSearchQuery]);
-
-  useEffect(() => {
-    setCollapsedExplorerSearchTreeIDs((previous) => {
-      if (previous.size === 0) return previous;
-      const availableTreeIDs = new Set(explorerSearchResults.map((result) => result.treeID));
-      const next = new Set<string>();
-      for (const treeID of previous) {
-        if (availableTreeIDs.has(treeID)) next.add(treeID);
-      }
-      return next.size === previous.size ? previous : next;
-    });
-  }, [explorerSearchResults]);
 
   useEffect(() => {
     if (activeHomeView.startsWith("shared:")) return;
@@ -1115,8 +1051,6 @@ export function AppSidebar({
   const viewsActive = homeActive && APP_SIDEBAR_RACI_VIEWS.some((view) => (
     activeHomeView === view.viewID || (activeHomeView === "aci-inbox" && view.viewID === "a-inbox")
   ));
-  const explorerSearchOpen = explorerSearchQuery.trim().length > 0;
-
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -1124,8 +1058,8 @@ export function AppSidebar({
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
-      <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle(explorerSearchOpen)}>
-        <div style={appSidebarExplorerSearchShellStyle(explorerSearchOpen)}>
+      <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>
+        <div style={appSidebarExplorerSearchShellStyle}>
           <input
             aria-label="Search Explorer"
             value={explorerSearchQuery}
@@ -1134,7 +1068,6 @@ export function AppSidebar({
               if (event.key === "Escape") {
                 event.preventDefault();
                 setExplorerSearchQuery("");
-                setExplorerSearchResults([]);
                 event.currentTarget.blur();
               }
             }}
@@ -1145,66 +1078,6 @@ export function AppSidebar({
             <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-        </div>
-        <div
-          className="company-explorer-scroll"
-          role={explorerSearchOpen && explorerSearchResults.length > 0 ? "tree" : undefined}
-          aria-label={explorerSearchOpen && explorerSearchResults.length > 0 ? "Explorer search results" : undefined}
-          style={appSidebarExplorerSearchResultsStyle(explorerSearchOpen)}
-          aria-live="polite"
-        >
-          {explorerSearchOpen && (
-            explorerSearchResults.length > 0 ? visibleExplorerSearchResults.map((result) => {
-              const collapsed = collapsedExplorerSearchTreeIDs.has(result.treeID);
-              return (
-                <div
-                  key={`${result.treeID}:${result.label}`}
-                  role="treeitem"
-                  tabIndex={0}
-                  aria-level={Math.max(1, result.depth + 1)}
-                  aria-expanded={result.hasChildren ? !collapsed : undefined}
-                  title={`${result.label} (${formatExplorerSearchResultKind(result.kind)})`}
-                  style={appSidebarExplorerSearchTreeRowStyle(result.depth)}
-                  onClick={() => requestExplorerSearchResultSelection(result)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      requestExplorerSearchResultSelection(result);
-                    } else if (result.hasChildren && event.key === "ArrowRight" && collapsed) {
-                      event.preventDefault();
-                      toggleExplorerSearchResultBranch(result.treeID);
-                    } else if (result.hasChildren && event.key === "ArrowLeft" && !collapsed) {
-                      event.preventDefault();
-                      toggleExplorerSearchResultBranch(result.treeID);
-                    }
-                  }}
-                >
-                  <span style={appSidebarExplorerSearchTreeToggleSlotStyle}>
-                    {result.hasChildren && (
-                      <button
-                        type="button"
-                        aria-label={`${collapsed ? "Expand" : "Collapse"} ${result.label}`}
-                        style={appSidebarExplorerSearchTreeToggleButtonStyle}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          toggleExplorerSearchResultBranch(result.treeID);
-                        }}
-                      >
-                        <ExplorerDisclosureIcon open={!collapsed} color="rgba(15, 23, 42, 0.58)" />
-                      </button>
-                    )}
-                  </span>
-                  <span style={appSidebarExplorerSearchTreeIconStyle}>
-                    <ExplorerRowIcon kind={result.kind} systemKey={result.systemKey} mangoDefaultFolder={result.mangoDefaultFolder} />
-                  </span>
-                  <span style={appSidebarExplorerSearchTreeLabelStyle}>{result.label}</span>
-                </div>
-              );
-            }) : (
-              <div style={appSidebarExplorerSearchEmptyStyle}>No matches</div>
-            )
-          )}
         </div>
       </div>
 
@@ -1464,9 +1337,7 @@ export function AppSidebar({
       <AppSidebarCompanyExplorerSection
         selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
         explorerSearchQuery={explorerSearchQuery}
-        explorerSearchSelectionRequest={explorerSearchSelectionRequest}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
-        onExplorerSearchResultsChange={handleExplorerSearchResultsChange}
         onTriageMessagesDrop={requestExplorerTriageMessageDrop}
       />
 
@@ -1613,16 +1484,12 @@ export function AppSidebar({
 function AppSidebarCompanyExplorerSection({
   selectionTargetFrameIDs,
   explorerSearchQuery,
-  explorerSearchSelectionRequest,
   onExplorerSearchQueryChange,
-  onExplorerSearchResultsChange,
   onTriageMessagesDrop,
 }: {
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
-  explorerSearchSelectionRequest: CompanyExplorerSearchSelectionRequest | null;
   onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
-  onExplorerSearchResultsChange: (results: CompanyExplorerSearchResultSummary[]) => void;
   onTriageMessagesDrop: CompanyExplorerTriageMessageDropHandler;
 }): React.ReactElement {
   return (
@@ -1635,11 +1502,8 @@ function AppSidebarCompanyExplorerSection({
           useParentScroll
           selectionTargetFrameIDs={selectionTargetFrameIDs}
           externalSearchQuery={explorerSearchQuery}
-          externalSearchSelectionRequest={explorerSearchSelectionRequest}
-          onSearchResultsChange={onExplorerSearchResultsChange}
           onSearchResultSelect={() => {
             onExplorerSearchQueryChange("");
-            onExplorerSearchResultsChange([]);
           }}
           onTriageMessagesDrop={onTriageMessagesDrop}
         />
@@ -1674,13 +1538,6 @@ function sidebarNotificationMatchesFilter(item: NotificationItem, filter: Sideba
 
 function normalizeSidebarNotificationCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-
-function formatExplorerSearchResultKind(kind: CompanyExplorerSearchResultSummary["kind"]): string {
-  if (kind === "logic_gate") return "Logic Gate";
-  if (kind === "node") return "Node";
-  if (kind === "kanban") return "Kanban Board";
-  return "Folder";
 }
 
 function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadge[] }): React.ReactElement | null {
@@ -2251,56 +2108,28 @@ const appSidebarAccountChromeStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-function appSidebarExplorerSearchContainerStyle(open: boolean): React.CSSProperties {
-  return {
-    position: "sticky",
-    top: 0,
-    zIndex: 40,
-    flex: "0 0 auto",
-    display: "grid",
-    minWidth: 0,
-    margin: "-2px 3px 0",
-    borderRadius: 10,
-    background: open ? "linear-gradient(180deg, rgba(251, 251, 253, 0.98) 0%, rgba(246, 247, 251, 0.96) 100%)" : "transparent",
-    boxShadow: open ? "0 14px 24px rgba(15, 23, 42, 0.12)" : "none",
-    backdropFilter: open ? "blur(12px) saturate(1.04)" : undefined,
-    WebkitBackdropFilter: open ? "blur(12px) saturate(1.04)" : undefined,
-  };
-}
-
-function appSidebarExplorerSearchShellStyle(open: boolean): React.CSSProperties {
-  return {
-    position: "relative",
-    minWidth: 0,
-    height: 32,
-    border: "1px solid rgba(255, 255, 255, 0.78)",
-    borderRadius: open ? "9px 9px 0 0" : 9,
-    background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.9) 100%)",
-    boxShadow: open ? "inset 1px 1px 0 rgba(255, 255, 255, 0.82)" : "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-    transition: "border-radius 140ms ease, box-shadow 160ms ease",
-  };
-}
-
-const appSidebarExplorerSearchResultsStyle = (open: boolean): React.CSSProperties => ({
+const appSidebarExplorerSearchContainerStyle: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 40,
   flex: "0 0 auto",
   display: "grid",
-  alignContent: "start",
-  gap: 1,
   minWidth: 0,
-  maxHeight: open ? 272 : 0,
-  opacity: open ? 1 : 0,
-  overflowY: open ? "auto" : "hidden",
-  overflowX: "hidden",
-  padding: open ? "5px 4px 6px" : "0 4px",
-  border: open ? "1px solid rgba(255, 255, 255, 0.78)" : "1px solid transparent",
-  borderTop: "none",
-  borderRadius: "0 0 9px 9px",
+  margin: "-2px 3px 0",
+  borderRadius: 10,
+  background: "transparent",
+  boxShadow: "none",
+};
+
+const appSidebarExplorerSearchShellStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
+  height: 32,
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 9,
   background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
-  boxShadow: open ? "inset 1px 0 0 rgba(255, 255, 255, 0.7)" : "none",
-  transition: "max-height 180ms ease, opacity 140ms ease, padding 160ms ease, border-color 160ms ease",
-  ["--company-explorer-scroll-accent" as string]: SIDEBAR_SCROLL_ACCENT,
-  ["--company-explorer-scroll-track" as string]: "transparent",
-});
+  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.18), -5px -5px 12px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+};
 
 const appSidebarExplorerSearchInputStyle: React.CSSProperties = {
   width: "100%",
@@ -2323,74 +2152,6 @@ const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
   top: 9,
   color: "rgba(15, 23, 42, 0.72)",
   pointerEvents: "none",
-};
-
-function appSidebarExplorerSearchTreeRowStyle(depth: number): React.CSSProperties {
-  const safeDepth = Math.max(0, Math.min(14, Math.floor(depth)));
-  return {
-    width: "100%",
-    minWidth: 0,
-    minHeight: 26,
-    display: "flex",
-    alignItems: "center",
-    gap: 5,
-    border: "1px solid transparent",
-    borderRadius: 7,
-    background: "transparent",
-    color: "#111827",
-    cursor: "pointer",
-    font: "inherit",
-    padding: `2px 7px 2px ${TREE_BASE_LEFT_PX + safeDepth * TREE_INDENT_PX}px`,
-    textAlign: "left",
-  };
-}
-
-const appSidebarExplorerSearchTreeToggleSlotStyle: React.CSSProperties = {
-  width: TREE_TOGGLE_SLOT_PX,
-  height: 20,
-  flexShrink: 0,
-  display: "grid",
-  placeItems: "center",
-};
-
-const appSidebarExplorerSearchTreeToggleButtonStyle: React.CSSProperties = {
-  width: TREE_TOGGLE_SLOT_PX,
-  height: 20,
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  cursor: "pointer",
-  display: "grid",
-  placeItems: "center",
-  padding: 0,
-};
-
-const appSidebarExplorerSearchTreeIconStyle: React.CSSProperties = {
-  width: 15,
-  height: 15,
-  display: "grid",
-  placeItems: "center",
-  flexShrink: 0,
-};
-
-const appSidebarExplorerSearchTreeLabelStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 11,
-  fontWeight: 700,
-  lineHeight: 1.1,
-};
-
-const appSidebarExplorerSearchEmptyStyle: React.CSSProperties = {
-  minHeight: 28,
-  display: "flex",
-  alignItems: "center",
-  padding: "0 8px",
-  color: "rgba(71, 85, 105, 0.82)",
-  fontSize: 11,
-  fontWeight: 700,
 };
 
 const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
