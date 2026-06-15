@@ -103,6 +103,61 @@ func (r *MemoryRepo) logicGateRaciAssignmentForSubjectLocked(companyID, logicGat
 	return item, nil
 }
 
+func (r *MemoryRepo) logicGateRaciUserIDsForGroupLocked(companyID, groupID string) ([]string, error) {
+	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
+		return nil, ErrAssigneeNotInCompany
+	}
+	groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, groupID)
+	userIDs := map[string]bool{}
+	for _, member := range r.userGroupMembers {
+		userID := strings.TrimSpace(member.UserID)
+		if member.CompanyID == companyID && groupIDs[member.GroupID] && userID != "" {
+			userIDs[userID] = true
+		}
+	}
+	out := make([]string, 0, len(userIDs))
+	for userID := range userIDs {
+		out = append(out, userID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (r *MemoryRepo) expandedLogicGateRaciCommandAssignmentsLocked(companyID string, assignments []normalizedLogicGateRaciCommandAssignment) ([]normalizedLogicGateRaciCommandAssignment, error) {
+	expanded := make([]normalizedLogicGateRaciCommandAssignment, 0, len(assignments))
+	seen := map[string]bool{}
+	for _, assignment := range assignments {
+		if assignment.subjectType != EntityPermissionSubjectGroup {
+			key := assignment.role + ":" + assignment.subjectType + ":" + assignment.subjectID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			expanded = append(expanded, assignment)
+			continue
+		}
+		userIDs, err := r.logicGateRaciUserIDsForGroupLocked(companyID, assignment.subjectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, userID := range userIDs {
+			expandedAssignment := normalizedLogicGateRaciCommandAssignment{
+				role:        assignment.role,
+				subjectType: EntityPermissionSubjectUser,
+				subjectID:   userID,
+				userID:      userID,
+			}
+			key := expandedAssignment.role + ":" + expandedAssignment.subjectType + ":" + expandedAssignment.subjectID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			expanded = append(expanded, expandedAssignment)
+		}
+	}
+	return expanded, nil
+}
+
 func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].LogicGateID != items[j].LogicGateID {
@@ -406,11 +461,19 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	now := time.Now().UTC()
 	seen := map[string]bool{}
 	assignments := make([]domain.LogicGateRaciAssignment, 0, len(input.Assignments))
+	normalizedAssignments := make([]normalizedLogicGateRaciCommandAssignment, 0, len(input.Assignments))
 	for _, inputAssignment := range input.Assignments {
 		normalized, err := normalizeLogicGateRaciAssignmentInput(inputAssignment)
 		if err != nil {
 			return nil, err
 		}
+		normalizedAssignments = append(normalizedAssignments, normalized)
+	}
+	expanded, err := r.expandedLogicGateRaciCommandAssignmentsLocked(companyID, normalizedAssignments)
+	if err != nil {
+		return nil, err
+	}
+	for _, normalized := range expanded {
 		assignmentKey := normalized.role + ":" + normalized.subjectType + ":" + normalized.subjectID
 		if seen[assignmentKey] {
 			continue

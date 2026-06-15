@@ -753,38 +753,11 @@ func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignment
 			continue
 		}
 		seen[key] = true
-
-		switch normalizedAssignment.subjectType {
-		case EntityPermissionSubjectUser:
-			var userInCompany bool
-			if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from company_memberships
-  where company_id=$1 and user_id::text=$2
-)`, companyID, normalizedAssignment.subjectID).Scan(&userInCompany); err != nil {
-				return nil, err
-			}
-			if !userInCompany {
-				return nil, ErrAssigneeNotInCompany
-			}
-		case EntityPermissionSubjectGroup:
-			var groupInCompany bool
-			if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from company_user_groups
-  where company_id=$1 and group_id::text=$2
-)`, companyID, normalizedAssignment.subjectID).Scan(&groupInCompany); err != nil {
-				return nil, err
-			}
-			if !groupInCompany {
-				return nil, ErrAssigneeNotInCompany
-			}
-		default:
-			return nil, ErrInvalid
-		}
 		normalized = append(normalized, normalizedAssignment)
+	}
+	normalized, err = expandPostgresLogicGateRaciAssignmentsTx(ctx, tx, companyID, normalized)
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `

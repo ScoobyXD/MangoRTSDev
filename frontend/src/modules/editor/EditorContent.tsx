@@ -84,7 +84,7 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
-import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup } from "../communications/communicationsApi";
+import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
 import {
@@ -217,6 +217,37 @@ function companyUserOptionLabel(user: CompanyUser): string {
   const email = (user.email ?? "").trim();
   if (name && email) return `${name} <${email}>`;
   return name || email || user.user_id;
+}
+
+function companyUserGroupSubtreeIDs(groups: CompanyUserGroup[], rootGroupID: string): Set<string> {
+  const cleanRootID = rootGroupID.trim();
+  const ids = new Set<string>();
+  if (!cleanRootID || !groups.some((group) => group.group_id === cleanRootID)) return ids;
+  ids.add(cleanRootID);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const group of groups) {
+      const parentID = group.parent_group_id?.trim() ?? "";
+      if (parentID && ids.has(parentID) && !ids.has(group.group_id)) {
+        ids.add(group.group_id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+function companyUserIDsForGroupSubtree(groups: CompanyUserGroup[], members: CompanyUserGroupMember[], rootGroupID: string): string[] {
+  const groupIDs = companyUserGroupSubtreeIDs(groups, rootGroupID);
+  if (groupIDs.size === 0) return [];
+  const userIDs = new Set<string>();
+  for (const member of members) {
+    const groupID = member.group_id.trim();
+    const userID = member.user_id.trim();
+    if (groupIDs.has(groupID) && userID) userIDs.add(userID);
+  }
+  return Array.from(userIDs).sort((left, right) => left.localeCompare(right));
 }
 
 function logicGateRaciAssignmentSubjectType(assignment: LogicGateRaciAssignment): LogicGateRaciSubjectType {
@@ -393,6 +424,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [logicGateRaciAssignments, setLogicGateRaciAssignments] = useState<LogicGateRaciAssignment[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
+  const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [collaborators, setCollaborators] = useState<EditorCollaboratorPresence[]>([]);
   const [collaborationStatus, setCollaborationStatus] = useState("");
@@ -549,6 +581,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!companyID) {
       setCompanyUsers([]);
       setCompanyUserGroups([]);
+      setCompanyUserGroupMembers([]);
       return;
     }
     (async () => {
@@ -560,11 +593,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         if (!cancelled) {
           setCompanyUsers(users);
           setCompanyUserGroups(groupsPayload.groups);
+          setCompanyUserGroupMembers(groupsPayload.members);
         }
       } catch {
         if (!cancelled) {
           setCompanyUsers([]);
           setCompanyUserGroups([]);
+          setCompanyUserGroupMembers([]);
         }
       }
     })();
@@ -1352,29 +1387,55 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const addLogicGateRaciSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
     const cleanSubjectID = subjectID.trim();
     if (!cleanSubjectID) return;
-    if (logicGateRaciAssignments.some((assignment) => (
-      assignment.role === role
-      && logicGateRaciAssignmentSubjectType(assignment) === subjectType
-      && logicGateRaciAssignmentSubjectID(assignment) === cleanSubjectID
-    ))) return;
-    const user = subjectType === "user" ? companyUsers.find((candidate) => candidate.user_id === cleanSubjectID) : undefined;
-    const group = subjectType === "group" ? companyUserGroups.find((candidate) => candidate.group_id === cleanSubjectID) : undefined;
+    const existingUserIDsForRole = new Set(logicGateRaciAssignments
+      .filter((assignment) => assignment.role === role && logicGateRaciAssignmentSubjectType(assignment) === "user")
+      .map((assignment) => logicGateRaciAssignmentSubjectID(assignment))
+      .filter(Boolean));
+    if (subjectType === "group") {
+      const groupUserIDs = companyUserIDsForGroupSubtree(companyUserGroups, companyUserGroupMembers, cleanSubjectID);
+      const createdTimestamp = new Date().toISOString();
+      const expandedAssignments = groupUserIDs
+        .filter((userID) => !existingUserIDsForRole.has(userID))
+        .map((userID) => {
+          const user = companyUsers.find((candidate) => candidate.user_id === userID);
+          return {
+            company_id: companyID,
+            logic_gate_id: linkedNodeID,
+            role,
+            subject_type: "user" as LogicGateRaciSubjectType,
+            subject_id: userID,
+            subject_name: user?.display_name ?? user?.email,
+            user_id: userID,
+            user_display_name: user?.display_name,
+            user_email: user?.email,
+            created_timestamp: createdTimestamp,
+          };
+        });
+      if (expandedAssignments.length === 0) return;
+      void saveLogicGateRaciAssignments([
+        ...logicGateRaciAssignments,
+        ...expandedAssignments,
+      ]);
+      return;
+    }
+    if (existingUserIDsForRole.has(cleanSubjectID)) return;
+    const user = companyUsers.find((candidate) => candidate.user_id === cleanSubjectID);
     void saveLogicGateRaciAssignments([
       ...logicGateRaciAssignments,
       {
         company_id: companyID,
         logic_gate_id: linkedNodeID,
         role,
-        subject_type: subjectType,
+        subject_type: "user",
         subject_id: cleanSubjectID,
-        subject_name: subjectType === "group" ? group?.name : user?.display_name ?? user?.email,
-        user_id: subjectType === "user" ? cleanSubjectID : "",
+        subject_name: user?.display_name ?? user?.email,
+        user_id: cleanSubjectID,
         user_display_name: user?.display_name,
         user_email: user?.email,
         created_timestamp: new Date().toISOString(),
       },
     ]);
-  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, logicGateRaciAssignments, saveLogicGateRaciAssignments]);
+  }, [companyID, companyUserGroupMembers, companyUserGroups, companyUsers, linkedNodeID, logicGateRaciAssignments, saveLogicGateRaciAssignments]);
 
   const removeLogicGateRaciSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
     const cleanSubjectID = subjectID.trim();
@@ -2174,6 +2235,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             } : null}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
+            companyUserGroupMembers={companyUserGroupMembers}
             isEditingTitle={isEditingTitle}
             editingTitleRef={editingTitleRef}
             editingTitleDraftRef={editingTitleDraftRef}

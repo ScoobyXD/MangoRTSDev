@@ -50,6 +50,7 @@ type EditorLinkedDocumentPanelsProps = {
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
   isEditingTitle: boolean;
   editingTitleRef: React.RefObject<HTMLSpanElement>;
   editingTitleDraftRef: React.MutableRefObject<string>;
@@ -115,6 +116,37 @@ function companyUserOptionLabel(user: { user_id: string; email?: string; display
 
 function companyGroupLabel(group: { group_id: string; name?: string } | undefined, fallbackID: string): string {
   return group?.name?.trim() || fallbackID || "Group";
+}
+
+function companyUserGroupSubtreeIDs(groups: Array<{ group_id: string; parent_group_id?: string }>, rootGroupID: string): Set<string> {
+  const cleanRootID = rootGroupID.trim();
+  const ids = new Set<string>();
+  if (!cleanRootID || !groups.some((group) => group.group_id === cleanRootID)) return ids;
+  ids.add(cleanRootID);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const group of groups) {
+      const parentID = group.parent_group_id?.trim() ?? "";
+      if (parentID && ids.has(parentID) && !ids.has(group.group_id)) {
+        ids.add(group.group_id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+function companyUserIDsForGroupSubtree(groups: Array<{ group_id: string; parent_group_id?: string }>, members: Array<{ group_id: string; user_id: string }>, rootGroupID: string): string[] {
+  const groupIDs = companyUserGroupSubtreeIDs(groups, rootGroupID);
+  if (groupIDs.size === 0) return [];
+  const userIDs = new Set<string>();
+  for (const member of members) {
+    const groupID = member.group_id.trim();
+    const userID = member.user_id.trim();
+    if (groupIDs.has(groupID) && userID) userIDs.add(userID);
+  }
+  return Array.from(userIDs).sort((left, right) => left.localeCompare(right));
 }
 
 function logicGateRaciAssignmentSubjectType(assignment: LogicGateRaciAssignment): LogicGateRaciSubjectType {
@@ -237,6 +269,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   logicGateRaciFields,
   companyUsers,
   companyUserGroups,
+  companyUserGroupMembers,
   isEditingTitle,
   editingTitleRef,
   editingTitleDraftRef,
@@ -872,6 +905,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   assignments={logicGateRaciFields.assignments.filter((assignment) => assignment.role === column.role)}
                   companyUsers={companyUsers}
                   companyUserGroups={companyUserGroups}
+                  companyUserGroupMembers={companyUserGroupMembers}
                   accent={accent}
                   panelBackground={panelBackground}
                   ruleColor={ruleColor}
@@ -918,6 +952,7 @@ function LogicGateRaciRoleEditor({
   assignments,
   companyUsers,
   companyUserGroups,
+  companyUserGroupMembers,
   accent,
   panelBackground,
   ruleColor,
@@ -930,6 +965,7 @@ function LogicGateRaciRoleEditor({
   assignments: LogicGateRaciAssignment[];
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
   accent: string;
   panelBackground: string;
   ruleColor: string;
@@ -975,7 +1011,9 @@ function LogicGateRaciRoleEditor({
     }
     const visit = (parentID: string, depth: number) => {
       for (const group of childrenByParent.get(parentID) ?? []) {
-        if (!assignedSubjectKeys.has(`group:${group.group_id}`)) {
+        const memberUserIDs = companyUserIDsForGroupSubtree(companyUserGroups, companyUserGroupMembers, group.group_id);
+        const hasUnassignedMember = memberUserIDs.some((userID) => !assignedSubjectKeys.has(`user:${userID}`));
+        if (!assignedSubjectKeys.has(`group:${group.group_id}`) && hasUnassignedMember) {
           const groupLabel = companyGroupLabel(group, group.group_id);
           const fields = [groupLabel, group.group_id].map((field) => field.trim().toLowerCase());
           if (!query || fields.some((field) => field.includes(query))) {
@@ -993,7 +1031,7 @@ function LogicGateRaciRoleEditor({
     };
     visit("", 0);
     return options.slice(0, 10);
-  }, [assignedSubjectKeys, companyUserGroups, companyUsers, draft]);
+  }, [assignedSubjectKeys, companyUserGroupMembers, companyUserGroups, companyUsers, draft]);
 
   useEffect(() => {
     if (!open && !assignedOpen) return;

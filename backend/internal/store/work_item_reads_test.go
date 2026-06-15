@@ -227,9 +227,9 @@ func TestMemoryRepoLogicGateRaciGroupAssignmentsIncludeSubgroups(t *testing.T) {
 		t.Fatalf("my gates = %+v, want parent group responsible gate", myGates)
 	}
 	if len(responsibleGateRead.RaciAssignments) != 1 ||
-		responsibleGateRead.RaciAssignments[0].SubjectType != EntityPermissionSubjectGroup ||
-		responsibleGateRead.RaciAssignments[0].SubjectID != parentGroup.GroupID {
-		t.Fatalf("responsible gate assignments = %+v, want parent group assignment", responsibleGateRead.RaciAssignments)
+		responsibleGateRead.RaciAssignments[0].SubjectType != EntityPermissionSubjectUser ||
+		responsibleGateRead.RaciAssignments[0].UserID != user.UserID {
+		t.Fatalf("responsible gate assignments = %+v, want expanded group member assignment", responsibleGateRead.RaciAssignments)
 	}
 
 	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
