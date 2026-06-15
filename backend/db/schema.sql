@@ -632,7 +632,7 @@ create table if not exists resource_permissions (
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')),
+  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder')),
   primary key (company_id, resource_type, resource_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
@@ -662,7 +662,7 @@ create or replace function mangorts_user_can_access_resource(
   p_access_level text
 )
 returns boolean as $$
-  with recursive normalized_resource(resource_type) as (
+  with normalized_resource(resource_type) as (
     select lower(btrim(coalesce(p_resource_type, '')))
   ),
   requested(required_rank) as (
@@ -704,6 +704,12 @@ returns boolean as $$
       and folder.company_id=p_company_id
       and folder.folder_id=p_resource_id
       and folder.folder_kind <> 'communications'
+    union all
+    select coalesce(folder.default_access, 'edit')
+    from communications_shared_inbox_folders folder, normalized_resource normalized
+    where normalized.resource_type='shared_triage_folder'
+      and folder.company_id=p_company_id
+      and folder.folder_id=p_resource_id
   ),
   direct_override(exists_override) as (
     select exists (
@@ -715,82 +721,12 @@ returns boolean as $$
         and access.resource_id=p_resource_id
         and access.user_id=p_user_id
     )
-  ),
-  resource_scope(resource_id, depth, path) as (
-    select p_resource_id, 0, array[p_resource_id]
-    union all
-    select folder.parent_folder_id, resource_scope.depth + 1, resource_scope.path || folder.parent_folder_id
-    from resource_scope
-    join company_explorer_folders folder
-      on folder.company_id = p_company_id
-     and folder.folder_kind = 'communications'
-     and folder.folder_id = resource_scope.resource_id
-    join normalized_resource normalized
-      on normalized.resource_type = 'shared_triage_folder'
-    where folder.parent_folder_id is not null
-      and not folder.parent_folder_id = any(resource_scope.path)
-  ),
-  permitted_group_scope(resource_id, depth, group_id, access_rank, path) as (
-    select permission.resource_id,
-           resource_scope.depth,
-           permission.principal_id,
-           mangorts_access_level_rank(permission.access_level),
-           array[permission.principal_id]
-    from resource_access_grants permission
-    join resource_scope
-      on resource_scope.resource_id = permission.resource_id
-    join normalized_resource normalized
-      on normalized.resource_type = permission.resource_type
-    where permission.company_id = p_company_id
-      and permission.principal_type = 'group'
-    union all
-    select parent.resource_id,
-           parent.depth,
-           child.group_id,
-           parent.access_rank,
-           parent.path || child.group_id
-    from permitted_group_scope parent
-    join company_user_groups child
-      on child.company_id = p_company_id
-     and child.parent_group_id = parent.group_id
-    where not child.group_id = any(parent.path)
-  ),
-  matching_grants(depth, subject_rank, access_rank) as (
-    select resource_scope.depth,
-           2,
-           mangorts_access_level_rank(permission.access_level)
-    from resource_access_grants permission
-    join resource_scope
-      on resource_scope.resource_id = permission.resource_id
-    join normalized_resource normalized
-      on normalized.resource_type = permission.resource_type
-    where permission.company_id = p_company_id
-      and permission.principal_type = 'user'
-      and permission.principal_id = p_user_id
-    union all
-    select permitted_group_scope.depth,
-           1,
-           permitted_group_scope.access_rank
-    from company_user_group_members member
-    join permitted_group_scope
-      on permitted_group_scope.group_id = member.group_id
-    where member.company_id = p_company_id
-      and member.user_id = p_user_id
-  ),
-  effective_grant(access_rank) as (
-    select matching_grants.access_rank
-    from matching_grants
-    order by matching_grants.depth asc,
-             matching_grants.subject_rank desc,
-             matching_grants.access_rank desc
-    limit 1
   )
   select case
     when requested.required_rank = 0 then false
     when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder') then false
     when (select allowed from role_admin_actor) then true
-    when normalized_resource.resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')
-      and exists (
+    when exists (
         select 1
         from company_memberships membership
         where membership.company_id = p_company_id
@@ -801,7 +737,6 @@ returns boolean as $$
         ((select default_access from normalized_resource_row limit 1) = 'edit' and not (select exists_override from direct_override))
         or ((select default_access from normalized_resource_row limit 1) = 'no_access' and (select exists_override from direct_override))
       ) then true
-    when exists (select 1 from effective_grant) then (select access_rank from effective_grant) >= requested.required_rank
     else false
   end
   from requested, normalized_resource;
@@ -1288,13 +1223,12 @@ create table if not exists company_explorer_folders (
   system_key text,
   name text not null,
   default_access text not null default 'edit',
-  account_email text,
   scope_type text not null default 'company',
   scope_id text,
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project', 'communications')),
+  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project')),
   constraint company_explorer_folders_default_access_chk check (default_access in ('edit', 'no_access')),
   constraint company_explorer_folders_scope_chk check (
     scope_type in ('company', 'user', 'team')
@@ -1304,13 +1238,6 @@ create table if not exists company_explorer_folders (
     )
   ),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
-  constraint company_explorer_folders_account_email_chk check (
-    account_email is null or (
-      folder_kind = 'communications'
-      and btrim(account_email) <> ''
-      and account_email = lower(btrim(account_email))
-    )
-  ),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
@@ -1324,12 +1251,42 @@ create unique index if not exists idx_company_explorer_folders_system_key
 create index if not exists idx_company_explorer_folders_parent_kind
   on company_explorer_folders(company_id, folder_kind, parent_folder_id, position, created_timestamp);
 
-create index if not exists idx_company_explorer_folders_account_email
-  on company_explorer_folders(company_id, account_email)
-  where account_email is not null;
-
 create index if not exists idx_company_explorer_folders_scope
   on company_explorer_folders(company_id, scope_type, scope_id);
+
+create table if not exists communications_shared_inbox_folders (
+  company_id uuid not null,
+  folder_id uuid not null,
+  parent_folder_id uuid,
+  entry_type text not null default 'folder',
+  name text not null,
+  default_access text not null default 'edit',
+  account_email text,
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint communications_shared_inbox_folders_entry_type_chk check (entry_type in ('folder', 'shared_inbox')),
+  constraint communications_shared_inbox_folders_default_access_chk check (default_access in ('edit', 'no_access')),
+  constraint communications_shared_inbox_folders_name_nonblank_chk check (btrim(name) <> ''),
+  constraint communications_shared_inbox_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
+  constraint communications_shared_inbox_folders_account_email_chk check (
+    account_email is null or (
+      entry_type = 'shared_inbox'
+      and btrim(account_email) <> ''
+      and account_email = lower(btrim(account_email))
+    )
+  ),
+  primary key (company_id, folder_id),
+  foreign key (company_id) references companies (company_id) on delete cascade,
+  foreign key (company_id, parent_folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade
+);
+
+create index if not exists idx_communications_shared_inbox_folders_parent
+  on communications_shared_inbox_folders(company_id, parent_folder_id, position, created_timestamp);
+
+create index if not exists idx_communications_shared_inbox_folders_account_email
+  on communications_shared_inbox_folders(company_id, account_email)
+  where account_email is not null;
 
 create table if not exists communications_shared_inbox_raci_assignments (
   company_id uuid not null,
@@ -1339,7 +1296,7 @@ create table if not exists communications_shared_inbox_raci_assignments (
   created_timestamp timestamptz not null default now(),
   constraint communications_shared_inbox_raci_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
   primary key (company_id, folder_id, role, user_id),
-  foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade,
+  foreign key (company_id, folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade,
   foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade
 );
 
@@ -1357,7 +1314,7 @@ create table if not exists communications_shared_inbox_raci_group_assignments (
   created_timestamp timestamptz not null default now(),
   constraint communications_shared_inbox_raci_group_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
   primary key (company_id, folder_id, role, group_id),
-  foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade,
+  foreign key (company_id, folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade,
   foreign key (company_id, group_id) references company_user_groups (company_id, group_id) on delete cascade
 );
 
@@ -1435,7 +1392,7 @@ create table if not exists recycle_bin_items (
   constraint recycle_bin_items_object_label_nonblank_chk check (btrim(object_label) <> ''),
   constraint recycle_bin_items_folder_kind_chk check (
     object_folder_kind is null
-    or object_folder_kind in ('node', 'logic_gate', 'project', 'communications')
+    or object_folder_kind in ('node', 'logic_gate', 'project')
   ),
   primary key (company_id, recycle_bin_item_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
@@ -1552,7 +1509,7 @@ returns table(scope text, resource_key text) as $$
     ('workspace-snapshot:company_explorer', 'folder_kind:node'),
     ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
     ('workspace-snapshot:company_explorer', 'folder_kind:project'),
-    ('workspace-snapshot:company_explorer', 'folder_kind:communications'),
+    ('workspace-snapshot:shared_triage', ''),
     ('company-explorer-folder-items', ''),
     ('company-explorer-folder-items', 'item_type:node'),
     ('company-explorer-folder-items', 'item_type:logic_gate'),
@@ -1738,7 +1695,7 @@ begin
       ) as v(scope, resource_key);
     elsif folder_kind = 'communications' then
       return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:company_explorer', 'folder_kind:communications')
+        ('workspace-snapshot:shared_triage', '')
       ) as v(scope, resource_key);
     end if;
   end if;

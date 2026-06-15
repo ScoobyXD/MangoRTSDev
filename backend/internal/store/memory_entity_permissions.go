@@ -183,6 +183,10 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			folder := r.folders[key(companyID, resource.entityID)]
 			folder.DefaultAccess = ResourceDefaultAccessEdit
 			r.folders[key(companyID, resource.entityID)] = folder
+		case EntityTypeSharedTriageFolder:
+			folder := r.folders[key(companyID, resource.entityID)]
+			folder.DefaultAccess = ResourceDefaultAccessEdit
+			r.folders[key(companyID, resource.entityID)] = folder
 		}
 	}
 	for raciKey, assignments := range r.sharedInboxRaci {
@@ -541,6 +545,10 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			project.DefaultAccess = defaultAccess
 			r.projects[key(companyID, entityID)] = project
 		case EntityTypeCompanyExplorerFolder:
+			folder := r.folders[key(companyID, entityID)]
+			folder.DefaultAccess = defaultAccess
+			r.folders[key(companyID, entityID)] = folder
+		case EntityTypeSharedTriageFolder:
 			folder := r.folders[key(companyID, entityID)]
 			folder.DefaultAccess = defaultAccess
 			r.folders[key(companyID, entityID)] = folder

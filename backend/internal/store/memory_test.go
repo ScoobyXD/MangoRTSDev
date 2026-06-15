@@ -684,6 +684,10 @@ func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing
 		if err != nil {
 			t.Fatalf("ListCompanyExplorerFolders communications failed: %v", err)
 		}
+		sharedTriageFolders, err := repo.ListCommunicationsSharedInboxFolders(companyID)
+		if err != nil {
+			t.Fatalf("ListCommunicationsSharedInboxFolders failed: %v", err)
+		}
 
 		systemKeys := map[string]bool{}
 		for _, folder := range nodeFolders {
@@ -712,8 +716,11 @@ func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing
 		if logicRootID == "" || len(logicChildren) != len(companyExplorerDefaultLogicGateChildFolderNames) {
 			t.Fatalf("logic defaults root=%q children=%+v", logicRootID, logicChildren)
 		}
-		if len(communicationsFolders) != 21 {
-			t.Fatalf("communications default folders = %d, want 21", len(communicationsFolders))
+		if len(communicationsFolders) != 0 {
+			t.Fatalf("company explorer communications folders = %d, want 0", len(communicationsFolders))
+		}
+		if len(sharedTriageFolders) != 0 {
+			t.Fatalf("shared triage default folders = %d, want 0", len(sharedTriageFolders))
 		}
 	}
 
@@ -1247,11 +1254,8 @@ func TestMemoryRepoUserEmailConnectionDoesNotUseSharedInboxFallback(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sharedFolder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Shared")
+	_, err = repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Shared", "shared@example.com")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, sharedFolder.FolderID, "shared@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {

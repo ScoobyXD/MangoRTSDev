@@ -153,7 +153,9 @@ export type CommunicationsSharedInbox = {
   folder_id: string;
   parent_folder_id?: string;
   folder_kind: "communications";
+  entry_type?: "folder" | "shared_inbox";
   name: string;
+  default_access?: "edit" | "no_access";
   account_email?: string;
   position: number;
   raci_assignments?: CommunicationsSharedInboxRaciAssignment[];

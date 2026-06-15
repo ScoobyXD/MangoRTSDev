@@ -252,7 +252,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const assignmentCount = accessBySubject.size;
   const effectiveReadOnly = readOnly || !serverCanEditPermissions;
   const controlsDisabled = busy || effectiveReadOnly;
-  const usesDefaultAccessPolicy = entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder";
+  const usesDefaultAccessPolicy = entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder";
   const defaultExceptionAccessLevel = oppositeDefaultAccess(defaultAccess);
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
@@ -560,13 +560,12 @@ function companyUserRoleLabel(role: string | undefined): string {
 
 function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType, defaultAccess: "edit" | "no_access"): string {
   if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
-  if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder") {
+  if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder") {
     const defaultLabel = defaultAccess === "edit" ? "Default edit" : "Default no access";
     if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} exception users. Dev admins and company admins always keep admin access.`;
     return `${defaultLabel}. No exception users. Dev admins and company admins always keep admin access.`;
   }
   if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access.`;
-  if (entityType === "shared_triage_folder") return "No grants saved here. Parent Shared Triage grants can still apply; otherwise access is denied except for dev admins and company admins.";
   return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 

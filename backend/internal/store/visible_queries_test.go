@@ -139,17 +139,17 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder logic: %v", err)
 	}
-	sharedParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Visible shared")
+	sharedParent, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Visible shared", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder shared parent: %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder shared parent: %v", err)
 	}
-	sharedChild, err := repo.CreateCompanyExplorerFolder(companyID, sharedParent.FolderID, "communications", "Visible child")
+	sharedChild, err := repo.CreateCommunicationsSharedInboxFolder(companyID, sharedParent.FolderID, "Visible child", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder shared child: %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder shared child: %v", err)
 	}
-	hiddenShared, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Hidden shared")
+	hiddenShared, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Hidden shared", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder hidden shared: %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder hidden shared: %v", err)
 	}
 
 	visibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Explorer visible node")
@@ -165,7 +165,11 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, viewer.UserID, EntityPermissionNoAccess)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedParent.FolderID, viewer.UserID, EntityPermissionView)
+	for _, folderID := range []string{sharedParent.FolderID, sharedChild.FolderID, hiddenShared.FolderID} {
+		mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedTriageFolder, folderID, ResourceDefaultAccessNoAccess)
+	}
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedParent.FolderID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedChild.FolderID, viewer.UserID, EntityPermissionEdit)
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")
 	responsibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Work item responsible node")
@@ -174,9 +178,9 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	aciGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item ACI")
 	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleAccountable, UserID: viewer.UserID}})
 
-	sharedFolders, err := repo.ListVisibleCompanyExplorerFolders(companyID, "communications", viewer.UserID)
+	sharedFolders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
-		t.Fatalf("ListVisibleCompanyExplorerFolders: %v", err)
+		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders: %v", err)
 	}
 	assertVisibleQueryFolderIDs(t, sharedFolders, sharedParent.FolderID, sharedChild.FolderID)
 	assertVisibleQueryFoldersDoNotContain(t, sharedFolders, hiddenShared.FolderID)
@@ -363,7 +367,6 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecompanyexplorernodesummaries",
 		"func (r *postgresrepo) listvisiblecompanyexplorerlogicgatesummaries",
 		"mangorts_user_can_access_resource",
-		"'shared_triage_folder'",
 		"item.item_type not in ('node', 'logic_gate', 'project')",
 	} {
 		if !strings.Contains(companyExplorerSource, needle) {
@@ -373,6 +376,26 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
 		if strings.Contains(companyExplorerSource, forbidden) {
 			t.Fatalf("Postgres visible company explorer query should not use %q", forbidden)
+		}
+	}
+
+	sharedInboxRaw, err := os.ReadFile("postgres_shared_inbox_folders.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_shared_inbox_folders.go: %v", err)
+	}
+	sharedInboxSource := visibleQueryNormalizeSource(string(sharedInboxRaw))
+	for _, needle := range []string{
+		"func (r *postgresrepo) listvisiblecommunicationssharedinboxfolders",
+		"mangorts_user_can_access_resource",
+		"'shared_triage_folder'",
+	} {
+		if !strings.Contains(sharedInboxSource, needle) {
+			t.Fatalf("Postgres visible shared inbox query missing %q", needle)
+		}
+	}
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
+		if strings.Contains(sharedInboxSource, forbidden) {
+			t.Fatalf("Postgres visible shared inbox query should not use %q", forbidden)
 		}
 	}
 

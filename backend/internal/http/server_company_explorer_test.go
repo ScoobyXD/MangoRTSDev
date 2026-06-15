@@ -502,135 +502,33 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	}
 }
 
-func TestCompanyExplorerCommunicationsDefaultFoldersSeedOnceAndAreMutable(t *testing.T) {
+func TestCompanyExplorerRejectsCommunicationsFolderKind(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	handler := server.Routes()
-	companyID := "company-communications-folder-seed-test"
-	repo.EnsureCompany(companyID, "Communications Folder Seed Company")
+	companyID := "company-communications-folder-cutoff-test"
+	repo.EnsureCompany(companyID, "Communications Folder Cutoff Company")
 
-	type folderPayload struct {
-		FolderID       string  `json:"folder_id"`
-		ParentFolderID *string `json:"parent_folder_id"`
-		FolderKind     string  `json:"folder_kind"`
-		SystemKey      *string `json:"system_key"`
-		Name           string  `json:"name"`
-	}
-	listCommunicationsFolders := func() []folderPayload {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET communications default folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-		}
-		var payload struct {
-			Folders []folderPayload `json:"folders"`
-		}
-		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode communications default folders: %v", err)
-		}
-		return payload.Folders
-	}
-	folderByName := func(folders []folderPayload, name string) folderPayload {
-		t.Helper()
-		for _, folder := range folders {
-			if folder.Name == name {
-				return folder
-			}
-		}
-		t.Fatalf("folder %q not found in %+v", name, folders)
-		return folderPayload{}
-	}
-	assertParent := func(folders []folderPayload, childName, parentName string) {
-		t.Helper()
-		child := folderByName(folders, childName)
-		parent := folderByName(folders, parentName)
-		if child.ParentFolderID == nil || *child.ParentFolderID != parent.FolderID {
-			t.Fatalf("folder %q parent = %v, want %q", childName, child.ParentFolderID, parentName)
-		}
-	}
-
-	folders := listCommunicationsFolders()
-	if len(folders) != 21 {
-		t.Fatalf("communications default folder count = %d, want 21: %+v", len(folders), folders)
-	}
-	for _, name := range []string{"BM", "Supply Chain", "Production", "QA", "Finance", "Legal", "HR"} {
-		folder := folderByName(folders, name)
-		if folder.ParentFolderID != nil {
-			t.Fatalf("root folder %q has parent %v", name, folder.ParentFolderID)
-		}
-		if folder.SystemKey != nil {
-			t.Fatalf("default communications folder %q should be customer-mutable, got system key %q", name, *folder.SystemKey)
-		}
-	}
-	for _, pair := range [][2]string{
-		{"Product", "BM"},
-		{"Account", "BM"},
-		{"Commercial", "BM"},
-		{"Project", "BM"},
-		{"design", "Product"},
-		{"printing", "Product"},
-		{"suppliers", "Product"},
-		{"orders", "Supply Chain"},
-		{"shipping", "Supply Chain"},
-		{"receiving", "Supply Chain"},
-		{"temps", "Production"},
-		{"quality", "QA"},
-		{"ar", "Finance"},
-		{"ap", "Finance"},
-	} {
-		assertParent(folders, pair[0], pair[1])
-	}
-
-	bm := folderByName(folders, "BM")
-	renameBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"name":       "Business Management",
+	createBody, _ := json.Marshal(map[string]string{
+		"company_id":  companyID,
+		"folder_kind": "communications",
+		"name":        "Shared",
 	})
-	renameReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+bm.FolderID, bytes.NewReader(renameBody))
-	renameReq.Header.Set("Content-Type", "application/json")
-	renameRec := httptest.NewRecorder()
-	handler.ServeHTTP(renameRec, renameReq)
-	if renameRec.Code != http.StatusOK {
-		t.Fatalf("PUT communications default folder status = %d, want %d body=%s", renameRec.Code, http.StatusOK, renameRec.Body.String())
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST communications company explorer folder status = %d, want %d body=%s", createRec.Code, http.StatusBadRequest, createRec.Body.String())
 	}
 
-	folders = listCommunicationsFolders()
-	supplyChain := folderByName(folders, "Supply Chain")
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+supplyChain.FolderID+"?company_id="+companyID, nil)
-	deleteRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("DELETE communications default folder status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
-	}
-	folders = listCommunicationsFolders()
-	for _, deletedName := range []string{"Supply Chain", "orders", "shipping", "receiving"} {
-		for _, folder := range folders {
-			if folder.Name == deletedName {
-				t.Fatalf("deleted communications folder %q was recreated: %+v", deletedName, folder)
-			}
-		}
-	}
-	if folderByName(folders, "Business Management").FolderID != bm.FolderID {
-		t.Fatalf("renamed communications default folder did not persist")
-	}
-
-	for _, folder := range folders {
-		if folder.ParentFolderID != nil {
-			continue
-		}
-		deleteRootReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+folder.FolderID+"?company_id="+companyID, nil)
-		deleteRootRec := httptest.NewRecorder()
-		handler.ServeHTTP(deleteRootRec, deleteRootReq)
-		if deleteRootRec.Code != http.StatusOK {
-			t.Fatalf("DELETE communications root %q status = %d, want %d body=%s", folder.Name, deleteRootRec.Code, http.StatusOK, deleteRootRec.Body.String())
-		}
-	}
-	if folders = listCommunicationsFolders(); len(folders) != 0 {
-		t.Fatalf("communications defaults were recreated after deleting all folders: %+v", folders)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusBadRequest {
+		t.Fatalf("GET communications company explorer folders status = %d, want %d body=%s", listRec.Code, http.StatusBadRequest, listRec.Body.String())
 	}
 }
 
@@ -663,9 +561,9 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		t.Fatalf("CreateCompanyUserGroup error = %v", err)
 	}
 
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "AR")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "AR", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
 	}
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -675,7 +573,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 			{"role": "informed", "subject_type": "group", "subject_id": department.GroupID},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+folder.FolderID+"/raci", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/raci", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -701,7 +599,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		t.Fatalf("first assignment = %+v", updatePayload.Assignments[0])
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -716,7 +614,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 				SubjectID   string `json:"subject_id"`
 				UserID      string `json:"user_id"`
 			} `json:"raci_assignments"`
-		} `json:"folders"`
+		} `json:"shared_inboxes"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
 		t.Fatalf("decode communications folders: %v", err)
@@ -749,6 +647,7 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-raci-inheritance-test"
+	repo.EnsureCompany(companyID, "Shared Inbox RACI Inheritance")
 
 	parentUser, err := repo.UpsertAuthUser("subject-shared-raci-parent", "parent-raci@example.com", "Parent RACI")
 	if err != nil {
@@ -765,13 +664,13 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 		t.Fatalf("AddCompanyMembership child error = %v", err)
 	}
 
-	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Parent")
+	parent, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Parent", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder parent error = %v", err)
 	}
-	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "communications", "Child")
+	child, err := repo.CreateCommunicationsSharedInboxFolder(companyID, parent.FolderID, "Child", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder child error = %v", err)
 	}
 
 	parentBody, _ := json.Marshal(map[string]any{
@@ -780,7 +679,7 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 			{"role": "responsible", "user_id": parentUser.UserID},
 		},
 	})
-	parentReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+parent.FolderID+"/raci", bytes.NewReader(parentBody))
+	parentReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+parent.FolderID+"/raci", bytes.NewReader(parentBody))
 	parentReq.Header.Set("Content-Type", "application/json")
 	parentRec := httptest.NewRecorder()
 	handler.ServeHTTP(parentRec, parentReq)
@@ -788,7 +687,7 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 		t.Fatalf("PUT parent RACI status = %d, want %d body=%s", parentRec.Code, http.StatusOK, parentRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -803,7 +702,7 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 				UserID          string `json:"user_id"`
 				UserDisplayName string `json:"user_display_name"`
 			} `json:"raci_assignments"`
-		} `json:"folders"`
+		} `json:"shared_inboxes"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
 		t.Fatalf("decode communications folders: %v", err)
@@ -833,7 +732,7 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 			{"role": "accountable", "user_id": childUser.UserID},
 		},
 	})
-	childReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+child.FolderID+"/raci", bytes.NewReader(childBody))
+	childReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+child.FolderID+"/raci", bytes.NewReader(childBody))
 	childReq.Header.Set("Content-Type", "application/json")
 	childRec := httptest.NewRecorder()
 	handler.ServeHTTP(childRec, childReq)
@@ -875,6 +774,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-account-test"
+	repo.EnsureCompany(companyID, "Shared Inbox Account Company")
 
 	user, err := repo.UpsertAuthUser("subject-shared-account", "triage@example.com", "Triage User")
 	if err != nil {
@@ -895,11 +795,10 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 
 	createBody, _ := json.Marshal(map[string]string{
 		"company_id":    companyID,
-		"folder_kind":   "communications",
 		"name":          "AR Inbox",
 		"account_email": "TRIAGE@example.com",
 	})
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(createBody))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -917,7 +816,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 		t.Fatalf("created shared inbox = %+v, want normalized account email", created)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -927,7 +826,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 		Folders []struct {
 			FolderID     string `json:"folder_id"`
 			AccountEmail string `json:"account_email"`
-		} `json:"folders"`
+		} `json:"shared_inboxes"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
 		t.Fatalf("decode communications folder list: %v", err)
@@ -950,7 +849,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 		"company_id":    companyID,
 		"account_email": "",
 	})
-	clearReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+created.FolderID, bytes.NewReader(clearBody))
+	clearReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+created.FolderID, bytes.NewReader(clearBody))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearRec := httptest.NewRecorder()
 	handler.ServeHTTP(clearRec, clearReq)
@@ -969,11 +868,10 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 
 	missingBody, _ := json.Marshal(map[string]string{
 		"company_id":    companyID,
-		"folder_kind":   "communications",
 		"name":          "Missing Account",
 		"account_email": "missing@example.com",
 	})
-	missingReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(missingBody))
+	missingReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(missingBody))
 	missingReq.Header.Set("Content-Type", "application/json")
 	missingRec := httptest.NewRecorder()
 	handler.ServeHTTP(missingRec, missingReq)
@@ -1156,43 +1054,60 @@ func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	}
 }
 
-func TestFilterCommunicationsSharedInboxFoldersForUserKeepsGrantedFoldersOnly(t *testing.T) {
+func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testing.T) {
 	t.Parallel()
 
-	parentID := "shared-root"
-	folders := []domain.CompanyExplorerFolder{
-		{FolderID: parentID, FolderKind: "communications", Name: "Shared Triage"},
-		{
-			FolderID:       "ar",
-			ParentFolderID: &parentID,
-			FolderKind:     "communications",
-			Name:           "AR",
-			AccessGrants:   []domain.EntityPermission{{EntityType: store.EntityTypeSharedTriageFolder, EntityID: "ar", SubjectType: store.EntityPermissionSubjectUser, SubjectID: "user-1", Permission: store.EntityPermissionEdit, AccessLevel: store.EntityPermissionEdit}},
-		},
-		{FolderID: "ar-child", ParentFolderID: stringPtr("ar"), FolderKind: "communications", Name: "AR Child"},
-		{
-			FolderID:       "ap",
-			ParentFolderID: &parentID,
-			FolderKind:     "communications",
-			Name:           "AP",
-			AccessGrants:   []domain.EntityPermission{{EntityType: store.EntityTypeSharedTriageFolder, EntityID: "ap", SubjectType: store.EntityPermissionSubjectUser, SubjectID: "user-2", Permission: store.EntityPermissionEdit, AccessLevel: store.EntityPermissionEdit}},
-		},
-	}
+	repo := store.NewMemoryRepo()
+	companyID := "company-shared-inbox-visible-default-test"
+	repo.EnsureCompany(companyID, "Shared Inbox Visible Default")
 
-	filtered := filterCommunicationsSharedInboxFoldersForUser(folders, "user-1")
-	ids := make([]string, 0, len(filtered))
-	for _, folder := range filtered {
-		ids = append(ids, folder.FolderID)
+	user, err := repo.UpsertAuthUser("shared-visible-user", "visible@example.com", "Visible")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser error = %v", err)
 	}
-
-	want := []string{"ar"}
-	if len(ids) != len(want) {
-		t.Fatalf("filtered IDs = %v, want %v", ids, want)
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership error = %v", err)
 	}
-	for i := range want {
-		if ids[i] != want[i] {
-			t.Fatalf("filtered IDs = %v, want %v", ids, want)
+	visible, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Visible", "")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder visible error = %v", err)
+	}
+	hidden, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Hidden", "")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder hidden error = %v", err)
+	}
+	for _, folder := range []domain.CompanyExplorerFolder{visible, hidden} {
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:        companyID,
+			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityID:         folder.FolderID,
+			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+			DefaultAccessSet: true,
+		}); err != nil {
+			t.Fatalf("SetEntityPermissions default %s error = %v", folder.FolderID, err)
 		}
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         visible.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{user.UserID},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions visible override error = %v", err)
+	}
+
+	folders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, user.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders error = %v", err)
+	}
+	ids := map[string]bool{}
+	for _, folder := range folders {
+		ids[folder.FolderID] = true
+	}
+	if !ids[visible.FolderID] || ids[hidden.FolderID] {
+		t.Fatalf("visible shared inbox IDs = %v, want only %q", ids, visible.FolderID)
 	}
 }
 
@@ -1203,6 +1118,7 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-shared-inbox-list-unfiltered-test"
+	repo.EnsureCompany(companyID, "Shared Inbox List Unfiltered")
 
 	currentUser, err := repo.UpsertAuthUser("shared-inbox-current", "current@example.com", "Current")
 	if err != nil {
@@ -1219,13 +1135,13 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 		t.Fatalf("AddCompanyMembership assigned error = %v", err)
 	}
 
-	unassigned, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Unassigned")
+	unassigned, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Unassigned", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder unassigned error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder unassigned error = %v", err)
 	}
-	assigned, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Assigned")
+	assigned, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Assigned", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder assigned error = %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder assigned error = %v", err)
 	}
 	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
 		CompanyID: companyID,
@@ -1238,7 +1154,7 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments assigned error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
 	req = requestWithActorForTest(req, currentUser, companyID)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -1246,7 +1162,7 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 		t.Fatalf("GET communications folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	var payload struct {
-		Folders []domain.CompanyExplorerFolder `json:"folders"`
+		Folders []domain.CompanyExplorerFolder `json:"shared_inboxes"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode communications folders: %v", err)
@@ -1258,10 +1174,6 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 	if !ids[unassigned.FolderID] || !ids[assigned.FolderID] {
 		t.Fatalf("communications folder list IDs = %v, want both %q and %q", ids, unassigned.FolderID, assigned.FolderID)
 	}
-}
-
-func stringPtr(value string) *string {
-	return &value
 }
 
 func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing.T) {

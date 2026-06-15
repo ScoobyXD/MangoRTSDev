@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -297,18 +296,16 @@ func (r *PostgresRepo) listCommunicationsSharedInboxRaciAncestry(ctx context.Con
 with recursive ancestry as (
   select folder_id::text as folder_id,
          parent_folder_id::text as parent_folder_id
-  from company_explorer_folders
+  from communications_shared_inbox_folders
   where company_id = $1
-    and folder_kind = 'communications'
     and folder_id = any(string_to_array($2, ',')::uuid[])
   union
   select parent.folder_id::text as folder_id,
          parent.parent_folder_id::text as parent_folder_id
-  from company_explorer_folders parent
+  from communications_shared_inbox_folders parent
   join ancestry child
     on child.parent_folder_id = parent.folder_id::text
   where parent.company_id = $1
-    and parent.folder_kind = 'communications'
 )
 select folder_id, parent_folder_id
 from ancestry`,
@@ -412,17 +409,18 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 	}
 	defer tx.Rollback()
 
-	var folderKind string
+	var exists bool
 	if err := tx.QueryRowContext(ctx,
-		`select folder_kind from company_explorer_folders where company_id=$1 and folder_id=$2`,
+		`select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
 		companyID, folderID,
-	).Scan(&folderKind); errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	} else if err != nil {
+	).Scan(&exists); err != nil {
+		if postgresSharedInboxStorageUnavailable(err) {
+			return nil, ErrSharedInboxStorageUnavailable
+		}
 		return nil, err
 	}
-	if folderKind != "communications" {
-		return nil, ErrInvalid
+	if !exists {
+		return nil, ErrNotFound
 	}
 
 	type normalizedAssignment struct {
@@ -585,7 +583,7 @@ on conflict (company_id, folder_id, role, user_id) do nothing`,
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	folders, err := r.ListCompanyExplorerFolders(companyID, "communications")
+	folders, err := r.ListCommunicationsSharedInboxFolders(companyID)
 	if err != nil {
 		return nil, err
 	}

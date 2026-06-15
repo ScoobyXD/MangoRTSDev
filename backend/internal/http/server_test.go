@@ -1680,6 +1680,7 @@ func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.
 	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-777777777777"
+	base.EnsureCompany(companyID, "Node Map Window Company")
 
 	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Window")
 	if err != nil {
@@ -1722,8 +1723,8 @@ func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.
 		t.Fatalf("ListNodeMapWindow calls after 304 = %d, want 1", repo.listNodeMapWindowCalls)
 	}
 
-	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "folder_kind": "communications", "name": "Shared"})
-	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(communicationsBody))
+	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Shared"})
+	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(communicationsBody))
 	communicationsReq.Header.Set("Content-Type", "application/json")
 	communicationsRec := httptest.NewRecorder()
 	handler.ServeHTTP(communicationsRec, communicationsReq)
@@ -2021,6 +2022,7 @@ func TestWorkspaceSnapshotLogicGateMapWindowConditionalGetAndEventFilters(t *tes
 	server := newServerWithLegacyMapRoutesForTest(repo)
 	handler := server.Routes()
 	companyID := "11111111-1111-4111-8111-cccccccccccc"
+	base.EnsureCompany(companyID, "Logic Gate Map Window Company")
 
 	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Window")
 	if err != nil {
@@ -2063,8 +2065,8 @@ func TestWorkspaceSnapshotLogicGateMapWindowConditionalGetAndEventFilters(t *tes
 		t.Fatalf("ListLogicGateMapWindow calls after 304 = %d, want 1", repo.listLogicGateMapWindowCalls)
 	}
 
-	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "folder_kind": "communications", "name": "Shared"})
-	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(communicationsBody))
+	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Shared"})
+	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(communicationsBody))
 	communicationsReq.Header.Set("Content-Type", "application/json")
 	communicationsRec := httptest.NewRecorder()
 	handler.ServeHTTP(communicationsRec, communicationsReq)
@@ -2746,6 +2748,7 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 	repo := store.NewMemoryRepo()
 	server := NewServerWithOptions(repo, ServerOptions{})
 	companyID := "company-scoped-etag-unrelated-test"
+	repo.EnsureCompany(companyID, "Scoped ETag Unrelated")
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
 	logicGate, err := repo.CreateLogicGate(companyID, "Snapshot gate")
 	if err != nil {
@@ -2774,11 +2777,10 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 	}
 
 	body, _ := json.Marshal(map[string]string{
-		"company_id":  companyID,
-		"folder_kind": "communications",
-		"name":        "Shared inbox",
+		"company_id": companyID,
+		"name":       "Shared inbox",
 	})
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(body))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(body))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)

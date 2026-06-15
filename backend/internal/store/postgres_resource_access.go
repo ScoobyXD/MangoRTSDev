@@ -42,6 +42,11 @@ where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, Resou
 select coalesce(default_access, $3)
 from company_explorer_folders
 where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
+	case EntityTypeSharedTriageFolder:
+		err = q.QueryRowContext(ctx, `
+select coalesce(default_access, $3)
+from communications_shared_inbox_folders
+where company_id=$1::uuid and folder_id=$2::uuid`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
 	default:
 		return "", ErrInvalid
 	}
@@ -85,6 +90,12 @@ where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, defau
 update company_explorer_folders
 set default_access=$3
 where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, defaultAccess)
+	case EntityTypeSharedTriageFolder:
+		res, err = tx.ExecContext(ctx, `
+update communications_shared_inbox_folders
+set default_access=$3,
+    updated_timestamp=now()
+where company_id=$1::uuid and folder_id=$2::uuid`, companyID, resourceID, defaultAccess)
 	default:
 		return ErrInvalid
 	}

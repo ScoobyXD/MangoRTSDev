@@ -883,11 +883,8 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", sharedUser.Email)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, sharedUser.Email); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
@@ -952,11 +949,8 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, "support@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
@@ -1043,22 +1037,16 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", sharedUser.Email)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, sharedUser.Email); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionView,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1071,20 +1059,18 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
 	path := "/v1/communications/messages/send?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
 	body := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body"}`
-	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusForbidden)
+	assertJSONStatus(t, handler, http.MethodPost, path, body, token, http.StatusNotFound)
 	if nylas.lastSendGrantID != "" {
 		t.Fatalf("send grant after view-only request = %q, want none", nylas.lastSendGrantID)
 	}
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{actor.UserID},
 	}); err != nil {
 		t.Fatal(err)
 	}

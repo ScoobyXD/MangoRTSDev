@@ -600,9 +600,9 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{groupMember.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
 	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Shared RACI Inbox")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Shared RACI Inbox", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -702,9 +702,9 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 
 	user := mustNotificationUser(t, repo, companyID, "shared-access-revoked")
 	actor := mustNotificationUser(t, repo, companyID, "shared-access-actor")
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Revoked Shared Inbox")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Revoked Shared Inbox", "")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
+		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
