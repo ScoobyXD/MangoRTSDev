@@ -15,6 +15,9 @@ func TestHealthIncludesDeployMetadata(t *testing.T) {
 	t.Setenv("MANGORTS_DEPLOY_REVISION", "test-sha")
 	t.Setenv("MANGORTS_APP_URL", "https://dev.mangorts.com")
 	t.Setenv("MANGORTS_API_URL", "https://api.dev.mangorts.com")
+	t.Setenv("MANGORTS_EMAIL_FROM", "noreply@example.com")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
 	rec := httptest.NewRecorder()
 	NewServer(nil).handleHealth(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -41,5 +44,11 @@ func TestHealthIncludesDeployMetadata(t *testing.T) {
 	}
 	if got, _ := payload["ok"].(bool); !got {
 		t.Fatalf("ok = %v, want true", payload["ok"])
+	}
+	if got, _ := payload["email_sender_configured"].(bool); !got {
+		t.Fatalf("email_sender_configured = %v, want true", payload["email_sender_configured"])
+	}
+	if got, _ := payload["aws_env_credentials_configured"].(bool); !got {
+		t.Fatalf("aws_env_credentials_configured = %v, want true", payload["aws_env_credentials_configured"])
 	}
 }
