@@ -262,8 +262,8 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   return {
     preferredFolderKind,
     preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : preferredFolderKind === "project" ? projectParentFolderID : nodeParentFolderID,
-    folderScopeType,
-    folderScopeID,
+    ...(folderScopeType ? { folderScopeType } : {}),
+    ...(folderScopeID ? { folderScopeID } : {}),
     nodeFolderParentID,
     logicGateFolderParentID,
     projectFolderParentID,
