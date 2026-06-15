@@ -86,6 +86,10 @@ function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
 }
 
+function homeViewUsesSharedEmailConnection(viewID: HomeViewID): boolean {
+  return sharedInboxIDForHomeView(viewID) !== "";
+}
+
 function isTriageMailViewID(viewID: HomeViewID): boolean {
   return viewID === "my-triage" || viewID === "shared-root" || viewID.startsWith("shared:");
 }
@@ -330,6 +334,12 @@ export function HomePage({
     const params = new URLSearchParams(window.location.search);
     return Boolean(params.get("nylas_error")?.trim());
   });
+  const [pendingSharedOAuthAccountEmail, setPendingSharedOAuthAccountEmail] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const scope = params.get("nylas_scope")?.trim().toLowerCase() ?? "";
+    const accountEmail = params.get("nylas_account_email")?.trim().toLowerCase() ?? "";
+    return params.get("nylas") === "connected" && scope === "shared" ? accountEmail : "";
+  });
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -351,6 +361,7 @@ export function HomePage({
   const selectedMessageIDRef = useRef("");
   const selectedMessageRef = useRef<EmailMessage | null>(null);
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
+  const initialViewIDRef = useRef<HomeViewID>(initialViewID);
   const pendingAutoArchiveMessageIDsRef = useRef<Set<string>>(new Set());
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const autoArchiveTimerIDsRef = useRef<Map<string, number>>(new Map());
@@ -430,6 +441,13 @@ export function HomePage({
   }, [activeRacioMatrixUserID, companyID, currentUserID]);
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
+  const activeMailViewUsesSharedConnection = homeViewUsesSharedEmailConnection(activeViewID);
+  const activeMailViewHasEmailConnection = status?.connected === true || activeMailViewUsesSharedConnection;
+  const showPersonalEmailConnectPanel = status?.connected === false
+    && !activeMailViewUsesSharedConnection
+    && !isInboxMatrixView
+    && !isCustomMatrixView
+    && !isWorkspacePanelHomeViewID(activeViewID);
   const connection = status?.connection;
 
   const activeSharedInbox = useMemo(
@@ -443,7 +461,7 @@ export function HomePage({
     ? ""
     : activeSharedInboxFolderID
       ? activeSharedInbox?.account_email ?? ""
-      : connection?.account_email;
+      : connection?.account_email ?? "";
   const sharedInboxPermissionsFolder = useMemo(
     () => sharedInboxPermissionsFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxPermissionsFolderID) ?? null : null,
     [sharedInboxPermissionsFolderID, sharedInboxes],
@@ -728,7 +746,10 @@ export function HomePage({
     const oauthError = params.get("nylas_error");
     if (connected === "connected") {
       invalidateCommunicationsCache();
-      setNotice("Email connected.");
+      const scope = params.get("nylas_scope")?.trim().toLowerCase() ?? "";
+      const accountEmail = params.get("nylas_account_email")?.trim().toLowerCase() ?? "";
+      if (scope === "shared" && accountEmail) setPendingSharedOAuthAccountEmail(accountEmail);
+      setNotice(scope === "shared" ? "Shared inbox connected." : "Email connected.");
     }
     if (oauthError) setError(formatErrorCode(oauthError));
     if (connected || oauthError) {
@@ -741,17 +762,11 @@ export function HomePage({
     try {
       const next = await fetchCommunicationsStatus();
       setStatus(next);
-      if (!next.connected) {
+      if (!next.connected && !homeViewUsesSharedEmailConnection(activeViewIDRef.current)) {
         cancelPendingAutoArchiveMessages(Array.from(pendingAutoArchiveMessageIDsRef.current));
         cancelPendingStarredMessages(Array.from(pendingStarredMessageIDsRef.current));
         setMailboxCountOverrides({});
         setFolders([]);
-        setSharedInboxes([]);
-        setCompanyUsers([]);
-        setCompanyUserGroups([]);
-        setCompanyUserGroupMembers([]);
-        setRacioViewerListEntries([]);
-        setRacioMatrixTargetUserID("");
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
@@ -799,6 +814,14 @@ export function HomePage({
       return true;
     } catch (folderError) {
       if (foldersRequestSeqRef.current !== requestSeq) return false;
+      if (sharedInboxID && (isSharedInboxEmailConnectionError(folderError) || isEmailAccessExpiredError(folderError))) {
+        const folder = sharedInboxes.find((item) => item.folder_id === sharedInboxID);
+        const accountEmail = folder?.account_email?.trim().toLowerCase() ?? "";
+        if (accountEmail) {
+          setSharedInboxEmailConnectionDialog({ accountEmail });
+          return false;
+        }
+      }
       if (isEmailAccessExpiredError(folderError)) {
         await handleEmailAccessExpired(folderError);
         return false;
@@ -939,7 +962,7 @@ export function HomePage({
     return remaining < Math.max(800, list.clientHeight * 2);
   }, []);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
-    if (!status?.connected) return;
+    if (!activeMailViewHasEmailConnection) return;
     if (isInboxMatrixViewID(activeViewID) || isCustomMatrixViewID(activeViewID)) {
       setLoadedMessageListKey("");
       setMessages([]);
@@ -1026,6 +1049,12 @@ export function HomePage({
       }
     } catch (messageError) {
       if (messageRequestSeqRef.current === requestSeq) {
+        if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
+          setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase() });
+          setMessages([]);
+          setNextPageToken("");
+          return;
+        }
         if (isEmailAccessExpiredError(messageError)) {
           await handleEmailAccessExpired(messageError);
           return;
@@ -1044,7 +1073,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, unreadOnly]);
   const appendPrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): string | null => {
     const prefetched = prefetchedMessagePageRef.current;
     if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
@@ -1067,7 +1096,7 @@ export function HomePage({
     return page.next_page_token ?? "";
   }, []);
   const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
-    if (!status?.connected || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
+    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
     const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1103,9 +1132,9 @@ export function HomePage({
       });
     prefetchMessagePromiseRef.current = request;
     await request;
-  }, [companyID, currentMessageFilterKey, handleEmailAccessExpired, status?.connected]);
+  }, [activeMailViewHasEmailConnection, companyID, currentMessageFilterKey, handleEmailAccessExpired]);
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1155,6 +1184,10 @@ export function HomePage({
         if (nextToken && messageListWithinPrefetchDistance()) void prefetchNextMessagePage(nextToken);
       }, 0);
     } catch (messageError) {
+      if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
+        setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase() });
+        return;
+      }
       if (isEmailAccessExpiredError(messageError)) {
         await handleEmailAccessExpired(messageError);
         return;
@@ -1163,7 +1196,7 @@ export function HomePage({
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [appendPrefetchedMessagePage, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage, status?.connected]);
+  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
   useEffect(() => {
     loadMessagesRef.current = loadMessages;
   }, [loadMessages]);
@@ -1172,10 +1205,10 @@ export function HomePage({
     const refresh = options?.refresh === true;
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
-      if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current)) return;
+      if (!activeMailViewHasEmailConnection || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current)) return;
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
-  }, [status?.connected]);
+  }, [activeMailViewHasEmailConnection]);
   const fillMessageListAfterRemoval = useCallback(() => {
     window.setTimeout(() => {
       const list = messageListRef.current;
@@ -1289,9 +1322,9 @@ export function HomePage({
     queueArchiveMessages([messageID]);
   }, [queueArchiveMessages, removeMessagesFromVisibleMailList, removePendingAutoArchiveMessages]);
   useEffect(() => { void loadStatus({ clearError: !preserveInitialOAuthError }); }, [loadStatus, preserveInitialOAuthError]);
-  useEffect(() => { if (status?.connected && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeViewID, loadFolders, status?.connected]);
-  useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
-  useEffect(() => { if (status?.connected || isInboxMatrixView) void loadCompanyUsers(); }, [isInboxMatrixView, loadCompanyUsers, status?.connected]);
+  useEffect(() => { if (activeMailViewHasEmailConnection && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeMailViewHasEmailConnection, activeViewID, loadFolders]);
+  useEffect(() => { if (status?.configured) void loadSharedInboxes(); }, [loadSharedInboxes, status?.configured]);
+  useEffect(() => { if (status?.connected || activeMailViewUsesSharedConnection || isInboxMatrixView) void loadCompanyUsers(); }, [activeMailViewUsesSharedConnection, isInboxMatrixView, loadCompanyUsers, status?.connected]);
   useEffect(() => {
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -1316,8 +1349,8 @@ export function HomePage({
     if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
   }, [loadMoreMessages, loadingMessages, loadingMoreMessages, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage]);
   useEffect(() => {
-    if (!status?.connected) return undefined;
-    const connectedAccountEmail = status.connection?.account_email ?? "";
+    if (!activeMailViewHasEmailConnection) return undefined;
+    const connectedAccountEmail = activeMailAccountEmail;
     const currentMessageListParams = () => ({
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
@@ -1448,9 +1481,9 @@ export function HomePage({
         folderReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
+  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh]);
   useEffect(() => {
-    if (!status?.connected) return undefined;
+    if (!activeMailViewHasEmailConnection) return undefined;
     const refreshVisibleMailbox = () => {
       if (document.visibilityState === "hidden") return;
       scheduleMessageListRefresh(0, { refresh: true });
@@ -1463,7 +1496,7 @@ export function HomePage({
       window.removeEventListener("focus", refreshVisibleMailbox);
       document.removeEventListener("visibilitychange", refreshVisibleMailbox);
     };
-  }, [scheduleMessageListRefresh, status?.connected]);
+  }, [activeMailViewHasEmailConnection, scheduleMessageListRefresh]);
   useEffect(() => {
     if (!companyID || !currentUserID) return undefined;
     const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {
@@ -1708,9 +1741,20 @@ export function HomePage({
     selectMailbox(nextMailbox);
   }, [selectMailbox]);
   useEffect(() => {
+    if (initialViewIDRef.current === initialViewID) return;
+    initialViewIDRef.current = initialViewID;
     if (activeViewID === initialViewID) return;
     selectHomeView(initialViewID, mailboxForHomeView(initialViewID));
   }, [activeViewID, initialViewID, selectHomeView]);
+  useEffect(() => {
+    const accountEmail = pendingSharedOAuthAccountEmail.trim().toLowerCase();
+    if (!accountEmail) return;
+    const folder = sortSharedInboxes(sharedInboxes).find((item) => (item.account_email ?? "").trim().toLowerCase() === accountEmail);
+    if (!folder) return;
+    const viewID = `shared:${folder.folder_id}` as HomeViewID;
+    setPendingSharedOAuthAccountEmail("");
+    selectHomeView(viewID, mailboxForHomeView(viewID));
+  }, [pendingSharedOAuthAccountEmail, selectHomeView, sharedInboxes]);
   const currentMessageListParams = useCallback(() => ({
     limit: MESSAGE_BATCH_SIZE,
     mailbox: mailboxRef.current,
@@ -1895,7 +1939,7 @@ export function HomePage({
     }
   }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadFolders, removeMessagesFromVisibleMailList, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
-    if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
+    if (!canMutateCurrentMailView || !activeMailViewHasEmailConnection || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
     if (ids.length === 0) return;
     addPendingAutoArchiveMessages(ids);
@@ -1905,7 +1949,7 @@ export function HomePage({
       }, AUTO_ARCHIVE_SCROLL_DELAY_MS);
       autoArchiveTimerIDsRef.current.set(id, timerID);
     }
-  }, [addPendingAutoArchiveMessages, canMutateCurrentMailView, completePendingAutoArchiveMessage, status?.connected]);
+  }, [activeMailViewHasEmailConnection, addPendingAutoArchiveMessages, canMutateCurrentMailView, completePendingAutoArchiveMessage]);
   const archiveSelected = async () => {
     if (!selectedMessage || !canMutateCurrentMailView) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
@@ -3504,7 +3548,7 @@ export function HomePage({
     if (baseMailboxCounts.starred === starredMailboxCountOverride) setStarredMailboxCountOverride(currentMailboxCountKey, undefined);
   }, [baseMailboxCounts.starred, currentMailboxCountKey, setStarredMailboxCountOverride, starredMailboxCountOverride]);
   useEffect(() => {
-    if (!status?.connected || !isArchivableListView || mailbox !== "primary" || searchQuery.trim() || unreadOnly) return;
+    if (!activeMailViewHasEmailConnection || !isArchivableListView || mailbox !== "primary" || searchQuery.trim() || unreadOnly) return;
     if (loadedMessageListKey !== activeMessageListKey) return;
     if (activeSharedInboxNeedsEmail || activeSharedInboxBlocksEmail || loadingMessages || loadingMoreMessages || nextPageToken) return;
     setPrimaryMailboxCountOverride(currentMailboxCountKey, messages.length);
@@ -3522,15 +3566,15 @@ export function HomePage({
     nextPageToken,
     searchQuery,
     setPrimaryMailboxCountOverride,
-    status?.connected,
+    activeMailViewHasEmailConnection,
     unreadOnly,
   ]);
   useEffect(() => {
-    if (!status?.connected || isInboxMatrixView || isCustomMatrixView) return;
+    if (!activeMailViewHasEmailConnection || isInboxMatrixView || isCustomMatrixView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
       detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
     }));
-  }, [activeViewID, companyID, isCustomMatrixView, isInboxMatrixView, status?.connected, unreadMessageCount]);
+  }, [activeMailViewHasEmailConnection, activeViewID, companyID, isCustomMatrixView, isInboxMatrixView, unreadMessageCount]);
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
@@ -3592,7 +3636,7 @@ export function HomePage({
             <p style={mutedTextStyle}>Set the Nylas environment variables on the backend, then restart the API.</p>
           </section>
         </main>
-      ) : !status.connected ? (
+      ) : showPersonalEmailConnectPanel ? (
         <main style={centerStyle}>
           <section style={connectPanelStyle}>
             <h2 style={panelTitleStyle}>Connect your company email</h2>

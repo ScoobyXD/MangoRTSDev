@@ -96,6 +96,7 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
 		UserID:      actor.User.UserID,
 		Email:       accountEmail,
+		UserEmail:   actor.User.Email,
 		Provider:    provider,
 		StrictEmail: requestedAccountEmail != "",
 	}, time.Now())
@@ -856,6 +857,13 @@ func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) st
 	return "personal"
 }
 
+func communicationsConnectionScopeForOAuthGrant(state nylasOAuthStatePayload, accountEmail string) string {
+	if state.StrictEmail && normalizeEmailForCompare(accountEmail) != "" && normalizeEmailForCompare(accountEmail) != normalizeEmailForCompare(state.UserEmail) {
+		return "shared"
+	}
+	return "personal"
+}
+
 func grantIDLogValue(grantID string) string {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
@@ -919,27 +927,28 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 	if provider == "" {
 		provider = state.Provider
 	}
-	_, err = s.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+	connectionScope := communicationsConnectionScopeForOAuthGrant(state, grant.Email)
+	connection, err := s.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID:       state.UserID,
 		Provider:     provider,
 		AccountEmail: grant.Email,
-		Scope:        communicationsConnectionScopeForOAuthState(state),
+		Scope:        connectionScope,
 		GrantID:      grant.GrantID,
 		Status:       "connected",
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		log.Printf("nylas_oauth_callback outcome=redirect reason=mango_user_not_found request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), grantIDLogValue(grant.GrantID))
+		log.Printf("nylas_oauth_callback outcome=redirect reason=mango_user_not_found request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
 		s.redirectCommunications(w, r, "mango_user_not_found")
 		return
 	}
 	if err != nil {
-		log.Printf("nylas_oauth_callback outcome=redirect reason=connection_store_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), grantIDLogValue(grant.GrantID), err)
+		log.Printf("nylas_oauth_callback outcome=redirect reason=connection_store_failed request_id=%s user_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), err)
 		s.redirectCommunications(w, r, "nylas_connection_store_failed")
 		return
 	}
 	s.commCache.invalidateUser(state.UserID)
-	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), communicationsConnectionScopeForOAuthState(state), state.StrictEmail, grantIDLogValue(grant.GrantID))
-	s.redirectCommunicationsSuccess(w, r)
+	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
+	s.redirectCommunicationsSuccess(w, r, connection)
 }
 
 func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (domain.UserEmailConnection, bool) {
@@ -1727,10 +1736,16 @@ func normalizeEmailForCompare(email string) string {
 	return strings.TrimSpace(strings.ToLower(email))
 }
 
-func (s *Server) redirectCommunicationsSuccess(w http.ResponseWriter, r *http.Request) {
+func (s *Server) redirectCommunicationsSuccess(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
 	target := s.communicationsRedirectURL()
 	query := target.Query()
 	query.Set("nylas", "connected")
+	if strings.TrimSpace(connection.Scope) != "" {
+		query.Set("nylas_scope", strings.TrimSpace(connection.Scope))
+	}
+	if strings.TrimSpace(connection.AccountEmail) != "" {
+		query.Set("nylas_account_email", normalizeEmailForCompare(connection.AccountEmail))
+	}
 	target.RawQuery = query.Encode()
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
