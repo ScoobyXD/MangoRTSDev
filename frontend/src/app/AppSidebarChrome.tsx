@@ -1347,7 +1347,14 @@ export function AppSidebar({
         </div>
       )}
       {explorerTriagePriorityMenu && (
-        <FrameRightClickMenu x={explorerTriagePriorityMenu.x} y={explorerTriagePriorityMenu.y} onClose={() => setExplorerTriagePriorityMenu(null)}>
+        <FrameRightClickMenu
+          x={explorerTriagePriorityMenu.x}
+          y={explorerTriagePriorityMenu.y}
+          width={244}
+          minWidth={244}
+          maxWidth={244}
+          onClose={() => setExplorerTriagePriorityMenu(null)}
+        >
           <div style={appSidebarPriorityMenuTitleStyle}>Priority</div>
           <div style={appSidebarPriorityMenuTargetStyle}>
             {explorerTriagePriorityMenu.target.kind === "node" ? "Attach to" : "Create in"} {explorerTriagePriorityMenu.target.label}
@@ -1356,7 +1363,7 @@ export function AppSidebar({
             <button
               key={priority.value}
               type="button"
-              style={appSidebarContextMenuButtonStyle}
+              style={appSidebarPriorityMenuButtonStyle}
               disabled={explorerTriageBusy}
               onClick={() => void pickExplorerTriagePriority(priority.value)}
             >
@@ -2631,11 +2638,28 @@ const appSidebarPriorityMenuTitleStyle: React.CSSProperties = {
 };
 
 const appSidebarPriorityMenuTargetStyle: React.CSSProperties = {
-  maxWidth: 240,
+  maxWidth: 220,
   padding: "0 12px 6px",
   color: "rgba(15, 23, 42, 0.58)",
   fontSize: 11,
   fontWeight: 650,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const appSidebarPriorityMenuButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 30,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  textAlign: "left",
+  padding: "0 12px",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
