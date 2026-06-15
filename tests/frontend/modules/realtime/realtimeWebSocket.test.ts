@@ -10,6 +10,7 @@ import {
   type RealtimeCommunicationsEventMessage,
   type RealtimeNotificationCreatedMessage,
   type RealtimeNotificationDeletedMessage,
+  type RealtimeNotificationsClearedMessage,
   type RealtimePermissionRevokedMessage,
   type RealtimeProjectionDeltaMessage,
   type RealtimeSnapshotRefetchMessage,
@@ -101,6 +102,19 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(deleted.scope, "notifications:user:user-1");
   assert.equal(deleted.notification_id, "notification-1");
   assert.equal(deleted.ts, "2026-06-03T10:00:02.000Z");
+
+  const cleared = parseRealtimeMessage(JSON.stringify({
+    type: "notifications.cleared",
+    company_id: "company-1",
+    scope: "notifications:user:user-1",
+    deleted_count: 4,
+    ts: "2026-06-03T10:00:02.500Z",
+  })) as RealtimeNotificationsClearedMessage;
+  assert.equal(cleared.type, "notifications.cleared");
+  assert.equal(cleared.company_id, "company-1");
+  assert.equal(cleared.scope, "notifications:user:user-1");
+  assert.equal(cleared.deleted_count, 4);
+  assert.equal(cleared.ts, "2026-06-03T10:00:02.500Z");
 
   const communications = parseRealtimeMessage(JSON.stringify({
     type: "communications.event",
@@ -304,10 +318,12 @@ test("realtime client dispatches notification messages only to the exact subscri
     });
     const created: RealtimeNotificationCreatedMessage[] = [];
     const deleted: RealtimeNotificationDeletedMessage[] = [];
+    const cleared: RealtimeNotificationsClearedMessage[] = [];
     const unrelated: RealtimeNotificationCreatedMessage[] = [];
     const unsubscribeA = client.subscribe("notifications:user:user-a", {
       onNotificationCreated: (message) => created.push(message),
       onNotificationDeleted: (message) => deleted.push(message),
+      onNotificationsCleared: (message) => cleared.push(message),
     });
     const unsubscribeB = client.subscribe("notifications:user:user-b", {
       onNotificationCreated: (message) => unrelated.push(message),
@@ -335,11 +351,19 @@ test("realtime client dispatches notification messages only to the exact subscri
       scope: "notifications:user:user-a",
       notification_id: "notification-a",
     }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({
+      type: "notifications.cleared",
+      company_id: "company-1",
+      scope: "notifications:user:user-a",
+      deleted_count: 3,
+    }) });
 
     assert.equal(created.length, 1);
     assert.equal(created[0].notification.notification_id, "notification-a");
     assert.equal(deleted.length, 1);
     assert.equal(deleted[0].notification_id, "notification-a");
+    assert.equal(cleared.length, 1);
+    assert.equal(cleared[0].deleted_count, 3);
     assert.equal(unrelated.length, 0);
     unsubscribeA();
     unsubscribeB();

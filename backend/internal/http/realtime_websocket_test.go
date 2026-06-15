@@ -1046,6 +1046,66 @@ func TestRealtimeWebSocketNotificationDeletedRoutesOnlyToRecipientScope(t *testi
 	clientB.assertNoMessage(t)
 }
 
+func TestRealtimeWebSocketNotificationsClearedRoutesAggregateToRecipientScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888015"
+	tokenA := "notifications-cleared-a-token"
+	tokenB := "notifications-cleared-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-b", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
+			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
+		}},
+		DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+
+	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	defer clientA.close()
+	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
+	defer clientB.close()
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+	scopeA := realtimeNotificationScope(userA.UserID)
+	scopeB := realtimeNotificationScope(userB.UserID)
+	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
+	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
+	clientA.readJSON(t)
+	clientB.readJSON(t)
+
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: userA.UserID,
+			Type:            domain.NotificationEventMentionCreated,
+			SourceEventID:   "88888888-8888-4888-8888-000000000015",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        "notifications-cleared-node-a",
+			Title:           "Cleared notification A",
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: userA.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "88888888-8888-4888-8888-000000000016",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        "notifications-cleared-node-b",
+			Title:           "Cleared notification B",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+	server.publishNotificationsCleared(created)
+	message := clientA.readJSON(t)
+	if message["type"] != realtimeMessageNotificationsCleared || message["scope"] != scopeA || message["deleted_count"] != float64(2) {
+		t.Fatalf("cleared notification websocket message = %+v, want aggregate clear count for scope %s", message, scopeA)
+	}
+	clientB.assertNoMessage(t)
+}
+
 func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, role string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", strings.ReplaceAll(subject, "-", " "))
