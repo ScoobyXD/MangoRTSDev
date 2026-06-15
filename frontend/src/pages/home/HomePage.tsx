@@ -286,7 +286,6 @@ export function HomePage({
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [nextPageToken, setNextPageToken] = useState("");
   const [loadedMessageListKey, setLoadedMessageListKey] = useState("");
-  const [newSharedInboxName, setNewSharedInboxName] = useState("");
   const [compose, setCompose] = useState<ComposeState>(emptyCompose);
   const [mailDrafts, setMailDrafts] = useState<HomeMailDraft[]>([]);
   const [emailSignature, setEmailSignature] = useState("");
@@ -2220,12 +2219,6 @@ export function HomePage({
     )));
   }, [currentDirectSharedInboxRaciAssignments, saveSharedInboxRaciAssignments]);
 
-  const submitSharedInbox = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const parentFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
-    const folder = await createSharedInboxFolder(parentFolderID, newSharedInboxName);
-    if (folder) setNewSharedInboxName("");
-  };
   const nodeByID = useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const allNodeRows = useMemo(() => buildCompanyExplorerTreeRows({
     expanded: nodeExpandedIDs,
@@ -3631,12 +3624,9 @@ export function HomePage({
               connectedAccountEmail={connection?.account_email}
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
-              newSharedInboxName={newSharedInboxName}
               busy={busy}
               notificationSummary={notificationSummary}
               onSelectView={selectHomeView}
-              onNewSharedInboxNameChange={setNewSharedInboxName}
-              onSubmitSharedInbox={submitSharedInbox}
               onCreateSharedInbox={createSharedInboxFolder}
               onRenameSharedInbox={renameSharedInboxFolder}
               onSetSharedInboxAccountEmail={setSharedInboxAccountEmail}

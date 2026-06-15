@@ -20,26 +20,28 @@ import (
 )
 
 type fakeNylasClient struct {
-	mu                sync.Mutex
-	grant             NylasGrant
-	deletedGrants     []string
-	folders           []NylasFolder
-	messages          []NylasMessage
-	messagesByID      map[string]NylasMessage
-	thread            NylasThread
-	message           NylasMessage
-	sent              NylasSendMessageRequest
-	update            NylasMessageUpdate
-	updateCalls       []fakeNylasUpdateCall
-	updateErrByID     map[string]error
-	lastQuery         NylasMessageQuery
-	lastFolderGrantID string
-	lastSendGrantID   string
-	folderCalls       int
-	messageCalls      int
-	detailCalls       int
-	listErr           error
-	exchangeErr       error
+	mu                 sync.Mutex
+	grant              NylasGrant
+	deletedGrants      []string
+	folders            []NylasFolder
+	messages           []NylasMessage
+	messagesByGrantID  map[string][]NylasMessage
+	messagesByID       map[string]NylasMessage
+	thread             NylasThread
+	message            NylasMessage
+	sent               NylasSendMessageRequest
+	update             NylasMessageUpdate
+	updateCalls        []fakeNylasUpdateCall
+	updateErrByID      map[string]error
+	lastQuery          NylasMessageQuery
+	lastMessageGrantID string
+	lastFolderGrantID  string
+	lastSendGrantID    string
+	folderCalls        int
+	messageCalls       int
+	detailCalls        int
+	listErr            error
+	exchangeErr        error
 }
 
 type fakeNylasUpdateCall struct {
@@ -71,13 +73,19 @@ func (f *fakeNylasClient) ListFolders(_ context.Context, grantID string) ([]Nyla
 	return f.folders, nil
 }
 
-func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasMessageQuery) (NylasMessagePage, error) {
+func (f *fakeNylasClient) ListMessages(_ context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.messageCalls++
 	f.lastQuery = query
+	f.lastMessageGrantID = grantID
 	if f.listErr != nil {
 		return NylasMessagePage{}, f.listErr
+	}
+	if f.messagesByGrantID != nil {
+		if messages, ok := f.messagesByGrantID[grantID]; ok {
+			return NylasMessagePage{Messages: messages, NextPageToken: "next-token"}, nil
+		}
 	}
 	return NylasMessagePage{Messages: f.messages, NextPageToken: "next-token"}, nil
 }
@@ -595,6 +603,99 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	}
 }
 
+func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-message-cache"
+	repo.EnsureCompany(companyID, "Shared Message Cache Company")
+	actor, err := repo.UpsertAuthUser("cache-actor", "actor@example.com", "Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       actor.UserID,
+		Provider:     "google",
+		AccountEmail: actor.Email,
+		GrantID:      "grant-personal",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       actor.UserID,
+		Provider:     "google",
+		AccountEmail: "support@example.com",
+		GrantID:      "grant-shared",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, "support@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   actor.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		messagesByGrantID: map[string][]NylasMessage{
+			"grant-personal": {{ID: "personal-message", Subject: "Personal inbox"}},
+			"grant-shared":   {{ID: "shared-message", Subject: "Shared inbox"}},
+		},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+	if nylas.lastMessageGrantID != "grant-personal" {
+		t.Fatalf("personal message grant = %q, want grant-personal", nylas.lastMessageGrantID)
+	}
+
+	sharedPath := "/v1/communications/messages?mailbox=primary&limit=5&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	req := httptest.NewRequest(http.MethodGet, sharedPath, nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shared inbox messages status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if nylas.lastMessageGrantID != "grant-shared" {
+		t.Fatalf("shared message grant = %q, want grant-shared", nylas.lastMessageGrantID)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "shared-message") || strings.Contains(body, "personal-message") {
+		t.Fatalf("shared inbox response = %s, want shared mailbox messages only", body)
+	}
+	if nylas.messageCalls != 2 {
+		t.Fatalf("message calls = %d, want personal and shared Nylas reads", nylas.messageCalls)
+	}
+	assertJSONStatus(t, handler, http.MethodGet, sharedPath, "", token, http.StatusOK)
+	if nylas.messageCalls != 2 {
+		t.Fatalf("message calls after shared cache read = %d, want cached shared page", nylas.messageCalls)
+	}
+}
+
 func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T) {
 	t.Parallel()
 
@@ -754,35 +855,35 @@ func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
 	for i := 0; i < communicationsMaxMessagePagesPerUser+2; i++ {
 		query := NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", i)}
 		page := NylasMessagePage{Messages: []NylasMessage{{ID: fmt.Sprintf("message-%d", i)}}}
-		cache.setMessagePage("user-1", query, page, now.Add(time.Duration(i)*time.Second))
+		cache.setMessagePage("user-1", "account:user@example.com", query, page, now.Add(time.Duration(i)*time.Second))
 	}
 	if len(cache.messagePages) != communicationsMaxMessagePagesPerUser {
 		t.Fatalf("message page cache size = %d, want %d", len(cache.messagePages), communicationsMaxMessagePagesPerUser)
 	}
-	if _, ok := cache.getMessagePage("user-1", NylasMessageQuery{Limit: 5, PageToken: "page-0"}, communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", NylasMessageQuery{Limit: 5, PageToken: "page-0"}, communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
 		t.Fatal("oldest message page was not evicted")
 	}
-	if _, ok := cache.getMessagePage("user-1", NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", communicationsMaxMessagePagesPerUser+1)}, communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", communicationsMaxMessagePagesPerUser+1)}, communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
 		t.Fatal("newest message page was evicted")
 	}
 
 	for i := 0; i < communicationsMaxMessageEntries+4; i++ {
-		cache.setMessage(fmt.Sprintf("global-user-%d", i), NylasMessage{ID: "message-1", Body: "body"}, now.Add(time.Duration(i)*time.Second))
+		cache.setMessage(fmt.Sprintf("global-user-%d", i), "account:user@example.com", NylasMessage{ID: "message-1", Body: "body"}, now.Add(time.Duration(i)*time.Second))
 	}
 	if len(cache.messages) != communicationsMaxMessageEntries {
 		t.Fatalf("message detail cache size = %d, want %d", len(cache.messages), communicationsMaxMessageEntries)
 	}
-	if _, ok := cache.getMessage("global-user-0", "message-1", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+	if _, ok := cache.getMessage("global-user-0", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
 		t.Fatal("oldest message detail was not globally evicted")
 	}
 
 	for i := 0; i < communicationsMaxMessageDetailsPerUser+2; i++ {
-		cache.setMessage("detail-user", NylasMessage{ID: fmt.Sprintf("detail-%d", i), Body: "body"}, now.Add(time.Duration(i)*time.Second))
+		cache.setMessage("detail-user", "account:user@example.com", NylasMessage{ID: fmt.Sprintf("detail-%d", i), Body: "body"}, now.Add(time.Duration(i)*time.Second))
 	}
-	if _, ok := cache.getMessage("detail-user", "detail-0", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+	if _, ok := cache.getMessage("detail-user", "account:user@example.com", "detail-0", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
 		t.Fatal("oldest per-user message detail was not evicted")
 	}
-	if _, ok := cache.getMessage("detail-user", fmt.Sprintf("detail-%d", communicationsMaxMessageDetailsPerUser+1), communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
+	if _, ok := cache.getMessage("detail-user", "account:user@example.com", fmt.Sprintf("detail-%d", communicationsMaxMessageDetailsPerUser+1), communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
 		t.Fatal("newest per-user message detail was evicted")
 	}
 }
@@ -795,37 +896,37 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 
 	cache := newCommunicationsCache()
 	server := &Server{commCache: cache}
-	cache.setFolders("user-1", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
-	cache.setMessagePage("user-1", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 
 	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
 
-	if _, ok := cache.getFolders("user-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message webhook invalidated folders; want folder cache preserved")
 	}
-	if _, ok := cache.getMessagePage("user-1", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message webhook invalidated message page; want list cache preserved")
 	}
-	if _, ok := cache.getMessage("user-1", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("message webhook preserved detail; want changed message detail invalidated")
 	}
 
 	cache = newCommunicationsCache()
 	server.commCache = cache
-	cache.setFolders("user-1", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
-	cache.setMessagePage("user-1", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 
 	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "folder.updated"})
 
-	if _, ok := cache.getFolders("user-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("folder webhook preserved folders; want folder cache invalidated")
 	}
-	if _, ok := cache.getMessagePage("user-1", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("folder webhook invalidated message page; want list cache preserved")
 	}
-	if _, ok := cache.getMessage("user-1", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("folder webhook invalidated message detail; want detail cache preserved")
 	}
 }
