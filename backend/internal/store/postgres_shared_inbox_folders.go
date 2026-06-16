@@ -387,7 +387,7 @@ item_access as (
              and access.user_id=$2::uuid
          ) as has_direct_override
   from communications_shared_items item
-  where item.company_id=$1
+  where item.company_id=$1::text
 )
 select item.company_id,
        item.folder_id,

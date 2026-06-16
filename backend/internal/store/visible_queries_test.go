@@ -390,6 +390,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"item_access as",
 		"from resource_permissions access",
 		"access.resource_type in (item.resource_type, $5)",
+		"where item.company_id=$1::text",
 		"coalesce(item.default_access, $3) = $3 and not item.has_direct_override",
 		"coalesce(item.default_access, $3) = $4 and item.has_direct_override",
 		"'shared_inbox_folder'",
