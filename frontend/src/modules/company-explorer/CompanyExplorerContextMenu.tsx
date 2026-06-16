@@ -41,7 +41,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
   const createNodeNeedsPriority = menu.canCreateNode && Boolean(menu.createNodeLogicGateID);
   const priorityOptions = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0");
-  const submenuSide = menu.x + 420 > window.innerWidth ? "left" : "right";
   const menuSections = buildCompanyExplorerContextMenuSections({
     permissionsEnabled: Boolean(menu.permissionsTarget),
     createFolderEnabled: menu.canCreateFolder,
@@ -58,36 +57,31 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   const enabledButtonStyle: React.CSSProperties = { color: "#111111" };
   const menuButtonStyle = (enabled: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
     ...buttonStyle,
+    padding: "6px 14px",
     ...(enabled ? enabledButtonStyle : disabledButtonStyle),
     ...extra,
   });
   const dividerStyle: React.CSSProperties = {
     height: 1,
-    margin: "4px 8px",
+    margin: "2px 8px",
     background: "rgba(148, 163, 184, 0.28)",
   };
   const createNodeButton = (
-    <div
-      style={{ position: "relative" }}
-      onMouseEnter={() => {
-        if (menu.canCreateNode && createNodeNeedsPriority) setPrioritySubmenuOpen(true);
-      }}
-    >
+    <div style={{ position: "relative" }}>
       <button
         type="button"
         disabled={!menu.canCreateNode}
-        style={menuButtonStyle(menu.canCreateNode, { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18 })}
+        style={menuButtonStyle(menu.canCreateNode)}
         onClick={() => {
           if (!menu.canCreateNode) return;
           if (createNodeNeedsPriority) {
-            setPrioritySubmenuOpen(true);
+            setPrioritySubmenuOpen((open) => !open);
             return;
           }
           onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID);
         }}
       >
-        <span>Create Node</span>
-        {createNodeNeedsPriority ? <span aria-hidden="true" style={{ color: "#64748b" }}>{submenuSide === "right" ? ">" : "<"}</span> : null}
+        Create Node
       </button>
       {createNodeNeedsPriority && prioritySubmenuOpen && (
         <div
@@ -95,9 +89,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           aria-label="Node priority"
           style={{
             position: "absolute",
-            top: -5,
-            left: submenuSide === "right" ? "calc(100% + 6px)" : undefined,
-            right: submenuSide === "left" ? "calc(100% + 6px)" : undefined,
+            top: 0,
+            left: "calc(100% + 6px)",
             minWidth: 214,
             padding: "5px 0",
             borderRadius: 14,
@@ -115,27 +108,10 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
               <button
                 key={option.value}
                 type="button"
-                style={{
-                  ...buttonStyle,
-                  color: option.color,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
+                style={menuButtonStyle(true)}
                 onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID, priority)}
               >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: 999,
-                    background: option.color,
-                    boxShadow: `0 0 0 3px ${option.glow}`,
-                    flex: "0 0 auto",
-                  }}
-                />
-                <span>{option.label}</span>
+                {option.label}
               </button>
             );
           })}
