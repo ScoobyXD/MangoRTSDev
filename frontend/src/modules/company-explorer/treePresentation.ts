@@ -115,7 +115,6 @@ export const EXPLORER_SYSTEM_ACTIVE_LOGIC_GATES_FOLDER_ID = "system-folder-activ
 export const EXPLORER_SYSTEM_ACTIVE_PROJECTS_FOLDER_ID = "system-folder-active-projects";
 export const EXPLORER_SYSTEM_HISTORY_FOLDER_ID = "system-folder-history";
 export const EXPLORER_SYSTEM_FOLDER_COLOR = "rgb(71, 85, 105)";
-export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
 export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
 

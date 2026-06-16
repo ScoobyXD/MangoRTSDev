@@ -126,6 +126,10 @@ export type CompanyExplorerContentProps = {
   onTriageMessagesDrop?: CompanyExplorerTriageMessageDropHandler;
 };
 
+export function createInitialCompanyExplorerExpandedRows(): Set<string> {
+  return new Set();
+}
+
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
   ["system-active-node-", "active_nodes"],
   ["system-active-project-", "active_projects"],

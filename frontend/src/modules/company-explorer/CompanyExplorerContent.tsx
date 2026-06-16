@@ -24,7 +24,6 @@ import {
   getExplorerRowContainerID,
   getExplorerRowOrderKind,
   getExplorerSelectionDomain,
-  readExpandedRowsFromStorage,
   readRootRowOrderFromStorage,
   readScrollTopFromStorage,
   TREE_ROW_POSITION_STEP,
@@ -59,6 +58,7 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { listMyLogicGates, listRacioMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
+  createInitialCompanyExplorerExpandedRows,
   findProtectedSystemFolderInDeleteTargets,
   getSystemFolderKeyForTreeRowID,
   type CompanyExplorerContentProps,
@@ -1431,7 +1431,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const normalizedSelectionTargetFrameIDs = useMemo(() => (
     Array.from(new Set((selectionTargetFrameIDs ?? []).map((id) => id.trim()).filter(Boolean)))
   ), [selectionTargetFrameIDs]);
-  const expandedStorageKey = `company-explorer-expanded-v1:${companyID}:${scope}`;
   const scrollStorageKey = `company-explorer-scroll-v1:${companyID}:${scope}`;
   const rootOrderStorageKey = `company-explorer-root-order-v1:${companyID}:${scope}`;
 
@@ -1444,10 +1443,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [selectedKanbanBoardID, setSelectedKanbanBoardID] = useState("");
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedRowsFromStorage(expandedStorageKey));
+  const [expanded, setExpanded] = useState<Set<string>>(createInitialCompanyExplorerExpandedRows);
   const selectedTreeIDRef = useRef(selectedTreeID);
   const expandedRef = useRef(expanded);
-  const defaultExpansionAppliedRef = useRef(false);
   const treeRowsRef = useRef<ExplorerTreeNode[]>([]);
   const pendingScrollTreeIDRef = useRef("");
   const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
@@ -1761,34 +1759,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
     return () => { cancelled = true; };
   }, [raciScopeTargetUserIDs, refreshScopedRaciExplorerProjections, scopeView, scopeViewsEnabled]);
-  useEffect(() => {
-    if (!raciExplorerActive) return;
-    setExpanded((previous) => {
-      let changed = false;
-      const next = new Set(previous);
-      const defaultFoldersID = raciDefaultFoldersTreeID();
-      if (!next.has(defaultFoldersID)) {
-        next.add(defaultFoldersID);
-        changed = true;
-      }
-      for (const folder of RACI_FOLDER_ROWS) {
-        const treeID = raciFolderTreeID(folder.role);
-        if (next.has(treeID)) continue;
-        next.add(treeID);
-        changed = true;
-      }
-      return changed ? next : previous;
-    });
-  }, [raciExplorerActive]);
-  useEffect(() => {
-    if (!scopeViewsEnabled) return;
-    const treeID = scopeView === "team"
-      ? teamDefaultFoldersTreeID()
-      : scopeView === "company"
-        ? companyDefaultFoldersTreeID()
-        : raciDefaultFoldersTreeID();
-    setExpanded((previous) => previous.has(treeID) ? previous : new Set(previous).add(treeID));
-  }, [scopeView, scopeViewsEnabled]);
   const scopedRootFolder = useMemo(() => (
     scopedKind && scopedRootName
       ? findCompanyExplorerRootFolderByName(folders, scopedKind, scopedRootName)
@@ -2102,41 +2072,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   });
 
   useEffect(() => {
-    if (defaultExpansionAppliedRef.current) return;
-    try {
-      if (localStorage.getItem(expandedStorageKey) != null) {
-        defaultExpansionAppliedRef.current = true;
-        return;
-      }
-    } catch {
-      // If local storage is blocked, still apply the first-open default.
-    }
-    const logicGateDefaultsRoot = folders.find((folder) =>
-      folder.folder_kind === "logic_gate"
-      && !folder.parent_folder_id
-      && folder.name.trim().toLowerCase() === "logic gates"
-    );
-    if (!logicGateDefaultsRoot) return;
-    defaultExpansionAppliedRef.current = true;
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      next.add(`workspace-folder-${logicGateDefaultsRoot.folder_id}`);
-      return next;
-    });
-  }, [expandedStorageKey, folders]);
-
-  useEffect(() => {
     if (!scopedRootTreeID) return;
     setExpanded((previous) => previous.has(scopedRootTreeID) ? previous : new Set(previous).add(scopedRootTreeID));
   }, [scopedRootTreeID]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(expandedStorageKey, JSON.stringify([...expanded]));
-    } catch {
-      // Expanded rows are per-device UI state; storage failure should not block navigation.
-    }
-  }, [expanded, expandedStorageKey]);
 
   useEffect(() => {
     try {

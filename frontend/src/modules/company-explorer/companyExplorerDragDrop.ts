@@ -1,7 +1,6 @@
 import type { DragEvent } from "react";
 import type { CompanyExplorerFolder, CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
 import {
-  EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   getExplorerDropPayloadItemType,
   getExplorerDropPayloadItems,
 } from "./treePresentation.js";
@@ -152,19 +151,6 @@ export function getExplorerDropIntent(event: DragEvent<HTMLElement>): ExplorerRo
 export function getExplorerRowReorderPlacement(event: DragEvent<HTMLElement>): ExplorerRowDropPlacement {
   const rect = event.currentTarget.getBoundingClientRect();
   return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
-}
-
-export function readExpandedRowsFromStorage(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS);
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS);
-    const ids = parsed.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-    return new Set(ids.length > 0 ? ids : EXPLORER_DEFAULT_EXPANDED_ROW_IDS);
-  } catch {
-    return new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS);
-  }
 }
 
 export function readScrollTopFromStorage(key: string): number {

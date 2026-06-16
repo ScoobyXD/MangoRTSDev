@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
   buildExplorerFindSelection,
@@ -22,7 +21,7 @@ import {
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
-import { filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
+import { createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
   { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
@@ -44,8 +43,14 @@ run("root presentation has no visible default company row", () => {
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-notes"), false);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-logic"), false);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-nodes"), false);
-  assert.deepEqual([...EXPLORER_DEFAULT_EXPANDED_ROW_IDS], []);
   assert.equal(Object.prototype.hasOwnProperty.call(EXPLORER_ROOT_ROW_LABELS, "folder-root"), false);
+});
+
+run("company explorer starts each page load with collapsed rows", () => {
+  const initialExpanded = createInitialCompanyExplorerExpandedRows();
+  assert.deepEqual([...initialExpanded], []);
+  initialExpanded.add("workspace-folder-open");
+  assert.deepEqual([...createInitialCompanyExplorerExpandedRows()], []);
 });
 
 run("folder labels do not display counts", () => {
