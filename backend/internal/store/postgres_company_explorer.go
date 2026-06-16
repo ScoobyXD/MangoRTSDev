@@ -444,71 +444,15 @@ func (r *PostgresRepo) GetCompanyExplorerFolder(companyID, folderID string) (dom
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	ctx := context.Background()
-	var item domain.CompanyExplorerFolder
-	var parent sql.NullString
-	var systemKey sql.NullString
-	var accountEmail sql.NullString
-	var scopeType sql.NullString
-	var scopeID sql.NullString
-	err := r.db.QueryRowContext(ctx, `
-select company_id::text,
-       folder_id::text,
-       parent_folder_id::text,
-       folder_kind,
-       system_key,
-       name,
-       coalesce(default_access, $3),
-       account_email,
-       coalesce(scope_type, 'company'),
-       scope_id,
-       position,
-       created_timestamp,
-       updated_timestamp
-from company_explorer_folders
-where company_id=$1::uuid
-  and folder_id=$2::uuid`,
-		companyID, folderID, ResourceDefaultAccessEdit,
-	).Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&parent,
-		&item.FolderKind,
-		&systemKey,
-		&item.Name,
-		&item.DefaultAccess,
-		&accountEmail,
-		&scopeType,
-		&scopeID,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
-	}
+	item, err := r.getCompanyExplorerFolder(ctx, companyID, folderID, true)
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	if item.FolderKind == "communications" {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
+	defaultAccess, err := postgresResourceDefaultAccess(ctx, r.db, companyID, EntityTypeCompanyExplorerFolder, folderID)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
 	}
-	if parent.Valid {
-		item.ParentFolderID = &parent.String
-	}
-	if systemKey.Valid {
-		item.SystemKey = &systemKey.String
-	}
-	if accountEmail.Valid {
-		item.AccountEmail = &accountEmail.String
-	}
-	if scopeType.Valid && strings.TrimSpace(scopeType.String) != "" {
-		item.ScopeType = scopeType.String
-	} else {
-		item.ScopeType = CompanyExplorerFolderScopeCompany
-	}
-	if scopeID.Valid {
-		item.ScopeID = &scopeID.String
-	}
+	item.DefaultAccess = defaultAccess
 	return item, nil
 }
 
