@@ -1449,16 +1449,6 @@ export function HomeSidebar({
                     Change inbox email
                   </button>
                 )}
-                {contextFolder.entry_type === "shared_inbox" && contextFolder.account_email && (
-                  <button
-                    type="button"
-                    style={sharedInboxContextMenuButtonStyle}
-                    disabled={sharedBusy}
-                    onClick={() => void setSharedFolderAccountEmail(contextFolder.folder_id, "")}
-                  >
-                    Detach Email
-                  </button>
-                )}
                 <button
                   type="button"
                   style={sharedInboxContextMenuButtonStyle}

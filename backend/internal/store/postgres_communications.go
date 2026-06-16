@@ -20,35 +20,14 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
-		`with candidate_connections as (
-		   select 0 as match_rank, connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id,
-		          connection.status, connection.created_timestamp, connection.updated_timestamp
-		   from user_email_connections connection
-		   where connection.user_id = $1
-		     and connection.connection_scope = 'personal'
-		     and connection.account_email = (
-		       select lower(btrim(email))
-		       from users
-		       where user_id = $1
-		     )
-		   union all
-		   select 1 as match_rank, connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id,
-		          connection.status, connection.created_timestamp, connection.updated_timestamp
-		   from user_email_connections connection
-		   where connection.user_id = $1
-		     and connection.connection_scope = 'personal'
-		     and not exists (
-		       select 1
-		       from company_memberships membership
-		       join communications_shared_inbox_folders folder
-		         on folder.company_id = membership.company_id
-		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
-		       where membership.user_id = connection.user_id
-		     )
-		 )
-		 select user_id, provider, account_email, connection_scope, grant_id, status, created_timestamp, updated_timestamp
-		 from candidate_connections
-		 order by match_rank asc, updated_timestamp desc
+		`select connection.user_id, connection.provider, connection.account_email, connection.connection_scope, connection.grant_id,
+		        connection.status, connection.created_timestamp, connection.updated_timestamp
+		 from user_email_connections connection
+		 join users app_user
+		   on app_user.user_id = connection.user_id
+		  and connection.account_email = lower(btrim(app_user.email))
+		 where connection.user_id = $1
+		   and connection.connection_scope = 'personal'
 		 limit 1`,
 		userID,
 	).Scan(
@@ -138,6 +117,7 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accoun
 		   on membership.user_id = connection.user_id
 		 where membership.company_id = $1
 		   and connection.account_email = $2
+		   and connection.connection_scope = 'shared'
 		   and connection.status = 'connected'
 		 order by connection.updated_timestamp desc
 		 limit 1`,
@@ -293,40 +273,12 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 		return err
 	}
 	result, err := r.db.Exec(
-		`with candidate_connections as (
-		   select 0 as match_rank, connection.user_id, connection.account_email, connection.updated_timestamp
-		   from user_email_connections connection
-		   where connection.user_id = $1
-		     and connection.connection_scope = 'personal'
-		     and connection.account_email = (
-		       select lower(btrim(email))
-		       from users
-		       where user_id = $1
-		     )
-		   union all
-		   select 1 as match_rank, connection.user_id, connection.account_email, connection.updated_timestamp
-		   from user_email_connections connection
-		   where connection.user_id = $1
-		     and connection.connection_scope = 'personal'
-		     and not exists (
-		       select 1
-		       from company_memberships membership
-		       join communications_shared_inbox_folders folder
-		         on folder.company_id = membership.company_id
-		        and lower(btrim(coalesce(folder.account_email, ''))) = connection.account_email
-		       where membership.user_id = connection.user_id
-		     )
-		 ),
-		 target_connection as (
-		   select user_id, account_email
-		   from candidate_connections
-		   order by match_rank asc, updated_timestamp desc
-		   limit 1
-		 )
-		 delete from user_email_connections connection
-		 using target_connection
-		 where connection.user_id = target_connection.user_id
-		   and connection.account_email = target_connection.account_email`,
+		`delete from user_email_connections connection
+		 using users app_user
+		 where app_user.user_id = connection.user_id
+		   and connection.user_id = $1
+		   and connection.connection_scope = 'personal'
+		   and connection.account_email = lower(btrim(app_user.email))`,
 		userID,
 	)
 	if err != nil {

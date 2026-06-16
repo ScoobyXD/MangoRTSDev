@@ -33,6 +33,7 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 		UserID:       user.UserID,
 		Provider:     "google",
 		AccountEmail: "shared@example.com",
+		Scope:        "shared",
 		GrantID:      "grant-shared-route",
 		Status:       "connected",
 	}); err != nil {
@@ -133,7 +134,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPerm
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInboxFolder,
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -163,7 +164,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPerm
 	if len(payload.AccessGrants) != 0 {
 		t.Fatalf("assignments-only access update created compatibility grants: %+v", payload.AccessGrants)
 	}
-	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedTriageFolder, folder.FolderID, store.EntityPermissionView)
+	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionView)
 	if err != nil {
 		t.Fatalf("UserHasEffectiveAccess: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInboxFolder,
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -229,7 +230,7 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT shared inbox access as resource admin status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	allowed, err := repo.UserHasEffectiveAccess(companyID, targetUser.UserID, store.EntityTypeSharedTriageFolder, folder.FolderID, store.EntityPermissionView)
+	allowed, err := repo.UserHasEffectiveAccess(companyID, targetUser.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionView)
 	if err != nil {
 		t.Fatalf("UserHasEffectiveAccess target: %v", err)
 	}
@@ -277,7 +278,7 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 	for _, folder := range []domain.CompanyExplorerFolder{parent, child, unrelated} {
 		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 			CompanyID:        companyID,
-			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityType:       store.EntityTypeSharedInboxFolder,
 			EntityID:         folder.FolderID,
 			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 			DefaultAccessSet: true,
@@ -287,7 +288,7 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInboxFolder,
 		EntityID:         child.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -297,7 +298,7 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInboxFolder,
 		EntityID:         unrelated.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,

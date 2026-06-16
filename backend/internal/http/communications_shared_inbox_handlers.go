@@ -123,7 +123,7 @@ func (s *Server) createCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if hasActor && !actorCanManageCompany(actor, req.CompanyID) {
 		grants, grantErr := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 			CompanyID:        req.CompanyID,
-			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityType:       store.CommunicationsSharedInboxResourceType(item),
 			EntityID:         item.FolderID,
 			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 			DefaultAccessSet: true,
@@ -139,7 +139,8 @@ func (s *Server) createCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		item.DefaultAccess = store.ResourceDefaultAccessNoAccess
 		item.EffectiveAccess = store.EntityPermissionEdit
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
+	resourceType := store.CommunicationsSharedInboxResourceType(item)
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": resourceType, "folder": item})
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -228,7 +229,8 @@ func (s *Server) updateCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "shared_inbox_update_required")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
+	resourceType := store.CommunicationsSharedInboxResourceType(item)
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": resourceType, "folder": item})
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -241,14 +243,15 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionEdit) {
 		return
 	}
-	if _, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
+	item, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
+	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return
 	}
-	err := s.repo.DeleteCommunicationsSharedInboxFolder(companyID, folderID)
+	err = s.repo.DeleteCommunicationsSharedInboxFolder(companyID, folderID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 		return
@@ -261,7 +264,8 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_shared_inbox")
 		return
 	}
-	s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID, "folder_kind": "communications"})
+	resourceType := store.CommunicationsSharedInboxResourceType(item)
+	s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": "communications", "resource_type": resourceType})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -290,10 +294,11 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			return
 		}
 		canEditPermissions := false
+		resourceType := store.CommunicationsSharedInboxResourceType(folder)
 		if hasActor {
 			if actorCanManageCompany(actor, companyID) {
 				canEditPermissions = true
-			} else if allowed, accessErr := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedTriageFolder, folderID, store.EntityPermissionEdit); accessErr == nil {
+			} else if allowed, accessErr := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionEdit); accessErr == nil {
 				canEditPermissions = allowed
 			}
 		}
@@ -336,6 +341,15 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		if !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {
 			return
 		}
+		folder, err := s.loadCommunicationsSharedInboxFolder(req.CompanyID, folderID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_access")
+			return
+		}
 		defaultAccess := ""
 		defaultAccessSet := false
 		if req.DefaultAccess != nil {
@@ -344,7 +358,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		}
 		grants, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 			CompanyID:        req.CompanyID,
-			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityType:       store.CommunicationsSharedInboxResourceType(folder),
 			EntityID:         folderID,
 			DefaultAccess:    defaultAccess,
 			DefaultAccessSet: defaultAccessSet,
@@ -373,7 +387,8 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			storedDefaultAccess = folder.DefaultAccess
 		}
 		actorUserID, actorLabel := notificationActorPayload(r)
-		event, projected := s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "default_access": storedDefaultAccess, "access_grants": grants, "permissions": grants, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
+		resourceType := store.CommunicationsSharedInboxResourceType(folder)
+		event, projected := s.publishWorkspaceEvent(req.CompanyID, "shared_triage_access_updated", map[string]any{"folder_id": folderID, "shared_inbox_id": folder.SharedInboxID, "folder_kind": "communications", "resource_type": resourceType, "default_access": storedDefaultAccess, "access_grants": grants, "permissions": grants, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
 		if projected {
 			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 		}
@@ -409,7 +424,17 @@ func (s *Server) requireCommunicationsSharedInboxAccess(w http.ResponseWriter, r
 		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_level")
 		return false
 	}
-	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedTriageFolder, folderID, accessLevel)
+	folder, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
+		return false
+	}
+	resourceType := store.CommunicationsSharedInboxResourceType(folder)
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, accessLevel)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
 		return false
@@ -422,7 +447,7 @@ func (s *Server) requireCommunicationsSharedInboxAccess(w http.ResponseWriter, r
 		return true
 	}
 	if accessLevel != store.EntityPermissionView {
-		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, store.EntityTypeSharedTriageFolder, folderID, store.EntityPermissionView)
+		canView, err := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionView)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
 			return false

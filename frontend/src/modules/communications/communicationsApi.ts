@@ -151,6 +151,7 @@ export type ResourceAccessGrant = {
 export type CommunicationsSharedInbox = {
   company_id: string;
   folder_id: string;
+  shared_inbox_id?: string;
   parent_folder_id?: string;
   folder_kind: "communications";
   entry_type?: "folder" | "shared_inbox";
@@ -163,6 +164,12 @@ export type CommunicationsSharedInbox = {
   effective_access_level?: ResourceAccessLevel;
   created_timestamp: string;
   updated_timestamp: string;
+};
+
+export type CommunicationsSharedInboxCreateIntent = {
+  companyID: string;
+  parentFolderID?: string;
+  name: string;
 };
 
 export type CommunicationsTriageItem = {
@@ -313,10 +320,19 @@ export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus>
   return cloneStatus(await statusInflight);
 }
 
-export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string): Promise<string> {
+export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string, sharedInboxCreate?: CommunicationsSharedInboxCreateIntent): Promise<string> {
   const query = new URLSearchParams({ provider });
   const cleanAccountEmail = accountEmail?.trim().toLowerCase() ?? "";
   if (cleanAccountEmail) query.set("account_email", cleanAccountEmail);
+  const cleanCompanyID = sharedInboxCreate?.companyID.trim() ?? "";
+  const cleanName = sharedInboxCreate?.name.trim() ?? "";
+  if (cleanCompanyID || cleanName || sharedInboxCreate?.parentFolderID?.trim()) {
+    if (!cleanCompanyID || !cleanName) throw new Error("shared_inbox_create_intent_required");
+    query.set("shared_inbox_company_id", cleanCompanyID);
+    query.set("shared_inbox_name", cleanName);
+    const cleanParentFolderID = sharedInboxCreate?.parentFolderID?.trim() ?? "";
+    if (cleanParentFolderID) query.set("shared_inbox_parent_folder_id", cleanParentFolderID);
+  }
   const payload = await apiFetchJSON<{ auth_url: string }>(`/v1/communications/auth-url?${query.toString()}`);
   return payload.auth_url;
 }

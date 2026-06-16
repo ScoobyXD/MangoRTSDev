@@ -4,34 +4,48 @@ import (
 	"context"
 	"database/sql"
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 )
 
-func scanSharedInboxRaciAssignment(row interface {
-	Scan(dest ...any) error
-}) (domain.SharedInboxRaciAssignment, error) {
-	var item domain.SharedInboxRaciAssignment
-	var displayName sql.NullString
-	var email sql.NullString
-	err := row.Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&item.Role,
-		&item.UserID,
-		&displayName,
-		&email,
-		&item.CreatedTimestamp,
-	)
-	if displayName.Valid {
-		item.UserDisplayName = displayName.String
-	}
-	if email.Valid {
-		item.UserEmail = email.String
-	}
-	return item, err
+func sortSharedInboxRaciAssignments(items []domain.SharedInboxRaciAssignment) {
+	sort.Slice(items, func(i, j int) bool {
+		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
+			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
+		}
+		iLabel := sharedInboxRaciAssignmentSortLabel(items[i])
+		jLabel := sharedInboxRaciAssignmentSortLabel(items[j])
+		if iLabel != jLabel {
+			return iLabel < jLabel
+		}
+		if items[i].SubjectType != items[j].SubjectType {
+			return items[i].SubjectType < items[j].SubjectType
+		}
+		if items[i].SubjectID != items[j].SubjectID {
+			return items[i].SubjectID < items[j].SubjectID
+		}
+		return items[i].FolderID < items[j].FolderID
+	})
 }
 
-func appendSharedInboxRaciAssignment(assignmentsByFolder map[string][]domain.SharedInboxRaciAssignment, item domain.SharedInboxRaciAssignment) {
+func sharedInboxRaciAssignmentSortLabel(item domain.SharedInboxRaciAssignment) string {
+	label := strings.ToLower(strings.TrimSpace(item.SubjectName))
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserEmail))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.SubjectID))
+	}
+	if label == "" {
+		label = strings.ToLower(strings.TrimSpace(item.UserID))
+	}
+	return label
+}
+
+func appendSharedInboxRaciAssignment(assignmentsByInbox map[string][]domain.SharedInboxRaciAssignment, item domain.SharedInboxRaciAssignment) {
 	subjectType := strings.TrimSpace(item.SubjectType)
 	subjectID := strings.TrimSpace(item.SubjectID)
 	if subjectType == "" {
@@ -46,7 +60,8 @@ func appendSharedInboxRaciAssignment(assignmentsByFolder map[string][]domain.Sha
 	}
 	item.SubjectType = subjectType
 	item.SubjectID = subjectID
-	for _, existing := range assignmentsByFolder[item.FolderID] {
+	item.SharedInboxID = item.FolderID
+	for _, existing := range assignmentsByInbox[item.FolderID] {
 		existingSubjectType := strings.TrimSpace(existing.SubjectType)
 		existingSubjectID := strings.TrimSpace(existing.SubjectID)
 		if existingSubjectType == "" {
@@ -57,14 +72,15 @@ func appendSharedInboxRaciAssignment(assignmentsByFolder map[string][]domain.Sha
 			return
 		}
 	}
-	assignmentsByFolder[item.FolderID] = append(assignmentsByFolder[item.FolderID], item)
+	assignmentsByInbox[item.FolderID] = append(assignmentsByInbox[item.FolderID], item)
 }
 
-func (r *PostgresRepo) listCommunicationsSharedInboxRaciAssignments(ctx context.Context, companyID string, folderIDs []string) (map[string][]domain.SharedInboxRaciAssignment, error) {
-	assignmentsByFolder := map[string][]domain.SharedInboxRaciAssignment{}
-	if len(folderIDs) == 0 {
-		return assignmentsByFolder, nil
+func (r *PostgresRepo) listCommunicationsSharedInboxRaciAssignments(ctx context.Context, companyID string, sharedInboxIDs []string) (map[string][]domain.SharedInboxRaciAssignment, error) {
+	assignmentsByInbox := map[string][]domain.SharedInboxRaciAssignment{}
+	if len(sharedInboxIDs) == 0 {
+		return assignmentsByInbox, nil
 	}
+	idList := strings.Join(sharedInboxIDs, ",")
 	genericRows, err := r.db.QueryContext(ctx, `
 select
   assignment.company_id::text,
@@ -89,7 +105,7 @@ left join company_user_groups user_group
   on assignment.subject_type = 'group'
  and user_group.company_id = assignment.company_id
  and user_group.group_id = assignment.subject_id
-where assignment.company_id = $1
+where assignment.company_id = $1::uuid
   and assignment.resource_type = $3
   and assignment.resource_id = any(string_to_array($2, ',')::uuid[])
   and (
@@ -107,7 +123,7 @@ order by assignment.resource_id::text asc,
   assignment.subject_type asc,
   lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.subject_id::text)) asc,
   assignment.subject_id::text asc`,
-		companyID, strings.Join(folderIDs, ","), EntityTypeSharedTriageFolder,
+		companyID, idList, EntityTypeSharedInbox,
 	)
 	if err != nil {
 		if !isPostgresUndefinedTable(err, "resource_raci_assignments") && !isPostgresUndefinedColumn(err, "") && !isPostgresInvalidTextRepresentation(err) {
@@ -154,32 +170,30 @@ order by assignment.resource_id::text asc,
 					item.SubjectName = item.UserEmail
 				}
 			}
-			appendSharedInboxRaciAssignment(assignmentsByFolder, item)
+			appendSharedInboxRaciAssignment(assignmentsByInbox, item)
 		}
 		if err := genericRows.Err(); err != nil {
-			if !isPostgresUndefinedTable(err, "resource_raci_assignments") && !isPostgresUndefinedColumn(err, "") && !isPostgresInvalidTextRepresentation(err) {
-				return nil, err
-			}
+			return nil, err
 		}
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
   assignment.company_id::text,
-  assignment.folder_id::text,
+  assignment.shared_inbox_id::text,
   assignment.role,
   assignment.user_id::text,
   nullif(app_user.display_name, ''),
   nullif(app_user.email, ''),
   assignment.created_timestamp
-from communications_shared_inbox_raci_assignments assignment
+from shared_inbox_raci_assignments assignment
 join company_memberships membership
   on membership.company_id = assignment.company_id
  and membership.user_id = assignment.user_id
 join users app_user
   on app_user.user_id = assignment.user_id
-where assignment.company_id = $1
-  and assignment.folder_id = any(string_to_array($2, ',')::uuid[])
-order by assignment.folder_id::text asc,
+where assignment.company_id = $1::uuid
+  and assignment.shared_inbox_id = any(string_to_array($2, ',')::uuid[])
+order by assignment.shared_inbox_id::text asc,
   case assignment.role
     when 'responsible' then 1
     when 'accountable' then 2
@@ -189,22 +203,38 @@ order by assignment.folder_id::text asc,
   end,
   lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.user_id::text)) asc,
   assignment.user_id::text asc`,
-		companyID, strings.Join(folderIDs, ","),
+		companyID, idList,
 	)
 	if err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
-			return assignmentsByFolder, nil
-		}
-		if isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
-			return assignmentsByFolder, nil
+		if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			for inboxID := range assignmentsByInbox {
+				sortSharedInboxRaciAssignments(assignmentsByInbox[inboxID])
+			}
+			return assignmentsByInbox, nil
 		}
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		item, err := scanSharedInboxRaciAssignment(rows)
-		if err != nil {
+		var item domain.SharedInboxRaciAssignment
+		var displayName sql.NullString
+		var email sql.NullString
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.Role,
+			&item.UserID,
+			&displayName,
+			&email,
+			&item.CreatedTimestamp,
+		); err != nil {
 			return nil, err
+		}
+		if displayName.Valid {
+			item.UserDisplayName = displayName.String
+		}
+		if email.Valid {
+			item.UserEmail = email.String
 		}
 		item.SubjectType = EntityPermissionSubjectUser
 		item.SubjectID = item.UserID
@@ -212,32 +242,26 @@ order by assignment.folder_id::text asc,
 		if item.SubjectName == "" {
 			item.SubjectName = item.UserEmail
 		}
-		appendSharedInboxRaciAssignment(assignmentsByFolder, item)
+		appendSharedInboxRaciAssignment(assignmentsByInbox, item)
 	}
 	if err := rows.Err(); err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
-			return assignmentsByFolder, nil
-		}
-		if isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
-			return assignmentsByFolder, nil
-		}
 		return nil, err
 	}
 	groupRows, err := r.db.QueryContext(ctx, `
 select
   assignment.company_id::text,
-  assignment.folder_id::text,
+  assignment.shared_inbox_id::text,
   assignment.role,
   assignment.group_id::text,
   user_group.name,
   assignment.created_timestamp
-from communications_shared_inbox_raci_group_assignments assignment
+from shared_inbox_raci_group_assignments assignment
 join company_user_groups user_group
   on user_group.company_id = assignment.company_id
  and user_group.group_id = assignment.group_id
-where assignment.company_id = $1
-  and assignment.folder_id = any(string_to_array($2, ',')::uuid[])
-order by assignment.folder_id::text asc,
+where assignment.company_id = $1::uuid
+  and assignment.shared_inbox_id = any(string_to_array($2, ',')::uuid[])
+order by assignment.shared_inbox_id::text asc,
   case assignment.role
     when 'responsible' then 1
     when 'accountable' then 2
@@ -247,14 +271,14 @@ order by assignment.folder_id::text asc,
   end,
   lower(user_group.name) asc,
   assignment.group_id::text asc`,
-		companyID, strings.Join(folderIDs, ","),
+		companyID, idList,
 	)
 	if err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") || isPostgresInvalidTextRepresentation(err) {
-			for folderID := range assignmentsByFolder {
-				sortSharedInboxRaciAssignments(assignmentsByFolder[folderID])
+		if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") || isPostgresInvalidTextRepresentation(err) {
+			for inboxID := range assignmentsByInbox {
+				sortSharedInboxRaciAssignments(assignmentsByInbox[inboxID])
 			}
-			return assignmentsByFolder, nil
+			return assignmentsByInbox, nil
 		}
 		return nil, err
 	}
@@ -273,132 +297,41 @@ order by assignment.folder_id::text asc,
 			return nil, err
 		}
 		item.SubjectType = EntityPermissionSubjectGroup
-		appendSharedInboxRaciAssignment(assignmentsByFolder, item)
+		appendSharedInboxRaciAssignment(assignmentsByInbox, item)
 	}
 	if err := groupRows.Err(); err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
-			return assignmentsByFolder, nil
-		}
 		return nil, err
 	}
-	for folderID := range assignmentsByFolder {
-		sortSharedInboxRaciAssignments(assignmentsByFolder[folderID])
+	for inboxID := range assignmentsByInbox {
+		sortSharedInboxRaciAssignments(assignmentsByInbox[inboxID])
 	}
-	return assignmentsByFolder, nil
-}
-
-func (r *PostgresRepo) listCommunicationsSharedInboxRaciAncestry(ctx context.Context, companyID string, folderIDs []string) (map[string]string, []string, error) {
-	parentByFolder := map[string]string{}
-	if len(folderIDs) == 0 {
-		return parentByFolder, nil, nil
-	}
-	rows, err := r.db.QueryContext(ctx, `
-with recursive ancestry as (
-  select folder_id::text as folder_id,
-         parent_folder_id::text as parent_folder_id
-  from communications_shared_inbox_folders
-  where company_id = $1
-    and folder_id = any(string_to_array($2, ',')::uuid[])
-  union
-  select parent.folder_id::text as folder_id,
-         parent.parent_folder_id::text as parent_folder_id
-  from communications_shared_inbox_folders parent
-  join ancestry child
-    on child.parent_folder_id = parent.folder_id::text
-  where parent.company_id = $1
-)
-select folder_id, parent_folder_id
-from ancestry`,
-		companyID, strings.Join(folderIDs, ","),
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-
-	ids := make([]string, 0, len(folderIDs))
-	seen := map[string]bool{}
-	for rows.Next() {
-		var folderID string
-		var parentID sql.NullString
-		if err := rows.Scan(&folderID, &parentID); err != nil {
-			return nil, nil, err
-		}
-		if !seen[folderID] {
-			ids = append(ids, folderID)
-			seen[folderID] = true
-		}
-		if parentID.Valid {
-			parentByFolder[folderID] = parentID.String
-		} else {
-			parentByFolder[folderID] = ""
-		}
-	}
-	return parentByFolder, ids, rows.Err()
-}
-
-func sharedInboxRaciAssignmentsForFolder(folderID string, parentByFolder map[string]string, assignmentsByFolder map[string][]domain.SharedInboxRaciAssignment) []domain.SharedInboxRaciAssignment {
-	assignments := make([]domain.SharedInboxRaciAssignment, 0)
-	seenAssignments := map[string]bool{}
-	seenFolders := map[string]bool{}
-	for currentID := strings.TrimSpace(folderID); currentID != ""; currentID = strings.TrimSpace(parentByFolder[currentID]) {
-		if seenFolders[currentID] {
-			break
-		}
-		seenFolders[currentID] = true
-		for _, assignment := range assignmentsByFolder[currentID] {
-			subjectType := strings.TrimSpace(assignment.SubjectType)
-			subjectID := strings.TrimSpace(assignment.SubjectID)
-			if subjectType == "" {
-				subjectType = EntityPermissionSubjectUser
-				subjectID = strings.TrimSpace(assignment.UserID)
-			}
-			seenKey := assignment.Role + ":" + subjectType + ":" + subjectID
-			if seenAssignments[seenKey] {
-				continue
-			}
-			seenAssignments[seenKey] = true
-			assignments = append(assignments, assignment)
-		}
-		if _, ok := parentByFolder[currentID]; !ok {
-			break
-		}
-	}
-	sortSharedInboxRaciAssignments(assignments)
-	return assignments
+	return assignmentsByInbox, nil
 }
 
 func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx context.Context, companyID string, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
 	ids := make([]string, 0, len(folders))
 	for _, folder := range folders {
-		if folder.FolderKind == "communications" {
+		if folder.FolderKind == "communications" && normalizeCommunicationsSharedInboxEntryType(folder.EntryType, folder.AccountEmail != nil || folder.SharedInboxID != "") == CommunicationsSharedInboxEntryTypeSharedInbox {
 			ids = append(ids, folder.FolderID)
 		}
 	}
-	parentByFolder, assignmentFolderIDs, err := r.listCommunicationsSharedInboxRaciAncestry(ctx, companyID, ids)
-	if err != nil {
-		if isPostgresUndefinedTable(err, "") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
-			return folders, nil
-		}
-		return nil, err
-	}
-	assignments, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, assignmentFolderIDs)
+	assignments, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, ids)
 	if err != nil {
 		return nil, err
 	}
 	for index := range folders {
-		if folders[index].FolderKind != "communications" {
+		if folders[index].FolderKind != "communications" || normalizeCommunicationsSharedInboxEntryType(folders[index].EntryType, folders[index].AccountEmail != nil || folders[index].SharedInboxID != "") != CommunicationsSharedInboxEntryTypeSharedInbox {
 			continue
 		}
-		folders[index].RaciAssignments = sharedInboxRaciAssignmentsForFolder(folders[index].FolderID, parentByFolder, assignments)
+		folders[index].RaciAssignments = assignments[folders[index].FolderID]
 	}
 	return folders, nil
 }
 
 func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInboxRaciAssignmentUpdateInput) ([]domain.SharedInboxRaciAssignment, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
-	folderID := strings.TrimSpace(input.FolderID)
-	if companyID == "" || folderID == "" {
+	sharedInboxID := strings.TrimSpace(input.FolderID)
+	if companyID == "" || sharedInboxID == "" {
 		return nil, ErrInvalid
 	}
 
@@ -411,8 +344,8 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
-		`select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
-		companyID, folderID,
+		`select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`,
+		companyID, sharedInboxID,
 	).Scan(&exists); err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return nil, ErrSharedInboxStorageUnavailable
@@ -420,6 +353,11 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 		return nil, err
 	}
 	if !exists {
+		if folderExists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, sharedInboxID); err != nil {
+			return nil, err
+		} else if folderExists {
+			return nil, ErrInvalid
+		}
 		return nil, ErrNotFound
 	}
 
@@ -458,7 +396,7 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 select exists(
   select 1
   from company_memberships
-  where company_id=$1 and user_id::text=$2
+  where company_id=$1::uuid and user_id=$2::uuid
 )`, companyID, subjectID).Scan(&userInCompany); err != nil {
 				return nil, err
 			}
@@ -471,7 +409,7 @@ select exists(
 select exists(
   select 1
   from company_user_groups
-  where company_id=$1 and group_id::text=$2
+  where company_id=$1::uuid and group_id=$2::uuid
 )`, companyID, subjectID).Scan(&groupInCompany); err != nil {
 				return nil, err
 			}
@@ -486,8 +424,8 @@ select exists(
 
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_raci_assignments
-where company_id=$1 and resource_type=$2 and resource_id=$3`,
-		companyID, EntityTypeSharedTriageFolder, folderID,
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
+		companyID, EntityTypeSharedInbox, sharedInboxID,
 	); err != nil {
 		if isPostgresUndefinedTable(err, "resource_raci_assignments") {
 			return nil, ErrRaciStorageUnavailable
@@ -504,9 +442,9 @@ insert into resource_raci_assignments (
   subject_type,
   subject_id,
   created_timestamp
-) values ($1, $2, $3, $4, $5, $6, now())
+) values ($1::uuid, $2, $3::uuid, $4, $5, $6::uuid, now())
 on conflict (company_id, resource_type, resource_id, role, subject_type, subject_id) do nothing`,
-			companyID, EntityTypeSharedTriageFolder, folderID, assignment.role, assignment.subjectType, assignment.subjectID,
+			companyID, EntityTypeSharedInbox, sharedInboxID, assignment.role, assignment.subjectType, assignment.subjectID,
 		); err != nil {
 			if isPostgresUndefinedTable(err, "resource_raci_assignments") {
 				return nil, ErrRaciStorageUnavailable
@@ -517,10 +455,10 @@ on conflict (company_id, resource_type, resource_id, role, subject_type, subject
 
 	legacyUserAssignmentsAvailable := true
 	if _, err := tx.ExecContext(ctx,
-		`delete from communications_shared_inbox_raci_assignments where company_id=$1 and folder_id=$2`,
-		companyID, folderID,
+		`delete from shared_inbox_raci_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`,
+		companyID, sharedInboxID,
 	); err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
+		if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
 			legacyUserAssignmentsAvailable = false
 		} else {
 			return nil, err
@@ -528,10 +466,10 @@ on conflict (company_id, resource_type, resource_id, role, subject_type, subject
 	}
 	legacyGroupAssignmentsAvailable := true
 	if _, err := tx.ExecContext(ctx,
-		`delete from communications_shared_inbox_raci_group_assignments where company_id=$1 and folder_id=$2`,
-		companyID, folderID,
+		`delete from shared_inbox_raci_group_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`,
+		companyID, sharedInboxID,
 	); err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
+		if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
 			legacyGroupAssignmentsAvailable = false
 		} else {
 			return nil, err
@@ -543,17 +481,17 @@ on conflict (company_id, resource_type, resource_id, role, subject_type, subject
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
-insert into communications_shared_inbox_raci_group_assignments (
+insert into shared_inbox_raci_group_assignments (
   company_id,
-  folder_id,
+  shared_inbox_id,
   role,
   group_id,
   created_timestamp
-) values ($1, $2, $3, $4, now())
-on conflict (company_id, folder_id, role, group_id) do nothing`,
-				companyID, folderID, assignment.role, assignment.subjectID,
+) values ($1::uuid, $2::uuid, $3, $4::uuid, now())
+on conflict (company_id, shared_inbox_id, role, group_id) do nothing`,
+				companyID, sharedInboxID, assignment.role, assignment.subjectID,
 			); err != nil {
-				if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_group_assignments") {
+				if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
 					return nil, ErrRaciStorageUnavailable
 				}
 				return nil, err
@@ -564,17 +502,17 @@ on conflict (company_id, folder_id, role, group_id) do nothing`,
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
-insert into communications_shared_inbox_raci_assignments (
+insert into shared_inbox_raci_assignments (
   company_id,
-  folder_id,
+  shared_inbox_id,
   role,
   user_id,
   created_timestamp
-) values ($1, $2, $3, $4, now())
-on conflict (company_id, folder_id, role, user_id) do nothing`,
-			companyID, folderID, assignment.role, assignment.subjectID,
+) values ($1::uuid, $2::uuid, $3, $4::uuid, now())
+on conflict (company_id, shared_inbox_id, role, user_id) do nothing`,
+			companyID, sharedInboxID, assignment.role, assignment.subjectID,
 		); err != nil {
-			if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
+			if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
 				return nil, ErrRaciStorageUnavailable
 			}
 			return nil, err
@@ -588,7 +526,7 @@ on conflict (company_id, folder_id, role, user_id) do nothing`,
 		return nil, err
 	}
 	for _, folder := range folders {
-		if folder.FolderID == folderID {
+		if folder.FolderID == sharedInboxID {
 			return folder.RaciAssignments, nil
 		}
 	}

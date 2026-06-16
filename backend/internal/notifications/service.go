@@ -580,12 +580,23 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		}
 	case "communications_shared_inbox_raci_updated":
 		notificationType = domain.NotificationEventACIInboxRaciUpdated
-		entityType = store.EntityTypeSharedTriageFolder
-		entityID = payloadString(payload, "folder_id")
+		entityType = store.EntityTypeSharedInbox
+		entityID = payloadString(payload, "shared_inbox_id")
+		if entityID == "" {
+			entityID = payloadString(payload, "folder_id")
+		}
 	case "shared_triage_access_updated":
 		notificationType = domain.NotificationEventACIInboxChanged
-		entityType = store.EntityTypeSharedTriageFolder
+		entityType = store.EntityTypeSharedInboxFolder
+		if normalized, ok := store.NormalizeEntityType(payloadString(payload, "resource_type")); ok {
+			entityType = normalized
+		}
 		entityID = payloadString(payload, "folder_id")
+		if entityType == store.EntityTypeSharedInbox {
+			if sharedInboxID := payloadString(payload, "shared_inbox_id"); sharedInboxID != "" {
+				entityID = sharedInboxID
+			}
+		}
 	default:
 		return notificationProjectionEvent{}, false
 	}

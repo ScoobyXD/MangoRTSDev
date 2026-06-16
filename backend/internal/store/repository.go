@@ -713,6 +713,8 @@ const (
 	EntityTypeProject               = "project"
 	EntityTypeCompanyExplorerFolder = "company_explorer_folder"
 	EntityTypeSharedTriageFolder    = "shared_triage_folder"
+	EntityTypeSharedInboxFolder     = "shared_inbox_folder"
+	EntityTypeSharedInbox           = "shared_inbox"
 
 	EntityPermissionNoAccess = "no_access"
 	EntityPermissionView     = "view"
@@ -1555,8 +1557,10 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeProject, true
 	case EntityTypeCompanyExplorerFolder, "folder", "company_folder":
 		return EntityTypeCompanyExplorerFolder, true
-	case EntityTypeSharedTriageFolder, "communications_folder", "shared_inbox_folder":
-		return EntityTypeSharedTriageFolder, true
+	case EntityTypeSharedInboxFolder, EntityTypeSharedTriageFolder, "communications_folder":
+		return EntityTypeSharedInboxFolder, true
+	case EntityTypeSharedInbox:
+		return EntityTypeSharedInbox, true
 	default:
 		return "", false
 	}

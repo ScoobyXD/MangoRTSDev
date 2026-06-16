@@ -927,6 +927,7 @@ select exists(
     on membership.user_id = connection.user_id
   where membership.company_id = $1
     and connection.account_email = $2
+    and connection.connection_scope = 'shared'
     and connection.status = 'connected'
 )`, companyID, accountEmail).Scan(&exists); err != nil {
 		return false, err
@@ -1230,15 +1231,15 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 		if _, err := tx.ExecContext(ctx,
 			`delete from resource_access_grants
-			 where company_id=$1 and resource_type=$2 and resource_id = any(string_to_array($3, ',')::uuid[])`,
-			companyID, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
+			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
+			companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
 		); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 			return CompanyExplorerDeleteResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`delete from resource_permissions
-			 where company_id=$1 and resource_type=$2 and resource_id = any(string_to_array($3, ',')::uuid[])`,
-			companyID, EntityTypeCompanyExplorerFolder, strings.Join(grantFolderIDs, ","),
+			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
+			companyID, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(grantFolderIDs, ","),
 		); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 			return CompanyExplorerDeleteResult{}, err
 		}

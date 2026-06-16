@@ -569,7 +569,7 @@ create table if not exists resource_raci_assignments (
   subject_type text not null,
   subject_id uuid not null,
   created_timestamp timestamptz not null default now(),
-  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder')),
+  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_inbox')),
   constraint resource_raci_assignments_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
   constraint resource_raci_assignments_subject_type_chk check (subject_type in ('user', 'group')),
   primary key (company_id, resource_type, resource_id, role, subject_type, subject_id),
@@ -612,7 +612,7 @@ create table if not exists resource_access_grants (
   principal_id uuid not null,
   access_level text not null default 'view',
   created_timestamp timestamptz not null default now(),
-  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder')),
+  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox')),
   constraint resource_access_grants_principal_type_chk check (principal_type in ('user', 'group')),
   constraint resource_access_grants_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   primary key (company_id, resource_type, resource_id, principal_type, principal_id),
@@ -632,7 +632,7 @@ create table if not exists resource_permissions (
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder')),
+  constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox')),
   primary key (company_id, resource_type, resource_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
@@ -663,7 +663,11 @@ create or replace function mangorts_user_can_access_resource(
 )
 returns boolean as $$
   with normalized_resource(resource_type) as (
-    select lower(btrim(coalesce(p_resource_type, '')))
+    select case lower(btrim(coalesce(p_resource_type, '')))
+      when 'shared_triage_folder' then 'shared_inbox_folder'
+      when 'communications_folder' then 'shared_inbox_folder'
+      else lower(btrim(coalesce(p_resource_type, '')))
+    end
   ),
   requested(required_rank) as (
     select mangorts_access_level_rank(p_access_level)
@@ -706,10 +710,16 @@ returns boolean as $$
       and folder.folder_kind <> 'communications'
     union all
     select coalesce(folder.default_access, 'edit')
-    from communications_shared_inbox_folders folder, normalized_resource normalized
-    where normalized.resource_type='shared_triage_folder'
+    from shared_inbox_folders folder, normalized_resource normalized
+    where normalized.resource_type='shared_inbox_folder'
       and folder.company_id=p_company_id
       and folder.folder_id=p_resource_id
+    union all
+    select coalesce(inbox.default_access, 'edit')
+    from shared_inboxes inbox, normalized_resource normalized
+    where normalized.resource_type='shared_inbox'
+      and inbox.company_id=p_company_id
+      and inbox.shared_inbox_id=p_resource_id
   ),
   direct_override(exists_override) as (
     select exists (
@@ -724,7 +734,7 @@ returns boolean as $$
   )
   select case
     when requested.required_rank = 0 then false
-    when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_triage_folder') then false
+    when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox') then false
     when (select allowed from role_admin_actor) then true
     when exists (
         select 1
@@ -1254,75 +1264,85 @@ create index if not exists idx_company_explorer_folders_parent_kind
 create index if not exists idx_company_explorer_folders_scope
   on company_explorer_folders(company_id, scope_type, scope_id);
 
-create table if not exists communications_shared_inbox_folders (
+create table if not exists shared_inbox_folders (
   company_id uuid not null,
   folder_id uuid not null,
   parent_folder_id uuid,
-  entry_type text not null default 'folder',
   name text not null,
   default_access text not null default 'edit',
-  account_email text,
   position integer not null default 0,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint communications_shared_inbox_folders_entry_type_chk check (entry_type in ('folder', 'shared_inbox')),
-  constraint communications_shared_inbox_folders_default_access_chk check (default_access in ('edit', 'no_access')),
-  constraint communications_shared_inbox_folders_name_nonblank_chk check (btrim(name) <> ''),
-  constraint communications_shared_inbox_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
-  constraint communications_shared_inbox_folders_account_email_chk check (
-    account_email is null or (
-      entry_type = 'shared_inbox'
-      and btrim(account_email) <> ''
-      and account_email = lower(btrim(account_email))
-    )
-  ),
+  constraint shared_inbox_folders_default_access_chk check (default_access in ('edit', 'no_access')),
+  constraint shared_inbox_folders_name_nonblank_chk check (btrim(name) <> ''),
+  constraint shared_inbox_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
-  foreign key (company_id, parent_folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade
+  foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id) on delete cascade
 );
 
-create index if not exists idx_communications_shared_inbox_folders_parent
-  on communications_shared_inbox_folders(company_id, parent_folder_id, position, created_timestamp);
+create index if not exists idx_shared_inbox_folders_parent
+  on shared_inbox_folders(company_id, parent_folder_id, position, created_timestamp);
 
-create index if not exists idx_communications_shared_inbox_folders_account_email
-  on communications_shared_inbox_folders(company_id, account_email)
-  where account_email is not null;
-
-create table if not exists communications_shared_inbox_raci_assignments (
+create table if not exists shared_inboxes (
   company_id uuid not null,
-  folder_id uuid not null,
+  shared_inbox_id uuid not null,
+  parent_folder_id uuid,
+  name text not null,
+  account_email text not null,
+  default_access text not null default 'edit',
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint shared_inboxes_default_access_chk check (default_access in ('edit', 'no_access')),
+  constraint shared_inboxes_name_nonblank_chk check (btrim(name) <> ''),
+  constraint shared_inboxes_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
+  primary key (company_id, shared_inbox_id),
+  foreign key (company_id) references companies (company_id) on delete cascade,
+  foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id)
+);
+
+create index if not exists idx_shared_inboxes_parent
+  on shared_inboxes(company_id, parent_folder_id, position, created_timestamp);
+
+create index if not exists idx_shared_inboxes_account_email
+  on shared_inboxes(company_id, account_email);
+
+create table if not exists shared_inbox_raci_assignments (
+  company_id uuid not null,
+  shared_inbox_id uuid not null,
   role text not null,
   user_id uuid not null,
   created_timestamp timestamptz not null default now(),
-  constraint communications_shared_inbox_raci_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  primary key (company_id, folder_id, role, user_id),
-  foreign key (company_id, folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade,
+  constraint shared_inbox_raci_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
+  primary key (company_id, shared_inbox_id, role, user_id),
+  foreign key (company_id, shared_inbox_id) references shared_inboxes (company_id, shared_inbox_id) on delete cascade,
   foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade
 );
 
-create index if not exists idx_communications_shared_inbox_raci_user_role_folder
-  on communications_shared_inbox_raci_assignments(company_id, user_id, role, folder_id);
+create index if not exists idx_shared_inbox_raci_user_role_inbox
+  on shared_inbox_raci_assignments(company_id, user_id, role, shared_inbox_id);
 
-create index if not exists idx_communications_shared_inbox_raci_folder_role_user
-  on communications_shared_inbox_raci_assignments(company_id, folder_id, role, user_id);
+create index if not exists idx_shared_inbox_raci_inbox_role_user
+  on shared_inbox_raci_assignments(company_id, shared_inbox_id, role, user_id);
 
-create table if not exists communications_shared_inbox_raci_group_assignments (
+create table if not exists shared_inbox_raci_group_assignments (
   company_id uuid not null,
-  folder_id uuid not null,
+  shared_inbox_id uuid not null,
   role text not null,
   group_id uuid not null,
   created_timestamp timestamptz not null default now(),
-  constraint communications_shared_inbox_raci_group_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  primary key (company_id, folder_id, role, group_id),
-  foreign key (company_id, folder_id) references communications_shared_inbox_folders (company_id, folder_id) on delete cascade,
+  constraint shared_inbox_raci_group_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
+  primary key (company_id, shared_inbox_id, role, group_id),
+  foreign key (company_id, shared_inbox_id) references shared_inboxes (company_id, shared_inbox_id) on delete cascade,
   foreign key (company_id, group_id) references company_user_groups (company_id, group_id) on delete cascade
 );
 
-create index if not exists idx_communications_shared_inbox_raci_group_role_folder
-  on communications_shared_inbox_raci_group_assignments(company_id, group_id, role, folder_id);
+create index if not exists idx_shared_inbox_raci_group_role_inbox
+  on shared_inbox_raci_group_assignments(company_id, group_id, role, shared_inbox_id);
 
-create index if not exists idx_communications_shared_inbox_raci_folder_role_group
-  on communications_shared_inbox_raci_group_assignments(company_id, folder_id, role, group_id);
+create index if not exists idx_shared_inbox_raci_inbox_role_group
+  on shared_inbox_raci_group_assignments(company_id, shared_inbox_id, role, group_id);
 
 create table if not exists company_explorer_default_folder_seeds (
   company_id uuid not null,

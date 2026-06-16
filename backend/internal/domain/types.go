@@ -556,6 +556,7 @@ type LogicGateWorkAssignment struct {
 type CompanyExplorerFolder struct {
 	CompanyID        string                      `json:"company_id"`
 	FolderID         string                      `json:"folder_id"`
+	SharedInboxID    string                      `json:"shared_inbox_id,omitempty"`
 	ParentFolderID   *string                     `json:"parent_folder_id,omitempty"`
 	FolderKind       string                      `json:"folder_kind"`
 	EntryType        string                      `json:"entry_type,omitempty"`
@@ -576,6 +577,7 @@ type CompanyExplorerFolder struct {
 type SharedInboxRaciAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
+	SharedInboxID    string    `json:"shared_inbox_id,omitempty"`
 	Role             string    `json:"role"`
 	SubjectType      string    `json:"subject_type,omitempty"`
 	SubjectID        string    `json:"subject_id,omitempty"`

@@ -2,63 +2,20 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
-	"sort"
 	"strings"
 	"time"
 )
-
-func sortSharedInboxRaciAssignments(items []domain.SharedInboxRaciAssignment) {
-	sort.Slice(items, func(i, j int) bool {
-		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
-			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
-		}
-		iLabel := sharedInboxRaciAssignmentSortLabel(items[i])
-		jLabel := sharedInboxRaciAssignmentSortLabel(items[j])
-		if iLabel != jLabel {
-			return iLabel < jLabel
-		}
-		if items[i].SubjectType != items[j].SubjectType {
-			return items[i].SubjectType < items[j].SubjectType
-		}
-		if items[i].SubjectID != items[j].SubjectID {
-			return items[i].SubjectID < items[j].SubjectID
-		}
-		return items[i].FolderID < items[j].FolderID
-	})
-}
-
-func sharedInboxRaciAssignmentSortLabel(item domain.SharedInboxRaciAssignment) string {
-	label := strings.ToLower(strings.TrimSpace(item.SubjectName))
-	if label == "" {
-		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
-	}
-	if label == "" {
-		label = strings.ToLower(strings.TrimSpace(item.UserEmail))
-	}
-	if label == "" {
-		label = strings.ToLower(strings.TrimSpace(item.SubjectID))
-	}
-	if label == "" {
-		label = strings.ToLower(strings.TrimSpace(item.UserID))
-	}
-	return label
-}
 
 func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFolder) domain.CompanyExplorerFolder {
 	if folder.FolderKind != "communications" {
 		return folder
 	}
+	folder = normalizeMemorySharedInboxFolder(folder)
 	assignments := make([]domain.SharedInboxRaciAssignment, 0)
 	accessGrants := make([]domain.EntityPermission, 0)
-	seenAssignments := map[string]bool{}
-	seenFolders := map[string]bool{}
-	for current := folder; strings.TrimSpace(current.FolderID) != ""; {
-		currentID := strings.TrimSpace(current.FolderID)
-		if seenFolders[currentID] {
-			break
-		}
-		seenFolders[currentID] = true
-		for _, assignment := range r.sharedInboxRaci[sharedInboxRaciKey(folder.CompanyID, currentID)] {
+	if folder.EntryType == CommunicationsSharedInboxEntryTypeSharedInbox {
+		seenAssignments := map[string]bool{}
+		for _, assignment := range r.sharedInboxRaci[sharedInboxRaciKey(folder.CompanyID, folder.FolderID)] {
 			subjectType := strings.TrimSpace(assignment.SubjectType)
 			subjectID := strings.TrimSpace(assignment.SubjectID)
 			if subjectType == "" {
@@ -70,19 +27,13 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 				continue
 			}
 			seenAssignments[seenKey] = true
+			assignment.SharedInboxID = folder.FolderID
 			assignments = append(assignments, assignment)
 		}
-		if current.ParentFolderID == nil || strings.TrimSpace(*current.ParentFolderID) == "" {
-			break
-		}
-		parent, ok := r.folders[key(folder.CompanyID, strings.TrimSpace(*current.ParentFolderID))]
-		if !ok || parent.FolderKind != "communications" {
-			break
-		}
-		current = parent
 	}
+	resourceType := CommunicationsSharedInboxResourceType(folder)
 	for _, grant := range r.entityPermissions {
-		if grant.CompanyID != folder.CompanyID || grant.EntityType != EntityTypeSharedTriageFolder || grant.EntityID != folder.FolderID || grant.SubjectType != EntityPermissionSubjectUser {
+		if grant.CompanyID != folder.CompanyID || grant.EntityType != resourceType || grant.EntityID != folder.FolderID || grant.SubjectType != EntityPermissionSubjectUser {
 			continue
 		}
 		grant.Permission = OppositeResourceDefaultAccess(folder.DefaultAccess)
@@ -110,7 +61,8 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if folder.FolderKind != "communications" {
+	folder = normalizeMemorySharedInboxFolder(folder)
+	if folder.FolderKind != "communications" || folder.EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
 		return nil, ErrInvalid
 	}
 
@@ -140,6 +92,7 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 		item := domain.SharedInboxRaciAssignment{
 			CompanyID:        companyID,
 			FolderID:         folderID,
+			SharedInboxID:    folderID,
 			Role:             role,
 			SubjectType:      subjectType,
 			SubjectID:        subjectID,

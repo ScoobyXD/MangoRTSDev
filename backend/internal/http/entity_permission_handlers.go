@@ -793,8 +793,15 @@ func (s *Server) entityDefaultAccess(companyID, entityType, entityID string) (st
 			return "", err
 		}
 		return defaultAccessOrEdit(folder.DefaultAccess), nil
-	case store.EntityTypeSharedTriageFolder:
-		return store.EntityPermissionNoAccess, nil
+	case store.EntityTypeSharedInboxFolder, store.EntityTypeSharedInbox:
+		folder, err := s.repo.GetCommunicationsSharedInboxFolder(companyID, entityID)
+		if err != nil {
+			return "", err
+		}
+		if store.CommunicationsSharedInboxResourceType(folder) != entityType {
+			return "", store.ErrNotFound
+		}
+		return defaultAccessOrEdit(folder.DefaultAccess), nil
 	default:
 		return "", store.ErrInvalid
 	}

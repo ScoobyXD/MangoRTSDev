@@ -85,6 +85,10 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	requestedAccountEmail := normalizeEmailForCompare(r.URL.Query().Get("account_email"))
+	sharedInboxCompanyID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_company_id"))
+	sharedInboxParentFolderID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_parent_folder_id"))
+	sharedInboxName := strings.TrimSpace(r.URL.Query().Get("shared_inbox_name"))
+	sharedInboxCreateRequested := sharedInboxCompanyID != "" || sharedInboxParentFolderID != "" || sharedInboxName != ""
 	accountEmail := requestedAccountEmail
 	if accountEmail == "" {
 		accountEmail = normalizeEmailForCompare(actor.User.Email)
@@ -93,13 +97,51 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid_account_email")
 		return
 	}
+	if sharedInboxCreateRequested {
+		if sharedInboxCompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if sharedInboxName == "" {
+			writeError(w, http.StatusBadRequest, "shared_inbox_name_required")
+			return
+		}
+		if requestedAccountEmail == "" {
+			writeError(w, http.StatusBadRequest, "shared_inbox_account_email_required")
+			return
+		}
+		if !requireCompanyAccess(w, r, sharedInboxCompanyID) {
+			return
+		}
+		if sharedInboxParentFolderID != "" {
+			if !s.requireCommunicationsSharedInboxAccess(w, r, actor, sharedInboxCompanyID, sharedInboxParentFolderID, store.EntityPermissionEdit) {
+				return
+			}
+			parent, err := s.loadCommunicationsSharedInboxFolder(sharedInboxCompanyID, sharedInboxParentFolderID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "parent_shared_inbox_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_parent_shared_inbox")
+				return
+			}
+			if store.CommunicationsSharedInboxResourceType(parent) != store.EntityTypeSharedInboxFolder {
+				writeError(w, http.StatusBadRequest, "invalid_shared_inbox_parent")
+				return
+			}
+		}
+	}
 	strictEmail := true
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
-		UserID:      actor.User.UserID,
-		Email:       accountEmail,
-		UserEmail:   actor.User.Email,
-		Provider:    provider,
-		StrictEmail: strictEmail,
+		UserID:                    actor.User.UserID,
+		Email:                     accountEmail,
+		UserEmail:                 actor.User.Email,
+		Provider:                  provider,
+		StrictEmail:               strictEmail,
+		SharedInboxCompanyID:      sharedInboxCompanyID,
+		SharedInboxParentFolderID: sharedInboxParentFolderID,
+		SharedInboxName:           sharedInboxName,
 	}, time.Now())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_nylas_state")
@@ -852,6 +894,9 @@ func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
 }
 
 func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) string {
+	if strings.TrimSpace(state.SharedInboxCompanyID) != "" {
+		return "shared"
+	}
 	if state.StrictEmail && normalizeEmailForCompare(state.Email) != "" && normalizeEmailForCompare(state.Email) != normalizeEmailForCompare(state.UserEmail) {
 		return "shared"
 	}
@@ -859,6 +904,9 @@ func communicationsConnectionScopeForOAuthState(state nylasOAuthStatePayload) st
 }
 
 func communicationsConnectionScopeForOAuthGrant(state nylasOAuthStatePayload, accountEmail string) string {
+	if strings.TrimSpace(state.SharedInboxCompanyID) != "" {
+		return "shared"
+	}
 	if state.StrictEmail && normalizeEmailForCompare(accountEmail) != "" && normalizeEmailForCompare(accountEmail) != normalizeEmailForCompare(state.UserEmail) {
 		return "shared"
 	}
@@ -873,6 +921,9 @@ func communicationsOAuthStateRequiresEmailMatch(state nylasOAuthStatePayload) bo
 }
 
 func communicationsOAuthStateTargetsPersonalMailbox(state nylasOAuthStatePayload) bool {
+	if strings.TrimSpace(state.SharedInboxCompanyID) != "" {
+		return false
+	}
 	requestedEmail := normalizeEmailForCompare(state.Email)
 	userEmail := normalizeEmailForCompare(state.UserEmail)
 	return requestedEmail != "" && userEmail != "" && requestedEmail == userEmail
@@ -980,8 +1031,21 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.commCache.invalidateUser(state.UserID)
+	createdSharedInboxID := ""
+	if connectionScope == "shared" && strings.TrimSpace(state.SharedInboxCompanyID) != "" {
+		item, createErr := s.repo.CreateCommunicationsSharedInboxFolder(state.SharedInboxCompanyID, state.SharedInboxParentFolderID, state.SharedInboxName, grant.Email)
+		if createErr != nil {
+			_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "disconnected")
+			s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "shared_inbox_create_failed", grant)
+			log.Printf("nylas_oauth_callback outcome=redirect reason=shared_inbox_create_failed request_id=%s user_id=%s company_id=%s parent_folder_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, state.SharedInboxCompanyID, state.SharedInboxParentFolderID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), createErr)
+			s.redirectCommunications(w, r, "shared_inbox_create_failed")
+			return
+		}
+		createdSharedInboxID = item.FolderID
+		s.publishWorkspaceEvent(state.SharedInboxCompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
+	}
 	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
-	s.redirectCommunicationsSuccess(w, r, connection)
+	s.redirectCommunicationsSuccess(w, r, connection, createdSharedInboxID)
 }
 
 func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (domain.UserEmailConnection, bool) {
@@ -1054,6 +1118,10 @@ func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.
 	}
 	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, sharedInboxID, sharedInboxAccessLevel)
 	if !ok {
+		return domain.UserEmailConnection{}, false
+	}
+	if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
+		writeError(w, http.StatusConflict, "shared_inbox_not_mailbox")
 		return domain.UserEmailConnection{}, false
 	}
 	if folder.AccountEmail == nil || strings.TrimSpace(*folder.AccountEmail) == "" {
@@ -1769,7 +1837,7 @@ func normalizeEmailForCompare(email string) string {
 	return strings.TrimSpace(strings.ToLower(email))
 }
 
-func (s *Server) redirectCommunicationsSuccess(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
+func (s *Server) redirectCommunicationsSuccess(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, sharedInboxID string) {
 	target := s.communicationsRedirectURL()
 	query := target.Query()
 	query.Set("nylas", "connected")
@@ -1778,6 +1846,9 @@ func (s *Server) redirectCommunicationsSuccess(w http.ResponseWriter, r *http.Re
 	}
 	if strings.TrimSpace(connection.AccountEmail) != "" {
 		query.Set("nylas_account_email", normalizeEmailForCompare(connection.AccountEmail))
+	}
+	if strings.TrimSpace(sharedInboxID) != "" {
+		query.Set("nylas_shared_inbox_id", strings.TrimSpace(sharedInboxID))
 	}
 	target.RawQuery = query.Encode()
 	http.Redirect(w, r, target.String(), http.StatusFound)

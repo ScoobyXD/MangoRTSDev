@@ -600,13 +600,24 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{groupMember.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
 	}
-	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Shared RACI Inbox", "")
+	const sharedRaciAccountEmail = "shared-raci@example.com"
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       actor.UserID,
+		Provider:     "google",
+		AccountEmail: sharedRaciAccountEmail,
+		Scope:        "shared",
+		GrantID:      "shared-raci-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection shared: %v", err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Shared RACI Inbox", sharedRaciAccountEmail)
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityType: store.EntityTypeSharedInbox,
 		EntityID:   folder.FolderID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID, AccessLevel: store.EntityPermissionView, Permission: store.EntityPermissionView},
@@ -639,8 +650,10 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 		Type:        "communications_shared_inbox_raci_updated",
 		ActorUserID: &actor.UserID,
 		Payload: map[string]any{
-			"folder_id":   folder.FolderID,
-			"folder_kind": "communications",
+			"folder_id":       folder.FolderID,
+			"shared_inbox_id": folder.SharedInboxID,
+			"folder_kind":     "communications",
+			"resource_type":   store.EntityTypeSharedInbox,
 		},
 	})
 	if err != nil {
@@ -651,8 +664,8 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 		if item.Surface != domain.NotificationSurfaceSharedTriage {
 			t.Fatalf("shared inbox surface = %+v, want shared triage", item)
 		}
-		if item.EntityType != store.EntityTypeSharedTriageFolder || item.EntityID != folder.FolderID {
-			t.Fatalf("shared inbox target = %+v, want shared triage folder", item)
+		if item.EntityType != store.EntityTypeSharedInbox || item.EntityID != folder.FolderID {
+			t.Fatalf("shared inbox target = %+v, want shared inbox", item)
 		}
 		byUser[item.RecipientUserID] = item
 	}
