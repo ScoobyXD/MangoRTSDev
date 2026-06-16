@@ -387,7 +387,8 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	for _, needle := range []string{
 		"func (r *postgresrepo) listvisiblecommunicationssharedinboxfolders",
 		"mangorts_user_can_access_resource",
-		"'shared_triage_folder'",
+		"'shared_inbox_folder'",
+		"'shared_inbox'",
 	} {
 		if !strings.Contains(sharedInboxSource, needle) {
 			t.Fatalf("Postgres visible shared inbox query missing %q", needle)

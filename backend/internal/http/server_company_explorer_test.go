@@ -561,7 +561,17 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 		t.Fatalf("CreateCompanyUserGroup error = %v", err)
 	}
 
-	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "AR", "")
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       responsible.UserID,
+		Provider:     "google",
+		AccountEmail: "ar@example.com",
+		Scope:        "shared",
+		GrantID:      "grant-ar-raci",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection shared error = %v", err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "AR", "ar@example.com")
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
 	}
@@ -640,7 +650,7 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	t.Fatalf("folder %s not found in list payload", folder.FolderID)
 }
 
-func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
+func TestCommunicationsSharedInboxRaciRejectsFoldersAndDoesNotInherit(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -668,7 +678,17 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder parent error = %v", err)
 	}
-	child, err := repo.CreateCommunicationsSharedInboxFolder(companyID, parent.FolderID, "Child", "")
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       childUser.UserID,
+		Provider:     "google",
+		AccountEmail: "child-inbox@example.com",
+		Scope:        "shared",
+		GrantID:      "grant-child-raci",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection child shared error = %v", err)
+	}
+	child, err := repo.CreateCommunicationsSharedInboxFolder(companyID, parent.FolderID, "Child", "child-inbox@example.com")
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder child error = %v", err)
 	}
@@ -683,47 +703,8 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 	parentReq.Header.Set("Content-Type", "application/json")
 	parentRec := httptest.NewRecorder()
 	handler.ServeHTTP(parentRec, parentReq)
-	if parentRec.Code != http.StatusOK {
-		t.Fatalf("PUT parent RACI status = %d, want %d body=%s", parentRec.Code, http.StatusOK, parentRec.Body.String())
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET communications folders status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
-	}
-	var listPayload struct {
-		Folders []struct {
-			FolderID    string `json:"folder_id"`
-			Assignments []struct {
-				FolderID        string `json:"folder_id"`
-				Role            string `json:"role"`
-				UserID          string `json:"user_id"`
-				UserDisplayName string `json:"user_display_name"`
-			} `json:"raci_assignments"`
-		} `json:"shared_inboxes"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
-		t.Fatalf("decode communications folders: %v", err)
-	}
-	var childAssignments []struct {
-		FolderID        string `json:"folder_id"`
-		Role            string `json:"role"`
-		UserID          string `json:"user_id"`
-		UserDisplayName string `json:"user_display_name"`
-	}
-	for _, listed := range listPayload.Folders {
-		if listed.FolderID == child.FolderID {
-			childAssignments = listed.Assignments
-			break
-		}
-	}
-	if len(childAssignments) != 1 {
-		t.Fatalf("child inherited assignment count = %d, want 1", len(childAssignments))
-	}
-	if childAssignments[0].FolderID != parent.FolderID || childAssignments[0].Role != "responsible" || childAssignments[0].UserID != parentUser.UserID || childAssignments[0].UserDisplayName != "Parent RACI" {
-		t.Fatalf("child inherited assignment = %+v", childAssignments[0])
+	if parentRec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT parent folder RACI status = %d, want %d body=%s", parentRec.Code, http.StatusBadRequest, parentRec.Body.String())
 	}
 
 	childBody, _ := json.Marshal(map[string]any{
@@ -749,21 +730,11 @@ func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
 	if err := json.NewDecoder(childRec.Body).Decode(&childPayload); err != nil {
 		t.Fatalf("decode PUT child RACI: %v", err)
 	}
-	if len(childPayload.Assignments) != 2 {
-		t.Fatalf("child PUT assignment count = %d, want inherited parent plus direct child", len(childPayload.Assignments))
+	if len(childPayload.Assignments) != 1 {
+		t.Fatalf("child PUT assignment count = %d, want direct child only", len(childPayload.Assignments))
 	}
-	seenParent := false
-	seenChild := false
-	for _, assignment := range childPayload.Assignments {
-		if assignment.FolderID == parent.FolderID && assignment.Role == "responsible" && assignment.UserID == parentUser.UserID {
-			seenParent = true
-		}
-		if assignment.FolderID == child.FolderID && assignment.Role == "accountable" && assignment.UserID == childUser.UserID {
-			seenChild = true
-		}
-	}
-	if !seenParent || !seenChild {
-		t.Fatalf("child assignments = %+v, want inherited parent and direct child assignments", childPayload.Assignments)
+	if childPayload.Assignments[0].FolderID != child.FolderID || childPayload.Assignments[0].Role != "accountable" || childPayload.Assignments[0].UserID != childUser.UserID {
+		t.Fatalf("child assignment = %+v, want direct child assignment only", childPayload.Assignments[0])
 	}
 }
 
@@ -787,6 +758,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 		UserID:       user.UserID,
 		Provider:     "google",
 		AccountEmail: "triage@example.com",
+		Scope:        "shared",
 		GrantID:      "grant-shared-account",
 		Status:       "connected",
 	}); err != nil {
@@ -853,17 +825,8 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearRec := httptest.NewRecorder()
 	handler.ServeHTTP(clearRec, clearReq)
-	if clearRec.Code != http.StatusOK {
-		t.Fatalf("PUT clear shared inbox account status = %d, want %d body=%s", clearRec.Code, http.StatusOK, clearRec.Body.String())
-	}
-	var cleared struct {
-		AccountEmail *string `json:"account_email"`
-	}
-	if err := json.NewDecoder(clearRec.Body).Decode(&cleared); err != nil {
-		t.Fatalf("decode cleared shared inbox: %v", err)
-	}
-	if cleared.AccountEmail != nil {
-		t.Fatalf("cleared account_email = %v, want nil", *cleared.AccountEmail)
+	if clearRec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT clear shared inbox account status = %d, want %d body=%s", clearRec.Code, http.StatusBadRequest, clearRec.Body.String())
 	}
 
 	missingBody, _ := json.Marshal(map[string]string{
@@ -1079,7 +1042,7 @@ func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testi
 	for _, folder := range []domain.CompanyExplorerFolder{visible, hidden} {
 		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 			CompanyID:        companyID,
-			EntityType:       store.EntityTypeSharedTriageFolder,
+			EntityType:       store.EntityTypeSharedInboxFolder,
 			EntityID:         folder.FolderID,
 			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 			DefaultAccessSet: true,
@@ -1089,7 +1052,7 @@ func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testi
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInboxFolder,
 		EntityID:         visible.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -1134,12 +1097,22 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 	if _, err := repo.AddCompanyMembership(assignedUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership assigned error = %v", err)
 	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       assignedUser.UserID,
+		Provider:     "google",
+		AccountEmail: "assigned-shared@example.com",
+		Scope:        "shared",
+		GrantID:      "grant-assigned-shared",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection assigned shared error = %v", err)
+	}
 
 	unassigned, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Unassigned", "")
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder unassigned error = %v", err)
 	}
-	assigned, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Assigned", "")
+	assigned, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Assigned", "assigned-shared@example.com")
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder assigned error = %v", err)
 	}

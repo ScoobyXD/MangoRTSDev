@@ -40,6 +40,7 @@ import {
   type CompanyUserGroup,
   type CompanyUserGroupMember,
   type CommunicationsSharedInbox,
+  type CommunicationsSharedInboxCreateIntent,
   type CommunicationsSharedInboxRaciRole,
   type CommunicationsSharedInboxRaciSubjectType,
   type EmailFolder,
@@ -191,6 +192,7 @@ type QueuedArchiveBatch = {
 
 type SharedInboxEmailConnectionDialogState = {
   accountEmail: string;
+  createIntent?: CommunicationsSharedInboxCreateIntent;
 };
 
 type SharedInboxEmailAssignmentDialogState = {
@@ -339,6 +341,12 @@ export function HomePage({
     const scope = params.get("nylas_scope")?.trim().toLowerCase() ?? "";
     const accountEmail = params.get("nylas_account_email")?.trim().toLowerCase() ?? "";
     return params.get("nylas") === "connected" && scope === "shared" ? accountEmail : "";
+  });
+  const [pendingSharedOAuthSharedInboxID, setPendingSharedOAuthSharedInboxID] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const scope = params.get("nylas_scope")?.trim().toLowerCase() ?? "";
+    const sharedInboxID = params.get("nylas_shared_inbox_id")?.trim() ?? "";
+    return params.get("nylas") === "connected" && scope === "shared" ? sharedInboxID : "";
   });
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -748,7 +756,9 @@ export function HomePage({
       invalidateCommunicationsCache();
       const scope = params.get("nylas_scope")?.trim().toLowerCase() ?? "";
       const accountEmail = params.get("nylas_account_email")?.trim().toLowerCase() ?? "";
+      const sharedInboxID = params.get("nylas_shared_inbox_id")?.trim() ?? "";
       if (scope === "shared" && accountEmail) setPendingSharedOAuthAccountEmail(accountEmail);
+      if (scope === "shared" && sharedInboxID) setPendingSharedOAuthSharedInboxID(sharedInboxID);
       setNotice(scope === "shared" ? "Shared inbox connected." : "Email connected.");
     }
     if (oauthError) setError(formatErrorCode(oauthError));
@@ -799,6 +809,13 @@ export function HomePage({
   }, [cancelPendingAutoArchiveMessages, cancelPendingStarredMessages, loadStatus]);
   const loadFolders = useCallback(async (): Promise<boolean> => {
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    if (sharedInboxID) {
+      const sharedInbox = sharedInboxes.find((folder) => folder.folder_id === sharedInboxID) ?? null;
+      if (!sharedInbox || sharedInbox.entry_type !== "shared_inbox") {
+        setFolders([]);
+        return true;
+      }
+    }
     if (sharedInboxID && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === sharedInboxID)) {
       setFolders([]);
       return true;
@@ -1747,14 +1764,24 @@ export function HomePage({
     selectHomeView(initialViewID, mailboxForHomeView(initialViewID));
   }, [activeViewID, initialViewID, selectHomeView]);
   useEffect(() => {
+    const sharedInboxID = pendingSharedOAuthSharedInboxID.trim();
+    if (sharedInboxID) {
+      const folder = sharedInboxes.find((item) => item.folder_id === sharedInboxID || item.shared_inbox_id === sharedInboxID);
+      if (!folder) return;
+      const viewID = `shared:${folder.folder_id}` as HomeViewID;
+      setPendingSharedOAuthSharedInboxID("");
+      setPendingSharedOAuthAccountEmail("");
+      selectHomeView(viewID, mailboxForHomeView(viewID));
+      return;
+    }
     const accountEmail = pendingSharedOAuthAccountEmail.trim().toLowerCase();
     if (!accountEmail) return;
-    const folder = sortSharedInboxes(sharedInboxes).find((item) => (item.account_email ?? "").trim().toLowerCase() === accountEmail);
+    const folder = sortSharedInboxes(sharedInboxes).find((item) => item.entry_type === "shared_inbox" && (item.account_email ?? "").trim().toLowerCase() === accountEmail);
     if (!folder) return;
     const viewID = `shared:${folder.folder_id}` as HomeViewID;
     setPendingSharedOAuthAccountEmail("");
     selectHomeView(viewID, mailboxForHomeView(viewID));
-  }, [pendingSharedOAuthAccountEmail, selectHomeView, sharedInboxes]);
+  }, [pendingSharedOAuthAccountEmail, pendingSharedOAuthSharedInboxID, selectHomeView, sharedInboxes]);
   const currentMessageListParams = useCallback(() => ({
     limit: MESSAGE_BATCH_SIZE,
     mailbox: mailboxRef.current,
@@ -2087,10 +2114,10 @@ export function HomePage({
       setBusy("");
     }
   };
-  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string): boolean => {
+  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string, createIntent?: CommunicationsSharedInboxCreateIntent): boolean => {
     const cleanAccountEmail = accountEmail.trim().toLowerCase();
     if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
-    setSharedInboxEmailConnectionDialog({ accountEmail: cleanAccountEmail });
+    setSharedInboxEmailConnectionDialog({ accountEmail: cleanAccountEmail, createIntent });
     return true;
   }, []);
   const startSharedInboxEmailConnection = useCallback(async (provider: EmailProvider) => {
@@ -2099,13 +2126,13 @@ export function HomePage({
     setBusy("shared-inbox-connect");
     setError("");
     try {
-      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail);
+      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail, sharedInboxEmailConnectionDialog?.createIntent);
       window.location.assign(authURL);
     } catch (connectError) {
       setBusy("");
       setError(formatError(connectError, "Failed to start shared inbox email connection"));
     }
-  }, [sharedInboxEmailConnectionDialog?.accountEmail]);
+  }, [sharedInboxEmailConnectionDialog]);
   const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder", accountEmail = ""): Promise<CommunicationsSharedInbox | null> => {
     setBusy("shared-inbox");
     setError("");
@@ -2122,7 +2149,7 @@ export function HomePage({
       selectMailbox("primary");
       return folder;
     } catch (sharedInboxError) {
-      if (requestSharedInboxEmailConnection(sharedInboxError, accountEmail)) return null;
+      if (accountEmail.trim() && requestSharedInboxEmailConnection(sharedInboxError, accountEmail, { companyID, parentFolderID, name: rawName })) return null;
       setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
       return null;
     } finally {
@@ -3791,7 +3818,7 @@ export function HomePage({
             selectedMessageIDs={selectedMessageIDs}
             sharedInboxSettings={activeSharedInbox ? {
               onOpen: () => setSharedInboxPermissionsFolderID(activeSharedInbox.folder_id),
-              onOpenRaci: () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id),
+              onOpenRaci: activeSharedInbox.entry_type === "shared_inbox" ? () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id) : undefined,
             } : undefined}
             unassignedSharedInbox={activeSharedInboxBlocksEmail && activeSharedInbox
               ? { folderName: activeSharedInbox.name, message: "Parent folders cannot have emails assigned." }
@@ -3895,14 +3922,14 @@ export function HomePage({
         <EntityPermissionsDialog
           requestJSON={permissionsRequestJSON}
           companyID={companyID}
-          entityType="shared_triage_folder"
+          entityType={sharedInboxPermissionsFolder.entry_type === "shared_inbox" ? "shared_inbox" : "shared_inbox_folder"}
           entityID={sharedInboxPermissionsFolder.folder_id}
           title={sharedInboxPermissionsFolder.name}
           onClose={() => setSharedInboxPermissionsFolderID("")}
           onSaved={() => { void loadSharedInboxes(); }}
         />
       )}
-      {sharedInboxRaciFolder && (
+      {sharedInboxRaciFolder && sharedInboxRaciFolder.entry_type === "shared_inbox" && (
         <SharedInboxRaciSettingsModal
           requestJSON={permissionsRequestJSON}
           companyID={companyID}

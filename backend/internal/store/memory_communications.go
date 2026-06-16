@@ -23,11 +23,7 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	if ok && emailConnectionIsPersonal(connection) {
 		return connection, nil
 	}
-	connection, _, ok = r.personalEmailConnectionForUserLocked(userID)
-	if !ok {
-		return domain.UserEmailConnection{}, ErrNotFound
-	}
-	return connection, nil
+	return domain.UserEmailConnection{}, ErrNotFound
 }
 
 func (r *MemoryRepo) ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error) {
@@ -64,7 +60,7 @@ func (r *MemoryRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountE
 	var found domain.UserEmailConnection
 	hasFound := false
 	for _, connection := range r.emailConnections {
-		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
+		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail || normalizeEmailConnectionScope(connection.Scope) != "shared" {
 			continue
 		}
 		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; !ok {
@@ -177,51 +173,20 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 		delete(r.emailConnections, key)
 		return nil
 	}
-	_, key, ok = r.personalEmailConnectionForUserLocked(userID)
-	if !ok {
-		return ErrNotFound
-	}
-	delete(r.emailConnections, key)
-	return nil
+	return ErrNotFound
 }
 
 func (r *MemoryRepo) personalEmailConnectionForUserLocked(userID string) (domain.UserEmailConnection, string, bool) {
-	var found domain.UserEmailConnection
-	foundKey := ""
-	hasFound := false
-	for key, connection := range r.emailConnections {
-		if connection.UserID != userID {
-			continue
-		}
-		if !emailConnectionIsPersonal(connection) {
-			continue
-		}
-		if r.emailConnectionAccountAssignedToSharedInboxLocked(userID, connection.AccountEmail) {
-			continue
-		}
-		if !hasFound || connection.UpdatedTimestamp.After(found.UpdatedTimestamp) {
-			found = connection
-			foundKey = key
-			hasFound = true
-		}
+	user, ok := r.userByIDLocked(userID)
+	if !ok {
+		return domain.UserEmailConnection{}, "", false
 	}
-	return found, foundKey, hasFound
-}
-
-func (r *MemoryRepo) emailConnectionAccountAssignedToSharedInboxLocked(userID, accountEmail string) bool {
-	accountEmail = normalizeEmail(accountEmail)
-	if accountEmail == "" {
-		return false
+	key := emailConnectionKey(userID, user.Email)
+	connection, ok := r.emailConnections[key]
+	if !ok || !emailConnectionIsPersonal(connection) {
+		return domain.UserEmailConnection{}, "", false
 	}
-	for _, folder := range r.folders {
-		if folder.FolderKind != "communications" || folder.AccountEmail == nil || normalizeEmail(*folder.AccountEmail) != accountEmail {
-			continue
-		}
-		if _, ok := r.memberships[membershipKey(folder.CompanyID, userID)]; ok {
-			return true
-		}
-	}
-	return false
+	return connection, key, true
 }
 
 func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {

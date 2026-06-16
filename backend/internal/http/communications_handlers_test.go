@@ -577,6 +577,91 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	}
 }
 
+func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-oauth-create"
+	repo.EnsureCompany(companyID, "Shared OAuth Create")
+	user, err := repo.UpsertAuthUser("subject-shared-oauth-create", "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		Scope:        "personal",
+		GrantID:      "personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support Group", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:                    user.UserID,
+		Email:                     "support@example.com",
+		UserEmail:                 user.Email,
+		Provider:                  "google",
+		StrictEmail:               true,
+		SharedInboxCompanyID:      companyID,
+		SharedInboxParentFolderID: parent.FolderID,
+		SharedInboxName:           "Support",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-oauth-grant", Email: "support@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedInboxID := redirect.Query().Get("nylas_shared_inbox_id")
+	if redirect.Query().Get("nylas_scope") != "shared" || redirect.Query().Get("nylas_account_email") != "support@example.com" || sharedInboxID == "" {
+		t.Fatalf("callback redirect = %s, want shared scope, account email, and shared inbox id", redirect.String())
+	}
+	created, err := repo.GetCommunicationsSharedInboxFolder(companyID, sharedInboxID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "Support" || created.ParentFolderID == nil || *created.ParentFolderID != parent.FolderID || created.AccountEmail == nil || *created.AccountEmail != "support@example.com" || created.EntryType != "shared_inbox" {
+		t.Fatalf("created shared inbox = %+v, want Support mailbox under parent with support account", created)
+	}
+	personal, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal.AccountEmail != user.Email || personal.GrantID != "personal-grant" || personal.Scope != "personal" {
+		t.Fatalf("personal connection = %+v, want unchanged personal grant", personal)
+	}
+	shared, err := repo.GetUserEmailConnectionByGrantID("shared-oauth-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.AccountEmail != "support@example.com" || shared.Scope != "shared" {
+		t.Fatalf("shared connection = %+v, want shared support grant", shared)
+	}
+}
+
 func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) {
 	t.Parallel()
 
@@ -878,6 +963,7 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 		UserID:       sharedUser.UserID,
 		Provider:     "microsoft",
 		AccountEmail: sharedUser.Email,
+		Scope:        "shared",
 		GrantID:      "grant-shared",
 		Status:       "connected",
 	}); err != nil {
@@ -889,7 +975,7 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityType: store.EntityTypeSharedInbox,
 		EntityID:   folder.FolderID,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
@@ -944,6 +1030,7 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 		UserID:       actor.UserID,
 		Provider:     "google",
 		AccountEmail: "support@example.com",
+		Scope:        "shared",
 		GrantID:      "grant-shared",
 		Status:       "connected",
 	}); err != nil {
@@ -955,7 +1042,7 @@ func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) 
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
+		EntityType: store.EntityTypeSharedInbox,
 		EntityID:   folder.FolderID,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
@@ -1032,6 +1119,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		UserID:       sharedUser.UserID,
 		Provider:     "google",
 		AccountEmail: sharedUser.Email,
+		Scope:        "shared",
 		GrantID:      "grant-support",
 		Status:       "connected",
 	}); err != nil {
@@ -1043,7 +1131,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInbox,
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -1066,7 +1154,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedTriageFolder,
+		EntityType:       store.EntityTypeSharedInbox,
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,

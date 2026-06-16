@@ -227,42 +227,42 @@ where company_id=$1::uuid
 }
 
 var recycleSnapshotTables = map[string]bool{
-	"company_explorer_folders":                           true,
-	"nodes":                                              true,
-	"logic_gates":                                        true,
-	"projects":                                           true,
-	"node_information":                                   true,
-	"node_projection_table":                              true,
-	"node_content_changes":                               true,
-	"node_content_change_seen":                           true,
-	"node_projection_seen_snapshots":                     true,
-	"node_map_positions":                                 true,
-	"node_account_assignments":                           true,
-	"node_relationships":                                 true,
-	"logic_gate_information":                             true,
-	"logic_gate_projection_table":                        true,
-	"logic_gate_map_positions":                           true,
-	"logic_gate_relationships":                           true,
-	"logic_gate_raci_assignments":                        true,
-	"user_logic_gate_shortcuts":                          true,
-	"project_information":                                true,
-	"project_projection_table":                           true,
-	"project_relationships":                              true,
-	"project_relationship_projection":                    true,
-	"node_logic_gate_assignments":                        true,
-	"kanban_board_projection":                            true,
-	"racio_matrix_projection_table":                      true,
-	"project_management_timeline_items":                  true,
-	"project_management_timeline_projection":             true,
-	"resource_raci_assignments":                          true,
-	"entity_access_permissions":                          true,
-	"resource_access_grants":                             true,
-	"resource_permissions":                               true,
-	"company_explorer_folder_items":                      true,
-	"communications_shared_inbox_raci_assignments":       true,
-	"communications_shared_inbox_raci_group_assignments": true,
-	"company_explorer_folder_shares":                     true,
-	"communications_email_nodes":                         true,
+	"company_explorer_folders":               true,
+	"nodes":                                  true,
+	"logic_gates":                            true,
+	"projects":                               true,
+	"node_information":                       true,
+	"node_projection_table":                  true,
+	"node_content_changes":                   true,
+	"node_content_change_seen":               true,
+	"node_projection_seen_snapshots":         true,
+	"node_map_positions":                     true,
+	"node_account_assignments":               true,
+	"node_relationships":                     true,
+	"logic_gate_information":                 true,
+	"logic_gate_projection_table":            true,
+	"logic_gate_map_positions":               true,
+	"logic_gate_relationships":               true,
+	"logic_gate_raci_assignments":            true,
+	"user_logic_gate_shortcuts":              true,
+	"project_information":                    true,
+	"project_projection_table":               true,
+	"project_relationships":                  true,
+	"project_relationship_projection":        true,
+	"node_logic_gate_assignments":            true,
+	"kanban_board_projection":                true,
+	"racio_matrix_projection_table":          true,
+	"project_management_timeline_items":      true,
+	"project_management_timeline_projection": true,
+	"resource_raci_assignments":              true,
+	"entity_access_permissions":              true,
+	"resource_access_grants":                 true,
+	"resource_permissions":                   true,
+	"company_explorer_folder_items":          true,
+	"shared_inbox_raci_assignments":          true,
+	"shared_inbox_raci_group_assignments":    true,
+	"company_explorer_folder_shares":         true,
+	"communications_email_nodes":             true,
 }
 
 var recycleRestoreTableOrder = []string{
@@ -287,8 +287,8 @@ var recycleRestoreTableOrder = []string{
 	"entity_access_permissions",
 	"resource_access_grants",
 	"resource_permissions",
-	"communications_shared_inbox_raci_assignments",
-	"communications_shared_inbox_raci_group_assignments",
+	"shared_inbox_raci_assignments",
+	"shared_inbox_raci_group_assignments",
 	"company_explorer_folder_shares",
 	"user_logic_gate_shortcuts",
 	"communications_email_nodes",
@@ -388,10 +388,10 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 		if err := addTable("company_explorer_folders", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
-		if err := addTable("communications_shared_inbox_raci_assignments", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
+		if err := addTable("shared_inbox_raci_assignments", `company_id=$1::uuid and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
-		if err := addTable("communications_shared_inbox_raci_group_assignments", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
+		if err := addTable("shared_inbox_raci_group_assignments", `company_id=$1::uuid and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
 		if err := addTable("company_explorer_folder_shares", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
@@ -501,10 +501,12 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 			}
 		}
 		if len(accessFolderIDs) > 0 {
-			folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, "shared_triage_folder", accessFolderIDs, "resource_type", "resource_id")
-			for _, tableName := range []string{"resource_raci_assignments", "resource_access_grants"} {
-				if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
-					return nil, err
+			for _, resourceType := range []string{EntityTypeSharedInboxFolder, EntityTypeSharedInbox} {
+				folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, resourceType, accessFolderIDs, "resource_type", "resource_id")
+				for _, tableName := range []string{"resource_raci_assignments", "resource_access_grants", "resource_permissions"} {
+					if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}

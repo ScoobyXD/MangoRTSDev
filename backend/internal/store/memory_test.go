@@ -1198,7 +1198,7 @@ func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
 	}
 }
 
-func TestMemoryRepoUserEmailConnectionFallsBackToNonSharedAccount(t *testing.T) {
+func TestMemoryRepoUserEmailConnectionRequiresPersonalAccountEmail(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
@@ -1215,18 +1215,33 @@ func TestMemoryRepoUserEmailConnectionFallsBackToNonSharedAccount(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("mismatched personal account error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "profile@example.com",
+		GrantID:      "profile-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	connection, err := repo.GetUserEmailConnection(user.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "mailbox-grant" {
-		t.Fatalf("connection = %+v, want non-shared mailbox fallback", connection)
+	if connection.AccountEmail != "profile@example.com" || connection.GrantID != "profile-grant" {
+		t.Fatalf("connection = %+v, want exact personal profile mailbox", connection)
 	}
 	if err := repo.DeleteUserEmailConnection(user.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetUserEmailConnectionByGrantID("mailbox-grant"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetUserEmailConnectionByGrantID("profile-grant"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetUserEmailConnectionByGrantID("mailbox-grant"); err != nil {
+		t.Fatalf("mismatched personal account should remain by grant: %v", err)
 	}
 }
 
@@ -1264,7 +1279,7 @@ func TestMemoryRepoUserEmailConnectionDoesNotUseSharedInboxFallback(t *testing.T
 	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
 		UserID:       user.UserID,
 		Provider:     "google",
-		AccountEmail: "mailbox@example.com",
+		AccountEmail: "profile@example.com",
 		GrantID:      "mailbox-grant",
 		Status:       "connected",
 	}); err != nil {
@@ -1274,8 +1289,8 @@ func TestMemoryRepoUserEmailConnectionDoesNotUseSharedInboxFallback(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connection.AccountEmail != "mailbox@example.com" || connection.GrantID != "mailbox-grant" {
-		t.Fatalf("connection = %+v, want non-shared mailbox fallback", connection)
+	if connection.AccountEmail != "profile@example.com" || connection.GrantID != "mailbox-grant" {
+		t.Fatalf("connection = %+v, want exact personal mailbox", connection)
 	}
 }
 

@@ -13,18 +13,52 @@ const (
 	CommunicationsSharedInboxEntryTypeSharedInbox = "shared_inbox"
 )
 
+const communicationsSharedInboxItemsCTE = `
+with communications_shared_items as (
+  select folder.company_id::text as company_id,
+         folder.folder_id::text as folder_id,
+         null::text as shared_inbox_id,
+         folder.parent_folder_id::text as parent_folder_id,
+         'folder'::text as entry_type,
+         folder.name,
+         folder.default_access,
+         null::text as account_email,
+         folder.position,
+         folder.created_timestamp,
+         folder.updated_timestamp,
+         'shared_inbox_folder'::text as resource_type
+  from shared_inbox_folders folder
+  union all
+  select inbox.company_id::text as company_id,
+         inbox.shared_inbox_id::text as folder_id,
+         inbox.shared_inbox_id::text as shared_inbox_id,
+         inbox.parent_folder_id::text as parent_folder_id,
+         'shared_inbox'::text as entry_type,
+         inbox.name,
+         inbox.default_access,
+         inbox.account_email,
+         inbox.position,
+         inbox.created_timestamp,
+         inbox.updated_timestamp,
+         'shared_inbox'::text as resource_type
+  from shared_inboxes inbox
+)
+`
+
 type communicationsSharedInboxFolderScanner interface {
 	Scan(dest ...any) error
 }
 
 func scanCommunicationsSharedInboxFolder(row communicationsSharedInboxFolderScanner) (domain.CompanyExplorerFolder, error) {
 	var item domain.CompanyExplorerFolder
+	var sharedInboxID sql.NullString
 	var parent sql.NullString
 	var accountEmail sql.NullString
 	var entryType string
 	err := row.Scan(
 		&item.CompanyID,
 		&item.FolderID,
+		&sharedInboxID,
 		&parent,
 		&entryType,
 		&item.Name,
@@ -38,8 +72,11 @@ func scanCommunicationsSharedInboxFolder(row communicationsSharedInboxFolderScan
 		return item, err
 	}
 	item.FolderKind = "communications"
-	item.EntryType = normalizeCommunicationsSharedInboxEntryType(entryType, accountEmail.Valid)
+	item.EntryType = normalizeCommunicationsSharedInboxEntryType(entryType, accountEmail.Valid || sharedInboxID.Valid)
 	item.ScopeType = CompanyExplorerFolderScopeCompany
+	if sharedInboxID.Valid {
+		item.SharedInboxID = sharedInboxID.String
+	}
 	if parent.Valid {
 		item.ParentFolderID = &parent.String
 	}
@@ -62,25 +99,72 @@ func normalizeCommunicationsSharedInboxEntryType(entryType string, hasAccountEma
 	}
 }
 
+func CommunicationsSharedInboxResourceType(item domain.CompanyExplorerFolder) string {
+	return communicationsSharedInboxResourceType(item.EntryType, item.AccountEmail != nil || item.SharedInboxID != "")
+}
+
+func communicationsSharedInboxResourceType(entryType string, hasAccountEmail bool) string {
+	if normalizeCommunicationsSharedInboxEntryType(entryType, hasAccountEmail) == CommunicationsSharedInboxEntryTypeSharedInbox {
+		return EntityTypeSharedInbox
+	}
+	return EntityTypeSharedInboxFolder
+}
+
 func postgresSharedInboxStorageUnavailable(err error) bool {
-	return isPostgresUndefinedTable(err, "communications_shared_inbox_folders") || isPostgresUndefinedColumn(err, "")
+	return isPostgresUndefinedTable(err, "shared_inbox_folders") ||
+		isPostgresUndefinedTable(err, "shared_inboxes") ||
+		isPostgresUndefinedColumn(err, "")
 }
 
 func nextCommunicationsSharedInboxPositionSQL(ctx context.Context, tx *sql.Tx, companyID string, parent any) (int, error) {
 	var position int
 	err := tx.QueryRowContext(ctx, `
-select coalesce(max(position), 0) + 1000
-from communications_shared_inbox_folders
-where company_id=$1::uuid
-  and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)`, companyID, parent).Scan(&position)
+with positions as (
+  select position
+  from shared_inbox_folders
+  where company_id=$1::uuid
+    and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)
+  union all
+  select position
+  from shared_inboxes
+  where company_id=$1::uuid
+    and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)
+)
+select coalesce(max(position), 0) + 1000 from positions`, companyID, parent).Scan(&position)
 	return position, err
 }
 
+func postgresLockCommunicationsSharedInboxItemTx(ctx context.Context, tx *sql.Tx, companyID, itemID string) (string, sql.NullString, int, error) {
+	var parent sql.NullString
+	var position int
+	err := tx.QueryRowContext(ctx, `
+select parent_folder_id::text, position
+from shared_inbox_folders
+where company_id=$1::uuid and folder_id=$2::uuid
+for update`, companyID, itemID).Scan(&parent, &position)
+	if err == nil {
+		return CommunicationsSharedInboxEntryTypeFolder, parent, position, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", parent, 0, err
+	}
+	err = tx.QueryRowContext(ctx, `
+select parent_folder_id::text, position
+from shared_inboxes
+where company_id=$1::uuid and shared_inbox_id=$2::uuid
+for update`, companyID, itemID).Scan(&parent, &position)
+	if err == nil {
+		return CommunicationsSharedInboxEntryTypeSharedInbox, parent, position, nil
+	}
+	return "", parent, 0, err
+}
+
 func (r *PostgresRepo) getCommunicationsSharedInboxFolder(ctx context.Context, companyID, folderID string) (domain.CompanyExplorerFolder, error) {
-	item, err := scanCommunicationsSharedInboxFolder(r.db.QueryRowContext(ctx, `
-select company_id::text,
-       folder_id::text,
-       parent_folder_id::text,
+	item, err := scanCommunicationsSharedInboxFolder(r.db.QueryRowContext(ctx, communicationsSharedInboxItemsCTE+`
+select company_id,
+       folder_id,
+       shared_inbox_id,
+       parent_folder_id,
        entry_type,
        name,
        coalesce(default_access, $3),
@@ -88,8 +172,8 @@ select company_id::text,
        position,
        created_timestamp,
        updated_timestamp
-from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID, ResourceDefaultAccessEdit))
+from communications_shared_items
+where company_id=$1 and folder_id=$2`, companyID, folderID, ResourceDefaultAccessEdit))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
@@ -146,29 +230,17 @@ func (r *PostgresRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFo
 
 	var parent any
 	if parentFolderID != "" {
-		var parentEntryType string
-		err := tx.QueryRowContext(ctx, `
-select entry_type
-from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid
-for update`, companyID, parentFolderID).Scan(&parentEntryType)
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		}
-		if err != nil {
+		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, parentFolderID); err != nil {
 			if postgresSharedInboxStorageUnavailable(err) {
 				return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
 			}
 			return domain.CompanyExplorerFolder{}, err
-		}
-		if normalizeCommunicationsSharedInboxEntryType(parentEntryType, false) == CommunicationsSharedInboxEntryTypeSharedInbox {
-			return domain.CompanyExplorerFolder{}, ErrInvalid
+		} else if !exists {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parent = parentFolderID
 	}
 
-	var accountParam any
-	entryType := CommunicationsSharedInboxEntryTypeFolder
 	if accountEmail != "" {
 		available, err := postgresCompanyHasConnectedEmailAccount(ctx, tx, companyID, accountEmail)
 		if err != nil {
@@ -177,8 +249,6 @@ for update`, companyID, parentFolderID).Scan(&parentEntryType)
 		if !available {
 			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 		}
-		accountParam = accountEmail
-		entryType = CommunicationsSharedInboxEntryTypeSharedInbox
 	}
 	position, err := nextCommunicationsSharedInboxPositionSQL(ctx, tx, companyID, parent)
 	if err != nil {
@@ -188,32 +258,51 @@ for update`, companyID, parentFolderID).Scan(&parentEntryType)
 		return domain.CompanyExplorerFolder{}, err
 	}
 
-	item, err := scanCommunicationsSharedInboxFolder(tx.QueryRowContext(ctx, `
-insert into communications_shared_inbox_folders (
+	itemID := newUUIDv7String()
+	if accountEmail == "" {
+		if _, err := tx.ExecContext(ctx, `
+insert into shared_inbox_folders (
   company_id,
   folder_id,
   parent_folder_id,
-  entry_type,
   name,
   default_access,
-  account_email,
   position,
   created_timestamp,
   updated_timestamp
-) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, now(), now())
-returning company_id::text, folder_id::text, parent_folder_id::text, entry_type, name, default_access, account_email, position, created_timestamp, updated_timestamp`,
-		companyID, newUUIDv7String(), parent, entryType, name, ResourceDefaultAccessEdit, accountParam, position,
-	))
-	if err != nil {
-		if postgresSharedInboxStorageUnavailable(err) {
-			return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
+) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, now(), now())`,
+			companyID, itemID, parent, name, ResourceDefaultAccessEdit, position,
+		); err != nil {
+			if postgresSharedInboxStorageUnavailable(err) {
+				return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
+			}
+			return domain.CompanyExplorerFolder{}, err
 		}
-		return domain.CompanyExplorerFolder{}, err
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+insert into shared_inboxes (
+  company_id,
+  shared_inbox_id,
+  parent_folder_id,
+  name,
+  account_email,
+  default_access,
+  position,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, now(), now())`,
+			companyID, itemID, parent, name, accountEmail, ResourceDefaultAccessEdit, position,
+		); err != nil {
+			if postgresSharedInboxStorageUnavailable(err) {
+				return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
+			}
+			return domain.CompanyExplorerFolder{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCommunicationsSharedInboxFolder(ctx, companyID, item.FolderID)
+	return r.getCommunicationsSharedInboxFolder(ctx, companyID, itemID)
 }
 
 func (r *PostgresRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error) {
@@ -222,10 +311,11 @@ func (r *PostgresRepo) ListCommunicationsSharedInboxFolders(companyID string) ([
 		return nil, ErrInvalid
 	}
 	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx, `
-select company_id::text,
-       folder_id::text,
-       parent_folder_id::text,
+	rows, err := r.db.QueryContext(ctx, communicationsSharedInboxItemsCTE+`
+select company_id,
+       folder_id,
+       shared_inbox_id,
+       parent_folder_id,
        entry_type,
        name,
        coalesce(default_access, $2),
@@ -233,8 +323,8 @@ select company_id::text,
        position,
        created_timestamp,
        updated_timestamp
-from communications_shared_inbox_folders
-where company_id=$1::uuid
+from communications_shared_items
+where company_id=$1
 order by position asc, created_timestamp asc`, companyID, ResourceDefaultAccessEdit)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
@@ -268,17 +358,18 @@ func (r *PostgresRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, us
 		return nil, ErrInvalid
 	}
 	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx, `
-select folder.company_id::text,
-       folder.folder_id::text,
-       folder.parent_folder_id::text,
-       folder.entry_type,
-       folder.name,
-       coalesce(folder.default_access, $3),
-       folder.account_email,
-       folder.position,
-       folder.created_timestamp,
-       folder.updated_timestamp,
+	rows, err := r.db.QueryContext(ctx, communicationsSharedInboxItemsCTE+`
+select item.company_id,
+       item.folder_id,
+       item.shared_inbox_id,
+       item.parent_folder_id,
+       item.entry_type,
+       item.name,
+       coalesce(item.default_access, $3),
+       item.account_email,
+       item.position,
+       item.created_timestamp,
+       item.updated_timestamp,
        case
          when exists (
            select 1
@@ -289,13 +380,13 @@ select folder.company_id::text,
                or (membership.company_id=$1::uuid and membership.role='company_admin')
              )
          ) then 'admin'
-         when mangorts_user_can_access_resource(folder.company_id, 'shared_triage_folder', folder.folder_id, $2::uuid, 'edit') then 'edit'
+         when mangorts_user_can_access_resource(item.company_id::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit') then 'edit'
          else 'no_access'
        end as effective_access_level
-from communications_shared_inbox_folders folder
-where folder.company_id=$1::uuid
-  and mangorts_user_can_access_resource(folder.company_id, 'shared_triage_folder', folder.folder_id, $2::uuid, 'view')
-order by folder.position asc, folder.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit)
+from communications_shared_items item
+where item.company_id=$1
+  and mangorts_user_can_access_resource(item.company_id::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')
+order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return nil, ErrSharedInboxStorageUnavailable
@@ -306,12 +397,14 @@ order by folder.position asc, folder.created_timestamp asc`, companyID, userID, 
 	items := make([]domain.CompanyExplorerFolder, 0)
 	for rows.Next() {
 		var item domain.CompanyExplorerFolder
+		var sharedInboxID sql.NullString
 		var parent sql.NullString
 		var entryType string
 		var accountEmail sql.NullString
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.FolderID,
+			&sharedInboxID,
 			&parent,
 			&entryType,
 			&item.Name,
@@ -325,9 +418,12 @@ order by folder.position asc, folder.created_timestamp asc`, companyID, userID, 
 			return nil, err
 		}
 		item.FolderKind = "communications"
-		item.EntryType = normalizeCommunicationsSharedInboxEntryType(entryType, accountEmail.Valid)
+		item.EntryType = normalizeCommunicationsSharedInboxEntryType(entryType, accountEmail.Valid || sharedInboxID.Valid)
 		item.ScopeType = CompanyExplorerFolderScopeCompany
 		item.DefaultAccess = defaultResourceAccessOrEdit(item.DefaultAccess)
+		if sharedInboxID.Valid {
+			item.SharedInboxID = sharedInboxID.String
+		}
 		if parent.Valid {
 			item.ParentFolderID = &parent.String
 		}
@@ -359,15 +455,11 @@ func (r *PostgresRepo) MoveCommunicationsSharedInboxFolder(companyID, folderID s
 	}
 	defer tx.Rollback()
 
-	var currentParent sql.NullString
-	var currentPosition int
-	if err := tx.QueryRowContext(ctx, `
-select parent_folder_id::text, position
-from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid
-for update`, companyID, folderID).Scan(&currentParent, &currentPosition); errors.Is(err, sql.ErrNoRows) {
+	entryType, currentParent, currentPosition, err := postgresLockCommunicationsSharedInboxItemTx(ctx, tx, companyID, folderID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
-	} else if err != nil {
+	}
+	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
 		}
@@ -390,34 +482,29 @@ for update`, companyID, folderID).Scan(&currentParent, &currentPosition); errors
 		parent = nil
 	}
 	if parentFolderID != nil && targetParentID != "" {
-		var parentEntryType string
-		if err := tx.QueryRowContext(ctx, `
-select entry_type
-from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid`, companyID, targetParentID).Scan(&parentEntryType); errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		} else if err != nil {
+		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, targetParentID); err != nil {
 			return domain.CompanyExplorerFolder{}, err
+		} else if !exists {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
-		if normalizeCommunicationsSharedInboxEntryType(parentEntryType, false) == CommunicationsSharedInboxEntryTypeSharedInbox {
-			return domain.CompanyExplorerFolder{}, ErrInvalid
-		}
-		var createsCycle bool
-		if err := tx.QueryRowContext(ctx, `
+		if entryType == CommunicationsSharedInboxEntryTypeFolder {
+			var createsCycle bool
+			if err := tx.QueryRowContext(ctx, `
 with recursive descendants as (
   select folder_id
-  from communications_shared_inbox_folders
+  from shared_inbox_folders
   where company_id=$1::uuid and folder_id=$2::uuid
   union all
   select child.folder_id
-  from communications_shared_inbox_folders child
+  from shared_inbox_folders child
   join descendants parent on child.company_id=$1::uuid and child.parent_folder_id=parent.folder_id
 )
 select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, folderID, targetParentID).Scan(&createsCycle); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if createsCycle {
-			return domain.CompanyExplorerFolder{}, ErrInvalid
+				return domain.CompanyExplorerFolder{}, err
+			}
+			if createsCycle {
+				return domain.CompanyExplorerFolder{}, ErrInvalid
+			}
 		}
 		parent = targetParentID
 	}
@@ -431,17 +518,20 @@ select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, f
 			position = currentPosition
 		}
 	}
-	item, err := scanCommunicationsSharedInboxFolder(tx.QueryRowContext(ctx, `
-update communications_shared_inbox_folders
+	if entryType == CommunicationsSharedInboxEntryTypeFolder {
+		_, err = tx.ExecContext(ctx, `
+update shared_inbox_folders
 set parent_folder_id=$3::uuid,
     position=$4,
     updated_timestamp=now()
-where company_id=$1::uuid and folder_id=$2::uuid
-returning company_id::text, folder_id::text, parent_folder_id::text, entry_type, name, coalesce(default_access, $5), account_email, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, parent, position, ResourceDefaultAccessEdit,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
+where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID, parent, position)
+	} else {
+		_, err = tx.ExecContext(ctx, `
+update shared_inboxes
+set parent_folder_id=$3::uuid,
+    position=$4,
+    updated_timestamp=now()
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, parent, position)
 	}
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -449,7 +539,7 @@ returning company_id::text, folder_id::text, parent_folder_id::text, entry_type,
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCommunicationsSharedInboxFolder(ctx, companyID, item.FolderID)
+	return r.getCommunicationsSharedInboxFolder(ctx, companyID, folderID)
 }
 
 func (r *PostgresRepo) RenameCommunicationsSharedInboxFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -460,14 +550,12 @@ func (r *PostgresRepo) RenameCommunicationsSharedInboxFolder(companyID, folderID
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	ctx := context.Background()
-	item, err := scanCommunicationsSharedInboxFolder(r.db.QueryRowContext(ctx, `
-update communications_shared_inbox_folders
-set name=$3,
-    updated_timestamp=now()
-where company_id=$1::uuid and folder_id=$2::uuid
-returning company_id::text, folder_id::text, parent_folder_id::text, entry_type, name, coalesce(default_access, $4), account_email, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, name, ResourceDefaultAccessEdit,
-	))
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	defer tx.Rollback()
+	entryType, _, _, err := postgresLockCommunicationsSharedInboxItemTx(ctx, tx, companyID, folderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
@@ -477,7 +565,26 @@ returning company_id::text, folder_id::text, parent_folder_id::text, entry_type,
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCommunicationsSharedInboxFolder(ctx, companyID, item.FolderID)
+	if entryType == CommunicationsSharedInboxEntryTypeFolder {
+		_, err = tx.ExecContext(ctx, `
+update shared_inbox_folders
+set name=$3,
+    updated_timestamp=now()
+where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID, name)
+	} else {
+		_, err = tx.ExecContext(ctx, `
+update shared_inboxes
+set name=$3,
+    updated_timestamp=now()
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, name)
+	}
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	return r.getCommunicationsSharedInboxFolder(ctx, companyID, folderID)
 }
 
 func (r *PostgresRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error {
@@ -493,67 +600,111 @@ func (r *PostgresRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.QueryContext(ctx, `
-with recursive subtree as (
-  select folder_id
-  from communications_shared_inbox_folders
-  where company_id=$1::uuid and folder_id=$2::uuid
-  union all
-  select child.folder_id
-  from communications_shared_inbox_folders child
-  join subtree parent on child.company_id=$1::uuid and child.parent_folder_id=parent.folder_id
-)
-select folder_id::text from subtree`, companyID, folderID)
+	entryType, _, _, err := postgresLockCommunicationsSharedInboxItemTx(ctx, tx, companyID, folderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return ErrSharedInboxStorageUnavailable
 		}
 		return err
 	}
-	ids := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+
+	if entryType == CommunicationsSharedInboxEntryTypeFolder {
+		rows, err := tx.QueryContext(ctx, `
+with recursive subtree as (
+  select folder_id
+  from shared_inbox_folders
+  where company_id=$1::uuid and folder_id=$2::uuid
+  union all
+  select child.folder_id
+  from shared_inbox_folders child
+  join subtree parent on child.company_id=$1::uuid and child.parent_folder_id=parent.folder_id
+)
+select folder_id::text from subtree`, companyID, folderID)
+		if err != nil {
+			return err
+		}
+		ids := make([]string, 0)
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return ErrNotFound
-	}
-	idList := strings.Join(ids, ",")
-	if _, err := tx.ExecContext(ctx, `
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return ErrNotFound
+		}
+		idList := strings.Join(ids, ",")
+		if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid
   and resource_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedTriageFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from resource_access_grants
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from resource_raci_assignments
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+update shared_inboxes
+set parent_folder_id=null,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and parent_folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, idList); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from shared_inbox_folders
+where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, idList); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_permissions
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_access_grants
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedTriageFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_raci_assignments
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedTriageFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-delete from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID); err != nil {
+	if _, err := tx.ExecContext(ctx, `delete from shared_inbox_raci_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil && !isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from shared_inbox_raci_group_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil && !isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -563,7 +714,7 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folde
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
 	accountEmail = normalizeEmail(accountEmail)
-	if companyID == "" || folderID == "" {
+	if companyID == "" || folderID == "" || accountEmail == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	ctx := context.Background()
@@ -573,12 +724,16 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folde
 	}
 	defer tx.Rollback()
 
-	var entryType string
 	if err := tx.QueryRowContext(ctx, `
-select entry_type
-from communications_shared_inbox_folders
-where company_id=$1::uuid and folder_id=$2::uuid
-for update`, companyID, folderID).Scan(&entryType); errors.Is(err, sql.ErrNoRows) {
+select 1
+from shared_inboxes
+where company_id=$1::uuid and shared_inbox_id=$2::uuid
+for update`, companyID, folderID).Scan(new(int)); errors.Is(err, sql.ErrNoRows) {
+		if folderExists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, folderID); err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		} else if folderExists {
+			return domain.CompanyExplorerFolder{}, ErrInvalid
+		}
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	} else if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
@@ -586,37 +741,22 @@ for update`, companyID, folderID).Scan(&entryType); errors.Is(err, sql.ErrNoRows
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	entryType = normalizeCommunicationsSharedInboxEntryType(entryType, false)
-	if accountEmail != "" && entryType != CommunicationsSharedInboxEntryTypeSharedInbox {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
+	available, err := postgresCompanyHasConnectedEmailAccount(ctx, tx, companyID, accountEmail)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
 	}
-	var accountParam any
-	if accountEmail != "" {
-		available, err := postgresCompanyHasConnectedEmailAccount(ctx, tx, companyID, accountEmail)
-		if err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if !available {
-			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
-		}
-		accountParam = accountEmail
+	if !available {
+		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 	}
-	item, err := scanCommunicationsSharedInboxFolder(tx.QueryRowContext(ctx, `
-update communications_shared_inbox_folders
+	if _, err := tx.ExecContext(ctx, `
+update shared_inboxes
 set account_email=$3,
     updated_timestamp=now()
-where company_id=$1::uuid and folder_id=$2::uuid
-returning company_id::text, folder_id::text, parent_folder_id::text, entry_type, name, coalesce(default_access, $4), account_email, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, accountParam, ResourceDefaultAccessEdit,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
-	}
-	if err != nil {
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, accountEmail); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCommunicationsSharedInboxFolder(ctx, companyID, item.FolderID)
+	return r.getCommunicationsSharedInboxFolder(ctx, companyID, folderID)
 }

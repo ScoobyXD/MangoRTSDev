@@ -19,12 +19,15 @@ var (
 )
 
 type nylasOAuthStatePayload struct {
-	UserID      string `json:"user_id"`
-	Email       string `json:"email"`
-	UserEmail   string `json:"user_email,omitempty"`
-	Provider    string `json:"provider"`
-	StrictEmail bool   `json:"strict_email,omitempty"`
-	IssuedAt    int64  `json:"issued_at"`
+	UserID                    string `json:"user_id"`
+	Email                     string `json:"email"`
+	UserEmail                 string `json:"user_email,omitempty"`
+	Provider                  string `json:"provider"`
+	StrictEmail               bool   `json:"strict_email,omitempty"`
+	SharedInboxCompanyID      string `json:"shared_inbox_company_id,omitempty"`
+	SharedInboxParentFolderID string `json:"shared_inbox_parent_folder_id,omitempty"`
+	SharedInboxName           string `json:"shared_inbox_name,omitempty"`
+	IssuedAt                  int64  `json:"issued_at"`
 }
 
 func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time.Time) (string, error) {
@@ -33,7 +36,13 @@ func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
+	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
+	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
+	payload.SharedInboxName = strings.TrimSpace(payload.SharedInboxName)
 	if secret == "" || payload.UserID == "" || payload.Email == "" || payload.Provider == "" {
+		return "", errInvalidNylasState
+	}
+	if payload.SharedInboxCompanyID != "" && payload.SharedInboxName == "" {
 		return "", errInvalidNylasState
 	}
 	payload.IssuedAt = now.UTC().Unix()
@@ -72,7 +81,13 @@ func parseNylasOAuthState(secret, rawState string, now time.Time) (nylasOAuthSta
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
+	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
+	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
+	payload.SharedInboxName = strings.TrimSpace(payload.SharedInboxName)
 	if payload.UserID == "" || payload.Email == "" || payload.Provider == "" || payload.IssuedAt <= 0 {
+		return nylasOAuthStatePayload{}, errInvalidNylasState
+	}
+	if payload.SharedInboxCompanyID != "" && payload.SharedInboxName == "" {
 		return nylasOAuthStatePayload{}, errInvalidNylasState
 	}
 	issued := time.Unix(payload.IssuedAt, 0).UTC()

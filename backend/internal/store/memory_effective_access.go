@@ -277,7 +277,7 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		return true
 	}
 	switch resourceType {
-	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder, EntityTypeSharedTriageFolder:
+	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
 		if accessLevel == EntityPermissionAdmin {
 			return false
 		}
@@ -325,9 +325,15 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 			return "", false
 		}
 		return defaultResourceAccessOrEdit(folder.DefaultAccess), true
-	case EntityTypeSharedTriageFolder:
+	case EntityTypeSharedInboxFolder:
 		folder, ok := r.folders[key(companyID, resourceID)]
-		if !ok || folder.FolderKind != "communications" {
+		if !ok || folder.FolderKind != "communications" || normalizeCommunicationsSharedInboxEntryType(folder.EntryType, folder.AccountEmail != nil) != CommunicationsSharedInboxEntryTypeFolder {
+			return "", false
+		}
+		return defaultResourceAccessOrEdit(folder.DefaultAccess), true
+	case EntityTypeSharedInbox:
+		folder, ok := r.folders[key(companyID, resourceID)]
+		if !ok || folder.FolderKind != "communications" || normalizeCommunicationsSharedInboxEntryType(folder.EntryType, folder.AccountEmail != nil) != CommunicationsSharedInboxEntryTypeSharedInbox {
 			return "", false
 		}
 		return defaultResourceAccessOrEdit(folder.DefaultAccess), true

@@ -59,7 +59,17 @@ func WorkspaceEventAccessTargets(event domain.DomainEvent) []WorkspaceEventAcces
 	}
 	if folderKind := workspaceEventPayloadText(event.Payload, "folder_kind"); folderKind != "" {
 		if folderKind == "communications" {
-			add(EntityTypeSharedTriageFolder, workspaceEventPayloadText(event.Payload, "folder_id"))
+			resourceType := EntityTypeSharedInboxFolder
+			if normalized, ok := NormalizeEntityType(workspaceEventPayloadText(event.Payload, "resource_type")); ok {
+				resourceType = normalized
+			}
+			resourceID := workspaceEventPayloadText(event.Payload, "folder_id")
+			if resourceType == EntityTypeSharedInbox {
+				if sharedInboxID := workspaceEventPayloadText(event.Payload, "shared_inbox_id"); sharedInboxID != "" {
+					resourceID = sharedInboxID
+				}
+			}
+			add(resourceType, resourceID)
 			return targets
 		}
 		add(EntityTypeCompanyExplorerFolder, workspaceEventPayloadText(event.Payload, "folder_id"))

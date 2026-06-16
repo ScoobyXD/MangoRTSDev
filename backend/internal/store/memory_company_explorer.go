@@ -684,7 +684,7 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 
 func (r *MemoryRepo) companyHasConnectedEmailAccountLocked(companyID, accountEmail string) bool {
 	for _, connection := range r.emailConnections {
-		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
+		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail || normalizeEmailConnectionScope(connection.Scope) != "shared" {
 			continue
 		}
 		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
@@ -713,17 +713,17 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	item = normalizeMemorySharedInboxFolder(item)
-	if accountEmail != "" && item.EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
+	if accountEmail == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
-	if accountEmail != "" && !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
+	if item.EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+	if !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
 		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 	}
-	if accountEmail == "" {
-		item.AccountEmail = nil
-	} else {
-		item.AccountEmail = &accountEmail
-	}
+	item.AccountEmail = &accountEmail
+	item.SharedInboxID = item.FolderID
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
 	return r.withSharedInboxRaciLocked(item), nil
@@ -916,7 +916,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	}
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID &&
-			(permission.EntityType == EntityTypeSharedTriageFolder || permission.EntityType == EntityTypeCompanyExplorerFolder) &&
+			(permission.EntityType == EntityTypeSharedInboxFolder || permission.EntityType == EntityTypeSharedInbox || permission.EntityType == EntityTypeCompanyExplorerFolder) &&
 			folderIDs[permission.EntityID] {
 			delete(r.entityPermissions, permissionKey)
 		}

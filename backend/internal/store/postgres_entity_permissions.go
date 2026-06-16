@@ -876,6 +876,19 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxAccessGrants(ctx context.C
 		return folders, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
+with communications_shared_items as (
+  select folder.company_id,
+         folder.folder_id as resource_id,
+         folder.default_access,
+         'shared_inbox_folder'::text as resource_type
+  from shared_inbox_folders folder
+  union all
+  select inbox.company_id,
+         inbox.shared_inbox_id as resource_id,
+         inbox.default_access,
+         'shared_inbox'::text as resource_type
+  from shared_inboxes inbox
+)
 select access.company_id::text,
        access.resource_type,
        access.resource_id::text,
@@ -884,21 +897,22 @@ select access.company_id::text,
        nullif(app_user.display_name, ''),
        nullif(app_user.email, ''),
        case
-         when coalesce(folder.default_access, $4) = $4 then $5
-         else $4
+         when coalesce(folder.default_access, $5) = $5 then $6
+         else $5
        end as access_level,
        access.created_timestamp
 from resource_permissions access
-join communications_shared_inbox_folders folder
+join communications_shared_items folder
   on folder.company_id=access.company_id
- and folder.folder_id=access.resource_id
+ and folder.resource_id=access.resource_id
+ and folder.resource_type=access.resource_type
 join users app_user on app_user.user_id=access.user_id
 where access.company_id=$1::uuid
-  and access.resource_type=$2
-  and access.resource_id = any(string_to_array($3, ',')::uuid[])
+  and access.resource_type in ($2, $3)
+  and access.resource_id = any(string_to_array($4, ',')::uuid[])
 order by access.resource_id::text asc,
          lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.user_id::text)) asc,
-         access.user_id::text asc`, companyID, EntityTypeSharedTriageFolder, strings.Join(ids, ","), ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
+         access.user_id::text asc`, companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(ids, ","), ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
 	if err != nil {
 		if isPostgresUndefinedTable(err, "resource_permissions") || postgresSharedInboxStorageUnavailable(err) || isPostgresInvalidTextRepresentation(err) {
 			return folders, nil
@@ -953,9 +967,13 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		var exists bool
 		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID).Scan(&exists)
 		return exists, err
-	case EntityTypeSharedTriageFolder:
+	case EntityTypeSharedInboxFolder:
 		var exists bool
-		err := r.db.QueryRowContext(ctx, `select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID).Scan(&exists)
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID).Scan(&exists)
+		return exists, err
+	case EntityTypeSharedInbox:
+		var exists bool
+		err := r.db.QueryRowContext(ctx, `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`, companyID, entityID).Scan(&exists)
 		return exists, err
 	default:
 		return false, ErrInvalid
@@ -972,8 +990,10 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 		return postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeCompanyExplorerFolder:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID)
-	case EntityTypeSharedTriageFolder:
-		return postgresTxExists(ctx, tx, `select exists(select 1 from communications_shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID)
+	case EntityTypeSharedInboxFolder:
+		return postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID)
+	case EntityTypeSharedInbox:
+		return postgresTxExists(ctx, tx, `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`, companyID, entityID)
 	default:
 		return false, ErrInvalid
 	}

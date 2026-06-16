@@ -250,6 +250,10 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
 			return
 		}
+		if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
+			writeError(w, http.StatusBadRequest, "shared_inbox_raci_requires_mailbox")
+			return
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"company_id":       companyID,
 			"folder_id":        folderID,
@@ -280,6 +284,19 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		return
 	}
 	if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {
+		return
+	}
+	folder, err := s.repo.GetCommunicationsSharedInboxFolder(req.CompanyID, folderID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
+		return
+	}
+	if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
+		writeError(w, http.StatusBadRequest, "shared_inbox_raci_requires_mailbox")
 		return
 	}
 	assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
@@ -316,7 +333,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 			actorLabel = strings.TrimSpace(actor.User.Email)
 		}
 	}
-	event, projected := s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "raci_assignments": assignments, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
+	event, projected := s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "shared_inbox_id": folder.SharedInboxID, "folder_kind": "communications", "resource_type": store.EntityTypeSharedInbox, "raci_assignments": assignments, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
 	if projected {
 		s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 	}

@@ -4,7 +4,7 @@ import "strings"
 
 func usesDefaultResourceAccessPolicy(resourceType string) bool {
 	resourceType, ok := NormalizeEntityType(resourceType)
-	return ok && (resourceType == EntityTypeNode || resourceType == EntityTypeLogicGate || resourceType == EntityTypeProject || resourceType == EntityTypeCompanyExplorerFolder || resourceType == EntityTypeSharedTriageFolder)
+	return ok && (resourceType == EntityTypeNode || resourceType == EntityTypeLogicGate || resourceType == EntityTypeProject || resourceType == EntityTypeCompanyExplorerFolder || resourceType == EntityTypeSharedInboxFolder || resourceType == EntityTypeSharedInbox)
 }
 
 func defaultResourceAccessOrEdit(access string) string {

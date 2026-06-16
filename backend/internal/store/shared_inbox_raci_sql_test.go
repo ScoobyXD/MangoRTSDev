@@ -6,16 +6,29 @@ import (
 	"testing"
 )
 
-func TestPostgresSharedInboxRaciAncestryCastsUUIDForParentJoin(t *testing.T) {
+func TestPostgresSharedInboxRaciUsesMailboxTablesOnly(t *testing.T) {
 	raw, err := os.ReadFile("postgres_shared_inbox_raci.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_shared_inbox_raci.go: %v", err)
 	}
 	source := string(raw)
-	if !strings.Contains(source, "child.parent_folder_id = parent.folder_id::text") {
-		t.Fatalf("shared inbox ancestry query must compare text parent_folder_id to parent.folder_id::text")
+	for _, needle := range []string{
+		"from shared_inboxes",
+		"shared_inbox_raci_assignments",
+		"shared_inbox_raci_group_assignments",
+		"EntityTypeSharedInbox",
+	} {
+		if !strings.Contains(source, needle) {
+			t.Fatalf("shared inbox RACI source missing %q", needle)
+		}
 	}
-	if strings.Contains(source, "child.parent_folder_id = parent.folder_id\n") {
-		t.Fatalf("shared inbox ancestry query compares text to uuid without a cast")
+	for _, forbidden := range []string{
+		"with recursive",
+		"child.parent_folder_id",
+		"EntityTypeSharedTriageFolder",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("shared inbox RACI source should not use %q", forbidden)
+		}
 	}
 }

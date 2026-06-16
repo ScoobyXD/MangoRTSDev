@@ -183,7 +183,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			folder := r.folders[key(companyID, resource.entityID)]
 			folder.DefaultAccess = ResourceDefaultAccessEdit
 			r.folders[key(companyID, resource.entityID)] = folder
-		case EntityTypeSharedTriageFolder:
+		case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
 			folder := r.folders[key(companyID, resource.entityID)]
 			folder.DefaultAccess = ResourceDefaultAccessEdit
 			r.folders[key(companyID, resource.entityID)] = folder
@@ -413,9 +413,6 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 		}
 	}
 	targetEntityIDs := []string{entityID}
-	if entityType == EntityTypeSharedTriageFolder {
-		targetEntityIDs = r.sharedTriagePermissionTargetIDsLocked(companyID, entityID)
-	}
 	targetEntityIDSet := make(map[string]bool, len(targetEntityIDs))
 	for _, targetEntityID := range targetEntityIDs {
 		targetEntityIDSet[targetEntityID] = true
@@ -548,7 +545,7 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			folder := r.folders[key(companyID, entityID)]
 			folder.DefaultAccess = defaultAccess
 			r.folders[key(companyID, entityID)] = folder
-		case EntityTypeSharedTriageFolder:
+		case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
 			folder := r.folders[key(companyID, entityID)]
 			folder.DefaultAccess = defaultAccess
 			r.folders[key(companyID, entityID)] = folder
@@ -731,9 +728,12 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 	case EntityTypeCompanyExplorerFolder:
 		item, ok := r.folders[key(companyID, entityID)]
 		return ok && item.FolderKind != "communications"
-	case EntityTypeSharedTriageFolder:
+	case EntityTypeSharedInboxFolder:
 		item, ok := r.folders[key(companyID, entityID)]
-		return ok && item.FolderKind == "communications"
+		return ok && item.FolderKind == "communications" && normalizeCommunicationsSharedInboxEntryType(item.EntryType, item.AccountEmail != nil) == CommunicationsSharedInboxEntryTypeFolder
+	case EntityTypeSharedInbox:
+		item, ok := r.folders[key(companyID, entityID)]
+		return ok && item.FolderKind == "communications" && normalizeCommunicationsSharedInboxEntryType(item.EntryType, item.AccountEmail != nil) == CommunicationsSharedInboxEntryTypeSharedInbox
 	default:
 		return false
 	}
