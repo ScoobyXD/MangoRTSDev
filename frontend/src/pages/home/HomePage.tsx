@@ -451,11 +451,9 @@ export function HomePage({
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const activeMailViewUsesSharedConnection = homeViewUsesSharedEmailConnection(activeViewID);
   const activeMailViewHasEmailConnection = status?.connected === true || activeMailViewUsesSharedConnection;
+  const activePersonalMailViewNeedsConnection = activeViewID === "my-triage" || activeViewID === "primary";
   const showPersonalEmailConnectPanel = status?.connected === false
-    && !activeMailViewUsesSharedConnection
-    && !isInboxMatrixView
-    && !isCustomMatrixView
-    && !isWorkspacePanelHomeViewID(activeViewID);
+    && activePersonalMailViewNeedsConnection;
   const connection = status?.connection;
 
   const activeSharedInbox = useMemo(
