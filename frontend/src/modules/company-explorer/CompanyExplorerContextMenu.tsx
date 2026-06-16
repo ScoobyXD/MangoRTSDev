@@ -34,8 +34,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onDeleteTargets,
 }) => {
   const [prioritySubmenuOpen, setPrioritySubmenuOpen] = useState(false);
+  const [hoveredActionID, setHoveredActionID] = useState("");
+  const [hoveredPriorityValue, setHoveredPriorityValue] = useState("");
   useEffect(() => {
     setPrioritySubmenuOpen(false);
+    setHoveredActionID("");
+    setHoveredPriorityValue("");
   }, [menu]);
   if (!menu) return null;
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
@@ -54,16 +58,44 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
     cursor: "default",
     opacity: 0.72,
   };
-  const enabledButtonStyle: React.CSSProperties = { color: "#111111" };
-  const menuButtonStyle = (enabled: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
+  const enabledButtonStyle: React.CSSProperties = { color: "#111827" };
+  const highlightedMenuBackground = "linear-gradient(100deg, rgba(103, 232, 249, 0.2), rgba(216, 180, 254, 0.32))";
+  const menuItemEvents = (id: string, enabled: boolean, onEnter?: () => void) => ({
+    onMouseEnter: () => {
+      if (!enabled) return;
+      setHoveredActionID(id);
+      onEnter?.();
+    },
+    onMouseLeave: () => {
+      setHoveredActionID((current) => (current === id ? "" : current));
+    },
+    onFocus: () => {
+      if (!enabled) return;
+      setHoveredActionID(id);
+      onEnter?.();
+    },
+    onBlur: () => {
+      setHoveredActionID((current) => (current === id ? "" : current));
+    },
+  });
+  const menuButtonStyle = (enabled: boolean, extra?: React.CSSProperties, active = false): React.CSSProperties => ({
     ...buttonStyle,
-    padding: "6px 14px",
+    width: "calc(100% - 12px)",
+    minHeight: 31,
+    padding: "0 12px",
+    margin: "0 6px",
+    borderRadius: 9,
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: 600,
+    background: enabled && active ? highlightedMenuBackground : "transparent",
+    boxShadow: enabled && active ? "inset 0 0 0 1px rgba(168, 85, 247, 0.13)" : undefined,
     ...(enabled ? enabledButtonStyle : disabledButtonStyle),
     ...extra,
   });
   const dividerStyle: React.CSSProperties = {
     height: 1,
-    margin: "2px 8px",
+    margin: "4px 8px",
     background: "rgba(148, 163, 184, 0.28)",
   };
   const createNodeButton = (
@@ -71,11 +103,16 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       <button
         type="button"
         disabled={!menu.canCreateNode}
-        style={menuButtonStyle(menu.canCreateNode)}
+        style={menuButtonStyle(menu.canCreateNode, undefined, hoveredActionID === "create_node" || prioritySubmenuOpen)}
+        {...menuItemEvents("create_node", menu.canCreateNode, () => {
+          if (createNodeNeedsPriority) {
+            setPrioritySubmenuOpen(true);
+          }
+        })}
         onClick={() => {
           if (!menu.canCreateNode) return;
           if (createNodeNeedsPriority) {
-            setPrioritySubmenuOpen((open) => !open);
+            setPrioritySubmenuOpen(true);
             return;
           }
           onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID);
@@ -108,7 +145,23 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
               <button
                 key={option.value}
                 type="button"
-                style={menuButtonStyle(true)}
+                style={menuButtonStyle(
+                  true,
+                  {
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  },
+                  hoveredPriorityValue === option.value,
+                )}
+                onMouseEnter={() => setHoveredPriorityValue(option.value)}
+                onMouseLeave={() => {
+                  setHoveredPriorityValue((current) => (current === option.value ? "" : current));
+                }}
+                onFocus={() => setHoveredPriorityValue(option.value)}
+                onBlur={() => {
+                  setHoveredPriorityValue((current) => (current === option.value ? "" : current));
+                }}
                 onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition, menu.createNodeLogicGateID, menu.createNodeLogicGateTreeID, priority)}
               >
                 {option.label}
@@ -127,7 +180,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           key={action.id}
           type="button"
           disabled={!action.enabled}
-          style={menuButtonStyle(action.enabled)}
+          style={menuButtonStyle(action.enabled, undefined, hoveredActionID === action.id)}
+          {...menuItemEvents(action.id, action.enabled, () => setPrioritySubmenuOpen(false))}
           onClick={() => {
             if (!menu.permissionsTarget) return;
             onOpenFolderPermissions(menu.permissionsTarget);
@@ -143,7 +197,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           key={action.id}
           type="button"
           disabled={!action.enabled}
-          style={menuButtonStyle(action.enabled)}
+          style={menuButtonStyle(action.enabled, undefined, hoveredActionID === action.id)}
+          {...menuItemEvents(action.id, action.enabled, () => setPrioritySubmenuOpen(false))}
           onClick={() => {
             if (!menu.canCreateFolder) return;
             onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID);
@@ -159,7 +214,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           key={action.id}
           type="button"
           disabled={!action.enabled}
-          style={menuButtonStyle(action.enabled)}
+          style={menuButtonStyle(action.enabled, undefined, hoveredActionID === action.id)}
+          {...menuItemEvents(action.id, action.enabled, () => setPrioritySubmenuOpen(false))}
           onClick={() => {
             if (!menu.canCreateLogicGate) return;
             onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole);
@@ -175,7 +231,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           key={action.id}
           type="button"
           disabled={!action.enabled}
-          style={menuButtonStyle(action.enabled)}
+          style={menuButtonStyle(action.enabled, undefined, hoveredActionID === action.id)}
+          {...menuItemEvents(action.id, action.enabled, () => setPrioritySubmenuOpen(false))}
           onClick={() => {
             if (!menu.renameTarget || !menu.renameTreeID) return;
             onRenameTarget(menu.renameTreeID, menu.renameTarget, menu.renameLabel);
@@ -190,7 +247,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
         key={action.id}
         type="button"
         disabled={!action.enabled}
-        style={menuButtonStyle(action.enabled, { color: action.enabled ? "#334155" : disabledButtonStyle.color })}
+        style={menuButtonStyle(
+          action.enabled,
+          { color: action.enabled ? "#334155" : disabledButtonStyle.color },
+          hoveredActionID === action.id,
+        )}
+        {...menuItemEvents(action.id, action.enabled, () => setPrioritySubmenuOpen(false))}
         onClick={() => {
           if (!hasDeleteAction) return;
           onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!]);
