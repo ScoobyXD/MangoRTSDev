@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateRaciRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
 import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
@@ -14,12 +14,11 @@ import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRaciRole } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
-import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
+import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog } from "./CompanyExplorerDialogs";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
   collectFolderSubtreeIDs,
   explorerRowOrder,
-  getExplorerFindTarget,
   getExplorerItemPayload,
   getExplorerRowContainerID,
   getExplorerRowOrderKind,
@@ -33,8 +32,6 @@ import {
   type CompanyExplorerFolderPermissionsTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
-  type ExplorerFindTarget,
-  type ExplorerPinTarget,
   type ExplorerRenameDraft,
   type ExplorerRowDropPlacement,
   type ExplorerRowOrderUpdate,
@@ -46,11 +43,9 @@ import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelection
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
-import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import type { ProjectRecord } from "../project-management/projectManagementApi";
@@ -2101,16 +2096,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
-  const {
-    closeFolderShareDialog,
-    folderShareDialog,
-    openFolderShareDialog,
-    refreshFolderShares,
-    removeFolderShare,
-    submitFolderShare,
-    updateFolderShareEmail,
-  } = useCompanyExplorerFolderShares(companyID, requestJSON);
-
   useEffect(() => {
     if (!scopeViewsEnabled || !folderSnapshotLoaded || !companyID) return;
     const missing = RACI_FOLDER_ROWS.find((folder) => !raciVisualRootFolderForRole(folders, folder.role));
@@ -3162,23 +3147,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     await assignItemsToFolders(assignments, { expandTarget: true });
   }, [assignItemsToFolders, baseTreeRows, scopedAllowedItemType]);
 
-  const requestMapFind = useCallback((target: ExplorerFindTarget) => {
-    if (target.kind === "project") return;
-    if (target.kind === "node") {
-      emitDashboardEvent(EVENT_NODE_MAP_FOCUS_REQUESTED, {
-        mapWidgetID: linkedMapFrameID,
-        nodeID: target.id,
-        sourceExplorerID: scope,
-      });
-      return;
-    }
-    emitDashboardEvent(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, {
-      mapWidgetID: linkedLogicMapFrameID || linkedMapFrameID,
-      logicGateID: target.id,
-      sourceExplorerID: scope,
-    });
-  }, [linkedLogicMapFrameID, linkedMapFrameID, scope]);
-
   const getContextCreatePosition = useCallback((row: ExplorerTreeNode | null | undefined, event: React.MouseEvent): number => {
     if (!row) return 0;
     if (row.kind === "folder") return 0;
@@ -3223,17 +3191,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const createFolderScope = resolveCreateFolderScope(targets.preferredFolderParentID, targets.folderScopeType, targets.folderScopeID);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
-    const shareTarget = !protectedRaciRow && row?.kind === "folder" && row.folderID && !row.systemKey
-      ? { folderID: row.folderID, label: row.label }
-      : null;
     const permissionsTarget = !protectedRaciRow && row?.kind === "folder" && row.folderID && !row.systemKey
       ? { folderID: row.folderID, label: row.label }
       : null;
-    const pinTarget: ExplorerPinTarget | null = row?.kind === "node" && row.nodeID
-      ? { kind: "node", id: row.nodeID, label: row.label }
-      : row?.kind === "logic_gate" && row.logicGateID
-        ? { kind: "logic_gate", id: row.logicGateID, label: row.label }
-        : null;
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -3241,9 +3201,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deleteTarget: protectedRaciRow ? null : (deleteTargets[0] ?? resolveExplorerDeleteTarget(row ?? null)),
       deleteTargets,
       renameTarget: protectedRaciRow ? null : resolveExplorerRenameTarget(row ?? null),
-      findTarget: getExplorerFindTarget(row ?? null),
-      pinTarget,
-      shareTarget,
       permissionsTarget,
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
@@ -3254,7 +3211,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       createLogicGateRaciRole,
       createFolderScopeType: createFolderScope?.scope_type,
       createFolderScopeID: createFolderScope?.scope_id,
-      canCreateBothFolderTypes: !contextKind && !scopedKind,
       canCreateFolder: canCreateForContext && (!scopedKind || Boolean(scopedRootFolder)),
       canCreateNode: canCreateForContext && !scopedKind,
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
@@ -3474,18 +3430,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           void createLogicGateAtFolder(parentFolderID, position, raciRole);
           setExplorerContextMenu(null);
         }}
-        onFindTarget={(target) => {
-          setExplorerContextMenu(null);
-          requestMapFind(target);
-        }}
-        onPinTarget={(target) => {
-          setExplorerContextMenu(null);
-          requestAppSidebarPin(target);
-        }}
-        onShareFolder={(target) => {
-          setExplorerContextMenu(null);
-          openFolderShareDialog(target);
-        }}
         onOpenFolderPermissions={(target) => {
           setExplorerContextMenu(null);
           setFolderPermissionsTarget(target);
@@ -3500,20 +3444,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }}
         onDeleteTargets={requestDeleteTargets}
       />
-
-      {folderShareDialog && (
-        <CompanyExplorerFolderShareDialogView
-          dialog={folderShareDialog}
-          isDarkTheme={isDarkTheme}
-          ruleColor={ruleColor}
-          rowRuleColor={rowRuleColor}
-          onEmailChange={updateFolderShareEmail}
-          onSubmit={() => void submitFolderShare()}
-          onRemoveShare={(share) => void removeFolderShare(share)}
-          onClose={closeFolderShareDialog}
-          onRefresh={refreshFolderShares}
-        />
-      )}
 
       {folderPermissionsTarget && (
         <EntityPermissionsDialog

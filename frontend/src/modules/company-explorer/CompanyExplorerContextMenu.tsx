@@ -5,12 +5,10 @@ import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../kanban/shared";
 import type {
   CompanyExplorerContextMenuState,
   CompanyExplorerFolderPermissionsTarget,
-  CompanyExplorerShareTarget,
   ExplorerDeleteTargetWithLabel,
-  ExplorerFindTarget,
-  ExplorerPinTarget,
   ExplorerRenameTarget,
 } from "./companyExplorerTypes";
+import { buildCompanyExplorerContextMenuSections, type CompanyExplorerContextMenuAction } from "./CompanyExplorerContentModel";
 
 type CompanyExplorerContextMenuProps = {
   menu: CompanyExplorerContextMenuState | null;
@@ -19,9 +17,6 @@ type CompanyExplorerContextMenuProps = {
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number, scopeType?: CompanyExplorerFolderScopeType, scopeID?: string) => void;
   onCreateNode: (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => void;
   onCreateLogicGate: (parentFolderID: string, position?: number, raciRole?: string) => void;
-  onFindTarget: (target: ExplorerFindTarget) => void;
-  onPinTarget: (target: ExplorerPinTarget) => void;
-  onShareFolder: (target: CompanyExplorerShareTarget) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
@@ -34,9 +29,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateFolder,
   onCreateNode,
   onCreateLogicGate,
-  onFindTarget,
-  onPinTarget,
-  onShareFolder,
   onOpenFolderPermissions,
   onRenameTarget,
   onDeleteTargets,
@@ -46,23 +38,47 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
     setPrioritySubmenuOpen(false);
   }, [menu]);
   if (!menu) return null;
-  const hasCreateAction = menu.canCreateFolder || menu.canCreateNode || menu.canCreateLogicGate;
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
-  if (!hasCreateAction && !menu.findTarget && !menu.pinTarget && !menu.shareTarget && !menu.permissionsTarget && !menu.renameTarget && !hasDeleteAction) return null;
   const createNodeNeedsPriority = menu.canCreateNode && Boolean(menu.createNodeLogicGateID);
   const priorityOptions = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0");
   const submenuSide = menu.x + 420 > window.innerWidth ? "left" : "right";
+  const menuSections = buildCompanyExplorerContextMenuSections({
+    permissionsEnabled: Boolean(menu.permissionsTarget),
+    createFolderEnabled: menu.canCreateFolder,
+    createNodeEnabled: menu.canCreateNode,
+    createLogicGateEnabled: menu.canCreateLogicGate,
+    renameEnabled: Boolean(menu.renameTarget && menu.renameTreeID),
+    deleteEnabled: hasDeleteAction,
+  });
+  const disabledButtonStyle: React.CSSProperties = {
+    color: "#94a3b8",
+    cursor: "default",
+    opacity: 0.72,
+  };
+  const enabledButtonStyle: React.CSSProperties = { color: "#111111" };
+  const menuButtonStyle = (enabled: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
+    ...buttonStyle,
+    ...(enabled ? enabledButtonStyle : disabledButtonStyle),
+    ...extra,
+  });
+  const dividerStyle: React.CSSProperties = {
+    height: 1,
+    margin: "4px 8px",
+    background: "rgba(148, 163, 184, 0.28)",
+  };
   const createNodeButton = (
     <div
       style={{ position: "relative" }}
       onMouseEnter={() => {
-        if (createNodeNeedsPriority) setPrioritySubmenuOpen(true);
+        if (menu.canCreateNode && createNodeNeedsPriority) setPrioritySubmenuOpen(true);
       }}
     >
       <button
         type="button"
-        style={{ ...buttonStyle, color: "#111111", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18 }}
+        disabled={!menu.canCreateNode}
+        style={menuButtonStyle(menu.canCreateNode, { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18 })}
         onClick={() => {
+          if (!menu.canCreateNode) return;
           if (createNodeNeedsPriority) {
             setPrioritySubmenuOpen(true);
             return;
@@ -127,78 +143,96 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       )}
     </div>
   );
-
-  return (
-    <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose} overflow="visible">
-      {menu.canCreateBothFolderTypes ? (
-        <>
-          {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID)}>
-              Create New Folder
-            </button>
-          )}
-          {menu.canCreateNode && (
-            createNodeButton
-          )}
-          {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole)}>
-              Create Logic Gate
-            </button>
-          )}
-        </>
-      ) : (
-        <>
-          {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID)}>
-              Create New Folder
-            </button>
-          )}
-          {menu.canCreateNode && (
-            createNodeButton
-          )}
-          {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole)}>
-              Create Logic Gate
-            </button>
-          )}
-        </>
-      )}
-      {menu.findTarget && (
-        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onFindTarget(menu.findTarget!)}>
-          {menu.findTarget.kind === "logic_gate" ? "Find Logic Gate" : "Find Node"}
-        </button>
-      )}
-      {menu.pinTarget && (
-        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onPinTarget(menu.pinTarget!)}>
-          {menu.pinTarget.kind === "logic_gate" ? "Pin Logic Gate" : "Pin Node"}
-        </button>
-      )}
-      {menu.shareTarget && (
-        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onShareFolder(menu.shareTarget!)}>
-          Share Folder
-        </button>
-      )}
-      {menu.permissionsTarget && (
-        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onOpenFolderPermissions(menu.permissionsTarget!)}>
-          Folder Permissions
-        </button>
-      )}
-      {menu.renameTarget && (
+  const renderMenuAction = (action: CompanyExplorerContextMenuAction): React.ReactElement => {
+    if (action.id === "create_node") return <React.Fragment key={action.id}>{createNodeButton}</React.Fragment>;
+    if (action.id === "folder_permissions") {
+      return (
         <button
-          style={{ ...buttonStyle, color: "#111111" }}
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          onClick={() => {
+            if (!menu.permissionsTarget) return;
+            onOpenFolderPermissions(menu.permissionsTarget);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
+    if (action.id === "create_folder") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          onClick={() => {
+            if (!menu.canCreateFolder) return;
+            onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition, menu.createFolderScopeType ?? menu.targets.folderScopeType, menu.createFolderScopeID ?? menu.targets.folderScopeID);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
+    if (action.id === "create_logic_gate") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          onClick={() => {
+            if (!menu.canCreateLogicGate) return;
+            onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
+    if (action.id === "rename") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
           onClick={() => {
             if (!menu.renameTarget || !menu.renameTreeID) return;
             onRenameTarget(menu.renameTreeID, menu.renameTarget, menu.renameLabel);
           }}
         >
-          Rename
+          {action.label}
         </button>
-      )}
-      {(menu.deleteTargets.length > 0 || menu.deleteTarget) && (
-        <button style={{ ...buttonStyle, color: "#334155" }} onClick={() => onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!])}>
-          Delete
-        </button>
-      )}
+      );
+    }
+    return (
+      <button
+        key={action.id}
+        type="button"
+        disabled={!action.enabled}
+        style={menuButtonStyle(action.enabled, { color: action.enabled ? "#334155" : disabledButtonStyle.color })}
+        onClick={() => {
+          if (!hasDeleteAction) return;
+          onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!]);
+        }}
+      >
+        {action.label}
+      </button>
+    );
+  };
+
+  return (
+    <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose} overflow="visible">
+      {menuSections.map((section, index) => (
+        <React.Fragment key={section.map((action) => action.id).join(":")}>
+          {index > 0 ? <div aria-hidden="true" style={dividerStyle} /> : null}
+          {section.map(renderMenuAction)}
+        </React.Fragment>
+      ))}
     </FrameRightClickMenu>
   );
 };
