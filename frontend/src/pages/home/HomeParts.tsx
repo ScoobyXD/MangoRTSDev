@@ -1426,7 +1426,7 @@ export function HomeSidebar({
         const contextFolder = sharedContextMenu.folder;
         const contextFolderAcceptsChildren = !contextFolder || contextFolder.entry_type !== "shared_inbox";
         return (
-          <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
+          <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
             {contextFolderAcceptsChildren && (
               <>
                 <button
@@ -1472,7 +1472,7 @@ export function HomeSidebar({
                   disabled={sharedBusy}
                   onClick={() => void requestDeleteSharedFolder(contextFolder)}
                 >
-                  {contextFolder.entry_type === "shared_inbox" ? "Delete email from Shared Triage" : "Delete"}
+                  {contextFolder.entry_type === "shared_inbox" ? "Delete email" : "Delete"}
                 </button>
               </>
             )}
