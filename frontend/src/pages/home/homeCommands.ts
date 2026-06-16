@@ -622,7 +622,7 @@ export async function updateSharedInboxAccountEmailCommand(args: {
   if (!folderID) return null;
   const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
   const folder = await updateSharedInbox({ companyID: args.companyID, folderID, accountEmail: args.accountEmail });
-  return { folder, notice: folder.account_email ? `Attached ${folder.account_email}.` : "Email detached." };
+  return { folder, notice: folder.account_email ? `Attached ${folder.account_email}.` : "Email removed." };
 }
 
 export async function renameSharedInboxCommand(args: {

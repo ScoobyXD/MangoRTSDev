@@ -386,7 +386,12 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	sharedInboxSource := visibleQueryNormalizeSource(string(sharedInboxRaw))
 	for _, needle := range []string{
 		"func (r *postgresrepo) listvisiblecommunicationssharedinboxfolders",
-		"mangorts_user_can_access_resource",
+		"actor_access as",
+		"item_access as",
+		"from resource_permissions access",
+		"access.resource_type in (item.resource_type, $5)",
+		"coalesce(item.default_access, $3) = $3 and not item.has_direct_override",
+		"coalesce(item.default_access, $3) = $4 and item.has_direct_override",
 		"'shared_inbox_folder'",
 		"'shared_inbox'",
 	} {
@@ -394,7 +399,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 			t.Fatalf("Postgres visible shared inbox query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access", "mangorts_user_can_access_resource"} {
 		if strings.Contains(sharedInboxSource, forbidden) {
 			t.Fatalf("Postgres visible shared inbox query should not use %q", forbidden)
 		}

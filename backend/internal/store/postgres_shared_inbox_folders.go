@@ -358,7 +358,37 @@ func (r *PostgresRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, us
 		return nil, ErrInvalid
 	}
 	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx, communicationsSharedInboxItemsCTE+`
+	rows, err := r.db.QueryContext(ctx, communicationsSharedInboxItemsCTE+`,
+actor_access as (
+  select exists (
+    select 1
+    from company_memberships membership
+    where membership.user_id=$2::uuid
+      and (
+        membership.role='dev_admin'
+        or (membership.company_id=$1::uuid and membership.role='company_admin')
+      )
+  ) as is_admin,
+  exists (
+    select 1
+    from company_memberships membership
+    where membership.company_id=$1::uuid
+      and membership.user_id=$2::uuid
+  ) as is_member
+),
+item_access as (
+  select item.*,
+         exists (
+           select 1
+           from resource_permissions access
+           where access.company_id=item.company_id::uuid
+             and access.resource_type in (item.resource_type, $5)
+             and access.resource_id=item.folder_id::uuid
+             and access.user_id=$2::uuid
+         ) as has_direct_override
+  from communications_shared_items item
+  where item.company_id=$1
+)
 select item.company_id,
        item.folder_id,
        item.shared_inbox_id,
@@ -371,22 +401,24 @@ select item.company_id,
        item.created_timestamp,
        item.updated_timestamp,
        case
-         when exists (
-           select 1
-           from company_memberships membership
-           where membership.user_id=$2::uuid
-             and (
-               membership.role='dev_admin'
-               or (membership.company_id=$1::uuid and membership.role='company_admin')
-             )
-         ) then 'admin'
-         when mangorts_user_can_access_resource(item.company_id::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit') then 'edit'
+         when actor_access.is_admin then 'admin'
+         when actor_access.is_member and (
+           (coalesce(item.default_access, $3) = $3 and not item.has_direct_override)
+           or (coalesce(item.default_access, $3) = $4 and item.has_direct_override)
+         ) then 'edit'
          else 'no_access'
        end as effective_access_level
-from communications_shared_items item
-where item.company_id=$1
-  and mangorts_user_can_access_resource(item.company_id::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')
-order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit)
+from item_access item
+cross join actor_access
+where actor_access.is_admin
+   or (
+     actor_access.is_member
+     and (
+       (coalesce(item.default_access, $3) = $3 and not item.has_direct_override)
+       or (coalesce(item.default_access, $3) = $4 and item.has_direct_override)
+     )
+   )
+order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess, EntityTypeSharedTriageFolder)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return nil, ErrSharedInboxStorageUnavailable
