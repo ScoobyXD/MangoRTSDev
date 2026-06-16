@@ -40,8 +40,6 @@ export type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorer
 export type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
 export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
-export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string } | { kind: "project"; id: string };
-export type ExplorerPinTarget = { kind: "node" | "logic_gate"; id: string; label: string };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
 export type CompanyExplorerFolderPermissionsTarget = { folderID: string; label: string };
 export type CompanyExplorerFindRequestDetail = {
@@ -59,9 +57,6 @@ export type CompanyExplorerContextMenuState = {
   deleteTarget: ExplorerDeleteTargetWithLabel | null;
   deleteTargets: ExplorerDeleteTargetWithLabel[];
   renameTarget: ExplorerRenameTarget | null;
-  findTarget: ExplorerFindTarget | null;
-  pinTarget: ExplorerPinTarget | null;
-  shareTarget: CompanyExplorerShareTarget | null;
   permissionsTarget: CompanyExplorerFolderPermissionsTarget | null;
   renameTreeID: string;
   renameLabel: string;
@@ -72,7 +67,6 @@ export type CompanyExplorerContextMenuState = {
   createLogicGateRaciRole: LogicGateRaciRole | "";
   createFolderScopeType?: CompanyExplorerFolderScopeType;
   createFolderScopeID?: string;
-  canCreateBothFolderTypes: boolean;
   canCreateFolder: boolean;
   canCreateNode: boolean;
   canCreateLogicGate: boolean;

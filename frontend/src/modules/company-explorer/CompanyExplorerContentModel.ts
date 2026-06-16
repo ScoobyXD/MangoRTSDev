@@ -126,6 +126,42 @@ export type CompanyExplorerContentProps = {
   onTriageMessagesDrop?: CompanyExplorerTriageMessageDropHandler;
 };
 
+export type CompanyExplorerContextMenuActionID =
+  | "folder_permissions"
+  | "create_folder"
+  | "create_node"
+  | "create_logic_gate"
+  | "rename"
+  | "delete";
+
+export type CompanyExplorerContextMenuAction = {
+  id: CompanyExplorerContextMenuActionID;
+  label: string;
+  enabled: boolean;
+};
+
+export function buildCompanyExplorerContextMenuSections(input: {
+  permissionsEnabled: boolean;
+  createFolderEnabled: boolean;
+  createNodeEnabled: boolean;
+  createLogicGateEnabled: boolean;
+  renameEnabled: boolean;
+  deleteEnabled: boolean;
+}): CompanyExplorerContextMenuAction[][] {
+  return [
+    [{ id: "folder_permissions", label: "Folder Permissions", enabled: input.permissionsEnabled }],
+    [
+      { id: "create_folder", label: "Create New Folder", enabled: input.createFolderEnabled },
+      { id: "create_node", label: "Create Node", enabled: input.createNodeEnabled },
+      { id: "create_logic_gate", label: "Create Logic Gate", enabled: input.createLogicGateEnabled },
+    ],
+    [
+      { id: "rename", label: "Rename", enabled: input.renameEnabled },
+      { id: "delete", label: "Delete", enabled: input.deleteEnabled },
+    ],
+  ];
+}
+
 export function createInitialCompanyExplorerExpandedRows(): Set<string> {
   return new Set();
 }

@@ -21,7 +21,7 @@ import {
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
-import { createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
+import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
   { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
@@ -51,6 +51,28 @@ run("company explorer starts each page load with collapsed rows", () => {
   assert.deepEqual([...initialExpanded], []);
   initialExpanded.add("workspace-folder-open");
   assert.deepEqual([...createInitialCompanyExplorerExpandedRows()], []);
+});
+
+run("company explorer context menu keeps fixed sections with disabled unavailable actions", () => {
+  const sections = buildCompanyExplorerContextMenuSections({
+    permissionsEnabled: true,
+    createFolderEnabled: true,
+    createNodeEnabled: false,
+    createLogicGateEnabled: true,
+    renameEnabled: false,
+    deleteEnabled: true,
+  });
+
+  assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
+    ["Folder Permissions"],
+    ["Create New Folder", "Create Node", "Create Logic Gate"],
+    ["Rename", "Delete"],
+  ]);
+  assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
+    [true],
+    [true, false, true],
+    [false, true],
+  ]);
 });
 
 run("folder labels do not display counts", () => {

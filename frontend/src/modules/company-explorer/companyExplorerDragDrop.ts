@@ -6,7 +6,6 @@ import {
 } from "./treePresentation.js";
 import type {
   ExplorerDragPayload,
-  ExplorerFindTarget,
   ExplorerRowDropPlacement,
   ExplorerSelectionDomain,
   ExplorerTreeNode,
@@ -127,12 +126,6 @@ export function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): Explo
   if (row.kind === "project") return "project";
   if (row.kind === "kanban") return "kanban";
   return row.folderKind ?? "root";
-}
-
-export function getExplorerFindTarget(row?: ExplorerTreeNode | null): ExplorerFindTarget | null {
-  if (row?.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
-  if (row?.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
-  return null;
 }
 
 export function isExplorerTextInputTarget(target: EventTarget | null): boolean {
