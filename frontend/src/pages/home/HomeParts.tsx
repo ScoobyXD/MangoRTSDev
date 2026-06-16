@@ -969,7 +969,7 @@ export function HomeSidebar({
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [sharedCreateDialog, setSharedCreateDialog] = useState<{ mode: "folder" | "shared_inbox"; parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
-  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; detail: string; label: string } | null>(null);
+  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; title: string; detail: string; label: string; confirmLabel: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -1136,10 +1136,20 @@ export function HomeSidebar({
 
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
     setSharedContextMenu(null);
-    const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
     const label = folder.name.trim() || "this folder";
+    if (folder.entry_type === "shared_inbox") {
+      setSharedDeleteDialog({
+        folder,
+        title: "Delete email from Shared Triage",
+        detail: "this email from Shared Triage",
+        label,
+        confirmLabel: "Delete email",
+      });
+      return;
+    }
+    const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    setSharedDeleteDialog({ folder, detail, label });
+    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete" });
   }, [sharedInboxes]);
 
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
@@ -1462,7 +1472,7 @@ export function HomeSidebar({
                   disabled={sharedBusy}
                   onClick={() => void requestDeleteSharedFolder(contextFolder)}
                 >
-                  Delete
+                  {contextFolder.entry_type === "shared_inbox" ? "Delete email from Shared Triage" : "Delete"}
                 </button>
               </>
             )}
@@ -1498,8 +1508,10 @@ export function HomeSidebar({
       )}
       {sharedDeleteDialog && (
         <SharedInboxDeleteDialog
+          title={sharedDeleteDialog.title}
           label={sharedDeleteDialog.label}
           detail={sharedDeleteDialog.detail}
+          confirmLabel={sharedDeleteDialog.confirmLabel}
           busy={sharedBusy}
           onCancel={() => setSharedDeleteDialog(null)}
           onConfirm={() => {
@@ -1625,9 +1637,11 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
   );
 }
 
-function SharedInboxDeleteDialog({ label, detail, busy, onConfirm, onCancel }: {
+function SharedInboxDeleteDialog({ title, label, detail, confirmLabel, busy, onConfirm, onCancel }: {
+  title: string;
   label: string;
   detail: string;
+  confirmLabel: string;
   busy: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -1641,11 +1655,11 @@ function SharedInboxDeleteDialog({ label, detail, busy, onConfirm, onCancel }: {
         style={deleteModalStyle}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div style={{ fontSize: 12, fontWeight: 700 }}>Delete shared inbox</div>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>{title}</div>
         <div style={deleteModalDetailStyle}>Delete {detail}: {label}?</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>
-          <button type="button" disabled={busy} onClick={onConfirm} style={dangerButtonStyle}>{busy ? "Deleting" : "Delete"}</button>
+          <button type="button" disabled={busy} onClick={onConfirm} style={dangerButtonStyle}>{busy ? "Deleting" : confirmLabel}</button>
         </div>
       </div>
     </div>

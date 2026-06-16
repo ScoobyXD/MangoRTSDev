@@ -683,6 +683,16 @@ where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`
 		return tx.Commit()
 	}
 
+	var accountEmail sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select account_email
+from shared_inboxes
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID).Scan(&accountEmail); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
@@ -703,6 +713,17 @@ where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, compan
 	}
 	if _, err := tx.ExecContext(ctx, `delete from shared_inbox_raci_group_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil && !isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
 		return err
+	}
+	if cleanAccountEmail := normalizeEmail(accountEmail.String); cleanAccountEmail != "" {
+		if _, err := tx.ExecContext(ctx, `
+delete from user_email_connections connection
+using company_memberships membership
+where membership.user_id = connection.user_id
+  and membership.company_id = $1::uuid
+  and connection.account_email = $2
+  and connection.connection_scope = 'shared'`, companyID, cleanAccountEmail); err != nil && !isPostgresUndefinedTable(err, "user_email_connections") {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `delete from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil {
 		return err
