@@ -233,6 +233,19 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 	}
 	root = normalizeMemorySharedInboxFolder(root)
 	if root.EntryType == CommunicationsSharedInboxEntryTypeSharedInbox {
+		if root.AccountEmail != nil {
+			accountEmail := normalizeEmail(*root.AccountEmail)
+			if accountEmail != "" {
+				for connectionKey, connection := range r.emailConnections {
+					if normalizeEmailConnectionScope(connection.Scope) != "shared" || normalizeEmail(connection.AccountEmail) != accountEmail {
+						continue
+					}
+					if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
+						delete(r.emailConnections, connectionKey)
+					}
+				}
+			}
+		}
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxRaci, sharedInboxRaciKey(companyID, folderID))
 		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, folderID); err != nil {

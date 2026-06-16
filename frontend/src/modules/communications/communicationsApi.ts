@@ -648,6 +648,7 @@ export async function deleteCommunicationsSharedInbox(companyID: string, folderI
   await apiFetchJSON<{ status?: string }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
     method: "DELETE",
   });
+  invalidateCommunicationsCache({ folders: true, messagePages: true, messages: true });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
   dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
 }

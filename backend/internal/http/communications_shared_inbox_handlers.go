@@ -251,6 +251,25 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return
 	}
+	var sharedConnection domain.UserEmailConnection
+	hasSharedConnection := false
+	if item.EntryType == store.CommunicationsSharedInboxEntryTypeSharedInbox && item.AccountEmail != nil {
+		accountEmail := normalizeEmailForCompare(*item.AccountEmail)
+		if accountEmail != "" {
+			connection, lookupErr := s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail)
+			if lookupErr == nil {
+				sharedConnection = connection
+				hasSharedConnection = true
+			} else if !errors.Is(lookupErr, store.ErrNotFound) {
+				log.Printf("communications_shared_inbox_delete outcome=warning reason=shared_connection_lookup_failed request_id=%s company_id=%s folder_id=%s account_email=%s err=%v", requestCorrelationID(r), companyID, folderID, accountEmail, lookupErr)
+			}
+		}
+	}
+	if hasSharedConnection && s.nylasClient != nil && strings.TrimSpace(sharedConnection.GrantID) != "" {
+		if err := s.nylasClient.DeleteGrant(r.Context(), sharedConnection.GrantID); err != nil {
+			log.Printf("communications_shared_inbox_delete outcome=warning reason=delete_nylas_grant_failed request_id=%s company_id=%s folder_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), companyID, folderID, sharedConnection.Provider, sharedConnection.AccountEmail, sharedConnection.Scope, grantIDLogValue(sharedConnection.GrantID), err)
+		}
+	}
 	err = s.repo.DeleteCommunicationsSharedInboxFolder(companyID, folderID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "shared_inbox_not_found")

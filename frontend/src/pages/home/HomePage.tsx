@@ -348,6 +348,7 @@ export function HomePage({
     const sharedInboxID = params.get("nylas_shared_inbox_id")?.trim() ?? "";
     return params.get("nylas") === "connected" && scope === "shared" ? sharedInboxID : "";
   });
+  const [pendingSharedInboxMessageRefreshID, setPendingSharedInboxMessageRefreshID] = useState("");
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -1089,6 +1090,17 @@ export function HomePage({
       }
     }
   }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, unreadOnly]);
+  useEffect(() => {
+    const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
+    if (!sharedInboxID) return;
+    if (sharedInboxIDForHomeView(activeViewID) !== sharedInboxID || mailbox !== "primary") return;
+    const folder = sharedInboxes.find((item) => item.folder_id === sharedInboxID || item.shared_inbox_id === sharedInboxID);
+    if (!folder || folder.entry_type !== "shared_inbox" || !(folder.account_email ?? "").trim()) return;
+    setPendingSharedInboxMessageRefreshID("");
+    invalidateCommunicationsCache({ folders: true, messagePages: true, messages: true });
+    void loadFolders();
+    void loadMessages({ refresh: true });
+  }, [activeViewID, loadFolders, loadMessages, mailbox, pendingSharedInboxMessageRefreshID, sharedInboxes]);
   const appendPrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): string | null => {
     const prefetched = prefetchedMessagePageRef.current;
     if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
@@ -1770,6 +1782,7 @@ export function HomePage({
       setPendingSharedOAuthSharedInboxID("");
       setPendingSharedOAuthAccountEmail("");
       selectHomeView(viewID, mailboxForHomeView(viewID));
+      setPendingSharedInboxMessageRefreshID(folder.folder_id);
       return;
     }
     const accountEmail = pendingSharedOAuthAccountEmail.trim().toLowerCase();
@@ -1779,6 +1792,7 @@ export function HomePage({
     const viewID = `shared:${folder.folder_id}` as HomeViewID;
     setPendingSharedOAuthAccountEmail("");
     selectHomeView(viewID, mailboxForHomeView(viewID));
+    setPendingSharedInboxMessageRefreshID(folder.folder_id);
   }, [pendingSharedOAuthAccountEmail, pendingSharedOAuthSharedInboxID, selectHomeView, sharedInboxes]);
   const currentMessageListParams = useCallback(() => ({
     limit: MESSAGE_BATCH_SIZE,
@@ -2143,8 +2157,11 @@ export function HomePage({
         ...previous.filter((item) => item.folder_id !== folder.folder_id),
         folder,
       ]));
-      setActiveViewID(result.viewID ?? `shared:${folder.folder_id}`);
-      selectMailbox("primary");
+      const viewID = result.viewID ?? (`shared:${folder.folder_id}` as HomeViewID);
+      selectHomeView(viewID, "primary");
+      if (folder.entry_type === "shared_inbox" && (folder.account_email ?? "").trim()) {
+        setPendingSharedInboxMessageRefreshID(folder.folder_id);
+      }
       return folder;
     } catch (sharedInboxError) {
       if (accountEmail.trim() && requestSharedInboxEmailConnection(sharedInboxError, accountEmail, { companyID, parentFolderID, name: rawName })) return null;
@@ -2153,7 +2170,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [companyID, requestSharedInboxEmailConnection, selectMailbox]);
+  }, [companyID, requestSharedInboxEmailConnection, selectHomeView]);
 
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
     if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
@@ -2169,13 +2186,17 @@ export function HomePage({
       const folder = result.folder;
       setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
       if (result.notice) setNotice(result.notice);
+      if (folder.entry_type === "shared_inbox" && (folder.account_email ?? "").trim()) {
+        selectHomeView(`shared:${folder.folder_id}` as HomeViewID, "primary");
+        setPendingSharedInboxMessageRefreshID(folder.folder_id);
+      }
     } catch (sharedInboxError) {
       if (requestSharedInboxEmailConnection(sharedInboxError, accountEmail)) return;
       setError(formatError(sharedInboxError, "Failed to update Shared Triage email"));
     } finally {
       setBusy("");
     }
-  }, [companyID, requestSharedInboxEmailConnection, sharedInboxes]);
+  }, [companyID, requestSharedInboxEmailConnection, selectHomeView, sharedInboxes]);
 
   const assignActiveSharedInboxEmail = useCallback(() => {
     if (!activeSharedInbox) return;
