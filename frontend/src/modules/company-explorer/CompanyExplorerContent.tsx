@@ -3292,19 +3292,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const scrollbarAccent = theme === "light" ? LIGHT_EXPLORER_CYAN_ACCENT : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(71, 85, 105, 0.08)";
   const elevatedExplorerControls = useParentScroll && theme === "light" && !hideTopControls;
-  const explorerMenuButtonStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    width: "100%",
-    padding: "9px 14px",
-    border: "none",
-    background: "transparent",
-    cursor: "pointer",
-    fontFamily: "var(--mango-font-family)",
-    fontSize: 12,
-    fontWeight: 700,
-    textAlign: "left",
-  };
   const scopeToggleStyle: React.CSSProperties = {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
@@ -3416,7 +3403,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
       <CompanyExplorerContextMenu
         menu={explorerContextMenu}
-        buttonStyle={explorerMenuButtonStyle}
         onClose={() => setExplorerContextMenu(null)}
         onCreateFolder={(folderKind, parentFolderID, position, scopeType, scopeID) => {
           void createFolder(folderKind, parentFolderID, position, scopeType, scopeID);
