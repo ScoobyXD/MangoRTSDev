@@ -82,6 +82,8 @@
     "../modules/company-explorer/explorerSync.test.ts",
     "../../../frontend/src/modules/company-explorer/treePresentation.ts",
     "../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.ts",
+    "../../../frontend/src/modules/company-explorer/companyExplorerRaciVisibility.ts",
+    "../modules/company-explorer/companyExplorerRaciVisibility.test.ts",
     "../modules/company-explorer/treePresentation.test.ts",
     "../../../frontend/src/modules/folders/companyExplorerFolders.ts",
     "../modules/folders/companyExplorerFolders.test.ts",

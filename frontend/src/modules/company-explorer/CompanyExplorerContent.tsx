@@ -71,6 +71,7 @@ import {
   type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
 import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, type CompanyExplorerLazyParentType, type CompanyExplorerLazyScope } from "./companyExplorerLazyApi";
+import { shouldIncludeRaciCustomRootFolder, shouldShowRaciCompanyScopedFolderShell } from "./companyExplorerRaciVisibility";
 
 const scopedRootCreationKeys = new Set<string>();
 const raciVisualRootCreationKeys = new Set<string>();
@@ -736,9 +737,14 @@ function buildRaciCompanyExplorerRows(input: {
         if (requestedOwnerIDs.has(rootScopeID)) customRootFolderIDs.add(rootID);
         continue;
       }
-      if (rootScopeType === "team" && rootScopeID) continue;
-      const hasRequestedOwner = [...ownerIDs].some((ownerID) => requestedOwnerIDs.has(ownerID));
-      if (hasRequestedOwner) customRootFolderIDs.add(rootID);
+      if (shouldIncludeRaciCustomRootFolder({
+        rootScopeType,
+        rootScopeID,
+        ownerUserIDs: ownerIDs,
+        requestedOwnerUserIDs: requestedOwnerIDs,
+      })) {
+        customRootFolderIDs.add(rootID);
+      }
     }
   }
 
@@ -837,7 +843,8 @@ function buildRaciCompanyExplorerRows(input: {
   ): boolean {
     if (folderMatchesCurrentRaciUserScope(folder)) return true;
     if (folder.scope_type === "user" || folder.scope_type === "team") return false;
-    return visualFolderHasRaciVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID);
+    return shouldShowRaciCompanyScopedFolderShell(folder.scope_type)
+      || visualFolderHasRaciVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID);
   }
 
   const pushVisualLogicGateBranch = (
