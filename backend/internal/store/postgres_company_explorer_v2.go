@@ -306,8 +306,15 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 		positionExpr = "coalesce(user_group.position, 1000)"
 	}
 	rows, err := r.db.QueryContext(ctx, `
+with v2_root_args as (
+  select $2::text as view,
+         $3::uuid as scope_user_id,
+         $5::uuid as parent_entity_id,
+         $6::text as access_level
+)
 select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", positionExpr, "entity.created_timestamp", "entity.updated_timestamp")+`
 from company_explorer_entities entity
+cross join v2_root_args
 `+companyExplorerV2Joins("entity")+`
 where entity.company_id=$1::uuid
   and `+whereClause+`
