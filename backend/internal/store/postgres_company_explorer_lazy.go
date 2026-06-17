@@ -109,6 +109,7 @@ scope_users as (
 func companyExplorerLazyFolderScopePredicate(alias string) string {
 	return `(
     $2::text='all'
+    or coalesce(` + alias + `.scope_type, 'company')='company'
     or (
       $2::text='me'
       and coalesce(` + alias + `.scope_type, 'company')='user'
@@ -120,6 +121,27 @@ func companyExplorerLazyFolderScopePredicate(alias string) string {
         (coalesce(` + alias + `.scope_type, 'company')='team' and ` + alias + `.scope_id in (select group_id from scope_groups))
         or (coalesce(` + alias + `.scope_type, 'company')='user' and ` + alias + `.scope_id in (select user_id from scope_users))
       )
+    )
+  )`
+}
+
+func companyExplorerLazyNodeScopePredicate(alias string) string {
+	return `(
+    $2::text='all'
+    or ($2::text='me' and ` + alias + `.assignee_user_id=$3::uuid)
+    or ($2::text='team' and ` + alias + `.assignee_user_id in (select user_id from scope_users))
+    or exists (
+      select 1
+      from node_logic_gate_assignments node_gate
+      join logic_gate_raci_assignments assignment
+        on assignment.company_id=node_gate.company_id
+       and assignment.logic_gate_id=node_gate.logic_gate_id
+      where node_gate.company_id=` + alias + `.company_id
+        and node_gate.node_id=` + alias + `.node_id
+        and (
+          ($2::text='me' and assignment.user_id=$3::uuid)
+          or ($2::text='team' and assignment.user_id in (select user_id from scope_users))
+        )
     )
   )`
 }
@@ -137,20 +159,48 @@ func companyExplorerLazyLogicGateScopePredicate(alias string) string {
           or ($2::text='team' and assignment.user_id in (select user_id from scope_users))
         )
     )
-    or exists (
-      select 1
-      from company_explorer_folder_items item
-      join company_explorer_folders folder
-        on folder.company_id=item.company_id
-       and folder.folder_id=item.folder_id
-      where item.company_id=` + alias + `.company_id
-        and item.item_type='logic_gate'
-        and item.item_id=` + alias + `.logic_gate_id::text
-        and folder.folder_kind <> 'communications'
-        and (folder.system_key is null or folder.system_key <> 'kanban_boards')
-        and ` + companyExplorerLazyFolderScopePredicate("folder") + `
-        and ($4::uuid is null or mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $4::uuid, $6::text))
+  )`
+}
+
+func companyExplorerLazyProjectScopePredicate(alias string) string {
+	return `(
+    $2::text='all'
+    or (
+      $2::text='team'
+      and exists (
+        select 1
+        from project_team_assignments assignment
+        where assignment.company_id=` + alias + `.company_id
+          and assignment.project_id=` + alias + `.project_id
+          and assignment.team_id in (select group_id from scope_groups)
+      )
     )
+  )`
+}
+
+func companyExplorerLazyFolderItemScopePredicate(alias string) string {
+	return `(
+    (` + alias + `.item_type='node' and exists (
+      select 1
+      from nodes n
+      where n.company_id=` + alias + `.company_id
+        and n.node_id=` + alias + `.item_id::uuid
+        and ` + companyExplorerLazyNodeScopePredicate("n") + `
+    ))
+    or (` + alias + `.item_type='logic_gate' and exists (
+      select 1
+      from logic_gates gate
+      where gate.company_id=` + alias + `.company_id
+        and gate.logic_gate_id=` + alias + `.item_id::uuid
+        and ` + companyExplorerLazyLogicGateScopePredicate("gate") + `
+    ))
+    or (` + alias + `.item_type='project' and exists (
+      select 1
+      from projects project
+      where project.company_id=` + alias + `.company_id
+        and project.project_id=` + alias + `.item_id::uuid
+        and ` + companyExplorerLazyProjectScopePredicate("project") + `
+    ))
   )`
 }
 
@@ -215,6 +265,7 @@ where item.company_id=$1::uuid
   and item.item_type <> 'kanban'
   and folder.folder_kind <> 'communications'
   and `+companyExplorerLazyFolderScopePredicate("folder")+`
+  and `+companyExplorerLazyFolderItemScopePredicate("item")+`
   and (
     $4::uuid is null
     or (
@@ -267,11 +318,7 @@ where n.company_id=$1::uuid
       and item.item_id=n.node_id::text
   )
   and ($4::uuid is null or mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $4::uuid, $6::text))
-  and (
-    $2::text='all'
-    or ($2::text='me' and n.assignee_user_id=$3::uuid)
-    or ($2::text='team' and n.assignee_user_id in (select user_id from scope_users))
-  )
+  and `+companyExplorerLazyNodeScopePredicate("n")+`
 order by n.created_timestamp asc, n.node_id::text asc`, companyExplorerLazyArgs(query)...)
 	if err != nil {
 		return nil, err
@@ -295,6 +342,7 @@ where item.company_id=$1::uuid
   and item.item_type='node'
   and folder.folder_kind <> 'communications'
   and `+companyExplorerLazyFolderScopePredicate("folder")+`
+  and `+companyExplorerLazyNodeScopePredicate("n")+`
   and (
     $4::uuid is null
     or (
@@ -371,6 +419,7 @@ where item.company_id=$1::uuid
   and item.item_type='logic_gate'
   and folder.folder_kind <> 'communications'
   and `+companyExplorerLazyFolderScopePredicate("folder")+`
+  and `+companyExplorerLazyLogicGateScopePredicate("gate")+`
   and (
     $4::uuid is null
     or (
@@ -402,19 +451,7 @@ where project.company_id=$1::uuid
       and item.item_id=project.project_id::text
   )
   and ($4::uuid is null or mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $4::uuid, $6::text))
-  and (
-    $2::text='all'
-    or (
-      $2::text='team'
-      and exists (
-        select 1
-        from project_team_assignments assignment
-        where assignment.company_id=project.company_id
-          and assignment.project_id=project.project_id
-          and assignment.team_id in (select group_id from scope_groups)
-      )
-    )
-  )
+  and `+companyExplorerLazyProjectScopePredicate("project")+`
 order by lower(project.name) asc, project.project_id::text asc`, companyExplorerLazyArgs(query)...)
 	if err != nil {
 		return nil, err
@@ -437,6 +474,7 @@ where item.company_id=$1::uuid
   and item.item_type='project'
   and folder.folder_kind <> 'communications'
   and `+companyExplorerLazyFolderScopePredicate("folder")+`
+  and `+companyExplorerLazyProjectScopePredicate("project")+`
   and (
     $4::uuid is null
     or (

@@ -212,29 +212,34 @@ func (r *MemoryRepo) companyExplorerLazyFolderWithAccessLocked(query CompanyExpl
 
 func (r *MemoryRepo) companyExplorerLazyFolderItemVisibleLocked(query CompanyExplorerLazyRowsQuery, item domain.CompanyExplorerFolderItem) bool {
 	if query.PermissionUserID == "" {
-		return true
+		return r.companyExplorerLazyFolderItemMatchesScopeLocked(query, item)
 	}
-	return r.companyExplorerFolderItemVisibleLocked(query.CompanyID, query.PermissionUserID, item)
+	return r.companyExplorerFolderItemVisibleLocked(query.CompanyID, query.PermissionUserID, item) && r.companyExplorerLazyFolderItemMatchesScopeLocked(query, item)
 }
 
 func (r *MemoryRepo) companyExplorerLazyFolderMatchesScopeLocked(query CompanyExplorerLazyRowsQuery, folder domain.CompanyExplorerFolder) bool {
+	scopeID := companyExplorerFolderScopeID(folder)
 	switch query.Scope {
 	case CompanyExplorerLazyScopeAll:
 		return true
 	case CompanyExplorerLazyScopeMe:
-		scopeID := companyExplorerFolderScopeID(folder)
-		return companyExplorerFolderScopeType(folder) == CompanyExplorerFolderScopeUser && scopeID != nil && *scopeID == query.ScopeUserID
-	case CompanyExplorerLazyScopeTeam:
-		scopeID := companyExplorerFolderScopeID(folder)
-		if scopeID == nil {
+		switch companyExplorerFolderScopeType(folder) {
+		case CompanyExplorerFolderScopeCompany:
+			return true
+		case CompanyExplorerFolderScopeUser:
+			return scopeID != nil && *scopeID == query.ScopeUserID
+		default:
 			return false
 		}
+	case CompanyExplorerLazyScopeTeam:
 		teamUsers, teamGroups := r.companyExplorerLazyTeamScopeLocked(query.CompanyID, query.ScopeUserID)
 		switch companyExplorerFolderScopeType(folder) {
+		case CompanyExplorerFolderScopeCompany:
+			return true
 		case CompanyExplorerFolderScopeUser:
-			return teamUsers[*scopeID]
+			return scopeID != nil && teamUsers[*scopeID]
 		case CompanyExplorerFolderScopeTeam:
-			return teamGroups[*scopeID]
+			return scopeID != nil && teamGroups[*scopeID]
 		default:
 			return false
 		}
@@ -248,10 +253,40 @@ func (r *MemoryRepo) companyExplorerLazyNodeMatchesScopeLocked(query CompanyExpl
 	case CompanyExplorerLazyScopeAll:
 		return true
 	case CompanyExplorerLazyScopeMe:
-		return node.AssigneeUserID != nil && *node.AssigneeUserID == query.ScopeUserID
+		if node.AssigneeUserID != nil && *node.AssigneeUserID == query.ScopeUserID {
+			return true
+		}
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == query.CompanyID && assignment.NodeID == node.NodeID && r.companyExplorerLazyLogicGateMatchesScopeLocked(query, assignment.LogicGateID) {
+				return true
+			}
+		}
+		return false
 	case CompanyExplorerLazyScopeTeam:
 		teamUsers, _ := r.companyExplorerLazyTeamScopeLocked(query.CompanyID, query.ScopeUserID)
-		return node.AssigneeUserID != nil && teamUsers[*node.AssigneeUserID]
+		if node.AssigneeUserID != nil && teamUsers[*node.AssigneeUserID] {
+			return true
+		}
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == query.CompanyID && assignment.NodeID == node.NodeID && r.companyExplorerLazyLogicGateMatchesScopeLocked(query, assignment.LogicGateID) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (r *MemoryRepo) companyExplorerLazyFolderItemMatchesScopeLocked(query CompanyExplorerLazyRowsQuery, item domain.CompanyExplorerFolderItem) bool {
+	switch item.ItemType {
+	case EntityTypeNode:
+		node, ok := r.nodes[key(query.CompanyID, item.ItemID)]
+		return ok && r.companyExplorerLazyNodeMatchesScopeLocked(query, node)
+	case EntityTypeLogicGate:
+		return r.companyExplorerLazyLogicGateMatchesScopeLocked(query, item.ItemID)
+	case EntityTypeProject:
+		return r.companyExplorerLazyProjectMatchesScopeLocked(query, item.ItemID)
 	default:
 		return false
 	}
@@ -282,19 +317,7 @@ func (r *MemoryRepo) companyExplorerLazyLogicGateMatchesScopeLocked(query Compan
 }
 
 func (r *MemoryRepo) companyExplorerLazyLogicGateVisibleLocked(query CompanyExplorerLazyRowsQuery, logicGateID string) bool {
-	if r.companyExplorerLazyLogicGateMatchesScopeLocked(query, logicGateID) {
-		return true
-	}
-	for _, item := range r.folderItems {
-		if item.CompanyID != query.CompanyID || item.ItemType != EntityTypeLogicGate || item.ItemID != logicGateID {
-			continue
-		}
-		folder, ok := r.folders[key(query.CompanyID, item.FolderID)]
-		if ok && r.companyExplorerLazyFolderIncludedLocked(query, folder) {
-			return true
-		}
-	}
-	return false
+	return r.companyExplorerLazyLogicGateMatchesScopeLocked(query, logicGateID)
 }
 
 func (r *MemoryRepo) companyExplorerLazyProjectMatchesScopeLocked(query CompanyExplorerLazyRowsQuery, projectID string) bool {

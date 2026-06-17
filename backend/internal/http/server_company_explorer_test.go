@@ -1560,7 +1560,18 @@ func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) 
 	userBFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "User B folder", store.CompanyExplorerFolderScopeUser, userB.UserID)
 	teamFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "Team folder", store.CompanyExplorerFolderScopeTeam, group.GroupID)
 	allFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "All folder", store.CompanyExplorerFolderScopeCompany, "")
+	responsibleRoot := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "Responsible", store.CompanyExplorerFolderScopeCompany, "")
+	nestedResponsible, err := repo.CreateCompanyExplorerFolder(companyID, responsibleRoot.FolderID, "logic_gate", "Nested Responsible Custom")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder nested responsible error = %v", err)
+	}
 	hiddenFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "Hidden folder", store.CompanyExplorerFolderScopeCompany, "")
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, allFolder.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem gate A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, allFolder.FolderID, "logic_gate", gateB.LogicGateID, 2000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem gate B error = %v", err)
+	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
 		EntityType:       store.EntityTypeCompanyExplorerFolder,
@@ -1573,20 +1584,33 @@ func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) 
 
 	meRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "me", userA.UserID)
 	meFolders := companyExplorerLazyFolderIDSet(meRows)
-	if !meFolders[userAFolder.FolderID] || meFolders[userBFolder.FolderID] || meFolders[teamFolder.FolderID] || meFolders[allFolder.FolderID] || meFolders[hiddenFolder.FolderID] {
-		t.Fatalf("me scoped folders = %v, want only user A scoped folder", meFolders)
+	if !meFolders[userAFolder.FolderID] || !meFolders[allFolder.FolderID] || !meFolders[responsibleRoot.FolderID] || meFolders[userBFolder.FolderID] || meFolders[teamFolder.FolderID] || meFolders[hiddenFolder.FolderID] {
+		t.Fatalf("me scoped folders = %v, want user A and visible company-scoped folder shells only", meFolders)
 	}
 
 	teamRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "team", userA.UserID)
 	teamFolders := companyExplorerLazyFolderIDSet(teamRows)
-	if !teamFolders[userAFolder.FolderID] || !teamFolders[userBFolder.FolderID] || !teamFolders[teamFolder.FolderID] || teamFolders[allFolder.FolderID] || teamFolders[hiddenFolder.FolderID] {
-		t.Fatalf("team scoped folders = %v, want team/user scoped visible folders only", teamFolders)
+	if !teamFolders[userAFolder.FolderID] || !teamFolders[userBFolder.FolderID] || !teamFolders[teamFolder.FolderID] || !teamFolders[allFolder.FolderID] || !teamFolders[responsibleRoot.FolderID] || teamFolders[hiddenFolder.FolderID] {
+		t.Fatalf("team scoped folders = %v, want team/user and visible company-scoped folder shells only", teamFolders)
 	}
 
 	allRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "all", userA.UserID)
 	allFolders := companyExplorerLazyFolderIDSet(allRows)
-	if !allFolders[userAFolder.FolderID] || !allFolders[userBFolder.FolderID] || !allFolders[teamFolder.FolderID] || !allFolders[allFolder.FolderID] || allFolders[hiddenFolder.FolderID] {
+	if !allFolders[userAFolder.FolderID] || !allFolders[userBFolder.FolderID] || !allFolders[teamFolder.FolderID] || !allFolders[allFolder.FolderID] || !allFolders[responsibleRoot.FolderID] || allFolders[hiddenFolder.FolderID] {
 		t.Fatalf("all scoped folders = %v, want all visible scoped folders and no hidden folder", allFolders)
+	}
+
+	responsibleChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "folder", responsibleRoot.FolderID)
+	responsibleChildFolders := companyExplorerLazyFolderIDSet(responsibleChildren)
+	if !responsibleChildFolders[nestedResponsible.FolderID] {
+		t.Fatalf("me scoped responsible children = %v, want nested custom folder %s", responsibleChildFolders, nestedResponsible.FolderID)
+	}
+
+	allFolderChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "folder", allFolder.FolderID)
+	allFolderItems := companyExplorerLazyFolderItemIDSet(allFolderChildren)
+	allFolderLogicGates := companyExplorerLazyLogicGateIDSet(allFolderChildren)
+	if !allFolderItems[gateA.LogicGateID] || allFolderItems[gateB.LogicGateID] || !allFolderLogicGates[gateA.LogicGateID] || allFolderLogicGates[gateB.LogicGateID] {
+		t.Fatalf("me scoped all-folder gate rows items=%v gates=%v, want only %s", allFolderItems, allFolderLogicGates, gateA.LogicGateID)
 	}
 
 	gateAChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "logic_gate", gateA.LogicGateID)
@@ -1660,6 +1684,14 @@ func companyExplorerLazyNodeIDSet(payload store.CompanyExplorerLazyRows) map[str
 	ids := map[string]bool{}
 	for _, node := range payload.Nodes {
 		ids[node.NodeID] = true
+	}
+	return ids
+}
+
+func companyExplorerLazyLogicGateIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+	ids := map[string]bool{}
+	for _, gate := range payload.LogicGates {
+		ids[gate.LogicGateID] = true
 	}
 	return ids
 }
