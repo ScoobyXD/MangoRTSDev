@@ -242,6 +242,9 @@ type CompanyExplorerRepository interface {
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
+	ListCompanyExplorerRootRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
+	ListCompanyExplorerFolderChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
+	ListCompanyExplorerLogicGateChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
@@ -280,6 +283,28 @@ type CompanyExplorerRepository interface {
 	ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
+}
+
+const (
+	CompanyExplorerLazyScopeMe   = "me"
+	CompanyExplorerLazyScopeTeam = "team"
+	CompanyExplorerLazyScopeAll  = "all"
+)
+
+type CompanyExplorerLazyRowsQuery struct {
+	CompanyID        string
+	Scope            string
+	ScopeUserID      string
+	PermissionUserID string
+	ParentID         string
+}
+
+type CompanyExplorerLazyRows struct {
+	Folders     []domain.CompanyExplorerFolder     `json:"folders"`
+	FolderItems []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	Nodes       []domain.Node                      `json:"nodes"`
+	LogicGates  []domain.LogicGate                 `json:"logic_gates"`
+	Projects    []domain.Project                   `json:"projects"`
 }
 
 type MapLayoutRepository interface {

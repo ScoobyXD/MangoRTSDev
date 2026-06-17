@@ -10,7 +10,6 @@ import { invalidateKanbanBoardListCache, listKanbanBoards, type RacioMatrixProje
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
-import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRaciRole } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
@@ -69,9 +68,9 @@ import {
   shouldInvalidateKanbanBoardListForExplorerEnvelope,
   shouldRefreshCompanyExplorerSnapshotForGap,
   shouldRefreshKanbanBoardsAfterUpdate,
-  type CompanyExplorerSnapshotPayload,
   type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
+import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, type CompanyExplorerLazyParentType, type CompanyExplorerLazyScope } from "./companyExplorerLazyApi";
 
 const scopedRootCreationKeys = new Set<string>();
 const raciVisualRootCreationKeys = new Set<string>();
@@ -84,6 +83,13 @@ type CompanyExplorerRaciFolderRole = LogicGateRaciRole | "other";
 type RaciProjectionCacheEntry = { rows: RacioMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
+
+function companyExplorerLazyScopeForView(scopeView: CompanyExplorerScopeView, scopeViewsEnabled: boolean): CompanyExplorerLazyScope {
+  if (!scopeViewsEnabled) return "all";
+  if (scopeView === "mine") return "me";
+  if (scopeView === "team") return "team";
+  return "all";
+}
 
 const RACI_FOLDER_ROWS = [
   { role: "responsible", label: "Responsible" },
@@ -865,7 +871,7 @@ function buildRaciCompanyExplorerRows(input: {
       scopeLevel: rowDepth(depth),
       position,
       createdTimestamp,
-      hasChildren: nestedNodes.length > 0,
+      hasChildren: true,
       raciRole: role,
       syntheticKind: "logic_gate_children",
     });
@@ -1155,7 +1161,7 @@ function buildRaciCompanyExplorerRows(input: {
         scopeLevel: rowDepth(2),
         position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
-        hasChildren: nestedNodes.length > 0,
+        hasChildren: true,
         raciRole: folder.role,
         syntheticKind: "logic_gate_children",
       });
@@ -1492,41 +1498,68 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const raciProjectionRequestIDRef = useRef(0);
   const raciMultiProjectionRequestIDRef = useRef(0);
   const requestRaciExplorerProjectionRefreshRef = useRef<() => void>(() => undefined);
+  const scopedRootName = scopedRootFolderName.trim();
+  const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
+  const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
+  const scopeViewsEnabled = !hideTopControls && !scopedExplorerActive;
+  const companyExplorerLazyScope = useMemo(
+    () => companyExplorerLazyScopeForView(scopeView, scopeViewsEnabled),
+    [scopeView, scopeViewsEnabled],
+  );
+  const loadedCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
+  const inflightCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
 
-  const applyCompanyExplorerSnapshot = useCallback((snapshot: CompanyExplorerSnapshotPayload) => {
-    dispatchExplorerStore({ type: "applySnapshot", snapshot });
+  const resetCompanyExplorerLazyCache = useCallback(() => {
+    loadedCompanyExplorerBranchesRef.current.clear();
+    inflightCompanyExplorerBranchesRef.current.clear();
   }, []);
+
+  const refreshCompanyExplorerSnapshot = useCallback(async () => {
+    resetCompanyExplorerLazyCache();
+    dispatchExplorerStore({ type: "resetSnapshot" });
+    const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
+    dispatchExplorerStore({ type: "applySnapshot", snapshot });
+    loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
+  }, [apiBase, companyExplorerLazyScope, companyID, resetCompanyExplorerLazyCache]);
+
+  const loadCompanyExplorerChildren = useCallback(async (parentType: CompanyExplorerLazyParentType, parentID: string) => {
+    const cleanParentID = parentID.trim();
+    if (!cleanParentID) return;
+    const branchKey = `${companyExplorerLazyScope}:${parentType}:${cleanParentID}`;
+    if (loadedCompanyExplorerBranchesRef.current.has(branchKey) || inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
+    inflightCompanyExplorerBranchesRef.current.add(branchKey);
+    try {
+      const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, parentType, cleanParentID);
+      dispatchExplorerStore({ type: "mergeSnapshot", snapshot });
+      loadedCompanyExplorerBranchesRef.current.add(branchKey);
+    } finally {
+      inflightCompanyExplorerBranchesRef.current.delete(branchKey);
+    }
+  }, [apiBase, companyExplorerLazyScope, companyID]);
 
   const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (!shouldRefreshCompanyExplorerSnapshotForGap(gap, companyID)) return;
-    void fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer", force: true })
-      .then((result) => {
-        if (result.payload) dispatchExplorerStore({ type: "applySnapshot", snapshot: result.payload as CompanyExplorerSnapshotPayload });
-      })
-      .catch(() => {
-        // The next normal Explorer refresh still goes through the bounded snapshot cache.
-      });
-  }, [apiBase, companyID]);
-
-  const refreshCompanyExplorerSnapshot = useCallback(async () => {
-    const result = await fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer", force: true });
-    if (result.payload) applyCompanyExplorerSnapshot(result.payload as CompanyExplorerSnapshotPayload);
-  }, [apiBase, applyCompanyExplorerSnapshot, companyID]);
+    void refreshCompanyExplorerSnapshot().catch(() => {
+      // Stream recovery is best effort; the next explicit Explorer action can retry the same bounded reads.
+    });
+  }, [companyID, refreshCompanyExplorerSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
+    resetCompanyExplorerLazyCache();
     dispatchExplorerStore({ type: "resetSnapshot" });
     (async () => {
       try {
-        const result = await fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer" });
-        if (cancelled || !result.payload) return;
-        applyCompanyExplorerSnapshot(result.payload as CompanyExplorerSnapshotPayload);
+        const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
+        if (cancelled) return;
+        dispatchExplorerStore({ type: "applySnapshot", snapshot });
+        loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
       } catch {
         // Explorer bootstrap stays independent from map graph snapshots; stream deltas can still catch up.
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyCompanyExplorerSnapshot, companyID]);
+  }, [apiBase, companyExplorerLazyScope, companyID, resetCompanyExplorerLazyCache]);
 
   const refreshKanbanBoards = useCallback(async () => {
     try {
@@ -1576,10 +1609,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       },
     });
   }, [apiBase, companyID, reconcileCompanyExplorerGap]);
-  const scopedRootName = scopedRootFolderName.trim();
-  const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
-  const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
-  const scopeViewsEnabled = !hideTopControls && !scopedExplorerActive;
   useEffect(() => {
     if (!scopeViewsEnabled) return undefined;
     let cancelled = false;
@@ -1885,6 +1914,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   ), [companyGroupSections, companyHistoryRows, companyID, currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, logicGatesByFunctionRows, nodes, projects, raciExplorerActive, raciExplorerData, raciProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
+  useEffect(() => {
+    if (!folderSnapshotLoaded || explorerSearchActive) return;
+    for (const row of baseTreeRows) {
+      if (!effectiveExpanded.has(row.id) && !effectiveExpanded.has("*")) continue;
+      if (row.kind === "folder" && row.folderID) {
+        void loadCompanyExplorerChildren("folder", row.folderID).catch(() => undefined);
+      } else if (row.kind === "logic_gate" && row.logicGateID) {
+        void loadCompanyExplorerChildren("logic_gate", row.logicGateID).catch(() => undefined);
+      }
+    }
+  }, [baseTreeRows, effectiveExpanded, explorerSearchActive, folderSnapshotLoaded, loadCompanyExplorerChildren]);
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
     for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
@@ -2097,7 +2137,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
   useEffect(() => {
-    if (!scopeViewsEnabled || !folderSnapshotLoaded || !companyID) return;
+    if (!scopeViewsEnabled || companyExplorerLazyScope !== "all" || !folderSnapshotLoaded || !companyID) return;
     const missing = RACI_FOLDER_ROWS.find((folder) => !raciVisualRootFolderForRole(folders, folder.role));
     if (!missing) return;
     const creationKey = `${companyID}:${missing.role}`;
@@ -2124,7 +2164,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [apiBase, companyID, folderSnapshotLoaded, folders, requestJSON, scopeViewsEnabled]);
+  }, [apiBase, companyExplorerLazyScope, companyID, folderSnapshotLoaded, folders, requestJSON, scopeViewsEnabled]);
 
   useEffect(() => {
     if (!companyID || !folderSnapshotLoaded || !scopedKind || !scopedRootName || scopedRootFolder) return;

@@ -215,7 +215,7 @@ export function buildCompanyExplorerTreeRows({
           scopeLevel: depth,
           position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
           createdTimestamp: logicGate.created_timestamp,
-          hasChildren: getLogicGateChildNodes(logicGate.logic_gate_id).length > 0,
+          hasChildren: true,
         });
       }
     }
@@ -273,7 +273,7 @@ export function buildCompanyExplorerTreeRows({
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
-            hasChildren: getLogicGateChildNodes(logicGate.logic_gate_id).length > 0,
+            hasChildren: true,
           });
         }
       } else if (item.item_type === "project") {

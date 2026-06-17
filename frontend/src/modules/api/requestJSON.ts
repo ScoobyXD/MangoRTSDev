@@ -193,6 +193,8 @@ function shouldLogBenchmarkRequestTiming(method: string, path: string): boolean 
     cleanPath === "/v1/kanban/columns" ||
     cleanPath === "/v1/kanban/cards" ||
     cleanPath === "/v1/company-explorer/folders" ||
+    cleanPath === "/v1/company-explorer/roots" ||
+    cleanPath === "/v1/company-explorer/children" ||
     cleanPath === "/v1/company-explorer/folder-items" ||
     cleanPath === "/v1/map-layout" ||
     cleanPath === "/v1/nodes" ||
