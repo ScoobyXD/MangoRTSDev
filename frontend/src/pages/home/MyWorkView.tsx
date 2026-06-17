@@ -48,6 +48,10 @@ type ScopePickerRow = {
 };
 
 const SAVED_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.saved_grouping_settings.v1";
+const MY_WORK_INDENT_GUIDE_POSITIONS = [10, 38, 66, 94, 122, 150, 178, 206];
+const MY_WORK_INDENT_GUIDE_BACKGROUND = MY_WORK_INDENT_GUIDE_POSITIONS.map(() => "linear-gradient(to bottom, rgba(100, 116, 139, 0.24), rgba(100, 116, 139, 0.24))").join(", ");
+const MY_WORK_INDENT_GUIDE_POSITION = MY_WORK_INDENT_GUIDE_POSITIONS.map((position) => `${position}px 0`).join(", ");
+const MY_WORK_INDENT_GUIDE_SIZE = MY_WORK_INDENT_GUIDE_POSITIONS.map(() => "1px 100%").join(", ");
 
 export function MyWorkView({
   loading,
@@ -503,30 +507,38 @@ function MyWorkRows({
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
-  const sections = buildLogicGateSections(rows, logicGateByID);
+  const sections = useMemo(() => buildLogicGateSections(rows, logicGateByID), [logicGateByID, rows]);
+  const sectionSignature = useMemo(() => sections.map((section) => `${section.key}:${section.rows.length}`).join("|"), [sections]);
+  const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setCollapsedSectionKeys(new Set());
+  }, [sectionSignature]);
+
+  const toggleSection = useCallback((sectionKey: string) => {
+    setCollapsedSectionKeys((current) => {
+      const next = new Set(current);
+      if (next.has(sectionKey)) next.delete(sectionKey);
+      else next.add(sectionKey);
+      return next;
+    });
+  }, []);
+
   return (
     <div style={rowListStyle}>
-      {sections.map((section) => (
-        <div key={section.key} style={logicGateSectionBlockStyle}>
-          {section.logicGateID ? (
-            <button
-              type="button"
-              style={logicGateSectionRowStyle(depth, true)}
-              onClick={() => onOpenLogicGate(section.logicGateID, section.title)}
-            >
-              <ExplorerRowIcon kind="logic_gate" />
+      {sections.map((section) => {
+        const open = !collapsedSectionKeys.has(section.key);
+        return (
+          <div key={section.key} style={logicGateSectionBlockStyle}>
+            <button type="button" style={logicGateSectionRowStyle(depth)} onClick={() => toggleSection(section.key)}>
+              <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
+              {section.logicGateID ? <ExplorerRowIcon kind="logic_gate" /> : <span style={othersSectionBadgeStyle}>O</span>}
               <span style={workRowTitleTextStyle}>{section.title}</span>
               <span style={groupHeaderCountStyle}>{section.rows.length}</span>
             </button>
-          ) : (
-            <div style={logicGateSectionRowStyle(depth, false)}>
-              <span style={othersSectionBadgeStyle}>O</span>
-              <span style={workRowTitleTextStyle}>{section.title}</span>
-              <span style={groupHeaderCountStyle}>{section.rows.length}</span>
-            </div>
-          )}
-          <div style={logicGateNodeListStyle}>
-            {section.rows.map((row) => {
+            {open && (
+              <div style={logicGateNodeListStyle}>
+                {section.rows.map((row) => {
               const primaryPerson = row.people[0]?.label ?? "Unassigned";
               const status = row.status?.trim() || "No status";
               const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
@@ -556,10 +568,12 @@ function MyWorkRows({
                   <span style={workRowMetaCellStyle}>{dueDate}</span>
                 </button>
               );
-            })}
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -969,6 +983,10 @@ const myWorkListStyle: React.CSSProperties = {
   display: "grid",
   alignContent: "start",
   padding: "2px 16px 32px 0",
+  backgroundImage: MY_WORK_INDENT_GUIDE_BACKGROUND,
+  backgroundPosition: MY_WORK_INDENT_GUIDE_POSITION,
+  backgroundSize: MY_WORK_INDENT_GUIDE_SIZE,
+  backgroundRepeat: "no-repeat",
 };
 
 const myWorkEmptyStyle: React.CSSProperties = {
@@ -1354,23 +1372,25 @@ const logicGateSectionBlockStyle: React.CSSProperties = {
   alignContent: "start",
 };
 
-function logicGateSectionRowStyle(depth: number, clickable: boolean): React.CSSProperties {
+function logicGateSectionRowStyle(depth: number): React.CSSProperties {
   return {
     width: "max-content",
     maxWidth: "min(980px, calc(100% - 16px))",
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "16px minmax(180px, auto) auto",
+    gridTemplateColumns: "14px 16px minmax(180px, auto) auto",
     alignItems: "center",
-    gap: 7,
+    gap: 5,
     marginLeft: depth * 28 + 42,
     border: "none",
-    background: "#ffffff",
+    background: "transparent",
     color: "#111827",
     font: "inherit",
     textAlign: "left",
-    cursor: clickable ? "pointer" : "default",
-    padding: "0 8px",
+    cursor: "pointer",
+    outline: "none",
+    boxShadow: "none",
+    padding: "0 2px",
   };
 }
 
