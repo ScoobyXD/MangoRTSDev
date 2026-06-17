@@ -211,6 +211,38 @@ run("scoped explorer rows render children under a named logic-gate root", () => 
   ]);
 });
 
+run("raw scoped tree rows keep custom folders under default-named parents", () => {
+  const folders = [
+    { company_id: "c", folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Mango RACI Responsible", position: 1000, created_timestamp: "1", updated_timestamp: "1", scope_type: "company" as const },
+    { company_id: "c", folder_id: "custom-a", parent_folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Custom Responsible A", position: 1000, created_timestamp: "2", updated_timestamp: "2", scope_type: "user" as const, scope_id: "user-1" },
+    { company_id: "c", folder_id: "custom-b", parent_folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Custom Responsible B", position: 2000, created_timestamp: "3", updated_timestamp: "3", scope_type: "user" as const, scope_id: "user-1" },
+  ];
+  const rows = buildCompanyExplorerTreeRows({
+    expanded: new Set(["workspace-folder-responsible-root", "workspace-folder-custom-a", "workspace-folder-custom-b"]),
+    nodes: [],
+    logicGates: [
+      { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
+      { company_id: "c", logic_gate_id: "gate-b", node_id: "gate-b", header: "Gate B", title: "Gate B", created_timestamp: "5" },
+    ],
+    projects: [],
+    kanbanBoards: [],
+    folders,
+    folderItems: [
+      { company_id: "c", folder_id: "custom-a", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "6", updated_timestamp: "6" },
+      { company_id: "c", folder_id: "custom-b", item_type: "logic_gate", item_id: "gate-b", position: 1000, created_timestamp: "7", updated_timestamp: "7" },
+    ],
+    rootRowOrder: {},
+  });
+
+  assert.deepEqual(rows.map((row) => [row.id, row.depth, row.kind, row.label]), [
+    ["workspace-folder-responsible-root", 0, "folder", "Mango RACI Responsible"],
+    ["workspace-folder-custom-a", 1, "folder", "Custom Responsible A"],
+    ["logic-gate-gate-a", 2, "logic_gate", "Gate A"],
+    ["workspace-folder-custom-b", 1, "folder", "Custom Responsible B"],
+    ["logic-gate-gate-b", 2, "logic_gate", "Gate B"],
+  ]);
+});
+
 run("custom logic gate rows render assigned nodes when expanded", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-custom", "logic-gate-gate-a"]),
