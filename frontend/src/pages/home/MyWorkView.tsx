@@ -915,10 +915,10 @@ const groupHeaderBadgeStyle: React.CSSProperties = {
   height: 16,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.28)",
-  borderRadius: 4,
-  color: "#475569",
-  background: "#f8fafc",
+  border: "none",
+  borderRadius: 0,
+  color: "#64748b",
+  background: "transparent",
   fontSize: 10,
   lineHeight: 1,
   fontWeight: 850,
@@ -929,7 +929,7 @@ const myWorkShellStyle: React.CSSProperties = {
   height: "100%",
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 12,
+  gap: 6,
   padding: 14,
   background: "#ffffff",
   color: "#111827",
@@ -938,10 +938,8 @@ const myWorkShellStyle: React.CSSProperties = {
 
 const myWorkHeaderStyle: React.CSSProperties = {
   minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: "minmax(180px, 1fr) minmax(280px, auto)",
-  gap: 16,
-  alignItems: "start",
+  minHeight: 34,
+  position: "relative",
 };
 
 const myWorkTitleStackStyle: React.CSSProperties = {
@@ -983,7 +981,10 @@ const myWorkEmptyStyle: React.CSSProperties = {
 };
 
 const groupingPanelStyle: React.CSSProperties = {
-  position: "relative",
+  position: "absolute",
+  top: 0,
+  right: 0,
+  zIndex: 3,
   justifySelf: "end",
   width: "min(430px, 44vw)",
   minWidth: 280,
@@ -1311,16 +1312,18 @@ function groupHeaderStyle(depth: number): React.CSSProperties {
     display: "grid",
     gridTemplateColumns: "14px 16px minmax(0, auto) auto",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     marginLeft: depth * 28,
-    border: "1px solid rgba(15, 23, 42, 0.20)",
-    borderRadius: 5,
-    background: "#ffffff",
+    border: "none",
+    borderRadius: 0,
+    background: "transparent",
     color: "#111827",
     font: "inherit",
     textAlign: "left",
     cursor: "pointer",
-    padding: "0 8px",
+    outline: "none",
+    boxShadow: "none",
+    padding: "0 2px",
   };
 }
 
