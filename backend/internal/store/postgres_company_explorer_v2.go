@@ -419,9 +419,9 @@ order by edge.position asc, edge.created_timestamp asc, name asc, entity.entity_
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, parent CompanyExplorerV2Row) ([]CompanyExplorerV2Row, error) {
 	switch parent.EntityType {
 	case CompanyExplorerV2EntityCompany:
-		return r.queryCompanyExplorerV2DerivedGroups(ctx, query, "user_group.parent_group_id is null", []any{})
+		return r.queryCompanyExplorerV2DerivedGroups(ctx, query, "child_group.parent_group_id is null", []any{})
 	case CompanyExplorerV2EntityUserGroup:
-		items, err := r.queryCompanyExplorerV2DerivedGroups(ctx, query, "user_group.parent_group_id=$7::uuid", []any{parent.ResourceID})
+		items, err := r.queryCompanyExplorerV2DerivedGroups(ctx, query, "child_group.parent_group_id=$7::uuid", []any{parent.ResourceID})
 		if err != nil {
 			return nil, err
 		}
@@ -442,15 +442,15 @@ func (r *PostgresRepo) queryCompanyExplorerV2DerivedChildren(ctx context.Context
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroups(ctx context.Context, query CompanyExplorerV2RowsQuery, groupPredicate string, extraArgs []any) ([]CompanyExplorerV2Row, error) {
 	args := append(companyExplorerV2Args(query), extraArgs...)
 	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
-select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "coalesce(user_group.position, 1000)", "user_group.created_timestamp", "user_group.updated_timestamp")+`
-from company_user_groups user_group
+select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "coalesce(child_group.position, 1000)", "child_group.created_timestamp", "child_group.updated_timestamp")+`
+from company_user_groups child_group
 join company_explorer_entities entity
-  on entity.company_id=user_group.company_id
+  on entity.company_id=child_group.company_id
  and entity.entity_type='user_group'
- and entity.resource_id=user_group.group_id
+ and entity.resource_id=child_group.group_id
 `+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
-where user_group.company_id=$1::uuid
+where child_group.company_id=$1::uuid
   and `+groupPredicate+`
   and not exists (
     select 1

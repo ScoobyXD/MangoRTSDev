@@ -135,3 +135,28 @@ func TestPostgresCompanyExplorerV2RowsQueriesTypeSharedPlaceholders(t *testing.T
 		}
 	}
 }
+
+func TestPostgresCompanyExplorerV2DerivedGroupsDoNotReuseCommonJoinAlias(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	source := string(raw)
+	derivedSwitcher := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerV2DerivedChildren")
+	derivedGroups := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroups")
+	normalizedSwitcher := strings.ToLower(strings.Join(strings.Fields(derivedSwitcher), " "))
+	normalizedGroups := strings.ToLower(strings.Join(strings.Fields(derivedGroups), " "))
+	if strings.Contains(normalizedGroups, "from company_user_groups user_group") {
+		t.Fatal("derived group query must not reuse the common display join alias user_group")
+	}
+	for _, needle := range []string{
+		"from company_user_groups child_group",
+		"coalesce(child_group.position, 1000)",
+		"child_group.parent_group_id is null",
+		"child_group.parent_group_id=$7::uuid",
+	} {
+		if !strings.Contains(normalizedGroups, needle) && !strings.Contains(normalizedSwitcher, needle) {
+			t.Fatalf("derived group query should use child_group alias for %q", needle)
+		}
+	}
+}
