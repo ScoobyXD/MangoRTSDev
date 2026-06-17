@@ -76,3 +76,18 @@ func TestPostgresCompanyExplorerLazyScopeCTETypesUnusedRootParameters(t *testing
 		}
 	}
 }
+
+func TestPostgresCompanyExplorerV2NativeNodeHydrationUsesNodeSchemaColumns(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) ensureCompanyExplorerV2NativeEntities")
+	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	if strings.Contains(normalized, "node.updated_timestamp") {
+		t.Fatal("nodes table has no updated_timestamp column; V2 native hydration must use node.created_timestamp")
+	}
+	if !strings.Contains(normalized, "node.title, null, node.created_timestamp, node.created_timestamp") {
+		t.Fatal("V2 native node hydration should map both entity timestamps from node.created_timestamp")
+	}
+}
