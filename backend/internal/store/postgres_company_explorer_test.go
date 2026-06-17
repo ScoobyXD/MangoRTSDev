@@ -92,13 +92,21 @@ func TestPostgresCompanyExplorerV2NativeNodeHydrationUsesNodeSchemaColumns(t *te
 	}
 }
 
-func TestPostgresCompanyExplorerV2RootRowsTypesSharedPlaceholders(t *testing.T) {
+func TestPostgresCompanyExplorerV2RowsQueriesTypeSharedPlaceholders(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
 	}
-	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) ListCompanyExplorerV2RootRows")
-	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	source := string(raw)
+	start := strings.Index(source, "const companyExplorerV2TypedArgsCTE =")
+	if start < 0 {
+		t.Fatal("companyExplorerV2TypedArgsCTE not found")
+	}
+	end := strings.Index(source[start:], "func companyExplorerV2AccessPredicate")
+	if end < 0 {
+		t.Fatal("companyExplorerV2TypedArgsCTE end not found")
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(source[start:start+end]), " "))
 	for _, needle := range []string{
 		"$2::text as view",
 		"$3::uuid as scope_user_id",
@@ -106,7 +114,24 @@ func TestPostgresCompanyExplorerV2RootRowsTypesSharedPlaceholders(t *testing.T) 
 		"$6::text as access_level",
 	} {
 		if !strings.Contains(normalized, needle) {
-			t.Fatalf("V2 root rows query must type shared placeholder %q", needle)
+			t.Fatalf("V2 rows queries must type shared placeholder %q", needle)
+		}
+	}
+	for _, functionName := range []string{
+		"func (r *PostgresRepo) ListCompanyExplorerV2RootRows",
+		"func (r *PostgresRepo) getCompanyExplorerV2Parent",
+		"func (r *PostgresRepo) queryCompanyExplorerV2StoredChildren",
+		"func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroups",
+		"func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroupUsers",
+		"func (r *PostgresRepo) queryCompanyExplorerV2DerivedProjectChildren",
+		"func (r *PostgresRepo) queryCompanyExplorerV2DerivedLogicGateNodes",
+		"func (r *PostgresRepo) UpsertCompanyExplorerV2Edge",
+		"func (r *PostgresRepo) companyExplorerV2RowByEdge",
+	} {
+		body := extractFunctionSourceForTest(t, source, functionName)
+		normalizedBody := strings.ToLower(strings.Join(strings.Fields(body), " "))
+		if strings.Contains(normalizedBody, "companyexplorerv2args(") && !strings.Contains(normalizedBody, "companyexplorerv2typedargscte") {
+			t.Fatalf("%s uses companyExplorerV2Args without typing shared placeholders", functionName)
 		}
 	}
 }
