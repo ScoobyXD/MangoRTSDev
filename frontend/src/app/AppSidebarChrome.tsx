@@ -91,7 +91,7 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "views";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | `shared:${string}`;
+export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type RaciHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
@@ -1214,6 +1214,12 @@ export function AppSidebar({
           <span style={appSidebarCustomViewPlusStyle}>+</span>
           <span style={appSidebarTextStyle}>Custom View</span>
         </button>
+        <AppSidebarButton
+          label="My Work"
+          active={homeActive && activeHomeView === "my-work"}
+          elevated
+          onClick={() => onHomeViewSelect("my-work")}
+        />
         {notificationMenu && (
           <div style={appSidebarNotificationPopoverOverlayStyle(notificationMenu.anchorTop)}>
             <NotificationPopover
