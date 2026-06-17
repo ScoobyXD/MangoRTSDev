@@ -48,10 +48,6 @@ type ScopePickerRow = {
 };
 
 const SAVED_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.saved_grouping_settings.v1";
-const MY_WORK_INDENT_GUIDE_POSITIONS = [10, 38, 66, 94, 122, 150, 178, 206];
-const MY_WORK_INDENT_GUIDE_BACKGROUND = MY_WORK_INDENT_GUIDE_POSITIONS.map(() => "linear-gradient(to bottom, rgba(100, 116, 139, 0.24), rgba(100, 116, 139, 0.24))").join(", ");
-const MY_WORK_INDENT_GUIDE_POSITION = MY_WORK_INDENT_GUIDE_POSITIONS.map((position) => `${position}px 0`).join(", ");
-const MY_WORK_INDENT_GUIDE_SIZE = MY_WORK_INDENT_GUIDE_POSITIONS.map(() => "1px 100%").join(", ");
 
 export function MyWorkView({
   loading,
@@ -983,10 +979,6 @@ const myWorkListStyle: React.CSSProperties = {
   display: "grid",
   alignContent: "start",
   padding: "2px 16px 32px 0",
-  backgroundImage: MY_WORK_INDENT_GUIDE_BACKGROUND,
-  backgroundPosition: MY_WORK_INDENT_GUIDE_POSITION,
-  backgroundSize: MY_WORK_INDENT_GUIDE_SIZE,
-  backgroundRepeat: "no-repeat",
 };
 
 const myWorkEmptyStyle: React.CSSProperties = {
