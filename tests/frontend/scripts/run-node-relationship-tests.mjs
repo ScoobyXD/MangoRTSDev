@@ -36,6 +36,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeInlineComments.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerStore.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerRaciVisibility.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/companyExplorerFolders.test.js"),
