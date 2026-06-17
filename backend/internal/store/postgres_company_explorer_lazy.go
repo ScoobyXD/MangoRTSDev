@@ -113,13 +113,13 @@ func companyExplorerLazyFolderScopePredicate(alias string) string {
     or (
       $2::text='me'
       and coalesce(` + alias + `.scope_type, 'company')='user'
-      and ` + alias + `.scope_id=$3::uuid
+      and ` + alias + `.scope_id=$3::text
     )
     or (
       $2::text='team'
       and (
-        (coalesce(` + alias + `.scope_type, 'company')='team' and ` + alias + `.scope_id in (select group_id from scope_groups))
-        or (coalesce(` + alias + `.scope_type, 'company')='user' and ` + alias + `.scope_id in (select user_id from scope_users))
+        (coalesce(` + alias + `.scope_type, 'company')='team' and ` + alias + `.scope_id in (select group_id::text from scope_groups))
+        or (coalesce(` + alias + `.scope_type, 'company')='user' and ` + alias + `.scope_id in (select user_id::text from scope_users))
       )
     )
   )`
