@@ -1,0 +1,1316 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { NodeRecord } from "../../modules/node-map/shared";
+import { cleanIDList, logicGateTitle, nodeTitle } from "./homeUtils";
+import {
+  DEFAULT_MY_WORK_GROUPINGS,
+  MY_WORK_GROUPING_FIELDS,
+  buildNestedGroups,
+  computeDefaultExpandedGroupIDs,
+  defaultMyWorkSelectedScope,
+  myWorkGroupingFieldLabel,
+  myWorkNodeIsActive,
+  normalizeMyWorkGroupingStack,
+  normalizeMyWorkSavedGroupingSettings,
+  priorityLabel,
+  sortMyWorkRows,
+  type MyWorkGroupingField,
+  type MyWorkGroupingSetting,
+  type MyWorkNestedGroup,
+  type MyWorkResourceRow,
+  type MyWorkSavedGroupingSetting,
+  type MyWorkScopeLevel,
+  type MyWorkSelectedScope,
+} from "./myWorkGrouping";
+
+type MyWorkViewProps = {
+  loading: boolean;
+  companyID: string;
+  currentUserID: string;
+  nodes: NodeRecord[];
+  logicGates: LogicGateRecord[];
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  companyUserGroupMembers: CompanyUserGroupMember[];
+  onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+};
+
+type ScopePickerRow = {
+  key: string;
+  depth: number;
+  label: string;
+  detail: string;
+  icon: "company" | "group" | "user";
+  scope: MyWorkSelectedScope;
+};
+
+const SAVED_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.saved_grouping_settings.v1";
+
+export function MyWorkView({
+  loading,
+  companyID,
+  currentUserID,
+  nodes,
+  logicGates,
+  companyUsers,
+  companyUserGroups,
+  companyUserGroupMembers,
+  onOpenNode,
+  onOpenLogicGate,
+}: MyWorkViewProps) {
+  const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
+  const groupByID = useMemo(() => new Map(companyUserGroups.map((group) => [group.group_id.trim(), group])), [companyUserGroups]);
+  const membersByGroupID = useMemo(() => {
+    const out = new Map<string, CompanyUserGroupMember[]>();
+    for (const member of companyUserGroupMembers) {
+      const groupID = member.group_id.trim();
+      if (!groupID) continue;
+      const list = out.get(groupID) ?? [];
+      list.push(member);
+      out.set(groupID, list);
+    }
+    for (const list of out.values()) list.sort((a, b) => userLabel(userByID.get(a.user_id), a.user_id).localeCompare(userLabel(userByID.get(b.user_id), b.user_id), undefined, { numeric: true, sensitivity: "base" }));
+    return out;
+  }, [companyUserGroupMembers, userByID]);
+  const childGroupsByParentID = useMemo(() => {
+    const out = new Map<string, CompanyUserGroup[]>();
+    for (const group of companyUserGroups) {
+      const parentID = group.parent_group_id?.trim() ?? "";
+      const list = out.get(parentID) ?? [];
+      list.push(group);
+      out.set(parentID, list);
+    }
+    for (const list of out.values()) list.sort(sortCompanyUserGroups);
+    return out;
+  }, [companyUserGroups]);
+  const groupIDsByUserID = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const member of companyUserGroupMembers) {
+      const userID = member.user_id.trim();
+      const groupID = member.group_id.trim();
+      if (!userID || !groupID) continue;
+      const list = out.get(userID) ?? [];
+      if (!list.includes(groupID)) list.push(groupID);
+      out.set(userID, list);
+    }
+    return out;
+  }, [companyUserGroupMembers]);
+  const currentUserImmediateGroupID = useMemo(() => {
+    const groups = (groupIDsByUserID.get(currentUserID) ?? [])
+      .map((groupID) => groupByID.get(groupID))
+      .filter((group): group is CompanyUserGroup => Boolean(group))
+      .sort(sortCompanyUserGroups);
+    return groups[0]?.group_id.trim() ?? "";
+  }, [currentUserID, groupByID, groupIDsByUserID]);
+
+  const fallbackSetting = useMemo(() => createDefaultGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
+  const storageKey = useMemo(() => savedGroupingSettingsStorageKey(companyID, currentUserID), [companyID, currentUserID]);
+  const [settings, setSettings] = useState<MyWorkSavedGroupingSetting[]>(() => readSavedGroupingSettings(storageKey, fallbackSetting, currentUserID));
+  const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
+  const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
+  const [addGroupingOpen, setAddGroupingOpen] = useState(false);
+  const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const next = readSavedGroupingSettings(storageKey, fallbackSetting, currentUserID);
+    setSettings(next);
+    setSelectedSettingID(next[0]?.setting_id ?? "");
+  }, [currentUserID, fallbackSetting, storageKey]);
+
+  useEffect(() => {
+    writeSavedGroupingSettings(storageKey, settings);
+  }, [settings, storageKey]);
+
+  useEffect(() => {
+    if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
+    setSelectedSettingID(settings[0]?.setting_id ?? "");
+  }, [selectedSettingID, settings]);
+
+  const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
+
+  const updateSelectedSetting = useCallback((updater: (setting: MyWorkSavedGroupingSetting) => MyWorkSavedGroupingSetting) => {
+    setSettings((current) => current.map((setting) => {
+      if (setting.setting_id !== selectedSetting.setting_id) return setting;
+      const next = updater(setting);
+      return {
+        ...next,
+        groupings: normalizeMyWorkGroupingStack(next.groupings),
+        updated_timestamp: new Date().toISOString(),
+      };
+    }));
+  }, [selectedSetting.setting_id]);
+
+  const defaultScopeForLevel = useCallback((level: MyWorkScopeLevel): MyWorkSelectedScope => {
+    if (level === "me") return defaultMyWorkSelectedScope(currentUserID);
+    if (level === "team") {
+      return currentUserImmediateGroupID
+        ? { level, subject_type: "group", subject_id: currentUserImmediateGroupID }
+        : { level, subject_type: "user", subject_id: currentUserID };
+    }
+    return { level, subject_type: "company", subject_id: "company" };
+  }, [currentUserID, currentUserImmediateGroupID]);
+
+  const selectScopeLevel = useCallback((level: MyWorkScopeLevel) => {
+    if (selectedSetting.selected_scope.level !== level) {
+      const nextScope = defaultScopeForLevel(level);
+      updateSelectedSetting((setting) => ({ ...setting, selected_scope: nextScope }));
+    }
+    setScopeMenuLevel((current) => (current === level ? null : level));
+  }, [defaultScopeForLevel, selectedSetting.selected_scope.level, updateSelectedSetting]);
+
+  const selectScope = useCallback((scope: MyWorkSelectedScope) => {
+    updateSelectedSetting((setting) => ({ ...setting, selected_scope: scope }));
+    setScopeMenuLevel(null);
+  }, [updateSelectedSetting]);
+
+  const addSavedView = useCallback(() => {
+    const now = new Date().toISOString();
+    const nextNumber = settings.length + 1;
+    const setting: MyWorkSavedGroupingSetting = {
+      ...selectedSetting,
+      setting_id: createLocalID(),
+      name: `View ${nextNumber}`,
+      created_timestamp: now,
+      updated_timestamp: now,
+    };
+    setSettings((current) => [...current, setting]);
+    setSelectedSettingID(setting.setting_id);
+  }, [selectedSetting, settings.length]);
+
+  const deleteSavedView = useCallback((settingID: string) => {
+    setSettings((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((setting) => setting.setting_id !== settingID);
+      if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
+      return next;
+    });
+  }, [selectedSettingID]);
+
+  const updateGrouping = useCallback((index: number, grouping: MyWorkGroupingSetting) => {
+    updateSelectedSetting((setting) => ({
+      ...setting,
+      groupings: setting.groupings.map((item, itemIndex) => (itemIndex === index ? grouping : item)),
+    }));
+  }, [updateSelectedSetting]);
+
+  const removeGrouping = useCallback((index: number) => {
+    updateSelectedSetting((setting) => ({
+      ...setting,
+      groupings: setting.groupings.length <= 1 ? setting.groupings : setting.groupings.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }, [updateSelectedSetting]);
+
+  const addGrouping = useCallback((field: MyWorkGroupingField) => {
+    updateSelectedSetting((setting) => ({
+      ...setting,
+      groupings: [...setting.groupings, { field, direction: "asc" }],
+    }));
+    setAddGroupingOpen(false);
+  }, [updateSelectedSetting]);
+
+  const rows = useMemo(() => buildMyWorkRows({
+    nodes,
+    logicGates,
+    userByID,
+    groupByID,
+    groupIDsByUserID,
+  }), [groupByID, groupIDsByUserID, logicGates, nodes, userByID]);
+
+  const visibleRows = useMemo(() => filterRowsForScope(rows, selectedSetting.selected_scope, childGroupsByParentID, membersByGroupID), [childGroupsByParentID, membersByGroupID, rows, selectedSetting.selected_scope]);
+  const nestedGroups = useMemo(() => buildNestedGroups(visibleRows, selectedSetting.groupings), [selectedSetting.groupings, visibleRows]);
+  const groupingSignature = useMemo(() => JSON.stringify({
+    setting: selectedSetting.setting_id,
+    scope: selectedSetting.selected_scope,
+    groupings: selectedSetting.groupings,
+    rows: visibleRows.map((row) => `${row.kind}:${row.id}`).sort(),
+  }), [selectedSetting.groupings, selectedSetting.selected_scope, selectedSetting.setting_id, visibleRows]);
+
+  useEffect(() => {
+    setExpandedGroupIDs(computeDefaultExpandedGroupIDs(nestedGroups));
+  }, [groupingSignature, nestedGroups]);
+
+  const scopeRows = useMemo(() => buildScopePickerRows({
+    level: scopeMenuLevel ?? selectedSetting.selected_scope.level,
+    currentUserID,
+    companyUsers,
+    companyUserGroups,
+    groupByID,
+    membersByGroupID,
+    childGroupsByParentID,
+    currentUserImmediateGroupID,
+  }), [childGroupsByParentID, companyUserGroups, companyUsers, currentUserID, currentUserImmediateGroupID, groupByID, membersByGroupID, scopeMenuLevel, selectedSetting.selected_scope.level]);
+  const scopeLabel = selectedScopeLabel(selectedSetting.selected_scope, userByID, groupByID);
+  const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
+  const addableFields = MY_WORK_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
+
+  return (
+    <section style={myWorkShellStyle}>
+      <div style={myWorkHeaderStyle}>
+        <div style={myWorkTitleStackStyle}>
+          <h2 style={myWorkTitleStyle}>My Work</h2>
+          <div style={myWorkMetaStyle}>
+            {visibleRows.length} active item{visibleRows.length === 1 ? "" : "s"} for {scopeLabel}
+            {loading ? " - Loading" : ""}
+          </div>
+        </div>
+        <GroupingPanel
+          setting={selectedSetting}
+          settings={settings}
+          scopeLabel={scopeLabel}
+          scopeMenuLevel={scopeMenuLevel}
+          scopeRows={scopeRows}
+          addableFields={addableFields}
+          addGroupingOpen={addGroupingOpen}
+          onSelectSetting={setSelectedSettingID}
+          onAddSavedView={addSavedView}
+          onDeleteSavedView={deleteSavedView}
+          onSelectScopeLevel={selectScopeLevel}
+          onSelectScope={selectScope}
+          onToggleCollapsed={() => updateSelectedSetting((setting) => ({ ...setting, panel_collapsed: !setting.panel_collapsed }))}
+          onUpdateGrouping={updateGrouping}
+          onRemoveGrouping={removeGrouping}
+          onSetAddGroupingOpen={setAddGroupingOpen}
+          onAddGrouping={addGrouping}
+        />
+      </div>
+      <div className="mango-home-scroll" style={myWorkListStyle}>
+        {visibleRows.length === 0 && !loading ? (
+          <div style={myWorkEmptyStyle}>No active work for this scope</div>
+        ) : nestedGroups.length > 0 ? (
+          <MyWorkGroupList
+            groups={nestedGroups}
+            expandedGroupIDs={expandedGroupIDs}
+            onToggleGroup={(groupID) => {
+              setExpandedGroupIDs((current) => {
+                const next = new Set(current);
+                if (next.has(groupID)) next.delete(groupID);
+                else next.add(groupID);
+                return next;
+              });
+            }}
+            onOpenNode={onOpenNode}
+            onOpenLogicGate={onOpenLogicGate}
+            nodeByID={new Map(nodes.map((node) => [node.node_id, node]))}
+            logicGateByID={new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]))}
+          />
+        ) : (
+          <MyWorkRows rows={sortMyWorkRows(visibleRows)} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} nodeByID={new Map(nodes.map((node) => [node.node_id, node]))} logicGateByID={new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]))} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GroupingPanel({
+  setting,
+  settings,
+  scopeLabel,
+  scopeMenuLevel,
+  scopeRows,
+  addableFields,
+  addGroupingOpen,
+  onSelectSetting,
+  onAddSavedView,
+  onDeleteSavedView,
+  onSelectScopeLevel,
+  onSelectScope,
+  onToggleCollapsed,
+  onUpdateGrouping,
+  onRemoveGrouping,
+  onSetAddGroupingOpen,
+  onAddGrouping,
+}: {
+  setting: MyWorkSavedGroupingSetting;
+  settings: MyWorkSavedGroupingSetting[];
+  scopeLabel: string;
+  scopeMenuLevel: MyWorkScopeLevel | null;
+  scopeRows: ScopePickerRow[];
+  addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
+  addGroupingOpen: boolean;
+  onSelectSetting: (settingID: string) => void;
+  onAddSavedView: () => void;
+  onDeleteSavedView: (settingID: string) => void;
+  onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
+  onSelectScope: (scope: MyWorkSelectedScope) => void;
+  onToggleCollapsed: () => void;
+  onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
+  onRemoveGrouping: (index: number) => void;
+  onSetAddGroupingOpen: (open: boolean) => void;
+  onAddGrouping: (field: MyWorkGroupingField) => void;
+}) {
+  return (
+    <div style={groupingPanelStyle}>
+      <div style={scopeControlRowStyle}>
+        <div style={scopeTabsStyle}>
+          {(["me", "team", "all"] as const).map((level) => (
+            <button
+              key={level}
+              type="button"
+              style={scopeTabStyle(setting.selected_scope.level === level)}
+              onClick={() => onSelectScopeLevel(level)}
+            >
+              {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
+            </button>
+          ))}
+        </div>
+        <button type="button" title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"} style={collapseButtonStyle} onClick={onToggleCollapsed}>
+          <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
+        </button>
+      </div>
+      <div style={scopeLabelStyle}>{scopeLabel}</div>
+      {scopeMenuLevel && (
+        <div style={scopePickerStyle}>
+          {scopeRows.length === 0 ? (
+            <div style={scopePickerEmptyStyle}>No people or groups</div>
+          ) : scopeRows.map((row) => (
+            <button
+              key={row.key}
+              type="button"
+              style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, setting.selected_scope))}
+              onClick={() => onSelectScope(row.scope)}
+            >
+              <ScopeIcon icon={row.icon} />
+              <span style={scopePickerTextStyle}>
+                <span style={scopePickerLabelStyle}>{row.label}</span>
+                {row.detail && <span style={scopePickerDetailStyle}>{row.detail}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!setting.panel_collapsed && (
+        <div style={groupingBodyStyle}>
+          <div style={savedViewsStyle}>
+            <div style={savedViewsListStyle}>
+              {settings.map((item) => (
+                <div key={item.setting_id} style={savedViewRowStyle(item.setting_id === setting.setting_id)}>
+                  <button type="button" style={savedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
+                    {item.name}
+                  </button>
+                  <button type="button" title="Delete view" style={savedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
+          </div>
+          <div style={groupingStackStyle}>
+            {setting.groupings.map((grouping, index) => (
+              <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
+                <span style={groupingFieldLabelStyle}>{myWorkGroupingFieldLabel(grouping.field)}</span>
+                <button
+                  type="button"
+                  style={groupingDirectionButtonStyle}
+                  onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
+                >
+                  {grouping.direction === "asc" ? "Asc" : "Desc"}
+                </button>
+                <button type="button" title="Remove grouping" style={groupingRemoveButtonStyle} disabled={setting.groupings.length <= 1} onClick={() => onRemoveGrouping(index)}>x</button>
+              </div>
+            ))}
+            <div style={{ position: "relative" }}>
+              <button type="button" style={addGroupingButtonStyle} disabled={addableFields.length === 0} onClick={() => onSetAddGroupingOpen(!addGroupingOpen)}>
+                + Add Grouping
+              </button>
+              {addGroupingOpen && (
+                <div style={addGroupingMenuStyle}>
+                  {addableFields.map((field) => (
+                    <button key={field.value} type="button" style={addGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
+                      {field.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MyWorkGroupList({
+  groups,
+  expandedGroupIDs,
+  onToggleGroup,
+  onOpenNode,
+  onOpenLogicGate,
+  nodeByID,
+  logicGateByID,
+}: {
+  groups: MyWorkNestedGroup[];
+  expandedGroupIDs: Set<string>;
+  onToggleGroup: (groupID: string) => void;
+  onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+  nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
+}) {
+  return (
+    <div style={groupListStyle}>
+      {groups.map((group) => {
+        const open = expandedGroupIDs.has(group.id);
+        const leafRows = group.groups.length === 0 ? group.rows : [];
+        const itemCount = countGroupRows(group);
+        return (
+          <div key={group.id} style={groupBlockStyle}>
+            <button type="button" style={groupHeaderStyle(group.depth)} onClick={() => onToggleGroup(group.id)}>
+              <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
+              <GroupHeaderIcon field={group.field} />
+              <span style={groupHeaderLabelStyle}>{group.label}</span>
+              <span style={groupHeaderCountStyle}>{itemCount}</span>
+            </button>
+            {open && group.groups.length > 0 && (
+              <MyWorkGroupList
+                groups={group.groups}
+                expandedGroupIDs={expandedGroupIDs}
+                onToggleGroup={onToggleGroup}
+                onOpenNode={onOpenNode}
+                onOpenLogicGate={onOpenLogicGate}
+                nodeByID={nodeByID}
+                logicGateByID={logicGateByID}
+              />
+            )}
+            {open && leafRows.length > 0 && (
+              <MyWorkRows rows={leafRows} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MyWorkRows({
+  rows,
+  depth,
+  onOpenNode,
+  onOpenLogicGate,
+  nodeByID,
+  logicGateByID,
+}: {
+  rows: MyWorkResourceRow[];
+  depth: number;
+  onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+  nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
+}) {
+  return (
+    <div style={rowListStyle}>
+      {rows.map((row) => {
+        const primaryPerson = row.people[0]?.label ?? "Unassigned";
+        const status = row.status?.trim() || "No status";
+        const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
+        const dueDate = row.dueDate?.trim() || "No due date";
+        return (
+          <button
+            key={`${row.kind}:${row.id}`}
+            type="button"
+            style={workRowStyle(depth)}
+            onClick={() => {
+              if (row.kind === "node") {
+                const node = nodeByID.get(row.id);
+                if (node) onOpenNode(node);
+              } else {
+                onOpenLogicGate(row.id, logicGateTitle(logicGateByID.get(row.id)));
+              }
+            }}
+          >
+            <span style={workRowTitleCellStyle}>
+              <ExplorerRowIcon kind={row.kind === "node" ? "node" : "logic_gate"} />
+              <span style={workRowTitleTextStyle}>{row.title}</span>
+            </span>
+            <span style={workRowMetaCellStyle}>{row.kind === "node" ? "Node" : "Logic Gate"}</span>
+            <span style={workRowMetaCellStyle}>{primaryPerson}</span>
+            <span style={workRowMetaCellStyle}>{status}</span>
+            <span style={workRowMetaCellStyle}>{priority}</span>
+            <span style={workRowMetaCellStyle}>{dueDate}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildMyWorkRows({
+  nodes,
+  logicGates,
+  userByID,
+  groupByID,
+  groupIDsByUserID,
+}: {
+  nodes: NodeRecord[];
+  logicGates: LogicGateRecord[];
+  userByID: Map<string, CompanyUser>;
+  groupByID: Map<string, CompanyUserGroup>;
+  groupIDsByUserID: Map<string, string[]>;
+}): MyWorkResourceRow[] {
+  const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id.trim(), logicGate]));
+  const activeNodes = nodes.filter((node) => myWorkNodeIsActive(node));
+  const activeNodeLogicGateIDs = new Set(activeNodes.flatMap((node) => cleanIDList(node.logic_gate_ids ?? [])));
+  const rows: MyWorkResourceRow[] = activeNodes.map((node) => {
+    const linkedLogicGates = cleanIDList(node.logic_gate_ids ?? []).map((logicGateID) => logicGateByID.get(logicGateID)).filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate));
+    const assignments = linkedLogicGates.flatMap((logicGate) => logicGate.raci_assignments ?? []);
+    const assigneeID = node.assignee_user_id?.trim() ?? "";
+    const people = assigneeID ? [personForUserID(assigneeID, userByID, node.assignee_name ?? undefined, node.assignee_email ?? undefined)] : peopleFromAssignments(assignments, userByID);
+    const participantUserIDs = uniqueStrings([assigneeID, ...assignments.map((assignment) => assignment.user_id)]);
+    return {
+      kind: "node",
+      id: node.node_id,
+      title: nodeTitle(node),
+      status: node.status,
+      dueDate: node.due_date,
+      priority: node.priority,
+      accounts: node.accounts ?? [],
+      projectLabels: [],
+      people,
+      teams: teamsForUsers(people.map((person) => person.userID), groupIDsByUserID, groupByID),
+      raciRoles: uniqueRaciRoles(assignments.map((assignment) => assignment.role)),
+      participantUserIDs,
+      logicGateLabels: linkedLogicGates.map(logicGateTitle),
+    };
+  });
+
+  for (const logicGate of logicGates) {
+    const logicGateID = logicGate.logic_gate_id.trim();
+    const assignments = logicGate.raci_assignments ?? [];
+    if (!logicGateID || (assignments.length === 0 && !activeNodeLogicGateIDs.has(logicGateID))) continue;
+    const people = peopleFromAssignments(assignments, userByID);
+    const participantUserIDs = uniqueStrings(assignments.map((assignment) => assignment.user_id));
+    rows.push({
+      kind: "logic_gate",
+      id: logicGateID,
+      title: logicGateTitle(logicGate),
+      status: null,
+      dueDate: null,
+      priority: null,
+      accounts: [],
+      projectLabels: [],
+      people,
+      teams: teamsForUsers(people.map((person) => person.userID), groupIDsByUserID, groupByID),
+      raciRoles: uniqueRaciRoles(assignments.map((assignment) => assignment.role)),
+      participantUserIDs,
+      logicGateLabels: [logicGateTitle(logicGate)],
+    });
+  }
+
+  return sortMyWorkRows(rows);
+}
+
+function filterRowsForScope(
+  rows: MyWorkResourceRow[],
+  scope: MyWorkSelectedScope,
+  childGroupsByParentID: Map<string, CompanyUserGroup[]>,
+  membersByGroupID: Map<string, CompanyUserGroupMember[]>,
+): MyWorkResourceRow[] {
+  if (scope.subject_type === "company") return rows;
+  if (scope.subject_type === "user") {
+    const userID = scope.subject_id.trim();
+    if (!userID) return [];
+    return rows.filter((row) => row.participantUserIDs.includes(userID));
+  }
+  const userIDs = userIDsForGroupSubtree(scope.subject_id, childGroupsByParentID, membersByGroupID);
+  if (userIDs.size === 0) return [];
+  return rows.filter((row) => row.participantUserIDs.some((userID) => userIDs.has(userID)));
+}
+
+function buildScopePickerRows({
+  level,
+  currentUserID,
+  companyUsers,
+  companyUserGroups,
+  groupByID,
+  membersByGroupID,
+  childGroupsByParentID,
+  currentUserImmediateGroupID,
+}: {
+  level: MyWorkScopeLevel;
+  currentUserID: string;
+  companyUsers: CompanyUser[];
+  companyUserGroups: CompanyUserGroup[];
+  groupByID: Map<string, CompanyUserGroup>;
+  membersByGroupID: Map<string, CompanyUserGroupMember[]>;
+  childGroupsByParentID: Map<string, CompanyUserGroup[]>;
+  currentUserImmediateGroupID: string;
+}): ScopePickerRow[] {
+  if (level === "me") {
+    const currentUser = companyUsers.find((user) => user.user_id === currentUserID);
+    const users = [currentUser, ...companyUsers.filter((user) => user.user_id !== currentUserID)]
+      .filter((user): user is CompanyUser => Boolean(user))
+      .sort((a, b) => (a.user_id === currentUserID ? -1 : b.user_id === currentUserID ? 1 : userLabel(a, a.user_id).localeCompare(userLabel(b, b.user_id), undefined, { numeric: true, sensitivity: "base" })));
+    return users.map((user) => ({
+      key: `me:user:${user.user_id}`,
+      depth: 0,
+      label: userLabel(user, user.user_id),
+      detail: user.email?.trim() ?? "",
+      icon: "user",
+      scope: { level: "me", subject_type: "user", subject_id: user.user_id },
+    }));
+  }
+
+  const rows: ScopePickerRow[] = [];
+  const appendGroup = (group: CompanyUserGroup, depth: number, scopeLevel: MyWorkScopeLevel, seen: Set<string>) => {
+    const groupID = group.group_id.trim();
+    if (!groupID || seen.has(groupID)) return;
+    seen.add(groupID);
+    rows.push({
+      key: `${scopeLevel}:group:${groupID}`,
+      depth,
+      label: group.name.trim() || groupID,
+      detail: "Group",
+      icon: "group",
+      scope: { level: scopeLevel, subject_type: "group", subject_id: groupID },
+    });
+    for (const child of childGroupsByParentID.get(groupID) ?? []) appendGroup(child, depth + 1, scopeLevel, seen);
+    for (const member of membersByGroupID.get(groupID) ?? []) {
+      rows.push({
+        key: `${scopeLevel}:group:${groupID}:user:${member.user_id}`,
+        depth: depth + 1,
+        label: member.user_display_name?.trim() || userLabel(undefined, member.user_id),
+        detail: member.user_email?.trim() ?? "",
+        icon: "user",
+        scope: { level: scopeLevel, subject_type: "user", subject_id: member.user_id },
+      });
+    }
+  };
+
+  if (level === "team") {
+    const root = groupByID.get(currentUserImmediateGroupID);
+    if (root) appendGroup(root, 0, "team", new Set());
+    if (!root) {
+      const currentUser = companyUsers.find((user) => user.user_id === currentUserID);
+      rows.push({
+        key: `team:user:${currentUserID}`,
+        depth: 0,
+        label: userLabel(currentUser, currentUserID),
+        detail: currentUser?.email?.trim() ?? "",
+        icon: "user",
+        scope: { level: "team", subject_type: "user", subject_id: currentUserID },
+      });
+    }
+    return rows;
+  }
+
+  rows.push({
+    key: "all:company",
+    depth: 0,
+    label: "Company",
+    detail: "All people and groups",
+    icon: "company",
+    scope: { level: "all", subject_type: "company", subject_id: "company" },
+  });
+  const topGroups = childGroupsByParentID.get("") ?? companyUserGroups.filter((group) => !(group.parent_group_id ?? "").trim()).sort(sortCompanyUserGroups);
+  for (const group of topGroups) appendGroup(group, 1, "all", new Set());
+  return rows;
+}
+
+function userIDsForGroupSubtree(
+  groupID: string,
+  childGroupsByParentID: Map<string, CompanyUserGroup[]>,
+  membersByGroupID: Map<string, CompanyUserGroupMember[]>,
+): Set<string> {
+  const out = new Set<string>();
+  const visit = (currentGroupID: string, seen: Set<string>) => {
+    const cleanGroupID = currentGroupID.trim();
+    if (!cleanGroupID || seen.has(cleanGroupID)) return;
+    seen.add(cleanGroupID);
+    for (const member of membersByGroupID.get(cleanGroupID) ?? []) {
+      const userID = member.user_id.trim();
+      if (userID) out.add(userID);
+    }
+    for (const child of childGroupsByParentID.get(cleanGroupID) ?? []) visit(child.group_id, seen);
+  };
+  visit(groupID, new Set());
+  return out;
+}
+
+function peopleFromAssignments(assignments: LogicGateRaciAssignment[], userByID: Map<string, CompanyUser>) {
+  const people = new Map<string, { userID: string; label: string }>();
+  for (const assignment of assignments) {
+    const userID = assignment.user_id.trim();
+    if (!userID || people.has(userID)) continue;
+    people.set(userID, personForUserID(userID, userByID, assignment.user_display_name, assignment.user_email));
+  }
+  return Array.from(people.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function personForUserID(userID: string, userByID: Map<string, CompanyUser>, fallbackName?: string, fallbackEmail?: string) {
+  const user = userByID.get(userID);
+  return {
+    userID,
+    label: userLabel(user, userID, fallbackName, fallbackEmail),
+  };
+}
+
+function teamsForUsers(userIDs: string[], groupIDsByUserID: Map<string, string[]>, groupByID: Map<string, CompanyUserGroup>) {
+  const teams = new Map<string, { groupID: string; label: string }>();
+  for (const userID of userIDs) {
+    for (const groupID of groupIDsByUserID.get(userID) ?? []) {
+      const group = groupByID.get(groupID);
+      const label = group?.name.trim() || groupID;
+      if (groupID && !teams.has(groupID)) teams.set(groupID, { groupID, label });
+    }
+  }
+  return Array.from(teams.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function uniqueRaciRoles(roles: LogicGateRaciRole[]): LogicGateRaciRole[] {
+  const order: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
+  const seen = new Set(roles);
+  return order.filter((role) => seen.has(role));
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim() ?? "").filter(Boolean)));
+}
+
+function selectedScopeLabel(scope: MyWorkSelectedScope, userByID: Map<string, CompanyUser>, groupByID: Map<string, CompanyUserGroup>): string {
+  if (scope.subject_type === "company") return "Company";
+  if (scope.subject_type === "group") {
+    const group = groupByID.get(scope.subject_id);
+    return group?.name.trim() || scope.subject_id || "Group";
+  }
+  if (scope.level === "me" && !scope.subject_id.trim()) return "My view";
+  return userLabel(userByID.get(scope.subject_id), scope.subject_id);
+}
+
+function userLabel(user: CompanyUser | undefined, fallbackID: string, fallbackName = "", fallbackEmail = ""): string {
+  return user?.display_name?.trim() || fallbackName?.trim() || user?.email?.trim() || fallbackEmail?.trim() || fallbackID.trim() || "User";
+}
+
+function sortCompanyUserGroups(left: CompanyUserGroup, right: CompanyUserGroup): number {
+  return left.position - right.position
+    || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
+    || left.group_id.localeCompare(right.group_id);
+}
+
+function createDefaultGroupingSetting(companyID: string, currentUserID: string): MyWorkSavedGroupingSetting {
+  const now = new Date().toISOString();
+  return {
+    setting_id: createLocalID(),
+    company_id: companyID,
+    user_id: currentUserID,
+    surface: "my_work",
+    name: "RACIO Priority Project",
+    selected_scope: defaultMyWorkSelectedScope(currentUserID),
+    groupings: [...DEFAULT_MY_WORK_GROUPINGS],
+    panel_collapsed: false,
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+}
+
+function savedGroupingSettingsStorageKey(companyID: string, userID: string): string {
+  return `${SAVED_GROUPING_SETTINGS_STORAGE_PREFIX}:${companyID.trim() || "company"}:${userID.trim() || "user"}:my_work`;
+}
+
+function readSavedGroupingSettings(storageKey: string, fallback: MyWorkSavedGroupingSetting, currentUserID: string): MyWorkSavedGroupingSetting[] {
+  if (typeof localStorage === "undefined") return [fallback];
+  try {
+    return normalizeMyWorkSavedGroupingSettings(JSON.parse(localStorage.getItem(storageKey) ?? "null"), fallback, currentUserID);
+  } catch {
+    return [fallback];
+  }
+}
+
+function writeSavedGroupingSettings(storageKey: string, settings: MyWorkSavedGroupingSetting[]): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(storageKey, JSON.stringify(settings));
+}
+
+function createLocalID(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `setting-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function scopesEqual(left: MyWorkSelectedScope, right: MyWorkSelectedScope): boolean {
+  return left.level === right.level && left.subject_type === right.subject_type && left.subject_id === right.subject_id;
+}
+
+function countGroupRows(group: MyWorkNestedGroup): number {
+  if (group.groups.length === 0) return group.rows.length;
+  return group.groups.reduce((sum, child) => sum + countGroupRows(child), 0);
+}
+
+function ScopeIcon({ icon }: { icon: ScopePickerRow["icon"] }) {
+  if (icon === "group") return <ExplorerRowIcon kind="folder" />;
+  if (icon === "company") return <ExplorerRowIcon kind="folder" mangoDefaultFolder />;
+  return <ExplorerRowIcon kind="node" />;
+}
+
+function GroupHeaderIcon({ field }: { field: MyWorkGroupingField }) {
+  if (field === "project") return <ExplorerRowIcon kind="project" />;
+  if (field === "racio") return <ExplorerRowIcon kind="logic_gate" />;
+  if (field === "person" || field === "team") return <ExplorerRowIcon kind="folder" mangoDefaultFolder />;
+  return <ExplorerRowIcon kind="folder" />;
+}
+
+const myWorkShellStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  height: "100%",
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 12,
+  padding: 14,
+  background: "#ffffff",
+  color: "#111827",
+  overflow: "hidden",
+};
+
+const myWorkHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "minmax(180px, 1fr) minmax(280px, auto)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const myWorkTitleStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 4,
+};
+
+const myWorkTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#111827",
+  fontSize: 16,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  letterSpacing: 0,
+};
+
+const myWorkMetaStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const myWorkListStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflow: "auto",
+  display: "grid",
+  alignContent: "start",
+  padding: "2px 16px 32px 0",
+};
+
+const myWorkEmptyStyle: React.CSSProperties = {
+  minHeight: 160,
+  display: "grid",
+  placeItems: "center",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const groupingPanelStyle: React.CSSProperties = {
+  position: "relative",
+  justifySelf: "end",
+  width: "min(430px, 44vw)",
+  minWidth: 280,
+  display: "grid",
+  gap: 6,
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.10)",
+  padding: 8,
+};
+
+const scopeControlRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 28px",
+  gap: 6,
+  alignItems: "center",
+};
+
+const scopeTabsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  overflow: "hidden",
+};
+
+function scopeTabStyle(active: boolean): React.CSSProperties {
+  return {
+    minHeight: 28,
+    border: "none",
+    borderRight: "1px solid rgba(15, 23, 42, 0.12)",
+    background: active ? "#e2e8f0" : "#ffffff",
+    color: "#111827",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 800 : 650,
+    cursor: "pointer",
+  };
+}
+
+const collapseButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+};
+
+const scopeLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#475569",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const scopePickerStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 20,
+  top: 43,
+  right: 8,
+  width: "min(360px, 80vw)",
+  maxHeight: 320,
+  overflow: "auto",
+  display: "grid",
+  gap: 1,
+  padding: 6,
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 18px 46px rgba(15, 23, 42, 0.18)",
+};
+
+function scopePickerRowStyle(depth: number, active: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 28,
+    display: "grid",
+    gridTemplateColumns: "16px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 6,
+    border: "1px solid transparent",
+    borderRadius: 5,
+    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+    color: "#111827",
+    font: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+    padding: `3px 7px 3px ${7 + depth * 14}px`,
+  };
+}
+
+const scopePickerTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 1,
+};
+
+const scopePickerLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 750,
+};
+
+const scopePickerDetailStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#64748b",
+  fontSize: 10,
+  fontWeight: 650,
+};
+
+const scopePickerEmptyStyle: React.CSSProperties = {
+  padding: 8,
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const groupingBodyStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "112px minmax(0, 1fr)",
+  gap: 8,
+  minWidth: 0,
+};
+
+const savedViewsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateRows: "minmax(0, 1fr) auto",
+  gap: 6,
+  borderRight: "1px solid rgba(15, 23, 42, 0.12)",
+  paddingRight: 7,
+};
+
+const savedViewsListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 4,
+};
+
+function savedViewRowStyle(active: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 18px",
+    alignItems: "center",
+    borderRadius: 5,
+    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+  };
+}
+
+const savedViewButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 25,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 750,
+  textAlign: "left",
+  cursor: "pointer",
+  padding: "0 6px",
+};
+
+const savedViewDeleteStyle: React.CSSProperties = {
+  width: 18,
+  height: 24,
+  border: "none",
+  background: "transparent",
+  color: "#64748b",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 900,
+  padding: 0,
+};
+
+const newViewButtonStyle: React.CSSProperties = {
+  minHeight: 26,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const groupingStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 5,
+};
+
+function groupingRowStyle(index: number): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: index * 16,
+    border: "1px solid rgba(15, 23, 42, 0.16)",
+    borderRadius: 5,
+    background: "#f8fafc",
+    padding: "0 5px 0 8px",
+  };
+}
+
+const groupingFieldLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const groupingDirectionButtonStyle: React.CSSProperties = {
+  height: 22,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const groupingRemoveButtonStyle: React.CSSProperties = {
+  height: 22,
+  border: "none",
+  background: "transparent",
+  color: "#64748b",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const addGroupingButtonStyle: React.CSSProperties = {
+  minHeight: 28,
+  border: "1px dashed rgba(15, 23, 42, 0.24)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  cursor: "pointer",
+  padding: "0 8px",
+};
+
+const addGroupingMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 22,
+  top: "calc(100% + 4px)",
+  left: 0,
+  width: 180,
+  display: "grid",
+  gap: 2,
+  padding: 5,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
+};
+
+const addGroupingOptionStyle: React.CSSProperties = {
+  minHeight: 27,
+  border: "none",
+  borderRadius: 5,
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  textAlign: "left",
+  cursor: "pointer",
+  padding: "0 7px",
+};
+
+const groupListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 4,
+};
+
+const groupBlockStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 2,
+};
+
+function groupHeaderStyle(depth: number): React.CSSProperties {
+  return {
+    width: "max-content",
+    maxWidth: "100%",
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "14px 16px minmax(0, auto) auto",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: depth * 28,
+    border: "1px solid rgba(15, 23, 42, 0.20)",
+    borderRadius: 5,
+    background: "#ffffff",
+    color: "#111827",
+    font: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+    padding: "0 8px",
+  };
+}
+
+const groupHeaderLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const groupHeaderCountStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const rowListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+};
+
+function workRowStyle(depth: number): React.CSSProperties {
+  return {
+    width: "min(980px, calc(100% - 16px))",
+    minHeight: 34,
+    display: "grid",
+    gridTemplateColumns: "minmax(220px, 1.4fr) 92px minmax(120px, 0.8fr) 92px minmax(126px, 0.9fr) 96px",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: depth * 28 + 42,
+    border: "none",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
+    background: "#ffffff",
+    color: "#111827",
+    font: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+    padding: "0 8px",
+  };
+}
+
+const workRowTitleCellStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+};
+
+const workRowTitleTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 780,
+};
+
+const workRowMetaCellStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#475569",
+  fontSize: 11,
+  fontWeight: 650,
+};
