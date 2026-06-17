@@ -1,4 +1,5 @@
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
 
 export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "project" | "kanban";
 
@@ -11,6 +12,10 @@ export type ExplorerCreationContextRow = {
   kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  entityID?: string;
+  entityType?: CompanyExplorerV2EntityType;
+  edgeID?: string;
+  parentEntityID?: string;
   folderScopeType?: CompanyExplorerFolderScopeType;
   folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
@@ -152,9 +157,10 @@ export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | n
 }
 
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
-  if (!row || !payload || !row.folderID || !row.folderKind) return null;
+  if (!row || !payload || !row.folderID) return null;
   if (row.syntheticKind === "default_scope_folder") return null;
   const isRaciScopedRow = row.syntheticKind === "raci_folder" || Boolean(row.raciRole);
+  const genericV2Container = Boolean(row.entityID) && (row.entityType === "company" || row.entityType === "user_group" || row.entityType === "user" || row.entityType === "folder");
 
   // Drag events fire on the row under the pointer. A file row already carries
   // its containing folderID, so users can drop anywhere inside that visible
@@ -162,13 +168,14 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   if (payload.kind === "folder") {
     if (!payload.folderID || payload.folderID === row.folderID) return null;
     if (isRaciScopedRow && payload.folderKind !== row.folderKind) return null;
-    return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
+    const folderKind = row.folderKind ?? payload.folderKind ?? "logic_gate";
+    return { folderID: row.folderID, folderKind, treeID: row.id ?? `workspace-folder-${row.folderID}` };
   }
 
   const itemType = getExplorerDropPayloadItemType(payload);
   if (!itemType || itemType === "kanban") return null;
-  if (itemType !== row.folderKind) return null;
-  return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
+  if (!genericV2Container && itemType !== row.folderKind) return null;
+  return { folderID: row.folderID, folderKind: row.folderKind ?? itemType, treeID: row.id ?? `workspace-folder-${row.folderID}` };
 }
 
 export function sortExplorerOrderRows<T extends ExplorerOrderRow>(rows: T[]): T[] {
@@ -375,7 +382,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   | null {
   if (!row) return null;
   if (row.systemKey) return null;
-  if (row.kind === "folder" && row.folderID && row.folderKind) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
+  if (row.kind === "folder" && row.folderID && row.folderKind && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
   if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
@@ -397,7 +404,7 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | null {
   if (!row) return null;
   if (row.systemKey) return null;
-  if (row.kind === "folder" && row.folderID) return { kind: "folder", id: row.folderID };
+  if (row.kind === "folder" && row.folderID && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
   if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };

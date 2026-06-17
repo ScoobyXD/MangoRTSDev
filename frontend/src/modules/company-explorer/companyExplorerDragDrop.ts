@@ -19,8 +19,8 @@ export const TREE_ROW_POSITION_STEP = 1000;
 
 export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
   if (row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder") return null;
-  if (row.kind === "folder" && row.folderID && row.folderKind) {
-    return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind };
+  if (row.kind === "folder" && row.folderID && (row.folderKind || row.entityType === "folder")) {
+    return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind ?? "logic_gate" };
   }
   if (row.kind === "node" && row.nodeID) {
     return { kind: "node", itemID: row.nodeID, itemType: "node", sourceTreeID: row.id };
@@ -109,13 +109,13 @@ export function sortExplorerRowsByPosition(rows: ExplorerTreeNode[]): ExplorerTr
 }
 
 export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
-  if (row.kind === "folder") return row.parentFolderID ?? "";
-  if (row.folderKind) return row.folderID ?? "";
+  if (row.kind === "folder") return row.parentEntityID ?? row.parentFolderID ?? "";
+  if (row.folderKind || row.parentEntityID) return row.parentEntityID ?? row.folderID ?? "";
   return null;
 }
 
 export function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
-  if (row.kind === "folder") return row.folderKind ?? null;
+  if (row.kind === "folder") return row.folderKind ?? (row.entityID ? "logic_gate" : null);
   return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : row.kind === "kanban" ? "kanban" : null;
 }
 

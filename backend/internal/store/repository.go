@@ -242,6 +242,15 @@ type CompanyExplorerRepository interface {
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
+	ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
+	ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
+	GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error)
+	CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error)
+	UpdateCompanyExplorerV2Folder(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2Row, error)
+	UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error)
+	MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error)
+	DeleteCompanyExplorerV2Edge(companyID, edgeID string) error
+	DeleteCompanyExplorerV2Folder(companyID, entityID string) error
 	ListCompanyExplorerRootRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerFolderChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerLogicGateChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
@@ -305,6 +314,82 @@ type CompanyExplorerLazyRows struct {
 	Nodes       []domain.Node                      `json:"nodes"`
 	LogicGates  []domain.LogicGate                 `json:"logic_gates"`
 	Projects    []domain.Project                   `json:"projects"`
+}
+
+const (
+	CompanyExplorerV2EntityCompany   = "company"
+	CompanyExplorerV2EntityUserGroup = "user_group"
+	CompanyExplorerV2EntityUser      = "user"
+	CompanyExplorerV2EntityFolder    = "folder"
+	CompanyExplorerV2EntityProject   = EntityTypeProject
+	CompanyExplorerV2EntityLogicGate = EntityTypeLogicGate
+	CompanyExplorerV2EntityNode      = EntityTypeNode
+)
+
+type CompanyExplorerV2RowsQuery struct {
+	CompanyID        string
+	View             string
+	ScopeUserID      string
+	PermissionUserID string
+	ParentEntityID   string
+}
+
+type CompanyExplorerV2Rows struct {
+	Rows []CompanyExplorerV2Row `json:"rows"`
+}
+
+type CompanyExplorerV2Row struct {
+	CompanyID        string            `json:"company_id"`
+	EntityID         string            `json:"entity_id"`
+	EntityType       string            `json:"entity_type"`
+	ResourceID       string            `json:"resource_id,omitempty"`
+	Name             string            `json:"name"`
+	ParentEntityID   string            `json:"parent_entity_id,omitempty"`
+	EdgeID           string            `json:"edge_id,omitempty"`
+	Position         int               `json:"position"`
+	HasChildren      bool              `json:"has_children"`
+	EffectiveAccess  string            `json:"effective_access,omitempty"`
+	NativeContext    map[string]string `json:"native_context,omitempty"`
+	CreatedTimestamp time.Time         `json:"created_timestamp"`
+	UpdatedTimestamp time.Time         `json:"updated_timestamp"`
+}
+
+type CompanyExplorerV2FolderInput struct {
+	CompanyID        string
+	ParentEntityID   string
+	Name             string
+	Position         int
+	DefaultAccess    string
+	ActorUserID      string
+	PermissionUserID string
+}
+
+type CompanyExplorerV2FolderUpdateInput struct {
+	CompanyID        string
+	EntityID         string
+	Name             string
+	ActorUserID      string
+	PermissionUserID string
+}
+
+type CompanyExplorerV2EdgeInput struct {
+	CompanyID        string
+	ParentEntityID   string
+	ChildEntityID    string
+	ChildEntityType  string
+	ChildResourceID  string
+	Position         int
+	ActorUserID      string
+	PermissionUserID string
+}
+
+type CompanyExplorerV2MoveEdgeInput struct {
+	CompanyID        string
+	EdgeID           string
+	ParentEntityID   string
+	Position         int
+	ActorUserID      string
+	PermissionUserID string
 }
 
 type MapLayoutRepository interface {

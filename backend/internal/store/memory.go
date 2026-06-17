@@ -33,6 +33,8 @@ type MemoryRepo struct {
 	sharedInboxRaci               map[string][]domain.SharedInboxRaciAssignment
 	folders                       map[string]domain.CompanyExplorerFolder
 	folderItems                   map[string]domain.CompanyExplorerFolderItem
+	companyExplorerV2Entities     map[string]memoryCompanyExplorerV2Entity
+	companyExplorerV2Edges        map[string]memoryCompanyExplorerV2Edge
 	folderShares                  map[string]domain.CompanyExplorerFolderShare
 	defaultFolderSeed             map[string]bool
 	nodeMapPositions              map[string]domain.NodeMapPosition
@@ -96,6 +98,8 @@ func NewMemoryRepo() *MemoryRepo {
 		sharedInboxRaci:               map[string][]domain.SharedInboxRaciAssignment{},
 		folders:                       map[string]domain.CompanyExplorerFolder{},
 		folderItems:                   map[string]domain.CompanyExplorerFolderItem{},
+		companyExplorerV2Entities:     map[string]memoryCompanyExplorerV2Entity{},
+		companyExplorerV2Edges:        map[string]memoryCompanyExplorerV2Edge{},
 		folderShares:                  map[string]domain.CompanyExplorerFolderShare{},
 		defaultFolderSeed:             map[string]bool{},
 		nodeMapPositions:              map[string]domain.NodeMapPosition{},

@@ -180,9 +180,14 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			project.DefaultAccess = ResourceDefaultAccessEdit
 			r.projects[key(companyID, resource.entityID)] = project
 		case EntityTypeCompanyExplorerFolder:
-			folder := r.folders[key(companyID, resource.entityID)]
-			folder.DefaultAccess = ResourceDefaultAccessEdit
-			r.folders[key(companyID, resource.entityID)] = folder
+			if entity, ok := r.companyExplorerV2Entities[key(companyID, resource.entityID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
+				entity.DefaultAccess = ResourceDefaultAccessEdit
+				r.companyExplorerV2Entities[key(companyID, resource.entityID)] = entity
+			}
+			if folder, ok := r.folders[key(companyID, resource.entityID)]; ok {
+				folder.DefaultAccess = ResourceDefaultAccessEdit
+				r.folders[key(companyID, resource.entityID)] = folder
+			}
 		case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
 			folder := r.folders[key(companyID, resource.entityID)]
 			folder.DefaultAccess = ResourceDefaultAccessEdit
@@ -542,9 +547,14 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			project.DefaultAccess = defaultAccess
 			r.projects[key(companyID, entityID)] = project
 		case EntityTypeCompanyExplorerFolder:
-			folder := r.folders[key(companyID, entityID)]
-			folder.DefaultAccess = defaultAccess
-			r.folders[key(companyID, entityID)] = folder
+			if entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
+				entity.DefaultAccess = defaultAccess
+				r.companyExplorerV2Entities[key(companyID, entityID)] = entity
+			}
+			if folder, ok := r.folders[key(companyID, entityID)]; ok {
+				folder.DefaultAccess = defaultAccess
+				r.folders[key(companyID, entityID)] = folder
+			}
 		case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
 			folder := r.folders[key(companyID, entityID)]
 			folder.DefaultAccess = defaultAccess
@@ -726,6 +736,9 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 		_, ok := r.projects[key(companyID, entityID)]
 		return ok
 	case EntityTypeCompanyExplorerFolder:
+		if entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
+			return true
+		}
 		item, ok := r.folders[key(companyID, entityID)]
 		return ok && item.FolderKind != "communications"
 	case EntityTypeSharedInboxFolder:

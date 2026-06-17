@@ -40,8 +40,20 @@ where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, Resou
 	case EntityTypeCompanyExplorerFolder:
 		err = q.QueryRowContext(ctx, `
 select coalesce(default_access, $3)
-from company_explorer_folders
-where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
+from (
+  select folder.default_access
+  from company_explorer_entities folder
+  where folder.company_id=$1::uuid
+    and folder.entity_id=$2::uuid
+    and folder.entity_type='folder'
+  union all
+  select legacy.default_access
+  from company_explorer_folders legacy
+  where legacy.company_id=$1::uuid
+    and legacy.folder_id=$2::uuid
+    and legacy.folder_kind <> 'communications'
+  limit 1
+) item`, companyID, resourceID, ResourceDefaultAccessEdit).Scan(&access)
 	case EntityTypeSharedInboxFolder:
 		err = q.QueryRowContext(ctx, `
 select coalesce(default_access, $3)
@@ -91,10 +103,32 @@ update projects
 set default_access=$3
 where company_id=$1::uuid and project_id=$2::uuid`, companyID, resourceID, defaultAccess)
 	case EntityTypeCompanyExplorerFolder:
-		res, err = tx.ExecContext(ctx, `
-update company_explorer_folders
-set default_access=$3
-where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications'`, companyID, resourceID, defaultAccess)
+		var affected int
+		err = tx.QueryRowContext(ctx, `
+with v2 as (
+  update company_explorer_entities
+  set default_access=$3,
+      updated_timestamp=now()
+  where company_id=$1::uuid
+    and entity_id=$2::uuid
+    and entity_type='folder'
+  returning 1
+), legacy as (
+  update company_explorer_folders
+  set default_access=$3
+  where company_id=$1::uuid
+    and folder_id=$2::uuid
+    and folder_kind <> 'communications'
+  returning 1
+)
+select (select count(*) from v2) + (select count(*) from legacy)`, companyID, resourceID, defaultAccess).Scan(&affected)
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return ErrNotFound
+		}
+		return nil
 	case EntityTypeSharedInboxFolder:
 		res, err = tx.ExecContext(ctx, `
 update shared_inbox_folders
