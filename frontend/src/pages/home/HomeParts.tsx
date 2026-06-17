@@ -16,9 +16,9 @@ import { deleteNotification, fetchNotifications, type NotificationItem, type Not
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
-import type { ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
+import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentChipStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -4832,8 +4832,17 @@ function emailAttachmentContentType(attachment: EmailAttachment): string {
   return attachment.content_type?.trim() || "application/octet-stream";
 }
 
+function attachmentIsImageContentType(contentType: string): boolean {
+  return contentType.trim().toLowerCase().startsWith("image/");
+}
+
+function attachmentCanRenderInline(contentType: string): boolean {
+  const cleanType = contentType.trim().toLowerCase();
+  return attachmentIsImageContentType(cleanType) || cleanType.startsWith("application/pdf");
+}
+
 function emailAttachmentIsImage(attachment: EmailAttachment): boolean {
-  return emailAttachmentContentType(attachment).toLowerCase().startsWith("image/");
+  return attachmentIsImageContentType(emailAttachmentContentType(attachment));
 }
 
 function emailAttachmentDataURL(attachment: EmailAttachment): string {
@@ -4853,22 +4862,172 @@ function downloadURL(url: string, filename: string, revoke = false): void {
   if (revoke) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function openAttachmentURL(url: string, filename: string, revoke = false): void {
+  const opened = window.open(url, "_blank");
+  if (opened) {
+    opened.opener = null;
+    if (revoke) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  downloadURL(url, filename, revoke);
+}
+
+function attachmentExtension(filename: string, contentType: string): string {
+  const cleanName = filename.trim();
+  const dotIndex = cleanName.lastIndexOf(".");
+  if (dotIndex >= 0 && dotIndex < cleanName.length - 1) {
+    return cleanName.slice(dotIndex + 1, dotIndex + 6).toUpperCase();
+  }
+  const subtype = contentType.trim().toLowerCase().split("/")[1]?.split(";")[0]?.split("+")[0] ?? "";
+  if (!subtype || subtype === "octet-stream") return "FILE";
+  if (subtype === "jpeg") return "JPG";
+  if (subtype === "plain") return "TXT";
+  if (subtype.length > 5) return subtype.slice(0, 5).toUpperCase();
+  return subtype.toUpperCase();
+}
+
+function attachmentKindLabel(contentType: string): string {
+  const cleanType = contentType.trim().toLowerCase();
+  if (cleanType.startsWith("image/")) return "Image";
+  if (cleanType.startsWith("video/")) return "Video";
+  if (cleanType.startsWith("audio/")) return "Audio";
+  if (cleanType.startsWith("application/pdf")) return "PDF";
+  if (cleanType.includes("spreadsheet") || cleanType.includes("excel")) return "Sheet";
+  if (cleanType.includes("presentation") || cleanType.includes("powerpoint")) return "Slides";
+  if (cleanType.includes("word") || cleanType.includes("document")) return "Doc";
+  if (cleanType.startsWith("text/")) return "Text";
+  return "File";
+}
+
+function attachmentAccent(contentType: string): { background: string; color: string; stripe: string } {
+  const cleanType = contentType.trim().toLowerCase();
+  if (cleanType.startsWith("image/")) return { background: "linear-gradient(145deg, #eef9ff, #f8fbff)", color: "#0369a1", stripe: "#38bdf8" };
+  if (cleanType.startsWith("application/pdf")) return { background: "linear-gradient(145deg, #fff1f2, #fff7ed)", color: "#be123c", stripe: "#fb7185" };
+  if (cleanType.includes("spreadsheet") || cleanType.includes("excel")) return { background: "linear-gradient(145deg, #ecfdf5, #f7fee7)", color: "#047857", stripe: "#34d399" };
+  if (cleanType.includes("presentation") || cleanType.includes("powerpoint")) return { background: "linear-gradient(145deg, #fff7ed, #fffbeb)", color: "#c2410c", stripe: "#fb923c" };
+  if (cleanType.includes("word") || cleanType.includes("document")) return { background: "linear-gradient(145deg, #eff6ff, #f8fafc)", color: "#1d4ed8", stripe: "#60a5fa" };
+  if (cleanType.startsWith("audio/") || cleanType.startsWith("video/")) return { background: "linear-gradient(145deg, #f5f3ff, #faf5ff)", color: "#6d28d9", stripe: "#a78bfa" };
+  return { background: "linear-gradient(145deg, #ffffff, #f1f5f9)", color: "#475569", stripe: "#94a3b8" };
+}
+
+function attachmentTileStyle(interactive: boolean, highlighted: boolean): React.CSSProperties {
+  return {
+    ...mailAttachmentTileStyle,
+    position: "relative",
+    gap: 7,
+    cursor: interactive ? "zoom-in" : "default",
+    borderColor: highlighted ? "rgba(14, 165, 233, 0.34)" : mailAttachmentTileStyle.borderColor,
+    boxShadow: highlighted ? "0 14px 30px rgba(15, 23, 42, 0.12), inset 1px 1px 0 rgba(255, 255, 255, 0.9)" : mailAttachmentTileStyle.boxShadow,
+  };
+}
+
+const attachmentPreviewWrapStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
+};
+
+function attachmentActionButtonStyle(visible: boolean): React.CSSProperties {
+  return {
+    position: "absolute",
+    right: 7,
+    bottom: 7,
+    minHeight: 26,
+    border: "1px solid rgba(255, 255, 255, 0.82)",
+    borderRadius: 7,
+    background: "rgba(15, 23, 42, 0.86)",
+    color: "#ffffff",
+    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.22)",
+    cursor: "pointer",
+    fontSize: 10.5,
+    fontWeight: 760,
+    lineHeight: 1,
+    padding: "0 9px",
+    opacity: visible ? 1 : 0,
+    pointerEvents: visible ? "auto" : "none",
+    transition: "opacity 140ms ease, transform 140ms ease",
+    transform: visible ? "translateY(0)" : "translateY(3px)",
+  };
+}
+
+function attachmentRemoveButtonStyle(visible: boolean): React.CSSProperties {
+  return {
+    ...mailComposeAttachmentRemoveStyle,
+    position: "absolute",
+    top: 7,
+    right: 7,
+    width: 24,
+    height: 24,
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid rgba(255, 255, 255, 0.82)",
+    borderRadius: 999,
+    background: "rgba(15, 23, 42, 0.78)",
+    color: "#ffffff",
+    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.18)",
+    opacity: visible ? 1 : 0.86,
+  };
+}
+
+function AttachmentVisual({ filename, contentType, sourceURL, loading, failed }: {
+  filename: string;
+  contentType: string;
+  sourceURL?: string;
+  loading?: boolean;
+  failed?: boolean;
+}) {
+  const cleanType = contentType.trim() || "application/octet-stream";
+  if (sourceURL && attachmentIsImageContentType(cleanType)) {
+    return <img src={sourceURL} alt={filename} style={mailAttachmentThumbnailStyle} />;
+  }
+  if (sourceURL && cleanType.toLowerCase().startsWith("application/pdf")) {
+    return (
+      <object data={sourceURL} type="application/pdf" aria-label={filename} style={mailAttachmentThumbnailStyle}>
+        <div style={mailAttachmentFileIconStyle}>PDF</div>
+      </object>
+    );
+  }
+  const accent = attachmentAccent(cleanType);
+  const extension = attachmentExtension(filename, cleanType);
+  return (
+    <div style={{
+      ...mailAttachmentFileIconStyle,
+      position: "relative",
+      overflow: "hidden",
+      alignContent: "center",
+      gap: 5,
+      background: accent.background,
+      color: accent.color,
+      padding: 10,
+    }}>
+      <span style={{ position: "absolute", top: 0, left: 0, right: 0, height: 5, background: accent.stripe }} />
+      <span style={{ fontSize: 18, lineHeight: 1, fontWeight: 840 }}>{failed ? "!" : loading ? "..." : extension}</span>
+      <span style={{ fontSize: 10, color: "rgba(15, 23, 42, 0.58)", fontWeight: 720 }}>{failed ? "Preview unavailable" : attachmentKindLabel(cleanType)}</span>
+    </div>
+  );
+}
+
 function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }: {
   messageID: string;
   attachment: EmailAttachment;
   companyID: string;
   sharedInboxID?: string;
 }) {
+  const [hovered, setHovered] = React.useState(false);
+  const [focused, setFocused] = React.useState(false);
+  const [previewRequested, setPreviewRequested] = React.useState(false);
   const [previewURL, setPreviewURL] = React.useState("");
   const [loadingPreview, setLoadingPreview] = React.useState(false);
   const [previewFailed, setPreviewFailed] = React.useState(false);
   const attachmentID = attachment.id?.trim() ?? "";
   const filename = emailAttachmentFileName(attachment);
-  const isImage = emailAttachmentIsImage(attachment);
+  const contentType = emailAttachmentContentType(attachment);
+  const canRenderInline = attachmentCanRenderInline(contentType);
+  const shouldLoadPreview = canRenderInline && (emailAttachmentIsImage(attachment) || previewRequested);
   const canDownload = !!attachmentID || !!attachment.content?.trim();
+  const showActions = hovered || focused;
 
   React.useEffect(() => {
-    if (!isImage) {
+    if (!shouldLoadPreview) {
       setPreviewURL("");
       setLoadingPreview(false);
       setPreviewFailed(false);
@@ -4908,7 +5067,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       cancelled = true;
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [attachment, attachmentID, companyID, isImage, messageID, sharedInboxID]);
+  }, [attachment, attachmentID, companyID, messageID, sharedInboxID, shouldLoadPreview]);
 
   const handleDownload = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4924,16 +5083,138 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       });
   }, [attachment, attachmentID, companyID, filename, messageID, sharedInboxID]);
 
+  const handleOpen = React.useCallback(() => {
+    const inlineURL = emailAttachmentDataURL(attachment);
+    if (inlineURL) {
+      openAttachmentURL(inlineURL, filename);
+      return;
+    }
+    if (!attachmentID) return;
+    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
+      .then((blob) => {
+        const objectURL = URL.createObjectURL(blob);
+        openAttachmentURL(objectURL, filename, true);
+      });
+  }, [attachment, attachmentID, companyID, filename, messageID, sharedInboxID]);
+
   return (
-    <div style={mailAttachmentTileStyle}>
-      {isImage && previewURL ? (
-        <img src={previewURL} alt={filename} style={mailAttachmentThumbnailStyle} />
-      ) : (
-        <div style={mailAttachmentFileIconStyle}>{loadingPreview ? "Loading" : previewFailed ? "Preview unavailable" : emailAttachmentContentType(attachment).split("/")[1]?.toUpperCase() || "FILE"}</div>
-      )}
+    <div
+      role={canDownload ? "button" : undefined}
+      tabIndex={canDownload ? 0 : undefined}
+      style={attachmentTileStyle(canDownload, showActions)}
+      title={canDownload ? `Open ${filename}` : filename}
+      onMouseEnter={() => {
+        setHovered(true);
+        setPreviewRequested(true);
+      }}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => {
+        setFocused(true);
+        setPreviewRequested(true);
+      }}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        setFocused(false);
+      }}
+      onClick={() => {
+        if (canDownload) handleOpen();
+      }}
+      onKeyDown={(event) => {
+        if (!canDownload || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        handleOpen();
+      }}
+    >
+      <div style={attachmentPreviewWrapStyle}>
+        <AttachmentVisual
+          filename={filename}
+          contentType={contentType}
+          sourceURL={previewURL || emailAttachmentDataURL(attachment) || undefined}
+          loading={loadingPreview}
+          failed={previewFailed}
+        />
+        <button
+          type="button"
+          style={attachmentActionButtonStyle(showActions)}
+          disabled={!canDownload}
+          aria-label={`Download ${filename}`}
+          title={`Download ${filename}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleDownload();
+          }}
+        >
+          Download
+        </button>
+      </div>
       <div style={mailAttachmentNameStyle} title={filename}>{filename}</div>
-      <div style={mailAttachmentMetaStyle}>{formatComposeAttachmentSize(attachment.size ?? 0) || emailAttachmentContentType(attachment)}</div>
-      <button type="button" style={mailPanelSmallButtonStyle} disabled={!canDownload} onClick={handleDownload}>Download</button>
+      <div style={mailAttachmentMetaStyle}>{formatComposeAttachmentSize(attachment.size ?? 0) || contentType}</div>
+    </div>
+  );
+}
+
+function composeAttachmentContentType(attachment: ComposeAttachment): string {
+  return attachment.contentType?.trim() || "application/octet-stream";
+}
+
+function composeAttachmentDataURL(attachment: ComposeAttachment): string {
+  const content = attachment.content?.trim() ?? "";
+  if (!content) return "";
+  return `data:${composeAttachmentContentType(attachment)};base64,${content}`;
+}
+
+function ComposeAttachmentTile({ attachment, onRemove }: {
+  attachment: ComposeAttachment;
+  onRemove: (attachmentID: string) => void;
+}) {
+  const [hovered, setHovered] = React.useState(false);
+  const [focused, setFocused] = React.useState(false);
+  const filename = attachment.filename.trim() || "attachment";
+  const contentType = composeAttachmentContentType(attachment);
+  const sourceURL = composeAttachmentDataURL(attachment);
+  const showActions = hovered || focused;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      style={attachmentTileStyle(true, showActions)}
+      title={`Open ${filename}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        setFocused(false);
+      }}
+      onClick={() => {
+        if (sourceURL) openAttachmentURL(sourceURL, filename);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        if (sourceURL) openAttachmentURL(sourceURL, filename);
+      }}
+    >
+      <div style={attachmentPreviewWrapStyle}>
+        <AttachmentVisual filename={filename} contentType={contentType} sourceURL={sourceURL || undefined} />
+        <button
+          type="button"
+          style={attachmentRemoveButtonStyle(showActions)}
+          aria-label={`Remove ${filename}`}
+          title={`Remove ${filename}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove(attachment.id);
+          }}
+        >
+          x
+        </button>
+      </div>
+      <div style={mailAttachmentNameStyle} title={filename}>{filename}</div>
+      <div style={mailAttachmentMetaStyle}>{formatComposeAttachmentSize(attachment.size) || contentType}</div>
     </div>
   );
 }
@@ -5428,18 +5709,18 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
           {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
         </button>
-        {compose.attachments.map((attachment) => (
-          <span key={attachment.id} style={mailComposeAttachmentChipStyle} title={attachment.filename}>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.filename}</span>
-            {formatComposeAttachmentSize(attachment.size) && <span>{formatComposeAttachmentSize(attachment.size)}</span>}
-            <button type="button" style={mailComposeAttachmentRemoveStyle} onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.filename}`}>x</button>
-          </span>
-        ))}
         {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
         {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
         <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
         <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
       </div>
+      {compose.attachments.length > 0 && (
+        <div style={mailAttachmentGridStyle}>
+          {compose.attachments.map((attachment) => (
+            <ComposeAttachmentTile key={attachment.id} attachment={attachment} onRemove={removeAttachment} />
+          ))}
+        </div>
+      )}
       {signatureEditorOpen && (
         <div style={mailComposeSignatureBoxStyle}>
           <textarea
@@ -5477,8 +5758,16 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
   const localReplies = message.local_replies ?? [];
   const hasLocalReplies = localReplies.length > 0;
   const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
-  const bodyFrameStyle = hasLocalReplies ? { ...iframeStyle, minHeight: 320, height: 320 } : iframeStyle;
+  const hasAttachments = attachments.length > 0;
+  const bodyFrameStyle = hasLocalReplies || hasAttachments ? { ...iframeStyle, minHeight: 320, height: 360 } : iframeStyle;
   const replyFrameStyle = { ...iframeStyle, minHeight: 220, height: 220, boxShadow: "none" };
+  const bodyContainerStyle = hasLocalReplies || hasAttachments ? {
+    minHeight: 0,
+    overflow: "auto",
+    display: "grid",
+    gap: 10,
+    alignContent: "start",
+  } : { minHeight: 0 };
   return (
     <div style={detailStyle}>
       <div style={panelHeaderStyle}>
@@ -5500,15 +5789,8 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
         <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
         <button style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
-      <div style={hasLocalReplies ? {
-        minHeight: 0,
-        overflow: "auto",
-        display: "grid",
-        gap: 10,
-        alignContent: "start",
-      } : { minHeight: 0 }}>
-        <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
-        {attachments.length > 0 && (
+      <div style={bodyContainerStyle}>
+        {hasAttachments && (
           <div style={mailAttachmentSectionStyle}>
             <div style={mailAttachmentHeaderStyle}>
               <span>{attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}</span>
@@ -5526,6 +5808,7 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
             </div>
           </div>
         )}
+        <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
         {localReplies.map((reply) => (
           <div key={reply.id} style={{
             display: "grid",

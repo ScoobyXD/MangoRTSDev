@@ -557,14 +557,23 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	}
 
 	var content []byte
-	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+	if inlineContent := strings.TrimSpace(attachment.Content); inlineContent != "" {
 		var err error
-		content, err = s.nylasClient.DownloadAttachment(ctx, connection.GrantID, messageID, attachmentID)
-		return err
-	})
-	if err != nil {
-		s.writeNylasError(w, r, connection, err)
-		return
+		content, err = base64.StdEncoding.DecodeString(inlineContent)
+		if err != nil || len(content) > communicationsAttachmentDownloadMaxBytes {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+			return
+		}
+	} else {
+		err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+			var err error
+			content, err = s.nylasClient.DownloadAttachment(ctx, connection.GrantID, messageID, attachmentID)
+			return err
+		})
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
 	}
 
 	contentType := strings.TrimSpace(attachment.ContentType)
