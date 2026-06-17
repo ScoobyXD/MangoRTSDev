@@ -90,7 +90,13 @@ func companyExplorerLazyArgs(query CompanyExplorerLazyRowsQuery) []any {
 }
 
 const companyExplorerLazyScopeCTE = `
-with scope_groups as (
+with lazy_params as (
+  select $2::text as scope,
+         $4::uuid as permission_user_id,
+         $5::uuid as parent_id,
+         $6::text as access_level
+),
+scope_groups as (
   select member.group_id
   from company_user_group_members member
   where member.company_id=$1::uuid
