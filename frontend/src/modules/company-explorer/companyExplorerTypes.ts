@@ -76,6 +76,7 @@ export type CompanyExplorerContextMenuState = {
   canCreateFolder: boolean;
   canCreateNode: boolean;
   canCreateLogicGate: boolean;
+  canCreateProject: boolean;
 };
 
 export type ExplorerVirtualizedTree = {

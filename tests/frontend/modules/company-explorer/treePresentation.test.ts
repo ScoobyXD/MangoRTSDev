@@ -59,18 +59,19 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
     createFolderEnabled: true,
     createNodeEnabled: false,
     createLogicGateEnabled: true,
+    createProjectEnabled: true,
     renameEnabled: false,
     deleteEnabled: true,
   });
 
   assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
     ["Folder Permissions"],
-    ["Create New Folder", "Create Node", "Create Logic Gate"],
+    ["Create New Folder", "Create Node", "Create Logic Gate", "Create Project"],
     ["Rename", "Delete"],
   ]);
   assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
     [true],
-    [true, false, true],
+    [true, false, true, true],
     [false, true],
   ]);
 });
