@@ -965,7 +965,20 @@ func (r *PostgresRepo) postgresEntityExists(ctx context.Context, companyID, enti
 		return exists, err
 	case EntityTypeCompanyExplorerFolder:
 		var exists bool
-		err := r.db.QueryRowContext(ctx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID).Scan(&exists)
+		err := r.db.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_explorer_entities entity
+  where entity.company_id=$1::uuid
+    and entity.entity_id=$2::uuid
+    and entity.entity_type='folder'
+  union all
+  select 1
+  from company_explorer_folders folder
+  where folder.company_id=$1::uuid
+    and folder.folder_id=$2::uuid
+    and folder.folder_kind <> 'communications'
+)`, companyID, entityID).Scan(&exists)
 		return exists, err
 	case EntityTypeSharedInboxFolder:
 		var exists bool
@@ -989,7 +1002,20 @@ func postgresEntityExistsTx(ctx context.Context, tx *sql.Tx, companyID, entityTy
 	case EntityTypeProject:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeCompanyExplorerFolder:
-		return postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid and folder_kind <> 'communications')`, companyID, entityID)
+		return postgresTxExists(ctx, tx, `
+select exists(
+  select 1
+  from company_explorer_entities entity
+  where entity.company_id=$1::uuid
+    and entity.entity_id=$2::uuid
+    and entity.entity_type='folder'
+  union all
+  select 1
+  from company_explorer_folders folder
+  where folder.company_id=$1::uuid
+    and folder.folder_id=$2::uuid
+    and folder.folder_kind <> 'communications'
+)`, companyID, entityID)
 	case EntityTypeSharedInboxFolder:
 		return postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, entityID)
 	case EntityTypeSharedInbox:

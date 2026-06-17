@@ -66,6 +66,15 @@ var (
 		"company_explorer_folder_item_assigned",
 		"company_explorer_folder_item_removed",
 	}
+	CompanyExplorerV2WorkspaceEventTypes = []string{
+		"company_explorer_v2_entity_created",
+		"company_explorer_v2_entity_updated",
+		"company_explorer_v2_entity_deleted",
+		"company_explorer_v2_edge_upserted",
+		"company_explorer_v2_edge_moved",
+		"company_explorer_v2_edge_deleted",
+		"company_explorer_v2_permissions_updated",
+	}
 	KanbanBoardWorkspaceEventTypes = []string{
 		"kanban_board_saved",
 		"kanban_board_updated",
@@ -316,6 +325,20 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 			addCompanyExplorerFolderItems("")
 			addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
 		}
+	}
+	if stringInList(eventType, CompanyExplorerV2WorkspaceEventTypes) {
+		addNodeMapSnapshots()
+		addLogicGateMapSnapshots()
+		add("map-layout:node-window", "")
+		add("map-layout:logic_gate-window", "")
+		addCompanyExplorer("")
+		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "node"))
+		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "logic_gate"))
+		addCompanyExplorer(WorkspaceReadVersionResourceKey("folder_kind", "project"))
+		addCompanyExplorerFolderItems("")
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "node"))
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "logic_gate"))
+		addCompanyExplorerFolderItems(WorkspaceReadVersionResourceKey("item_type", "project"))
 	}
 
 	if stringInList(eventType, KanbanBoardWorkspaceEventTypes) {

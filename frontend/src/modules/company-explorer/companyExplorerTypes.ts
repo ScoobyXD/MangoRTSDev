@@ -1,4 +1,5 @@
 import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
 import type { LogicGateRaciRole } from "../logic-gate-map/shared.js";
 import type {
   ExplorerCreationTargets,
@@ -15,6 +16,11 @@ export type ExplorerTreeNode = {
   label: string;
   depth: number;
   kind: "folder" | "node" | "logic_gate" | "project" | "kanban";
+  entityID?: string;
+  entityType?: CompanyExplorerV2EntityType;
+  edgeID?: string;
+  resourceID?: string;
+  parentEntityID?: string;
   nodeID?: string;
   logicGateID?: string;
   projectID?: string;
@@ -41,7 +47,7 @@ export type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorer
 export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
-export type CompanyExplorerFolderPermissionsTarget = { folderID: string; label: string };
+export type CompanyExplorerFolderPermissionsTarget = { folderID: string; label: string; permissionsPath?: string };
 export type CompanyExplorerFindRequestDetail = {
   companyID?: string;
   sourceFrameID?: string;

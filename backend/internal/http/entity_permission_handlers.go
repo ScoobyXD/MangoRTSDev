@@ -683,12 +683,14 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		payload["project_id"] = entityID
 	} else if entityType == store.EntityTypeCompanyExplorerFolder {
 		folder, err := s.companyExplorerFolderForPermissions(req.CompanyID, entityID)
-		if err != nil {
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_company_explorer_folder")
 			return
 		}
 		payload["folder_id"] = entityID
-		payload["folder_kind"] = folder.FolderKind
+		if err == nil {
+			payload["folder_kind"] = folder.FolderKind
+		}
 	}
 	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
 	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
@@ -789,10 +791,13 @@ func (s *Server) entityDefaultAccess(companyID, entityType, entityID string) (st
 		return defaultAccessOrEdit(project.DefaultAccess), nil
 	case store.EntityTypeCompanyExplorerFolder:
 		folder, err := s.companyExplorerFolderForPermissions(companyID, entityID)
-		if err != nil {
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return "", err
 		}
-		return defaultAccessOrEdit(folder.DefaultAccess), nil
+		if err == nil {
+			return defaultAccessOrEdit(folder.DefaultAccess), nil
+		}
+		return s.repo.GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID)
 	case store.EntityTypeSharedInboxFolder, store.EntityTypeSharedInbox:
 		folder, err := s.repo.GetCommunicationsSharedInboxFolder(companyID, entityID)
 		if err != nil {

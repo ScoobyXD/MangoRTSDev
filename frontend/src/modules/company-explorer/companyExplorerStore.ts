@@ -11,6 +11,7 @@ import type {
 import type { KanbanBoard, KanbanBoardsUpdatedDetail } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop.js";
+import type { CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
 
 export type CompanyExplorerSnapshotPayload = {
   nodes?: NodeRecord[];
@@ -18,6 +19,7 @@ export type CompanyExplorerSnapshotPayload = {
   projects?: ProjectRecord[];
   folders?: CompanyExplorerFolder[];
   folder_items?: CompanyExplorerFolderItem[];
+  rows?: CompanyExplorerV2Row[];
 };
 
 export type CompanyExplorerWorkspaceStreamEnvelope = {
@@ -33,6 +35,7 @@ export type CompanyExplorerStoreState = {
   kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
+  rows: CompanyExplorerV2Row[];
   folderSnapshotLoaded: boolean;
 };
 
@@ -52,6 +55,7 @@ export type CompanyExplorerStoreAction =
   | { type: "replaceLogicGate"; logicGate: LogicGateRecord }
   | { type: "upsertProject"; project: ProjectRecord }
   | { type: "replaceProject"; project: ProjectRecord }
+  | { type: "upsertV2Rows"; rows: CompanyExplorerV2Row[] }
   | {
       type: "removeDeletedEntities";
       deletedFolderIDs: ReadonlySet<string>;
@@ -75,6 +79,7 @@ export function createCompanyExplorerStoreState(): CompanyExplorerStoreState {
     kanbanBoards: [],
     folders: [],
     folderItems: [],
+    rows: [],
     folderSnapshotLoaded: false,
   };
 }
@@ -92,6 +97,7 @@ export function reduceCompanyExplorerStore(
         projects: [],
         folders: [],
         folderItems: [],
+        rows: [],
         folderSnapshotLoaded: false,
       };
     case "applySnapshot":
@@ -102,6 +108,7 @@ export function reduceCompanyExplorerStore(
         projects: action.snapshot.projects ?? [],
         folders: action.snapshot.folders ?? [],
         folderItems: action.snapshot.folder_items ?? [],
+        rows: action.snapshot.rows ?? [],
         folderSnapshotLoaded: true,
       };
     case "mergeSnapshot":
@@ -112,6 +119,7 @@ export function reduceCompanyExplorerStore(
         projects: mergeByID(state.projects, action.snapshot.projects ?? [], (project) => project.project_id),
         folders: mergeByID(state.folders, action.snapshot.folders ?? [], (folder) => folder.folder_id),
         folderItems: upsertFolderItems(state.folderItems, action.snapshot.folder_items ?? []),
+        rows: upsertCompanyExplorerV2Rows(state.rows, action.snapshot.rows ?? []),
         folderSnapshotLoaded: true,
       };
     case "setKanbanBoards":
@@ -138,6 +146,8 @@ export function reduceCompanyExplorerStore(
       return { ...state, projects: upsertByID(state.projects, action.project, (project) => project.project_id) };
     case "replaceProject":
       return { ...state, projects: replaceByID(state.projects, action.project, (project) => project.project_id) };
+    case "upsertV2Rows":
+      return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, action.rows) };
     case "removeDeletedEntities":
       return removeDeletedEntities(state, action);
     case "restore":
@@ -272,6 +282,25 @@ function applyWorkspaceEnvelope(
       folderItems: state.folderItems.filter((item) => item.item_type !== itemType || item.item_id !== itemID),
     };
   }
+  if (
+    envelope.type === "company_explorer_v2_entity_created" ||
+    envelope.type === "company_explorer_v2_entity_updated" ||
+    envelope.type === "company_explorer_v2_edge_upserted" ||
+    envelope.type === "company_explorer_v2_edge_moved"
+  ) {
+    const row = asCompanyExplorerV2Row(data.entity);
+    return row ? { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, [row]) } : state;
+  }
+  if (envelope.type === "company_explorer_v2_edge_deleted") {
+    const edgeID = typeof data.edge_id === "string" ? data.edge_id : "";
+    if (!edgeID) return state;
+    return { ...state, rows: state.rows.filter((row) => row.edge_id !== edgeID) };
+  }
+  if (envelope.type === "company_explorer_v2_entity_deleted") {
+    const entityID = typeof data.entity_id === "string" ? data.entity_id : "";
+    if (!entityID) return state;
+    return { ...state, rows: state.rows.filter((row) => row.entity_id !== entityID && row.parent_entity_id !== entityID) };
+  }
   if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
     const board = asKanbanBoard(data.board);
     return board ? { ...state, kanbanBoards: upsertKanbanBoard(state.kanbanBoards, board) } : state;
@@ -299,6 +328,12 @@ function removeDeletedEntities(
     logicGates: state.logicGates.filter((logicGate) => !action.deletedLogicGateIDs.has(logicGate.logic_gate_id)),
     projects: state.projects.filter((project) => !action.deletedProjectIDs.has(project.project_id)),
     kanbanBoards: state.kanbanBoards.filter((board) => !action.deletedKanbanBoardIDs.has(board.board_id)),
+    rows: state.rows.filter((row) =>
+      !action.deletedFolderIDs.has(row.entity_id)
+      && (row.entity_type !== "node" || !action.deletedNodeIDs.has(row.resource_id ?? ""))
+      && (row.entity_type !== "logic_gate" || !action.deletedLogicGateIDs.has(row.resource_id ?? ""))
+      && (row.entity_type !== "project" || !action.deletedProjectIDs.has(row.resource_id ?? ""))
+    ),
     folderItems: state.folderItems.filter((item) =>
       !action.deletedFolderIDs.has(item.folder_id)
       && (item.item_type !== "node" || !action.deletedNodeIDs.has(item.item_id))
@@ -337,6 +372,25 @@ function upsertFolderItems(
     next = exists
       ? next.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
       : [...next, item];
+  }
+  return next;
+}
+
+function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
+  return row.edge_id || `${row.parent_entity_id ?? ""}:${row.entity_id}`;
+}
+
+function upsertCompanyExplorerV2Rows(
+  previous: CompanyExplorerV2Row[],
+  rows: CompanyExplorerV2Row[],
+): CompanyExplorerV2Row[] {
+  let next = previous;
+  for (const row of rows) {
+    const rowKey = companyExplorerV2RowKey(row);
+    if (!rowKey) continue;
+    next = next.some((item) => companyExplorerV2RowKey(item) === rowKey)
+      ? next.map((item) => (companyExplorerV2RowKey(item) === rowKey ? row : item))
+      : [...next, row];
   }
   return next;
 }
@@ -383,6 +437,11 @@ function asCompanyExplorerFolder(value: unknown): CompanyExplorerFolder | null {
 function asCompanyExplorerFolderItem(value: unknown): CompanyExplorerFolderItem | null {
   if (!isObjectRecord(value) || typeof value.folder_id !== "string" || typeof value.item_type !== "string" || typeof value.item_id !== "string") return null;
   return value as CompanyExplorerFolderItem;
+}
+
+function asCompanyExplorerV2Row(value: unknown): CompanyExplorerV2Row | null {
+  if (!isObjectRecord(value) || typeof value.entity_id !== "string" || typeof value.entity_type !== "string" || typeof value.name !== "string") return null;
+  return value as CompanyExplorerV2Row;
 }
 
 function asKanbanBoard(value: unknown): KanbanBoard | null {

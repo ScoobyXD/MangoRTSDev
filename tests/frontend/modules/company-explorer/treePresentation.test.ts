@@ -20,7 +20,7 @@ import {
   shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
-import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
+import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
@@ -106,6 +106,75 @@ run("tree rows render root content without a synthetic Company folder", () => {
   });
   assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-active", "workspace-folder-system-history", "node-node-a"]);
   assert.equal(rows[rows.length - 1]?.depth, 0);
+});
+
+run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
+  const rows = buildCompanyExplorerV2TreeRows({
+    expanded: new Set(["folder-root", "workspace-folder-folder-a", "logic-gate-gate-a"]),
+    rows: [
+      {
+        company_id: "c",
+        entity_id: "company-entity",
+        entity_type: "company",
+        resource_id: "c",
+        name: "Company",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "1",
+        updated_timestamp: "1",
+      },
+      {
+        company_id: "c",
+        entity_id: "folder-a",
+        entity_type: "folder",
+        name: "Folder A",
+        parent_entity_id: "company-entity",
+        edge_id: "edge-folder-a",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "2",
+        updated_timestamp: "2",
+      },
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "folder-a",
+        edge_id: "edge-gate-a",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "3",
+        updated_timestamp: "3",
+      },
+      {
+        company_id: "c",
+        entity_id: "node-entity",
+        entity_type: "node",
+        resource_id: "node-a",
+        name: "Node A",
+        parent_entity_id: "gate-entity",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "4",
+        updated_timestamp: "4",
+      },
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => row.id), [
+    "folder-root",
+    "workspace-folder-folder-a",
+    "logic-gate-gate-a",
+    "logic-gate-gate-a-node-node-a",
+  ]);
+  assert.equal(rows[1]?.entityType, "folder");
+  assert.equal(rows[1]?.folderID, "folder-a");
+  assert.equal(rows[1]?.edgeID, "edge-folder-a");
+  assert.equal(rows[2]?.logicGateID, "gate-a");
+  assert.equal(rows[3]?.nodeID, "node-a");
+  assert.equal(rows[3]?.parentEntityID, "gate-entity");
 });
 
 run("automatic folders hold active node placements and due-date history", () => {

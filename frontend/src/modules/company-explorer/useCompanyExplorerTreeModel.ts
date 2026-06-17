@@ -4,7 +4,8 @@ import type { NodeRecord as LogicGateRecord } from "../logic-gate-map/shared";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import type { KanbanBoard } from "../kanban/shared";
 import type { ProjectRecord } from "../project-management/projectManagementApi";
-import { buildCompanyExplorerTreeRows } from "./companyExplorerTreeRows";
+import type { CompanyExplorerV2Row } from "./companyExplorerLazyApi";
+import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows } from "./companyExplorerTreeRows";
 import type { ExplorerTreeNode } from "./companyExplorerTypes";
 import { useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
 
@@ -16,6 +17,7 @@ type UseCompanyExplorerTreeModelInput = {
   kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
+  rows?: CompanyExplorerV2Row[];
   rootRowOrder: Record<string, number>;
   selectedTreeID: string;
   treeViewportHeight: number;
@@ -30,14 +32,17 @@ export function useCompanyExplorerTreeModel({
   kanbanBoards,
   folders,
   folderItems,
+  rows = [],
   rootRowOrder,
   selectedTreeID,
   treeViewportHeight,
   treeScrollTop,
 }: UseCompanyExplorerTreeModelInput) {
   const treeRows = useMemo<ExplorerTreeNode[]>(
-    () => buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder }),
-    [expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder],
+    () => (rows.length > 0
+      ? buildCompanyExplorerV2TreeRows({ expanded, rows })
+      : buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder })),
+    [expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder, rows],
   );
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID), [selectedTreeID, treeRows]);

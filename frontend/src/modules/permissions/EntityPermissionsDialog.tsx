@@ -53,6 +53,7 @@ type EntityPermissionsDialogProps = {
   onClose: () => void;
   onSaved?: () => void;
   readOnly?: boolean;
+  permissionsPath?: string;
 };
 
 type EntityPermissionsPanelProps = {
@@ -65,6 +66,7 @@ type EntityPermissionsPanelProps = {
   onSaved?: () => void;
   variant?: "dialog" | "embedded";
   readOnly?: boolean;
+  permissionsPath?: string;
 };
 
 type PermissionPayload = {
@@ -167,6 +169,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   onSaved,
   variant = "dialog",
   readOnly = false,
+  permissionsPath: permissionsPathOverride,
 }) => {
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
@@ -179,7 +182,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const permissionsPath = permissionsPathFor(entityType, entityID);
+  const permissionsPath = useMemo(
+    () => permissionsPathOverride ?? permissionsPathFor(entityType, entityID),
+    [entityID, entityType, permissionsPathOverride],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -505,6 +511,7 @@ export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (
           onSaved={props.onSaved}
           variant="dialog"
           readOnly={props.readOnly}
+          permissionsPath={props.permissionsPath}
         />
       </div>
     </div>

@@ -320,6 +320,9 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 		}
 		return defaultResourceAccessOrEdit(project.DefaultAccess), true
 	case EntityTypeCompanyExplorerFolder:
+		if entity, ok := r.companyExplorerV2Entities[key(companyID, resourceID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
+			return defaultResourceAccessOrEdit(entity.DefaultAccess), true
+		}
 		folder, ok := r.folders[key(companyID, resourceID)]
 		if !ok || folder.FolderKind == "communications" {
 			return "", false
