@@ -1525,8 +1525,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const refreshCompanyExplorerSnapshot = useCallback(async () => {
     resetCompanyExplorerLazyCache();
     dispatchExplorerStore({ type: "resetSnapshot" });
+    setError("");
     const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
-    dispatchExplorerStore({ type: "applySnapshot", snapshot });
+    dispatchExplorerStore({ type: "applySnapshot", snapshot: snapshot ?? {} });
     loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
   }, [apiBase, companyExplorerLazyScope, companyID, resetCompanyExplorerLazyCache]);
 
@@ -1538,8 +1539,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     inflightCompanyExplorerBranchesRef.current.add(branchKey);
     try {
       const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, parentType, cleanParentID);
-      dispatchExplorerStore({ type: "mergeSnapshot", snapshot });
+      dispatchExplorerStore({ type: "mergeSnapshot", snapshot: snapshot ?? {} });
       loadedCompanyExplorerBranchesRef.current.add(branchKey);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_load_company_explorer_children");
+      throw err;
     } finally {
       inflightCompanyExplorerBranchesRef.current.delete(branchKey);
     }
@@ -1558,12 +1563,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     dispatchExplorerStore({ type: "resetSnapshot" });
     (async () => {
       try {
+        setError("");
         const snapshot = await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
         if (cancelled) return;
-        dispatchExplorerStore({ type: "applySnapshot", snapshot });
+        dispatchExplorerStore({ type: "applySnapshot", snapshot: snapshot ?? {} });
         loadedCompanyExplorerBranchesRef.current.add(`roots:${companyExplorerLazyScope}`);
-      } catch {
-        // Explorer bootstrap stays independent from map graph snapshots; stream deltas can still catch up.
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "failed_to_load_company_explorer_roots");
       }
     })();
     return () => { cancelled = true; };
@@ -1705,15 +1711,20 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     ];
     return uniqueCleanIDs(companyGroupSections.flatMap(collectUsers));
   }, [companyGroupSections, scopeView, scopeViewsEnabled, teamUsers]);
-  const scopedExplorerData = useMemo(() => filterCompanyExplorerDataForScope({
-    scopeView: scopeViewsEnabled ? scopeView : "company",
-    currentUserID,
-    teamMemberUserIDs,
-    nodes,
-    logicGates,
-    folders,
-    folderItems,
-  }), [currentUserID, folderItems, folders, groupMembers, logicGates, nodes, scopeView, scopeViewsEnabled, teamMemberUserIDs]);
+  const scopedExplorerData = useMemo(() => {
+    if (!USE_SYNTHETIC_COMPANY_EXPLORER_SCOPE_ROWS) {
+      return { nodes, logicGates, folders, folderItems };
+    }
+    return filterCompanyExplorerDataForScope({
+      scopeView: scopeViewsEnabled ? scopeView : "company",
+      currentUserID,
+      teamMemberUserIDs,
+      nodes,
+      logicGates,
+      folders,
+      folderItems,
+    });
+  }, [currentUserID, folderItems, folders, logicGates, nodes, scopeView, scopeViewsEnabled, teamMemberUserIDs]);
   const raciExplorerActive = USE_SYNTHETIC_COMPANY_EXPLORER_SCOPE_ROWS && scopeViewsEnabled && scopeView === "mine" && currentUserID.trim().length > 0;
   const fetchRaciProjectionForUser = useCallback(async (targetUserID: string): Promise<RaciProjectionCacheEntry> => {
     const cleanUserID = cleanExplorerID(targetUserID);
