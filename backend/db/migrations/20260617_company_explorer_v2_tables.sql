@@ -177,6 +177,17 @@ on conflict (company_id, entity_type, resource_id) where resource_id is not null
   name = coalesce(excluded.name, company_explorer_entities.name),
   updated_timestamp = greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp);
 
+with scoped_user_roots as (
+  select folder.company_id,
+         mangorts_try_uuid(folder.scope_id) as user_id,
+         min(folder.created_timestamp) as created_timestamp,
+         max(folder.updated_timestamp) as updated_timestamp
+  from company_explorer_folders folder
+  where folder.parent_folder_id is null
+    and folder.scope_type = 'user'
+    and mangorts_try_uuid(folder.scope_id) is not null
+  group by folder.company_id, mangorts_try_uuid(folder.scope_id)
+)
 insert into company_explorer_entities (
   company_id,
   entity_id,
@@ -187,20 +198,17 @@ insert into company_explorer_entities (
   created_timestamp,
   updated_timestamp
 )
-select folder.company_id,
-       mangorts_company_explorer_v2_entity_id(folder.company_id, 'user', mangorts_try_uuid(folder.scope_id)),
+select scoped.company_id,
+       mangorts_company_explorer_v2_entity_id(scoped.company_id, 'user', scoped.user_id),
        'user',
-       mangorts_try_uuid(folder.scope_id),
+       scoped.user_id,
        nullif(coalesce(nullif(app_user.display_name, ''), app_user.email), ''),
        null,
-       folder.created_timestamp,
-       folder.updated_timestamp
-from company_explorer_folders folder
+       scoped.created_timestamp,
+       scoped.updated_timestamp
+from scoped_user_roots scoped
 left join users app_user
-  on app_user.user_id = mangorts_try_uuid(folder.scope_id)
-where folder.parent_folder_id is null
-  and folder.scope_type = 'user'
-  and mangorts_try_uuid(folder.scope_id) is not null
+  on app_user.user_id = scoped.user_id
 on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set
   name = coalesce(excluded.name, company_explorer_entities.name),
   updated_timestamp = greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp);
@@ -228,6 +236,17 @@ on conflict (company_id, entity_type, resource_id) where resource_id is not null
   name = excluded.name,
   updated_timestamp = greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp);
 
+with scoped_team_roots as (
+  select folder.company_id,
+         mangorts_try_uuid(folder.scope_id) as group_id,
+         min(folder.created_timestamp) as created_timestamp,
+         max(folder.updated_timestamp) as updated_timestamp
+  from company_explorer_folders folder
+  where folder.parent_folder_id is null
+    and folder.scope_type = 'team'
+    and mangorts_try_uuid(folder.scope_id) is not null
+  group by folder.company_id, mangorts_try_uuid(folder.scope_id)
+)
 insert into company_explorer_entities (
   company_id,
   entity_id,
@@ -238,21 +257,18 @@ insert into company_explorer_entities (
   created_timestamp,
   updated_timestamp
 )
-select folder.company_id,
-       mangorts_company_explorer_v2_entity_id(folder.company_id, 'user_group', mangorts_try_uuid(folder.scope_id)),
+select scoped.company_id,
+       mangorts_company_explorer_v2_entity_id(scoped.company_id, 'user_group', scoped.group_id),
        'user_group',
-       mangorts_try_uuid(folder.scope_id),
+       scoped.group_id,
        user_group.name,
        null,
-       folder.created_timestamp,
-       folder.updated_timestamp
-from company_explorer_folders folder
+       scoped.created_timestamp,
+       scoped.updated_timestamp
+from scoped_team_roots scoped
 left join company_user_groups user_group
-  on user_group.company_id = folder.company_id
- and user_group.group_id = mangorts_try_uuid(folder.scope_id)
-where folder.parent_folder_id is null
-  and folder.scope_type = 'team'
-  and mangorts_try_uuid(folder.scope_id) is not null
+  on user_group.company_id = scoped.company_id
+ and user_group.group_id = scoped.group_id
 on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set
   name = coalesce(excluded.name, company_explorer_entities.name),
   updated_timestamp = greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp);
