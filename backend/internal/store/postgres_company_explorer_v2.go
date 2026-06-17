@@ -24,6 +24,17 @@ func companyExplorerV2Args(query CompanyExplorerV2RowsQuery) []any {
 	}
 }
 
+const companyExplorerV2TypedArgsCTE = `with v2_args as (
+  select $2::text as view,
+         $3::uuid as scope_user_id,
+         $5::uuid as parent_entity_id,
+         $6::text as access_level
+)
+`
+
+const companyExplorerV2TypedArgsJoin = `cross join v2_args
+`
+
 func companyExplorerV2AccessPredicate(alias string) string {
 	return `(
     $4::uuid is null
@@ -305,16 +316,10 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
       )`
 		positionExpr = "coalesce(user_group.position, 1000)"
 	}
-	rows, err := r.db.QueryContext(ctx, `
-with v2_root_args as (
-  select $2::text as view,
-         $3::uuid as scope_user_id,
-         $5::uuid as parent_entity_id,
-         $6::text as access_level
-)
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", positionExpr, "entity.created_timestamp", "entity.updated_timestamp")+`
 from company_explorer_entities entity
-cross join v2_root_args
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where entity.company_id=$1::uuid
   and `+whereClause+`
@@ -377,9 +382,10 @@ func (r *PostgresRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entity
 }
 
 func (r *PostgresRepo) getCompanyExplorerV2Parent(ctx context.Context, query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Row, error) {
-	item, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, `
+	item, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", "1000", "entity.created_timestamp", "entity.updated_timestamp")+`
 from company_explorer_entities entity
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where entity.company_id=$1::uuid
   and entity.entity_id=$5::uuid
@@ -392,12 +398,13 @@ limit 1`, companyExplorerV2Args(query)...))
 }
 
 func (r *PostgresRepo) queryCompanyExplorerV2StoredChildren(ctx context.Context, query CompanyExplorerV2RowsQuery) ([]CompanyExplorerV2Row, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "edge.parent_entity_id", "edge.edge_id", "edge.position", "edge.created_timestamp", "edge.updated_timestamp")+`
 from company_explorer_edges edge
 join company_explorer_entities entity
   on entity.company_id=edge.company_id
  and entity.entity_id=edge.child_entity_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where edge.company_id=$1::uuid
   and edge.parent_entity_id=$5::uuid
@@ -434,13 +441,14 @@ func (r *PostgresRepo) queryCompanyExplorerV2DerivedChildren(ctx context.Context
 
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroups(ctx context.Context, query CompanyExplorerV2RowsQuery, groupPredicate string, extraArgs []any) ([]CompanyExplorerV2Row, error) {
 	args := append(companyExplorerV2Args(query), extraArgs...)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "coalesce(user_group.position, 1000)", "user_group.created_timestamp", "user_group.updated_timestamp")+`
 from company_user_groups user_group
 join company_explorer_entities entity
   on entity.company_id=user_group.company_id
  and entity.entity_type='user_group'
  and entity.resource_id=user_group.group_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where user_group.company_id=$1::uuid
   and `+groupPredicate+`
@@ -461,13 +469,14 @@ order by position asc, created_timestamp asc, name asc, entity_id asc`, args...)
 
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedGroupUsers(ctx context.Context, query CompanyExplorerV2RowsQuery, groupID string) ([]CompanyExplorerV2Row, error) {
 	args := append(companyExplorerV2Args(query), groupID)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "1000000 + row_number() over (order by "+companyExplorerV2NameExpr("entity")+" asc, entity.entity_id asc)::integer * 1000", "member.created_timestamp", "member.updated_timestamp")+`
 from company_user_group_members member
 join company_explorer_entities entity
   on entity.company_id=member.company_id
  and entity.entity_type='user'
  and entity.resource_id=member.user_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where member.company_id=$1::uuid
   and member.group_id=$7::uuid
@@ -488,13 +497,14 @@ order by position asc, created_timestamp asc, name asc, entity_id asc`, args...)
 
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedProjectChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, projectID string) ([]CompanyExplorerV2Row, error) {
 	args := append(companyExplorerV2Args(query), projectID)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "projection.position", "projection.relationship_created_timestamp", "projection.relationship_updated_timestamp")+`
 from project_relationship_projection projection
 join company_explorer_entities entity
   on entity.company_id=projection.company_id
  and entity.entity_type=projection.resource_type
  and entity.resource_id=projection.resource_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where projection.company_id=$1::uuid
   and projection.project_id=$7::uuid
@@ -516,13 +526,14 @@ order by position asc, created_timestamp asc, name asc, entity_id asc`, args...)
 
 func (r *PostgresRepo) queryCompanyExplorerV2DerivedLogicGateNodes(ctx context.Context, query CompanyExplorerV2RowsQuery, logicGateID string) ([]CompanyExplorerV2Row, error) {
 	args := append(companyExplorerV2Args(query), logicGateID)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "$5::uuid", "null::uuid", "assignment.position", "assignment.created_timestamp", "assignment.updated_timestamp")+`
 from node_logic_gate_assignments assignment
 join company_explorer_entities entity
   on entity.company_id=assignment.company_id
  and entity.entity_type='node'
  and entity.resource_id=assignment.node_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$7::uuid
@@ -658,10 +669,11 @@ where company_id=$1::uuid and entity_type=$2 and resource_id=$3::uuid`, input.Co
 	if input.PermissionUserID != "" {
 		childQuery := CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, View: CompanyExplorerLazyScopeAll, ParentEntityID: childEntityID, PermissionUserID: input.PermissionUserID}
 		var visible bool
-		if err := tx.QueryRowContext(ctx, `
+		if err := tx.QueryRowContext(ctx, companyExplorerV2TypedArgsCTE+`
 select exists (
   select 1
   from company_explorer_entities entity
+  `+companyExplorerV2TypedArgsJoin+`
   where entity.company_id=$1::uuid
     and entity.entity_id=$5::uuid
     and `+companyExplorerV2AccessPredicate("entity")+`
@@ -929,12 +941,13 @@ where company_id=$1::uuid
 
 func (r *PostgresRepo) companyExplorerV2RowByEdge(ctx context.Context, companyID, edgeID, permissionUserID string) (CompanyExplorerV2Row, error) {
 	query := CompanyExplorerV2RowsQuery{CompanyID: companyID, PermissionUserID: permissionUserID, View: CompanyExplorerLazyScopeAll}
-	item, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, `
+	item, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "edge.parent_entity_id", "edge.edge_id", "edge.position", "edge.created_timestamp", "edge.updated_timestamp")+`
 from company_explorer_edges edge
 join company_explorer_entities entity
   on entity.company_id=edge.company_id
  and entity.entity_id=edge.child_entity_id
+`+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where edge.company_id=$1::uuid and edge.edge_id=$7::uuid
   and `+companyExplorerV2AccessPredicate("entity")+`
