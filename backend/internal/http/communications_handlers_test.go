@@ -861,6 +861,19 @@ func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
 	if attachment.Filename != "photo.png" || attachment.ContentType != "image/png" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || attachment.Size != int64(len("image-bytes")) {
 		t.Fatalf("attachment = %+v, want png content from raw MIME", attachment)
 	}
+	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/raw-mime-1", nil)
+	attachmentReq.Header.Set("Authorization", token)
+	attachmentRec := httptest.NewRecorder()
+	handler.ServeHTTP(attachmentRec, attachmentReq)
+	if attachmentRec.Code != http.StatusOK {
+		t.Fatalf("raw MIME attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
+	}
+	if attachmentRec.Header().Get("Content-Type") != "image/png" || attachmentRec.Body.String() != "image-bytes" {
+		t.Fatalf("raw MIME attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
+	}
+	if nylas.lastDownloadAttachmentID != "" {
+		t.Fatalf("download attachment id = %q, want raw MIME inline content without provider download", nylas.lastDownloadAttachmentID)
+	}
 }
 
 func TestCommunicationsSendAllowsLargeAttachmentBodyWithQueryCompanyID(t *testing.T) {
