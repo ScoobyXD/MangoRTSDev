@@ -1397,6 +1397,341 @@ create index if not exists idx_company_explorer_folder_shares_user
 create index if not exists idx_company_explorer_folder_shares_email_status
   on company_explorer_folder_shares(company_id, email, status);
 
+create or replace function mangorts_try_uuid(p_value text)
+returns uuid as $$
+begin
+  return nullif(btrim(coalesce(p_value, '')), '')::uuid;
+exception when invalid_text_representation then
+  return null;
+end;
+$$ language plpgsql immutable;
+
+create or replace function mangorts_company_explorer_v2_entity_id(
+  p_company_id uuid,
+  p_entity_type text,
+  p_resource_id uuid
+)
+returns uuid as $$
+  select md5(
+    p_company_id::text || ':company_explorer_v2_entity:' ||
+    lower(btrim(p_entity_type)) || ':' ||
+    p_resource_id::text
+  )::uuid;
+$$ language sql immutable;
+
+create or replace function mangorts_company_explorer_v2_edge_id(
+  p_company_id uuid,
+  p_parent_entity_id uuid,
+  p_child_entity_id uuid
+)
+returns uuid as $$
+  select md5(
+    p_company_id::text || ':company_explorer_v2_edge:' ||
+    p_parent_entity_id::text || ':' ||
+    p_child_entity_id::text
+  )::uuid;
+$$ language sql immutable;
+
+create table if not exists company_explorer_entities (
+  company_id uuid not null,
+  entity_id uuid not null,
+  entity_type text not null,
+  resource_id uuid,
+  name text,
+  default_access text,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint company_explorer_entities_type_chk check (
+    entity_type in ('company', 'user_group', 'user', 'folder', 'project', 'logic_gate', 'node')
+  ),
+  constraint company_explorer_entities_resource_shape_chk check (
+    (entity_type = 'folder' and resource_id is null)
+    or (entity_type <> 'folder' and resource_id is not null)
+  ),
+  constraint company_explorer_entities_name_nonblank_chk check (name is null or btrim(name) <> ''),
+  constraint company_explorer_entities_default_access_chk check (default_access is null or default_access in ('edit', 'no_access')),
+  constraint company_explorer_entities_folder_default_access_chk check (
+    (entity_type = 'folder' and default_access is not null)
+    or (entity_type <> 'folder' and default_access is null)
+  ),
+  primary key (company_id, entity_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create unique index if not exists idx_company_explorer_entities_native_resource
+  on company_explorer_entities(company_id, entity_type, resource_id)
+  where resource_id is not null;
+
+create index if not exists idx_company_explorer_entities_type_name
+  on company_explorer_entities(company_id, entity_type, lower(name), entity_id);
+
+create table if not exists company_explorer_edges (
+  company_id uuid not null,
+  edge_id uuid not null,
+  parent_entity_id uuid not null,
+  child_entity_id uuid not null,
+  position integer not null default 1000,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint company_explorer_edges_not_self_chk check (parent_entity_id <> child_entity_id),
+  primary key (company_id, edge_id),
+  unique (company_id, parent_entity_id, child_entity_id),
+  foreign key (company_id, parent_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade,
+  foreign key (company_id, child_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade
+);
+
+create index if not exists idx_company_explorer_edges_parent_position
+  on company_explorer_edges(company_id, parent_entity_id, position, created_timestamp, edge_id);
+
+create index if not exists idx_company_explorer_edges_child
+  on company_explorer_edges(company_id, child_entity_id, parent_entity_id);
+
+create or replace function mangorts_prevent_company_explorer_edge_cycle()
+returns trigger as $$
+begin
+  if new.parent_entity_id = new.child_entity_id then
+    raise exception 'company_explorer_edges cannot place an entity under itself';
+  end if;
+
+  if exists (
+    with recursive ancestors(entity_id, path) as (
+      select new.parent_entity_id, array[new.parent_entity_id]
+      union all
+      select edge.parent_entity_id, ancestors.path || edge.parent_entity_id
+      from ancestors
+      join company_explorer_edges edge
+        on edge.company_id = new.company_id
+       and edge.child_entity_id = ancestors.entity_id
+      where edge.edge_id <> new.edge_id
+        and not edge.parent_entity_id = any(ancestors.path)
+    )
+    select 1
+    from ancestors
+    where entity_id = new.child_entity_id
+  ) then
+    raise exception 'company_explorer_edges cycle detected for parent % and child %', new.parent_entity_id, new.child_entity_id;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_company_explorer_edges_prevent_cycle on company_explorer_edges;
+
+create trigger trg_company_explorer_edges_prevent_cycle
+  before insert or update of company_id, parent_entity_id, child_entity_id
+  on company_explorer_edges
+  for each row
+  execute function mangorts_prevent_company_explorer_edge_cycle();
+
+create or replace view company_explorer_v2_backfill_verification as
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'old_folders_to_v2_folder_entities'::text as check_name,
+         (select count(*) from company_explorer_folders)::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_entities entity
+             on entity.company_id = folder.company_id
+            and entity.entity_id = folder.folder_id
+            and entity.entity_type = 'folder'
+            and entity.resource_id is null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'old_folder_items_to_v2_resource_edges'::text as check_name,
+         (select count(*) from company_explorer_folder_items)::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folder_items item
+           join company_explorer_entities child
+             on child.company_id = item.company_id
+            and child.entity_type = item.item_type
+            and child.resource_id = mangorts_try_uuid(item.item_id)
+           join company_explorer_edges edge
+             on edge.company_id = item.company_id
+            and edge.parent_entity_id = item.folder_id
+            and edge.child_entity_id = child.entity_id
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'old_parent_child_folder_paths_to_v2_edges'::text as check_name,
+         (select count(*) from company_explorer_folders where parent_folder_id is not null)::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_edges edge
+             on edge.company_id = folder.company_id
+            and edge.parent_entity_id = folder.parent_folder_id
+            and edge.child_entity_id = folder.folder_id
+           where folder.parent_folder_id is not null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'company_root_folders_to_company_root_edges'::text as check_name,
+         (select count(*) from company_explorer_folders where parent_folder_id is null and scope_type = 'company')::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_edges edge
+             on edge.company_id = folder.company_id
+            and edge.child_entity_id = folder.folder_id
+           join company_explorer_entities parent
+             on parent.company_id = edge.company_id
+            and parent.entity_id = edge.parent_entity_id
+            and parent.entity_type = 'company'
+            and parent.resource_id = folder.company_id
+           where folder.parent_folder_id is null
+             and folder.scope_type = 'company'
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'user_root_folders_to_user_root_edges'::text as check_name,
+         (
+           select count(*)
+           from company_explorer_folders
+           where parent_folder_id is null
+             and scope_type = 'user'
+             and mangorts_try_uuid(scope_id) is not null
+         )::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_edges edge
+             on edge.company_id = folder.company_id
+            and edge.child_entity_id = folder.folder_id
+           join company_explorer_entities parent
+             on parent.company_id = edge.company_id
+            and parent.entity_id = edge.parent_entity_id
+            and parent.entity_type = 'user'
+            and parent.resource_id = mangorts_try_uuid(folder.scope_id)
+           where folder.parent_folder_id is null
+             and folder.scope_type = 'user'
+             and mangorts_try_uuid(folder.scope_id) is not null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'team_root_folders_to_group_root_edges'::text as check_name,
+         (
+           select count(*)
+           from company_explorer_folders
+           where parent_folder_id is null
+             and scope_type = 'team'
+             and mangorts_try_uuid(scope_id) is not null
+         )::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_edges edge
+             on edge.company_id = folder.company_id
+            and edge.child_entity_id = folder.folder_id
+           join company_explorer_entities parent
+             on parent.company_id = edge.company_id
+            and parent.entity_id = edge.parent_entity_id
+            and parent.entity_type = 'user_group'
+            and parent.resource_id = mangorts_try_uuid(folder.scope_id)
+           where folder.parent_folder_id is null
+             and folder.scope_type = 'team'
+             and mangorts_try_uuid(folder.scope_id) is not null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'folder_default_access_to_v2_entities'::text as check_name,
+         (select count(*) from company_explorer_folders)::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders folder
+           join company_explorer_entities entity
+             on entity.company_id = folder.company_id
+            and entity.entity_id = folder.folder_id
+            and entity.entity_type = 'folder'
+            and entity.default_access = folder.default_access
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'folder_permission_rows_target_v2_folder_entities'::text as check_name,
+         (
+           select count(*)
+           from resource_permissions permission
+           join company_explorer_folders folder
+             on folder.company_id = permission.company_id
+            and folder.folder_id = permission.resource_id
+           where permission.resource_type = 'company_explorer_folder'
+         )::bigint as expected_count,
+         (
+           select count(*)
+           from resource_permissions permission
+           join company_explorer_entities entity
+             on entity.company_id = permission.company_id
+            and entity.entity_id = permission.resource_id
+            and entity.entity_type = 'folder'
+           where permission.resource_type = 'company_explorer_folder'
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'active_folder_shares_to_edit_grants'::text as check_name,
+         (
+           select count(*)
+           from company_explorer_folder_shares share
+           where share.status = 'active'
+             and share.user_id is not null
+         )::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folder_shares share
+           join resource_access_grants grant_row
+             on grant_row.company_id = share.company_id
+            and grant_row.resource_type = 'company_explorer_folder'
+            and grant_row.resource_id = share.folder_id
+            and grant_row.principal_type = 'user'
+            and grant_row.principal_id = share.user_id
+            and grant_row.access_level = 'edit'
+           where share.status = 'active'
+             and share.user_id is not null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'legacy_folder_item_ids_are_valid_uuids'::text as check_name,
+         0::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folder_items
+           where mangorts_try_uuid(item_id) is null
+         )::bigint as actual_count
+) check_row
+union all
+select check_name, expected_count, actual_count, expected_count = actual_count as ok
+from (
+  select 'legacy_root_scope_ids_are_valid_uuids'::text as check_name,
+         0::bigint as expected_count,
+         (
+           select count(*)
+           from company_explorer_folders
+           where parent_folder_id is null
+             and scope_type in ('user', 'team')
+             and mangorts_try_uuid(scope_id) is null
+         )::bigint as actual_count
+) check_row;
+
 create table if not exists recycle_bin_items (
   company_id uuid not null,
   recycle_bin_item_id uuid not null,
