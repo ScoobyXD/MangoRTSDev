@@ -50,3 +50,29 @@ func TestPostgresCompanyExplorerLazyFolderScopeUsesTextScopeID(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresCompanyExplorerLazyScopeCTETypesUnusedRootParameters(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_lazy.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_lazy.go: %v", err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "const companyExplorerLazyScopeCTE =")
+	if start < 0 {
+		t.Fatal("companyExplorerLazyScopeCTE not found")
+	}
+	end := strings.Index(source[start:], "func companyExplorerLazyFolderScopePredicate")
+	if end < 0 {
+		t.Fatal("companyExplorerLazyScopeCTE end not found")
+	}
+	body := source[start : start+end]
+	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	for _, needle := range []string{
+		"$5::uuid as parent_id",
+		"$6::text as access_level",
+	} {
+		if !strings.Contains(normalized, needle) {
+			t.Fatalf("lazy scope CTE must type root-query placeholder %q", needle)
+		}
+	}
+}
