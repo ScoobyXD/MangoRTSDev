@@ -154,8 +154,13 @@ export function MyWorkView({
   }, [currentUserID, currentUserImmediateGroupID]);
 
   const selectScopeLevel = useCallback((level: MyWorkScopeLevel) => {
+    const nextScope = defaultScopeForLevel(level);
+    if (level === "me") {
+      updateSelectedSetting((setting) => ({ ...setting, selected_scope: nextScope }));
+      setScopeMenuLevel(null);
+      return;
+    }
     if (selectedSetting.selected_scope.level !== level) {
-      const nextScope = defaultScopeForLevel(level);
       updateSelectedSetting((setting) => ({ ...setting, selected_scope: nextScope }));
     }
     setScopeMenuLevel((current) => (current === level ? null : level));
@@ -498,43 +503,99 @@ function MyWorkRows({
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
+  const sections = buildLogicGateSections(rows, logicGateByID);
   return (
     <div style={rowListStyle}>
-      {rows.map((row) => {
-        const primaryPerson = row.people[0]?.label ?? "Unassigned";
-        const status = row.status?.trim() || "No status";
-        const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
-        const dueDate = row.dueDate?.trim() || "No due date";
-        return (
-          <button
-            key={`${row.kind}:${row.id}`}
-            type="button"
-            style={workRowStyle(depth)}
-            onClick={() => {
-              if (row.kind === "node") {
-                const node = nodeByID.get(row.id);
-                if (node) onOpenNode(node);
-              } else {
-                onOpenLogicGate(row.id, logicGateTitle(logicGateByID.get(row.id)));
-              }
-            }}
-          >
-            <span style={workRowTitleCellStyle}>
-              <ExplorerRowIcon kind={row.kind === "node" ? "node" : "logic_gate"} />
-              <span style={workRowTitleTextStyle}>{row.title}</span>
-            </span>
-            <span style={workRowMetaCellStyle}>{row.kind === "node" ? "Node" : "Logic Gate"}</span>
-            <span style={workRowMetaCellStyle}>{primaryPerson}</span>
-            <span style={workRowMetaCellStyle}>{status}</span>
-            <span style={workRowMetaCellStyle}>{priority}</span>
-            <span style={workRowMetaCellStyle}>{dueDate}</span>
-          </button>
-        );
-      })}
+      {sections.map((section) => (
+        <div key={section.key} style={logicGateSectionBlockStyle}>
+          {section.logicGateID ? (
+            <button
+              type="button"
+              style={logicGateSectionRowStyle(depth, true)}
+              onClick={() => onOpenLogicGate(section.logicGateID, section.title)}
+            >
+              <ExplorerRowIcon kind="logic_gate" />
+              <span style={workRowTitleTextStyle}>{section.title}</span>
+              <span style={groupHeaderCountStyle}>{section.rows.length}</span>
+            </button>
+          ) : (
+            <div style={logicGateSectionRowStyle(depth, false)}>
+              <span style={othersSectionBadgeStyle}>O</span>
+              <span style={workRowTitleTextStyle}>{section.title}</span>
+              <span style={groupHeaderCountStyle}>{section.rows.length}</span>
+            </div>
+          )}
+          <div style={logicGateNodeListStyle}>
+            {section.rows.map((row) => {
+              const primaryPerson = row.people[0]?.label ?? "Unassigned";
+              const status = row.status?.trim() || "No status";
+              const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
+              const dueDate = row.dueDate?.trim() || "No due date";
+              return (
+                <button
+                  key={`${section.key}:${row.kind}:${row.id}`}
+                  type="button"
+                  style={workRowStyle(depth + 1)}
+                  onClick={() => {
+                    if (row.kind === "node") {
+                      const node = nodeByID.get(row.id);
+                      if (node) onOpenNode(node);
+                    } else {
+                      onOpenLogicGate(row.id, logicGateTitle(logicGateByID.get(row.id)));
+                    }
+                  }}
+                >
+                  <span style={workRowTitleCellStyle}>
+                    <ExplorerRowIcon kind={row.kind === "node" ? "node" : "logic_gate"} />
+                    <span style={workRowTitleTextStyle}>{row.title}</span>
+                  </span>
+                  <span style={workRowMetaCellStyle}>{row.kind === "node" ? "Node" : "Logic Gate"}</span>
+                  <span style={workRowMetaCellStyle}>{primaryPerson}</span>
+                  <span style={workRowMetaCellStyle}>{status}</span>
+                  <span style={workRowMetaCellStyle}>{priority}</span>
+                  <span style={workRowMetaCellStyle}>{dueDate}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
+type MyWorkLogicGateSection = {
+  key: string;
+  logicGateID: string;
+  title: string;
+  rows: MyWorkResourceRow[];
+};
+
+function buildLogicGateSections(rows: MyWorkResourceRow[], logicGateByID: Map<string, LogicGateRecord>): MyWorkLogicGateSection[] {
+  const sections = new Map<string, MyWorkLogicGateSection>();
+  for (const row of rows) {
+    const logicGateIDs = row.logicGateIDs.length > 0 ? row.logicGateIDs : [""];
+    logicGateIDs.forEach((logicGateID, index) => {
+      const cleanLogicGateID = logicGateID.trim();
+      const key = cleanLogicGateID ? `logic_gate:${cleanLogicGateID}` : "others";
+      const existing = sections.get(key);
+      const title = cleanLogicGateID
+        ? (logicGateByID.has(cleanLogicGateID) ? logicGateTitle(logicGateByID.get(cleanLogicGateID)) : row.logicGateLabels[index] || cleanLogicGateID)
+        : "Others";
+      const section: MyWorkLogicGateSection = existing ?? { key, logicGateID: cleanLogicGateID, title, rows: [] };
+      if (!section.rows.some((item) => item.kind === row.kind && item.id === row.id)) section.rows.push(row);
+      sections.set(key, section);
+    });
+  }
+  return Array.from(sections.values())
+    .map((section) => ({ ...section, rows: sortMyWorkRows(section.rows) }))
+    .sort((left, right) => {
+      if (!left.logicGateID && right.logicGateID) return 1;
+      if (left.logicGateID && !right.logicGateID) return -1;
+      return left.title.localeCompare(right.title, undefined, { numeric: true, sensitivity: "base" })
+        || left.key.localeCompare(right.key);
+    });
+}
 function buildMyWorkRows({
   nodes,
   logicGates,
@@ -550,9 +611,9 @@ function buildMyWorkRows({
 }): MyWorkResourceRow[] {
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id.trim(), logicGate]));
   const activeNodes = nodes.filter((node) => myWorkNodeIsActive(node));
-  const activeNodeLogicGateIDs = new Set(activeNodes.flatMap((node) => cleanIDList(node.logic_gate_ids ?? [])));
   const rows: MyWorkResourceRow[] = activeNodes.map((node) => {
-    const linkedLogicGates = cleanIDList(node.logic_gate_ids ?? []).map((logicGateID) => logicGateByID.get(logicGateID)).filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate));
+    const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
+    const linkedLogicGates = logicGateIDs.map((logicGateID) => logicGateByID.get(logicGateID)).filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate));
     const assignments = linkedLogicGates.flatMap((logicGate) => logicGate.raci_assignments ?? []);
     const assigneeID = node.assignee_user_id?.trim() ?? "";
     const people = assigneeID ? [personForUserID(assigneeID, userByID, node.assignee_name ?? undefined, node.assignee_email ?? undefined)] : peopleFromAssignments(assignments, userByID);
@@ -570,36 +631,16 @@ function buildMyWorkRows({
       teams: teamsForUsers(people.map((person) => person.userID), groupIDsByUserID, groupByID),
       raciRoles: uniqueRaciRoles(assignments.map((assignment) => assignment.role)),
       participantUserIDs,
-      logicGateLabels: linkedLogicGates.map(logicGateTitle),
+      logicGateLabels: logicGateIDs.map((logicGateID) => {
+        const logicGate = logicGateByID.get(logicGateID);
+        return logicGate ? logicGateTitle(logicGate) : logicGateID;
+      }),
+      logicGateIDs,
     };
   });
 
-  for (const logicGate of logicGates) {
-    const logicGateID = logicGate.logic_gate_id.trim();
-    const assignments = logicGate.raci_assignments ?? [];
-    if (!logicGateID || (assignments.length === 0 && !activeNodeLogicGateIDs.has(logicGateID))) continue;
-    const people = peopleFromAssignments(assignments, userByID);
-    const participantUserIDs = uniqueStrings(assignments.map((assignment) => assignment.user_id));
-    rows.push({
-      kind: "logic_gate",
-      id: logicGateID,
-      title: logicGateTitle(logicGate),
-      status: null,
-      dueDate: null,
-      priority: null,
-      accounts: [],
-      projectLabels: [],
-      people,
-      teams: teamsForUsers(people.map((person) => person.userID), groupIDsByUserID, groupByID),
-      raciRoles: uniqueRaciRoles(assignments.map((assignment) => assignment.role)),
-      participantUserIDs,
-      logicGateLabels: [logicGateTitle(logicGate)],
-    });
-  }
-
   return sortMyWorkRows(rows);
 }
-
 function filterRowsForScope(
   rows: MyWorkResourceRow[],
   scope: MyWorkSelectedScope,
@@ -835,18 +876,53 @@ function countGroupRows(group: MyWorkNestedGroup): number {
 }
 
 function ScopeIcon({ icon }: { icon: ScopePickerRow["icon"] }) {
-  if (icon === "group") return <ExplorerRowIcon kind="folder" />;
-  if (icon === "company") return <ExplorerRowIcon kind="folder" mangoDefaultFolder />;
-  return <ExplorerRowIcon kind="node" />;
+  return <PeopleIcon multiple={icon !== "user"} />;
+}
+
+function PeopleIcon({ multiple }: { multiple: boolean }) {
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={peopleIconStyle}>
+      {multiple && <circle cx="5" cy="5.2" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.4" />}
+      {multiple && <path d="M1.8 13c.35-2.2 1.5-3.3 3.2-3.3.95 0 1.7.28 2.25.85" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />}
+      <circle cx={multiple ? 10.3 : 8} cy="5.1" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d={multiple ? "M6.3 13.1c.42-2.45 1.78-3.7 4-3.7s3.58 1.25 4 3.7" : "M3.9 13.1c.42-2.45 1.82-3.7 4.1-3.7s3.68 1.25 4.1 3.7"} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function GroupHeaderIcon({ field }: { field: MyWorkGroupingField }) {
-  if (field === "project") return <ExplorerRowIcon kind="project" />;
-  if (field === "racio") return <ExplorerRowIcon kind="logic_gate" />;
-  if (field === "person" || field === "team") return <ExplorerRowIcon kind="folder" mangoDefaultFolder />;
-  return <ExplorerRowIcon kind="folder" />;
+  return <span aria-hidden="true" style={groupHeaderBadgeStyle}>{groupHeaderBadgeLabel(field)}</span>;
 }
 
+function groupHeaderBadgeLabel(field: MyWorkGroupingField): string {
+  if (field === "account") return "A";
+  if (field === "due_date") return "D";
+  if (field === "person") return "P";
+  if (field === "priority") return "#";
+  if (field === "project") return "P";
+  if (field === "racio") return "R";
+  if (field === "status") return "S";
+  return "T";
+}
+
+const peopleIconStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  color: "#2563eb",
+};
+
+const groupHeaderBadgeStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
+  borderRadius: 4,
+  color: "#475569",
+  background: "#f8fafc",
+  fontSize: 10,
+  lineHeight: 1,
+  fontWeight: 850,
+};
 const myWorkShellStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
@@ -1267,6 +1343,52 @@ const rowListStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignContent: "start",
+};
+
+const logicGateSectionBlockStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+};
+
+function logicGateSectionRowStyle(depth: number, clickable: boolean): React.CSSProperties {
+  return {
+    width: "max-content",
+    maxWidth: "min(980px, calc(100% - 16px))",
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "16px minmax(180px, auto) auto",
+    alignItems: "center",
+    gap: 7,
+    marginLeft: depth * 28 + 42,
+    border: "none",
+    background: "#ffffff",
+    color: "#111827",
+    font: "inherit",
+    textAlign: "left",
+    cursor: clickable ? "pointer" : "default",
+    padding: "0 8px",
+  };
+}
+
+const logicGateNodeListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+};
+
+const othersSectionBadgeStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(100, 116, 139, 0.28)",
+  borderRadius: 4,
+  color: "#475569",
+  background: "#f8fafc",
+  fontSize: 10,
+  lineHeight: 1,
+  fontWeight: 850,
 };
 
 function workRowStyle(depth: number): React.CSSProperties {

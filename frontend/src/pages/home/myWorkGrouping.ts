@@ -66,6 +66,7 @@ export type MyWorkResourceRow = {
   raciRoles: LogicGateRaciRole[];
   participantUserIDs: string[];
   logicGateLabels: string[];
+  logicGateIDs: string[];
 };
 
 export type MyWorkGroupValue = {
@@ -226,7 +227,7 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
   }
 
   if (field === "racio") {
-    if (row.raciRoles.length === 0) return [{ key: "racio:none", label: "No RACIO", sortValue: "", sortLast: true }];
+    if (row.raciRoles.length === 0) return [{ key: "racio:none", label: "Others", sortValue: "", sortLast: true }];
     return row.raciRoles.map((role) => ({ key: `racio:${role}`, label: raciRoleLabel(role), sortValue: raciRoleSort(role) }));
   }
 
