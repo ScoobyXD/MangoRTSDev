@@ -25,6 +25,7 @@ function row(input: Partial<MyWorkResourceRow> & Pick<MyWorkResourceRow, "id" | 
     raciRoles: [],
     participantUserIDs: [],
     logicGateLabels: [],
+    logicGateIDs: [],
     ...input,
   };
 }
@@ -55,7 +56,7 @@ test("groups My Work rows by RACIO, priority, and project with missing fallbacks
   const rows = [
     row({ id: "node-1", title: "Project node", priority: 1, projectLabels: ["Project A"], raciRoles: ["responsible"] }),
     row({ id: "node-2", title: "Missing project", priority: 2, raciRoles: ["responsible"] }),
-    row({ id: "node-3", title: "No RACIO", priority: null }),
+    row({ id: "node-3", title: "Others", priority: null }),
   ];
   const groups = buildNestedGroups(rows, [
     { field: "racio", direction: "asc" },
@@ -67,7 +68,7 @@ test("groups My Work rows by RACIO, priority, and project with missing fallbacks
   assert.equal(groups[0].groups[0].label, "1 URGENT(<1hr)");
   assert.equal(groups[0].groups[0].groups[0].label, "Project A");
   assert.equal(groups[0].groups[1].groups[0].label, "No project");
-  assert.equal(groups[1].label, "No RACIO");
+  assert.equal(groups[1].label, "Others");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "account")[0].label, "No account");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "person")[0].label, "Unassigned");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "status")[0].label, "Pending");
