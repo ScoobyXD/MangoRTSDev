@@ -1419,6 +1419,7 @@ export function HomeSidebar({
           );
         })}
         <HomeCustomViewButton active={activeViewID === "custom-matrix"} onClick={() => onSelectView("custom-matrix", "all")} />
+        <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>

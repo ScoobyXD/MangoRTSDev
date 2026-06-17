@@ -75,6 +75,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
+import { MyWorkView } from "./MyWorkView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, MESSAGE_POLL_REFRESH_INTERVAL_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
@@ -405,10 +406,11 @@ export function HomePage({
   const hideNavigationRef = useRef(hideNavigation);
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
   const isCustomMatrixView = isCustomMatrixViewID(activeViewID);
+  const isMyWorkView = activeViewID === "my-work";
   const { accounts: matrixAccounts } = useCompanyAccounts(companyID, isInboxMatrixView || isCustomMatrixView);
   const isNarrow = isInboxMatrixView
     ? viewportWidth < 980
-    : isCustomMatrixView
+    : isCustomMatrixView || isMyWorkView
       ? viewportWidth < 760
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
@@ -979,7 +981,7 @@ export function HomePage({
   }, []);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
     if (!activeMailViewHasEmailConnection) return;
-    if (isInboxMatrixViewID(activeViewID) || isCustomMatrixViewID(activeViewID)) {
+    if (isInboxMatrixViewID(activeViewID) || isCustomMatrixViewID(activeViewID) || activeViewID === "my-work") {
       setLoadedMessageListKey("");
       setMessages([]);
       setSelectedMessage(null);
@@ -1123,7 +1125,7 @@ export function HomePage({
     return page.next_page_token ?? "";
   }, []);
   const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
-    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current) return;
+    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work" || loadingMessagesRef.current) return;
     const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1161,7 +1163,7 @@ export function HomePage({
     await request;
   }, [activeMailViewHasEmailConnection, companyID, currentMessageFilterKey, handleEmailAccessExpired]);
   const loadMoreMessages = useCallback(async () => {
-    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!activeMailViewHasEmailConnection || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
@@ -1232,7 +1234,7 @@ export function HomePage({
     const refresh = options?.refresh === true;
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
-      if (!activeMailViewHasEmailConnection || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current)) return;
+      if (!activeMailViewHasEmailConnection || isInboxMatrixViewID(activeViewIDRef.current) || isCustomMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work") return;
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [activeMailViewHasEmailConnection]);
@@ -1351,7 +1353,7 @@ export function HomePage({
   useEffect(() => { void loadStatus({ clearError: !preserveInitialOAuthError }); }, [loadStatus, preserveInitialOAuthError]);
   useEffect(() => { if (activeMailViewHasEmailConnection && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeMailViewHasEmailConnection, activeViewID, loadFolders]);
   useEffect(() => { if (status?.configured) void loadSharedInboxes(); }, [loadSharedInboxes, status?.configured]);
-  useEffect(() => { if (status?.connected || activeMailViewUsesSharedConnection || isInboxMatrixView) void loadCompanyUsers(); }, [activeMailViewUsesSharedConnection, isInboxMatrixView, loadCompanyUsers, status?.connected]);
+  useEffect(() => { if (status?.connected || activeMailViewUsesSharedConnection || isInboxMatrixView || isMyWorkView) void loadCompanyUsers(); }, [activeMailViewUsesSharedConnection, isInboxMatrixView, isMyWorkView, loadCompanyUsers, status?.connected]);
   useEffect(() => {
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -3616,21 +3618,21 @@ export function HomePage({
     unreadOnly,
   ]);
   useEffect(() => {
-    if (!activeMailViewHasEmailConnection || isInboxMatrixView || isCustomMatrixView) return;
+    if (!activeMailViewHasEmailConnection || isInboxMatrixView || isCustomMatrixView || isMyWorkView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
       detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
     }));
-  }, [activeMailViewHasEmailConnection, activeViewID, companyID, isCustomMatrixView, isInboxMatrixView, unreadMessageCount]);
+  }, [activeMailViewHasEmailConnection, activeViewID, companyID, isCustomMatrixView, isInboxMatrixView, isMyWorkView, unreadMessageCount]);
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
   const showLocalEntityRail = !embedded;
-  const layoutColumnWidths = isNarrow || isInboxMatrixView || isCustomMatrixView
+  const layoutColumnWidths = isNarrow || isInboxMatrixView || isCustomMatrixView || isMyWorkView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
-    : isCustomMatrixView
+    : isCustomMatrixView || isMyWorkView
       ? hideNavigation
         ? "minmax(0, 1fr)"
         : `${layoutColumnWidths[0]}px minmax(0, 1fr)`
@@ -3645,7 +3647,7 @@ export function HomePage({
       : isInboxMatrixView
         ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
         : getHomeGridTemplateColumns(layoutColumnWidths);
-  const matrixWorkspaceActive = (isInboxMatrixView || isCustomMatrixView) && !isNarrow;
+  const matrixWorkspaceActive = (isInboxMatrixView || isCustomMatrixView || isMyWorkView) && !isNarrow;
   const workspaceLayoutStyle: React.CSSProperties = {
     ...workspaceStyle,
     gridTemplateColumns: workspaceGridTemplateColumns,
@@ -3715,7 +3717,20 @@ export function HomePage({
               onDeleteSharedInbox={deleteSharedInboxFolder}
             />
           )}
-          {isCustomMatrixView ? (
+          {isMyWorkView ? (
+            <MyWorkView
+              loading={loadingNodes || loadingLogicGates}
+              companyID={companyID}
+              currentUserID={currentUserID}
+              nodes={nodes}
+              logicGates={logicGates}
+              companyUsers={companyUsers}
+              companyUserGroups={companyUserGroups}
+              companyUserGroupMembers={companyUserGroupMembers}
+              onOpenNode={openNodeEditorOverlay}
+              onOpenLogicGate={(logicGateID, label, nodeID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID)}
+            />
+          ) : isCustomMatrixView ? (
             <CustomMatrixView
               loading={loadingNodes || loadingLogicGates}
               nodes={matrixFilteredNodes}
