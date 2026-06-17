@@ -39,6 +39,7 @@ export type CompanyExplorerStoreState = {
 export type CompanyExplorerStoreAction =
   | { type: "resetSnapshot" }
   | { type: "applySnapshot"; snapshot: CompanyExplorerSnapshotPayload }
+  | { type: "mergeSnapshot"; snapshot: CompanyExplorerSnapshotPayload }
   | { type: "setKanbanBoards"; boards: KanbanBoard[] }
   | { type: "applyKanbanBoardsUpdated"; companyID: string; detail?: KanbanBoardsUpdatedDetail }
   | { type: "applyWorkspaceEnvelope"; companyID: string; envelope: CompanyExplorerWorkspaceStreamEnvelope }
@@ -101,6 +102,16 @@ export function reduceCompanyExplorerStore(
         projects: action.snapshot.projects ?? [],
         folders: action.snapshot.folders ?? [],
         folderItems: action.snapshot.folder_items ?? [],
+        folderSnapshotLoaded: true,
+      };
+    case "mergeSnapshot":
+      return {
+        ...state,
+        nodes: mergeByID(state.nodes, action.snapshot.nodes ?? [], (node) => node.node_id),
+        logicGates: mergeByID(state.logicGates, (action.snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord), (logicGate) => logicGate.logic_gate_id),
+        projects: mergeByID(state.projects, action.snapshot.projects ?? [], (project) => project.project_id),
+        folders: mergeByID(state.folders, action.snapshot.folders ?? [], (folder) => folder.folder_id),
+        folderItems: upsertFolderItems(state.folderItems, action.snapshot.folder_items ?? []),
         folderSnapshotLoaded: true,
       };
     case "setKanbanBoards":
@@ -303,6 +314,12 @@ function upsertByID<T>(items: T[], nextItem: T, getID: (item: T) => string): T[]
   return items.some((item) => getID(item) === nextID)
     ? items.map((item) => (getID(item) === nextID ? nextItem : item))
     : [...items, nextItem];
+}
+
+function mergeByID<T>(items: T[], nextItems: T[], getID: (item: T) => string): T[] {
+  let merged = items;
+  for (const item of nextItems) merged = upsertByID(merged, item, getID);
+  return merged;
 }
 
 function replaceByID<T>(items: T[], nextItem: T, getID: (item: T) => string): T[] {

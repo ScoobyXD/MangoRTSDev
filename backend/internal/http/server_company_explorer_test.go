@@ -1320,3 +1320,354 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 		t.Fatalf("logic-gate relationships after cross-folder move = %d, want 0", len(logicRelationships))
 	}
 }
+
+func TestCompanyExplorerLazyRootsReturnOnlyRootRows(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-lazy-roots-test"
+	repo.EnsureCompany(companyID, "Lazy Roots")
+
+	root, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Root")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder root error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, root.FolderID, "node", "Child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/roots?company_id="+companyID+"&scope=all", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lazy roots status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	payload := decodeCompanyExplorerLazyRowsForTest(t, rec)
+	folders := companyExplorerLazyFolderIDSet(payload)
+	if !folders[root.FolderID] {
+		t.Fatalf("lazy root folders = %v, want root folder %s", folders, root.FolderID)
+	}
+	if folders[child.FolderID] {
+		t.Fatalf("lazy root folders included child folder %s", child.FolderID)
+	}
+}
+
+func TestCompanyExplorerLazyFolderChildrenReturnImmediateRowsOnly(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-lazy-folder-children-test"
+	repo.EnsureCompany(companyID, "Lazy Folder Children")
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+	grandchild, err := repo.CreateCompanyExplorerFolder(companyID, child.FolderID, "node", "Grandchild")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder grandchild error = %v", err)
+	}
+	parentNode, err := repo.CreateNode(companyID, "Parent node")
+	if err != nil {
+		t.Fatalf("CreateNode parent error = %v", err)
+	}
+	childNode, err := repo.CreateNode(companyID, "Child node")
+	if err != nil {
+		t.Fatalf("CreateNode child error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", parentNode.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem parent error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", childNode.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem child error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope=all&parent_type=folder&parent_id="+parent.FolderID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lazy folder children status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	payload := decodeCompanyExplorerLazyRowsForTest(t, rec)
+	folders := companyExplorerLazyFolderIDSet(payload)
+	nodes := companyExplorerLazyNodeIDSet(payload)
+	items := companyExplorerLazyFolderItemIDSet(payload)
+	if !folders[child.FolderID] || folders[grandchild.FolderID] {
+		t.Fatalf("lazy child folders = %v, want child only and no grandchild", folders)
+	}
+	if !nodes[parentNode.NodeID] || nodes[childNode.NodeID] {
+		t.Fatalf("lazy child nodes = %v, want parent node only", nodes)
+	}
+	if !items[parentNode.NodeID] || items[childNode.NodeID] {
+		t.Fatalf("lazy child folder items = %v, want parent item only", items)
+	}
+}
+
+func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-lazy-gate-children-test"
+	repo.EnsureCompany(companyID, "Lazy Gate Children")
+
+	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A error = %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B error = %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: gateA.LogicGateID,
+		NodeID:      nodeA.NodeID,
+		Status:      "pending",
+		Position:    10,
+		Priority:    testPriority(1),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus A error = %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: gateB.LogicGateID,
+		NodeID:      nodeB.NodeID,
+		Status:      "pending",
+		Position:    20,
+		Priority:    testPriority(2),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus B error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope=all&parent_type=logic_gate&parent_id="+gateA.LogicGateID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lazy logic gate children status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	nodes := companyExplorerLazyNodeIDSet(decodeCompanyExplorerLazyRowsForTest(t, rec))
+	if !nodes[nodeA.NodeID] || nodes[nodeB.NodeID] {
+		t.Fatalf("lazy logic gate child nodes = %v, want only %s", nodes, nodeA.NodeID)
+	}
+}
+
+func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-lazy-scope-test"
+	repo.EnsureCompany(companyID, "Lazy Scope")
+
+	userA, err := repo.UpsertAuthUser("lazy-scope-user-a", "a@example.com", "User A")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser A error = %v", err)
+	}
+	userB, err := repo.UpsertAuthUser("lazy-scope-user-b", "b@example.com", "User B")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser B error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(userA.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership A error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(userB.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership B error = %v", err)
+	}
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Team")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup error = %v", err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{userA.UserID, userB.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers error = %v", err)
+	}
+
+	gateA, err := repo.CreateLogicGate(companyID, "User A Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A error = %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "User B Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B error = %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: gateA.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: userA.UserID}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments A error = %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: gateB.LogicGateID,
+		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: userB.UserID}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments B error = %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "User A gate node")
+	if err != nil {
+		t.Fatalf("CreateNode gate A child error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "User B gate node")
+	if err != nil {
+		t.Fatalf("CreateNode gate B child error = %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: gateA.LogicGateID,
+		NodeID:      nodeA.NodeID,
+		Status:      "pending",
+		Position:    10,
+		Priority:    testPriority(1),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus A error = %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: gateB.LogicGateID,
+		NodeID:      nodeB.NodeID,
+		Status:      "pending",
+		Position:    10,
+		Priority:    testPriority(1),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus B error = %v", err)
+	}
+
+	userAFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "User A folder", store.CompanyExplorerFolderScopeUser, userA.UserID)
+	userBFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "User B folder", store.CompanyExplorerFolderScopeUser, userB.UserID)
+	teamFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "Team folder", store.CompanyExplorerFolderScopeTeam, group.GroupID)
+	allFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "All folder", store.CompanyExplorerFolderScopeCompany, "")
+	hiddenFolder := mustCreateScopedCompanyExplorerFolderForTest(t, repo, companyID, "Hidden folder", store.CompanyExplorerFolderScopeCompany, "")
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeCompanyExplorerFolder,
+		EntityID:         hiddenFolder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden folder error = %v", err)
+	}
+
+	meRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "me", userA.UserID)
+	meFolders := companyExplorerLazyFolderIDSet(meRows)
+	if !meFolders[userAFolder.FolderID] || meFolders[userBFolder.FolderID] || meFolders[teamFolder.FolderID] || meFolders[allFolder.FolderID] || meFolders[hiddenFolder.FolderID] {
+		t.Fatalf("me scoped folders = %v, want only user A scoped folder", meFolders)
+	}
+
+	teamRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "team", userA.UserID)
+	teamFolders := companyExplorerLazyFolderIDSet(teamRows)
+	if !teamFolders[userAFolder.FolderID] || !teamFolders[userBFolder.FolderID] || !teamFolders[teamFolder.FolderID] || teamFolders[allFolder.FolderID] || teamFolders[hiddenFolder.FolderID] {
+		t.Fatalf("team scoped folders = %v, want team/user scoped visible folders only", teamFolders)
+	}
+
+	allRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "all", userA.UserID)
+	allFolders := companyExplorerLazyFolderIDSet(allRows)
+	if !allFolders[userAFolder.FolderID] || !allFolders[userBFolder.FolderID] || !allFolders[teamFolder.FolderID] || !allFolders[allFolder.FolderID] || allFolders[hiddenFolder.FolderID] {
+		t.Fatalf("all scoped folders = %v, want all visible scoped folders and no hidden folder", allFolders)
+	}
+
+	gateAChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "logic_gate", gateA.LogicGateID)
+	gateANodes := companyExplorerLazyNodeIDSet(gateAChildren)
+	if !gateANodes[nodeA.NodeID] || gateANodes[nodeB.NodeID] {
+		t.Fatalf("me scoped gate A children = %v, want only %s", gateANodes, nodeA.NodeID)
+	}
+	gateBChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "logic_gate", gateB.LogicGateID)
+	if nodes := companyExplorerLazyNodeIDSet(gateBChildren); len(nodes) != 0 {
+		t.Fatalf("me scoped gate B children = %v, want no nodes outside selected scope", nodes)
+	}
+}
+
+func mustCreateScopedCompanyExplorerFolderForTest(t *testing.T, repo *store.MemoryRepo, companyID, name, scopeType, scopeID string) domain.CompanyExplorerFolder {
+	t.Helper()
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", name)
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder %s error = %v", name, err)
+	}
+	if scopeType != store.CompanyExplorerFolderScopeCompany {
+		folder, err = repo.SetCompanyExplorerFolderScope(companyID, folder.FolderID, scopeType, scopeID)
+		if err != nil {
+			t.Fatalf("SetCompanyExplorerFolderScope %s error = %v", name, err)
+		}
+	}
+	return folder
+}
+
+func getCompanyExplorerLazyRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID string) store.CompanyExplorerLazyRows {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/roots?company_id="+companyID+"&scope="+scope, nil)
+	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lazy roots scope=%s status = %d, want %d body=%s", scope, rec.Code, http.StatusOK, rec.Body.String())
+	}
+	return decodeCompanyExplorerLazyRowsForTest(t, rec)
+}
+
+func getCompanyExplorerLazyChildRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID, parentType, parentID string) store.CompanyExplorerLazyRows {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope="+scope+"&parent_type="+parentType+"&parent_id="+parentID, nil)
+	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET lazy children scope=%s parent_type=%s parent_id=%s status = %d, want %d body=%s", scope, parentType, parentID, rec.Code, http.StatusOK, rec.Body.String())
+	}
+	return decodeCompanyExplorerLazyRowsForTest(t, rec)
+}
+
+func decodeCompanyExplorerLazyRowsForTest(t *testing.T, rec *httptest.ResponseRecorder) store.CompanyExplorerLazyRows {
+	t.Helper()
+	var payload store.CompanyExplorerLazyRows
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode lazy rows: %v", err)
+	}
+	return payload
+}
+
+func companyExplorerLazyFolderIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+	ids := map[string]bool{}
+	for _, folder := range payload.Folders {
+		ids[folder.FolderID] = true
+	}
+	return ids
+}
+
+func companyExplorerLazyNodeIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+	ids := map[string]bool{}
+	for _, node := range payload.Nodes {
+		ids[node.NodeID] = true
+	}
+	return ids
+}
+
+func companyExplorerLazyFolderItemIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+	ids := map[string]bool{}
+	for _, item := range payload.FolderItems {
+		ids[item.ItemID] = true
+	}
+	return ids
+}

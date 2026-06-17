@@ -10,6 +10,111 @@ import (
 	"strings"
 )
 
+func (s *Server) handleCompanyExplorerRoots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	query, ok := s.companyExplorerLazyRowsQuery(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.repo.ListCompanyExplorerRootRows(query)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_scope")
+		return
+	}
+	if err != nil {
+		log.Printf("company explorer roots: failed company_id=%s scope=%s: %v", query.CompanyID, query.Scope, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_roots")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, rows)
+}
+
+func (s *Server) handleCompanyExplorerChildren(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	query, ok := s.companyExplorerLazyRowsQuery(w, r)
+	if !ok {
+		return
+	}
+	parentType := strings.TrimSpace(r.URL.Query().Get("parent_type"))
+	parentID := strings.TrimSpace(r.URL.Query().Get("parent_id"))
+	if parentID == "" || !isValidCompanyExplorerResourceID(parentID) {
+		writeError(w, http.StatusBadRequest, "invalid_parent_id")
+		return
+	}
+	query.ParentID = parentID
+
+	var rows store.CompanyExplorerLazyRows
+	var err error
+	switch parentType {
+	case "folder":
+		if !s.requireEntityView(w, r, query.CompanyID, store.EntityTypeCompanyExplorerFolder, parentID, "company_explorer_folder_not_found") {
+			return
+		}
+		rows, err = s.repo.ListCompanyExplorerFolderChildRows(query)
+	case "logic_gate":
+		if !s.requireEntityView(w, r, query.CompanyID, store.EntityTypeLogicGate, parentID, "logic_gate_not_found") {
+			return
+		}
+		rows, err = s.repo.ListCompanyExplorerLogicGateChildRows(query)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_parent_type")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_child_query")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		log.Printf("company explorer children: failed company_id=%s scope=%s parent_type=%s parent_id=%s: %v", query.CompanyID, query.Scope, parentType, parentID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_children")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, rows)
+}
+
+func (s *Server) companyExplorerLazyRowsQuery(w http.ResponseWriter, r *http.Request) (store.CompanyExplorerLazyRowsQuery, bool) {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return store.CompanyExplorerLazyRowsQuery{}, false
+	}
+	scope, ok := store.NormalizeCompanyExplorerLazyScope(r.URL.Query().Get("scope"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_scope")
+		return store.CompanyExplorerLazyRowsQuery{}, false
+	}
+	query := store.CompanyExplorerLazyRowsQuery{
+		CompanyID:        companyID,
+		Scope:            scope,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+	}
+	actor, hasActor := authenticatedActor(r)
+	if hasActor {
+		query.ScopeUserID = strings.TrimSpace(actor.User.UserID)
+	}
+	if scope == store.CompanyExplorerLazyScopeMe || scope == store.CompanyExplorerLazyScopeTeam {
+		if !hasActor || strings.TrimSpace(actor.User.UserID) == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return store.CompanyExplorerLazyRowsQuery{}, false
+		}
+		if actorRoleForCompany(actor, companyID) == "" {
+			writeError(w, http.StatusForbidden, "company_access_denied")
+			return store.CompanyExplorerLazyRowsQuery{}, false
+		}
+	}
+	return query, true
+}
+
 func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
