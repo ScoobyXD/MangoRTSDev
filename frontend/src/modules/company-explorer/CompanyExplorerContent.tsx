@@ -47,7 +47,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
-import type { ProjectRecord } from "../project-management/projectManagementApi";
+import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { listMyLogicGates, listRacioMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
@@ -1517,6 +1517,28 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const companyExplorerV2RootEntityID = useMemo(() => (
     companyExplorerV2Rows.find((row) => !(row.parent_entity_id ?? "").trim())?.entity_id ?? ""
   ), [companyExplorerV2Rows]);
+  const companyExplorerV2RowByEntityID = useMemo(() => {
+    const byID = new Map<string, CompanyExplorerV2Row>();
+    for (const row of companyExplorerV2Rows) {
+      if (row.entity_id) byID.set(row.entity_id, row);
+    }
+    return byID;
+  }, [companyExplorerV2Rows]);
+  const companyExplorerV2TreeIDForEntityID = useCallback((entityID: string): string => {
+    const cleanEntityID = cleanExplorerID(entityID);
+    if (!cleanEntityID) return "folder-root";
+    const row = companyExplorerV2RowByEntityID.get(cleanEntityID);
+    if (!row) return `workspace-folder-${cleanEntityID}`;
+    const resourceID = row.resource_id || row.entity_id;
+    if (row.entity_type === "company" && !cleanExplorerID(row.parent_entity_id)) return "folder-root";
+    if (row.entity_type === "folder") return `workspace-folder-${row.entity_id}`;
+    if (row.entity_type === "user_group") return `company-explorer-group-${resourceID}`;
+    if (row.entity_type === "user") return `company-explorer-user-${resourceID}`;
+    if (row.entity_type === "logic_gate") return `logic-gate-${resourceID}`;
+    if (row.entity_type === "node") return `node-${resourceID}`;
+    if (row.entity_type === "project") return `project-${resourceID}`;
+    return `workspace-folder-${cleanEntityID}`;
+  }, [companyExplorerV2RowByEntityID]);
   const loadedCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
   const inflightCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
 
@@ -2281,8 +2303,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
         setExpanded((previous) => {
           const next = new Set(previous);
-          const parentTreeID = parentEntityID === companyExplorerV2RootEntityID ? "folder-root" : `workspace-folder-${parentEntityID}`;
-          next.add(parentTreeID);
+          next.add(companyExplorerV2TreeIDForEntityID(parentEntityID));
           next.add(`workspace-folder-${row.entity_id}`);
           return next;
         });
@@ -2333,7 +2354,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, requestJSON, resolveCreateFolderScope]);
+  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyExplorerV2TreeIDForEntityID, companyID, requestJSON, resolveCreateFolderScope]);
 
   const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
     const normalizedAssignments = assignments.filter((assignment) => (
@@ -2381,7 +2402,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           setExpanded((previous) => {
             const next = new Set(previous);
             for (const assignment of normalizedAssignments) {
-              next.add(assignment.folder_id === companyExplorerV2RootEntityID ? "folder-root" : `workspace-folder-${assignment.folder_id}`);
+              next.add(companyExplorerV2TreeIDForEntityID(assignment.folder_id));
             }
             return next;
           });
@@ -2419,7 +2440,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setError(err instanceof Error ? err.message : "failed_to_move_item");
       return false;
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows, companyID, folderItems, requestJSON]);
+  }, [apiBase, companyExplorerV2Rows, companyExplorerV2TreeIDForEntityID, companyID, folderItems, requestJSON]);
 
   const upsertOptimisticFolderItem = useCallback((item: CompanyExplorerFolderItem) => {
     dispatchExplorerStore({ type: "upsertFolderItems", folderItems: [item] });
@@ -2430,10 +2451,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const expandCreatedItemTarget = useCallback((parentFolderID: string) => {
     setExpanded((previous) => {
       const next = new Set(previous);
-      next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
+      if (companyExplorerV2Rows.length > 0) {
+        next.add(companyExplorerV2TreeIDForEntityID(parentFolderID || companyExplorerV2RootEntityID));
+      } else {
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
+      }
       return next;
     });
-  }, []);
+  }, [companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyExplorerV2TreeIDForEntityID]);
 
   const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => {
     setError("");
@@ -2477,7 +2502,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             }),
           });
           dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
-          createdFolderID = parentEntityID === companyExplorerV2RootEntityID ? "" : parentEntityID;
+          createdFolderID = parentEntityID;
         }
       }
       dispatchExplorerStore({ type: "upsertNode", node });
@@ -2544,7 +2569,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             }),
           });
           dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
-          createdFolderID = parentEntityID === companyExplorerV2RootEntityID ? "" : parentEntityID;
+          createdFolderID = parentEntityID;
         }
       }
       dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
@@ -2566,6 +2591,59 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
   }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
+
+  const createProjectAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
+    setError("");
+    try {
+      const response = await createProject({
+        companyID,
+        name: "New Project",
+        status: "Active",
+      });
+      const project = response.project;
+      if (!project) throw new Error("project_create_missing_project");
+      let createdFolderID = parentFolderID;
+      if (companyExplorerV2Rows.length > 0) {
+        const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
+        if (parentEntityID) {
+          const row = await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/edges", {
+            method: "POST",
+            body: JSON.stringify({
+              company_id: companyID,
+              parent_entity_id: parentEntityID,
+              child_entity_type: "project",
+              child_resource_id: project.project_id,
+              position,
+            }),
+          });
+          dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
+          createdFolderID = parentEntityID;
+        }
+      } else if (parentFolderID) {
+        await assignItemsToFolders([{
+          folder_id: parentFolderID,
+          item_type: "project",
+          item_id: project.project_id,
+          position,
+        }], { expandTarget: true });
+      }
+      dispatchExplorerStore({ type: "upsertProject", project });
+      if (!createdFolderID && position && position > 0) {
+        setRootRowOrder((previous) => ({ ...previous, [`project-${project.project_id}`]: position }));
+      }
+      expandCreatedItemTarget(createdFolderID);
+      lastLocalExplorerSelectionRef.current = { domain: "project", changedAt: Date.now() };
+      pendingExplorerSelectionIntentRef.current = "activate";
+      setSelectedTreeID(`project-${project.project_id}`);
+      setSelectedTreeIDs(new Set([`project-${project.project_id}`]));
+      setSelectionAnchorTreeID(`project-${project.project_id}`);
+      setSelectedLogicGateID("");
+      setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_project");
+    }
+  }, [assignItemsToFolders, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, expandCreatedItemTarget, requestJSON]);
 
   // Delete through one canonical batch request, then patch local/shared caches
   // once so multi-select deletes do not visibly collapse one row at a time.
@@ -2831,7 +2909,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         if (typeof options.targetExpanded === "boolean") {
           setExpanded((previous) => {
             const next = new Set(previous);
-            const targetTreeID = parentEntityID === companyExplorerV2RootEntityID ? "folder-root" : `workspace-folder-${parentEntityID}`;
+            const targetTreeID = companyExplorerV2TreeIDForEntityID(parentEntityID);
             if (options.targetExpanded) next.add(targetTreeID);
             else next.delete(targetTreeID);
             return next;
@@ -2839,7 +2917,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         } else if (options.expandTarget) {
           setExpanded((previous) => {
             const next = new Set(previous);
-            next.add(parentEntityID === companyExplorerV2RootEntityID ? "folder-root" : `workspace-folder-${parentEntityID}`);
+            next.add(companyExplorerV2TreeIDForEntityID(parentEntityID));
             return next;
           });
         }
@@ -2873,7 +2951,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_folder");
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows, companyID, requestJSON]);
+  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows, companyExplorerV2TreeIDForEntityID, companyID, requestJSON]);
 
   const focusTreeRow = useCallback((row: ExplorerTreeNode, options: { localIntent?: boolean; selectionIntent?: SelectionIntent } = {}) => {
     if (options.localIntent !== false) {
@@ -3466,6 +3544,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       canCreateFolder: canCreateForContext && (!scopedKind || Boolean(scopedRootFolder)),
       canCreateNode: canCreateForContext && !scopedKind,
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
+      canCreateProject: canCreateForContext && (scopedKind ? scopedKind === "project" && Boolean(scopedRootFolder) : true),
     });
   }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, raciExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
@@ -3666,6 +3745,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }}
         onCreateLogicGate={(parentFolderID, position, raciRole) => {
           void createLogicGateAtFolder(parentFolderID, position, raciRole);
+          setExplorerContextMenu(null);
+        }}
+        onCreateProject={(parentFolderID, position) => {
+          void createProjectAtFolder(parentFolderID, position);
           setExplorerContextMenu(null);
         }}
         onOpenFolderPermissions={(target) => {

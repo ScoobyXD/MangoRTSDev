@@ -131,6 +131,7 @@ export type CompanyExplorerContextMenuActionID =
   | "create_folder"
   | "create_node"
   | "create_logic_gate"
+  | "create_project"
   | "rename"
   | "delete";
 
@@ -145,6 +146,7 @@ export function buildCompanyExplorerContextMenuSections(input: {
   createFolderEnabled: boolean;
   createNodeEnabled: boolean;
   createLogicGateEnabled: boolean;
+  createProjectEnabled: boolean;
   renameEnabled: boolean;
   deleteEnabled: boolean;
 }): CompanyExplorerContextMenuAction[][] {
@@ -154,6 +156,7 @@ export function buildCompanyExplorerContextMenuSections(input: {
       { id: "create_folder", label: "Create New Folder", enabled: input.createFolderEnabled },
       { id: "create_node", label: "Create Node", enabled: input.createNodeEnabled },
       { id: "create_logic_gate", label: "Create Logic Gate", enabled: input.createLogicGateEnabled },
+      { id: "create_project", label: "Create Project", enabled: input.createProjectEnabled },
     ],
     [
       { id: "rename", label: "Rename", enabled: input.renameEnabled },

@@ -17,6 +17,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number, scopeType?: CompanyExplorerFolderScopeType, scopeID?: string) => void;
   onCreateNode: (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => void;
   onCreateLogicGate: (parentFolderID: string, position?: number, raciRole?: string) => void;
+  onCreateProject: (parentFolderID: string, position?: number) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
@@ -28,6 +29,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateFolder,
   onCreateNode,
   onCreateLogicGate,
+  onCreateProject,
   onOpenFolderPermissions,
   onRenameTarget,
   onDeleteTargets,
@@ -45,6 +47,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
     createFolderEnabled: menu.canCreateFolder,
     createNodeEnabled: menu.canCreateNode,
     createLogicGateEnabled: menu.canCreateLogicGate,
+    createProjectEnabled: menu.canCreateProject,
     renameEnabled: Boolean(menu.renameTarget && menu.renameTreeID),
     deleteEnabled: hasDeleteAction,
   });
@@ -194,6 +197,23 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           onClick={() => {
             if (!menu.canCreateLogicGate) return;
             onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
+    if (action.id === "create_project") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          {...menuItemEvents(action.enabled, closePrioritySubmenu)}
+          onClick={() => {
+            if (!menu.canCreateProject) return;
+            onCreateProject(menu.targets.projectParentFolderID, menu.createPosition);
           }}
         >
           {action.label}

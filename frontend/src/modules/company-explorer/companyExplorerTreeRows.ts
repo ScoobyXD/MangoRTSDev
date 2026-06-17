@@ -478,7 +478,8 @@ export function buildCompanyExplorerV2TreeRows({
     for (const row of rowsByParentEntityID.get(parentEntityID) ?? []) {
       const treeRow = toTreeRow(row, depth);
       out.push(treeRow);
-      if (!row.has_children || seen.has(row.entity_id)) continue;
+      const loadedChildren = rowsByParentEntityID.get(row.entity_id) ?? [];
+      if ((!row.has_children && loadedChildren.length === 0) || seen.has(row.entity_id)) continue;
       if (!expanded.has(treeRow.id) && !expanded.has("*")) continue;
       const nextSeen = new Set(seen).add(row.entity_id);
       pushBranch(row.entity_id, depth + 1, nextSeen);
