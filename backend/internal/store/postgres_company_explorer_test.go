@@ -91,3 +91,22 @@ func TestPostgresCompanyExplorerV2NativeNodeHydrationUsesNodeSchemaColumns(t *te
 		t.Fatal("V2 native node hydration should map both entity timestamps from node.created_timestamp")
 	}
 }
+
+func TestPostgresCompanyExplorerV2RootRowsTypesSharedPlaceholders(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) ListCompanyExplorerV2RootRows")
+	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	for _, needle := range []string{
+		"$2::text as view",
+		"$3::uuid as scope_user_id",
+		"$5::uuid as parent_entity_id",
+		"$6::text as access_level",
+	} {
+		if !strings.Contains(normalized, needle) {
+			t.Fatalf("V2 root rows query must type shared placeholder %q", needle)
+		}
+	}
+}
