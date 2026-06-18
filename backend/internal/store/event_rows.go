@@ -13,7 +13,7 @@ const DefaultEventRowProcessingLeaseTimeout = 5 * time.Minute
 
 const (
 	EventTypeKanbanProjectionDelta              = "kanban.projection_delta"
-	EventTypeRacioProjectionDelta               = "racio.projection_delta"
+	EventTypeGVICMatrixProjectionDelta          = "gvic_matrix.projection_delta"
 	EventTypeProjectManagementProjectionDelta   = "project_management.projection_delta"
 	EventTypeProjectRelationshipProjectionDelta = "project_relationship.projection_delta"
 	EventTypeEditorProjectionDelta              = "editor.projection_delta"
@@ -22,7 +22,7 @@ const (
 )
 
 const EventResourceTypeKanbanBoard = "kanban_board"
-const EventResourceTypeRacioMatrix = "racio_matrix"
+const EventResourceTypeGVICMatrix = "gvic_matrix"
 const EventResourceTypeGVICEffectiveAssignments = "gvic_effective_assignments"
 const EventResourceTypeProjectManagementTimeline = "project_management_timeline"
 const EventResourceTypeProjectRelationship = "project_relationship"
@@ -68,7 +68,7 @@ type KanbanProjectionDeltaEventPayload struct {
 	Deltas     []ProjectionDelta `json:"deltas"`
 }
 
-type RacioProjectionDeltaEventPayload struct {
+type GVICMatrixProjectionDeltaEventPayload struct {
 	Projection      string            `json:"projection"`
 	Scope           string            `json:"scope"`
 	ProjectionScope string            `json:"projection_scope,omitempty"`
@@ -208,7 +208,7 @@ func normalizeEventScopes(scopes []string) []string {
 func ProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
 	inputs := KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)
 	inputs = append(inputs, GVICProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
-	inputs = append(inputs, RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
+	inputs = append(inputs, GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	inputs = append(inputs, ProjectManagementProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	inputs = append(inputs, ProjectRelationshipProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	return inputs
@@ -459,14 +459,14 @@ func KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey str
 	return inputs
 }
 
-func RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
+func GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
 	type group struct {
 		userID string
 		deltas []ProjectionDelta
 	}
 	groups := map[string]group{}
 	for _, delta := range deltas {
-		if strings.TrimSpace(delta.Projection) != ProjectionNameRacioMatrix {
+		if strings.TrimSpace(delta.Projection) != ProjectionNameGVICMatrix {
 			continue
 		}
 		userID := projectionDeltaUserIDForEvent(delta)
@@ -490,20 +490,20 @@ func RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey stri
 	for _, userID := range userIDs {
 		item := groups[userID]
 		scope := RacioRealtimeUserScope(userID)
-		projectionScope := RacioProjectionUserScope(userID)
+		projectionScope := GVICMatrixProjectionUserScope(userID)
 		if scope == "" || projectionScope == "" {
 			continue
 		}
-		payloadBytes, _ := json.Marshal(RacioProjectionDeltaEventPayload{
-			Projection:      ProjectionNameRacioMatrix,
+		payloadBytes, _ := json.Marshal(GVICMatrixProjectionDeltaEventPayload{
+			Projection:      ProjectionNameGVICMatrix,
 			Scope:           scope,
 			ProjectionScope: projectionScope,
 			Deltas:          item.deltas,
 		})
 		inputs = append(inputs, EventRowInput{
 			CompanyID:      companyID,
-			EventType:      EventTypeRacioProjectionDelta,
-			ResourceType:   EventResourceTypeRacioMatrix,
+			EventType:      EventTypeGVICMatrixProjectionDelta,
+			ResourceType:   EventResourceTypeGVICMatrix,
 			ResourceID:     userID,
 			PrimaryScope:   scope,
 			AffectedScopes: []string{scope},
@@ -688,7 +688,7 @@ func RacioRealtimeUserScope(userID string) string {
 	if userID == "" {
 		return ""
 	}
-	return "racio:user:" + userID
+	return "gvic_matrix:user:" + userID
 }
 
 func ProjectManagementRealtimeUserScope(userID string) string {
@@ -699,7 +699,7 @@ func ProjectManagementRealtimeUserScope(userID string) string {
 	return "project_management:user:" + userID
 }
 
-func RacioProjectionUserScope(userID string) string {
+func GVICMatrixProjectionUserScope(userID string) string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ""
@@ -750,14 +750,14 @@ func DecodeKanbanProjectionDeltaEventPayload(row EventRow) (KanbanProjectionDelt
 	return payload, nil
 }
 
-func DecodeRacioProjectionDeltaEventPayload(row EventRow) (RacioProjectionDeltaEventPayload, error) {
+func DecodeGVICMatrixProjectionDeltaEventPayload(row EventRow) (GVICMatrixProjectionDeltaEventPayload, error) {
 	payloadBytes, err := json.Marshal(row.Payload)
 	if err != nil {
-		return RacioProjectionDeltaEventPayload{}, err
+		return GVICMatrixProjectionDeltaEventPayload{}, err
 	}
-	var payload RacioProjectionDeltaEventPayload
+	var payload GVICMatrixProjectionDeltaEventPayload
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return RacioProjectionDeltaEventPayload{}, err
+		return GVICMatrixProjectionDeltaEventPayload{}, err
 	}
 	payload.Projection = strings.TrimSpace(payload.Projection)
 	payload.Scope = strings.TrimSpace(payload.Scope)

@@ -177,14 +177,14 @@ test("derives scoped invalidation targets from workspace event types", () => {
   assert.equal(nodeScopes.some((scope) => scope.kind === "company_explorer" && scope.itemType === "node" && scope.itemID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-1" && scope.logicGateID === "gate-1" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "logic-gate:gate-2" && scope.logicGateID === "gate-2" && scope.nodeID === "node-1"), true);
-  assert.equal(nodeScopes.some((scope) => scope.kind === "racio_matrix" && scope.nodeID === "node-1"), true);
+  assert.equal(nodeScopes.some((scope) => scope.kind === "gvic_matrix" && scope.nodeID === "node-1"), true);
   assert.equal(nodeScopes.some((scope) => scope.kind === "workspace"), false);
 
   const assignmentScopes = deriveWorkspaceReconciliationScopes({ type: "work_item.logic_gate_assignment_saved", data: { logic_gate_id: "gate-A", node_id: "node-A", assignment_id: "assignment-A" } });
-  assert.equal(assignmentScopes.some((scope) => scope.kind === "racio_matrix" && scope.logicGateID === "gate-A" && scope.nodeID === "node-A"), true);
+  assert.equal(assignmentScopes.some((scope) => scope.kind === "gvic_matrix" && scope.logicGateID === "gate-A" && scope.nodeID === "node-A"), true);
 
-  const logicGateScopes = deriveWorkspaceReconciliationScopes({ type: "logic_gate_raci_updated", data: { logic_gate_id: "gate-B" } });
-  assert.equal(logicGateScopes.some((scope) => scope.kind === "racio_matrix" && scope.logicGateID === "gate-B"), true);
+  const logicGateScopes = deriveWorkspaceReconciliationScopes({ type: "logic_gate_gvic_updated", data: { logic_gate_id: "gate-B" } });
+  assert.equal(logicGateScopes.some((scope) => scope.kind === "gvic_matrix" && scope.logicGateID === "gate-B"), true);
 
   const kanbanScopes = deriveWorkspaceReconciliationScopes({ type: "kanban_card_moved", data: { board_id: "board-A", card_id: "card-A", node_id: "node-A" } });
   assert.equal(kanbanScopes.some((scope) => scope.kind === "kanban_board" && scope.boardID === "board-A" && scope.cardID === "card-A"), true);

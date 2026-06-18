@@ -243,7 +243,6 @@ var recycleSnapshotTables = map[string]bool{
 	"logic_gate_projection_table":            true,
 	"logic_gate_map_positions":               true,
 	"logic_gate_relationships":               true,
-	"logic_gate_raci_assignments":            true,
 	"user_logic_gate_shortcuts":              true,
 	"project_information":                    true,
 	"project_projection_table":               true,
@@ -254,13 +253,11 @@ var recycleSnapshotTables = map[string]bool{
 	"racio_matrix_projection_table":          true,
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
-	"resource_raci_assignments":              true,
+	"resource_gvic_assignments":              true,
 	"entity_access_permissions":              true,
 	"resource_access_grants":                 true,
 	"resource_permissions":                   true,
 	"company_explorer_folder_items":          true,
-	"shared_inbox_raci_assignments":          true,
-	"shared_inbox_raci_group_assignments":    true,
 	"company_explorer_folder_shares":         true,
 	"communications_email_nodes":             true,
 }
@@ -282,13 +279,10 @@ var recycleRestoreTableOrder = []string{
 	"node_content_change_seen",
 	"node_projection_seen_snapshots",
 	"node_account_assignments",
-	"logic_gate_raci_assignments",
-	"resource_raci_assignments",
+	"resource_gvic_assignments",
 	"entity_access_permissions",
 	"resource_access_grants",
 	"resource_permissions",
-	"shared_inbox_raci_assignments",
-	"shared_inbox_raci_group_assignments",
 	"company_explorer_folder_shares",
 	"user_logic_gate_shortcuts",
 	"communications_email_nodes",
@@ -388,12 +382,6 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 		if err := addTable("company_explorer_folders", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
-		if err := addTable("shared_inbox_raci_assignments", `company_id=$1::uuid and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
-			return nil, err
-		}
-		if err := addTable("shared_inbox_raci_group_assignments", `company_id=$1::uuid and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
-			return nil, err
-		}
 		if err := addTable("company_explorer_folder_shares", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
@@ -415,7 +403,7 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "logic_gate_information", "logic_gate_projection_table", "logic_gate_map_positions", "logic_gate_raci_assignments"} {
+		for _, tableName := range []string{"logic_gates", "logic_gate_information", "logic_gate_projection_table", "logic_gate_map_positions"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}
@@ -494,7 +482,7 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 	if len(accessNodeIDs) > 0 || len(accessLogicGateIDs) > 0 || len(accessProjectIDs) > 0 || len(accessFolderIDs) > 0 {
 		accessWhere, accessArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "resource_type", "resource_id")
 		if accessWhere != "" {
-			for _, tableName := range []string{"resource_raci_assignments", "resource_access_grants"} {
+			for _, tableName := range []string{"resource_gvic_assignments", "resource_access_grants"} {
 				if err := addTable(tableName, accessWhere, accessArgs...); err != nil {
 					return nil, err
 				}
@@ -503,7 +491,7 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 		if len(accessFolderIDs) > 0 {
 			for _, resourceType := range []string{EntityTypeSharedInboxFolder, EntityTypeSharedInbox} {
 				folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, resourceType, accessFolderIDs, "resource_type", "resource_id")
-				for _, tableName := range []string{"resource_raci_assignments", "resource_access_grants", "resource_permissions"} {
+				for _, tableName := range []string{"resource_gvic_assignments", "resource_access_grants", "resource_permissions"} {
 					if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
 						return nil, err
 					}

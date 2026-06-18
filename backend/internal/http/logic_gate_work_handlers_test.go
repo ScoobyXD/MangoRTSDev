@@ -110,7 +110,7 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		work.Statuses[1].StatusKey != store.LogicGateWorkStatusBacklog ||
 		work.Statuses[2].StatusKey != store.LogicGateWorkStatusPending ||
 		work.Statuses[3].StatusKey != store.LogicGateWorkStatusInProgress ||
-		work.Statuses[4].StatusKey != store.LogicGateWorkStatusVerify ||
+		work.Statuses[4].StatusKey != store.LogicGateWorkStatusReview ||
 		work.Statuses[5].StatusKey != store.LogicGateWorkStatusDone {
 		t.Fatalf("statuses = %+v, want canonical statuses", work.Statuses)
 	}
@@ -535,7 +535,7 @@ type logicGateWorkMutationPayloadForTest struct {
 	Assignment          domain.NodeLogicGateAssignment   `json:"assignment"`
 	Node                domain.Node                      `json:"node"`
 	Card                domain.KanbanCard                `json:"card"`
-	RacioProjectionRows []store.RacioMatrixProjectionRow `json:"racio_projection_rows"`
+	RacioProjectionRows []store.RacioMatrixProjectionRow `json:"gvic_projection_rows"`
 }
 
 func decodeLogicGateWorkMutationPayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) logicGateWorkMutationPayloadForTest {

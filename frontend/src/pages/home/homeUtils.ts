@@ -6,8 +6,8 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
-import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
-import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
+import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, GVIC_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
 import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
@@ -319,13 +319,13 @@ export function missingLogicGateRecordIDs(nodes: Pick<NodeRecord, "logic_gate_id
 export function logicGateHasRaciRole(logicGate: LogicGateRecord | undefined, role: LogicGateRaciRole, userID: string): boolean {
   const cleanUserID = userID.trim();
   if (!logicGate || !cleanUserID) return false;
-  return (logicGate.raci_assignments ?? []).some((assignment) => assignment.role === role && assignment.user_id?.trim() === cleanUserID);
+  return (logicGate.gvic_assignments ?? []).some((assignment) => assignment.role === role && assignment.user_id?.trim() === cleanUserID);
 }
 
 export function logicGateHasAnyRaciRole(logicGate: LogicGateRecord | undefined, userID: string): boolean {
   const cleanUserID = userID.trim();
   if (!logicGate || !cleanUserID) return false;
-  return (logicGate.raci_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
+  return (logicGate.gvic_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
 }
 
 export function addRaciInboxGroupNode(byCell: Map<string, Map<string, Set<string>>>, cellKey: string, logicGateID: string, nodeID: string): void {
@@ -370,7 +370,6 @@ export function buildRaciRoleInboxGroupsByCell(
     const status = normalizeResponsibleInboxStatus(node.status);
     if (priority === null || !status || status === "done") continue;
     if (role === "other") {
-      if (node.assignee_user_id?.trim() !== cleanUserID) continue;
       const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
       if (logicGateIDs.length === 0) {
         addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), INBOX_NO_LOGIC_GATE_ID, node.node_id);
@@ -514,7 +513,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
 export function responsibleStatusColor(status: ResponsibleInboxStatus): string {
   if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
-  if (status === "review") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+  if (status === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
   return KANBAN_LOGIC_GATE_DONE_COLOR;
 }
 
@@ -789,9 +788,8 @@ export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedIn
   return folders.some((folder) => scopedFolderIDs.has(folder.folder_id) && sharedInboxUserCanManageMail(folder, userID, false));
 }
 
-export function raciInboxSectionForView(viewID: HomeViewID): (typeof RACI_INBOX_SECTIONS)[number] | null {
-  const normalizedViewID = viewID === "aci-inbox" ? "a-inbox" : viewID;
-  return RACI_INBOX_SECTIONS.find((section) => section.viewID === normalizedViewID) ?? null;
+export function gvicInboxSectionForView(viewID: HomeViewID): (typeof GVIC_INBOX_SECTIONS)[number] | null {
+  return GVIC_INBOX_SECTIONS.find((section) => section.viewID === viewID) ?? null;
 }
 
 export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {
@@ -853,7 +851,7 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (viewID === "primary") return "Primary";
   if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Triage";
-  const raciSection = raciInboxSectionForView(viewID);
+  const raciSection = gvicInboxSectionForView(viewID);
   if (raciSection) return raciSection.title;
   if (viewID === "custom-matrix") return "Custom View";
   if (viewID === "my-work") return "My Work";
@@ -881,7 +879,7 @@ export function mailboxCountsFromFolders(folders: EmailFolder[]): MailboxCountMa
 }
 
 export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
-  return raciInboxSectionForView(viewID) !== null;
+  return gvicInboxSectionForView(viewID) !== null;
 }
 
 export function isCustomMatrixViewID(viewID: HomeViewID): boolean {
@@ -908,9 +906,9 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
     || cleanType === "logic_gate_created"
     || cleanType === "logic_gate_updated"
     || cleanType === "logic_gate_deleted"
-    || cleanType === "logic_gate_raci_updated"
+    || cleanType === "logic_gate_gvic_updated"
     || cleanType === "logic_gate_permissions_updated"
-    || cleanType === "communications_shared_inbox_raci_updated"
+    || cleanType === "communications_shared_inbox_gvic_updated"
     || cleanType === "shared_triage_access_updated"
     || cleanType.startsWith("company_explorer_folder_")
     || cleanType.startsWith("kanban_")

@@ -38,20 +38,24 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	mustSetInboxReadLogicGateRaci(t, repo, companyID, otherUserGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: otherUser.UserID}})
 	mustSetInboxReadLogicGateRaci(t, repo, otherCompanyID, otherCompanyGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
 
-	olderNode, err := repo.CreateNodeWithAssignee(companyID, "Older assigned node", user.UserID)
+	olderNode, err := repo.CreateNode(companyID, "Older assigned node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee older: %v", err)
+		t.Fatalf("CreateNode older: %v", err)
 	}
-	newerNode, err := repo.CreateNodeWithAssignee(companyID, "Newer assigned node", user.UserID)
+	mustSetInboxReadNodeGVIC(t, repo, companyID, olderNode.NodeID, user.UserID)
+	newerNode, err := repo.CreateNode(companyID, "Newer assigned node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee newer: %v", err)
+		t.Fatalf("CreateNode newer: %v", err)
 	}
+	mustSetInboxReadNodeGVIC(t, repo, companyID, newerNode.NodeID, user.UserID)
 	if _, err := repo.CreateNode(companyID, "Unassigned node"); err != nil {
 		t.Fatalf("CreateNode unassigned: %v", err)
 	}
-	if _, err := repo.CreateNodeWithAssignee(otherCompanyID, "Other company assigned node", user.UserID); err != nil {
-		t.Fatalf("CreateNodeWithAssignee other company: %v", err)
+	otherCompanyNode, err := repo.CreateNode(otherCompanyID, "Other company assigned node")
+	if err != nil {
+		t.Fatalf("CreateNode other company: %v", err)
 	}
+	mustSetInboxReadNodeGVIC(t, repo, otherCompanyID, otherCompanyNode.NodeID, user.UserID)
 	responsibleNode, err := repo.CreateNode(companyID, "Responsible gate node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible gate: %v", err)
@@ -81,10 +85,6 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
-	if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
-		t.Fatalf("clear responsible node assignee: %v", err)
-	}
-
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListResponsibleInboxNodes: %v", err)
@@ -267,6 +267,22 @@ func mustSetInboxReadLogicGateRaci(t *testing.T, repo *MemoryRepo, companyID, lo
 	t.Helper()
 	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{CompanyID: companyID, LogicGateID: logicGateID, Assignments: assignments}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments %s: %v", logicGateID, err)
+	}
+}
+
+func mustSetInboxReadNodeGVIC(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
+	t.Helper()
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   nodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   userID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments %s: %v", nodeID, err)
 	}
 }
 

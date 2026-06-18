@@ -53,7 +53,7 @@ run("uses loaded owner ids when custom root child items are available", () => {
   }), false);
 });
 
-run("shows company-scoped RACI child folder shells before their branches are loaded", () => {
+run("shows company-scoped GVIC child folder shells before their branches are loaded", () => {
   assert.equal(shouldShowRaciCompanyScopedFolderShell("company"), true);
   assert.equal(shouldShowRaciCompanyScopedFolderShell(undefined), true);
   assert.equal(shouldShowRaciCompanyScopedFolderShell("user"), false);

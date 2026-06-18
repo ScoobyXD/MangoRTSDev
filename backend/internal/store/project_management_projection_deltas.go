@@ -26,12 +26,8 @@ func cloneProjectManagementTimelineProjectionRow(row ProjectManagementTimelinePr
 	out := row
 	out.LogicGateID = cloneStringPointer(row.LogicGateID)
 	out.Status = cloneStringPointer(row.Status)
-	out.StatusColor = cloneStringPointer(row.StatusColor)
 	out.DueDate = cloneStringPointer(row.DueDate)
 	out.Priority = cloneIntPointer(row.Priority)
-	out.AssigneeUserID = cloneStringPointer(row.AssigneeUserID)
-	out.AssigneeDisplayName = cloneStringPointer(row.AssigneeDisplayName)
-	out.AssigneeEmail = cloneStringPointer(row.AssigneeEmail)
 	out.Accounts = cloneAccountSnapshots(row.Accounts)
 	return out
 }

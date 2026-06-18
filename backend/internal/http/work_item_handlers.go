@@ -352,11 +352,9 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 	} else if set {
 		input.FallbackStatus = optionalStringPointer(fallbackStatus)
 	}
-	if fallbackColor, set, ok := parseOptionalStringField(fields, "fallback_status_color"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_fallback_status_color")
+	if _, present := fields["fallback_status_color"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_fallback_status_color")
 		return
-	} else if set {
-		input.FallbackStatusColor = optionalStringPointer(fallbackColor)
 	}
 	userID := s.entityPermissionActorUserID(r, input.CompanyID)
 	if input.LogicGateID == "" && userID != "" {

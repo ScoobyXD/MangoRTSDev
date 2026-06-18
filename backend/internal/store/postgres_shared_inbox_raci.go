@@ -86,143 +86,64 @@ select
   assignment.company_id::text,
   assignment.resource_id::text,
   assignment.role,
-  assignment.subject_type,
-  assignment.subject_id::text,
+  assignment.principal_type,
+  assignment.principal_id::text,
   coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
   coalesce(app_user.user_id::text, ''),
   nullif(app_user.display_name, ''),
   nullif(app_user.email, ''),
   assignment.created_timestamp
-from resource_raci_assignments assignment
+from resource_gvic_assignments assignment
 left join company_memberships membership
-  on assignment.subject_type = 'user'
+  on assignment.principal_type = 'user'
  and membership.company_id = assignment.company_id
- and membership.user_id = assignment.subject_id
+ and membership.user_id = assignment.principal_id
 left join users app_user
-  on assignment.subject_type = 'user'
- and app_user.user_id = assignment.subject_id
+  on assignment.principal_type = 'user'
+ and app_user.user_id = assignment.principal_id
 left join company_user_groups user_group
-  on assignment.subject_type = 'group'
+  on assignment.principal_type = 'group'
  and user_group.company_id = assignment.company_id
- and user_group.group_id = assignment.subject_id
+ and user_group.group_id = assignment.principal_id
 where assignment.company_id = $1::uuid
   and assignment.resource_type = $3
   and assignment.resource_id = any(string_to_array($2, ',')::uuid[])
   and (
-    (assignment.subject_type = 'user' and membership.user_id is not null)
-    or (assignment.subject_type = 'group' and user_group.group_id is not null)
+    (assignment.principal_type = 'user' and membership.user_id is not null)
+    or (assignment.principal_type = 'group' and user_group.group_id is not null)
   )
 order by assignment.resource_id::text asc,
   case assignment.role
-    when 'responsible' then 1
-    when 'accountable' then 2
+    when 'generated' then 1
+    when 'verified' then 2
     when 'consulted' then 3
     when 'informed' then 4
     else 5
   end,
-  assignment.subject_type asc,
-  lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.subject_id::text)) asc,
-  assignment.subject_id::text asc`,
+  assignment.principal_type asc,
+  lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.principal_id::text)) asc,
+  assignment.principal_id::text asc`,
 		companyID, idList, EntityTypeSharedInbox,
 	)
 	if err != nil {
-		if !isPostgresUndefinedTable(err, "resource_raci_assignments") && !isPostgresUndefinedColumn(err, "") && !isPostgresInvalidTextRepresentation(err) {
-			return nil, err
-		}
-	} else {
-		defer genericRows.Close()
-		for genericRows.Next() {
-			var item domain.SharedInboxRaciAssignment
-			var subjectName sql.NullString
-			var displayName sql.NullString
-			var email sql.NullString
-			if err := genericRows.Scan(
-				&item.CompanyID,
-				&item.FolderID,
-				&item.Role,
-				&item.SubjectType,
-				&item.SubjectID,
-				&subjectName,
-				&item.UserID,
-				&displayName,
-				&email,
-				&item.CreatedTimestamp,
-			); err != nil {
-				return nil, err
-			}
-			if subjectName.Valid {
-				item.SubjectName = subjectName.String
-			}
-			if displayName.Valid {
-				item.UserDisplayName = displayName.String
-			}
-			if email.Valid {
-				item.UserEmail = email.String
-			}
-			if item.SubjectType == EntityPermissionSubjectUser {
-				if item.UserID == "" {
-					item.UserID = item.SubjectID
-				}
-				if item.SubjectName == "" {
-					item.SubjectName = item.UserDisplayName
-				}
-				if item.SubjectName == "" {
-					item.SubjectName = item.UserEmail
-				}
-			}
-			appendSharedInboxRaciAssignment(assignmentsByInbox, item)
-		}
-		if err := genericRows.Err(); err != nil {
-			return nil, err
-		}
-	}
-	rows, err := r.db.QueryContext(ctx, `
-select
-  assignment.company_id::text,
-  assignment.shared_inbox_id::text,
-  assignment.role,
-  assignment.user_id::text,
-  nullif(app_user.display_name, ''),
-  nullif(app_user.email, ''),
-  assignment.created_timestamp
-from shared_inbox_raci_assignments assignment
-join company_memberships membership
-  on membership.company_id = assignment.company_id
- and membership.user_id = assignment.user_id
-join users app_user
-  on app_user.user_id = assignment.user_id
-where assignment.company_id = $1::uuid
-  and assignment.shared_inbox_id = any(string_to_array($2, ',')::uuid[])
-order by assignment.shared_inbox_id::text asc,
-  case assignment.role
-    when 'responsible' then 1
-    when 'accountable' then 2
-    when 'consulted' then 3
-    when 'informed' then 4
-    else 5
-  end,
-  lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.user_id::text)) asc,
-  assignment.user_id::text asc`,
-		companyID, idList,
-	)
-	if err != nil {
-		if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
-			for inboxID := range assignmentsByInbox {
-				sortSharedInboxRaciAssignments(assignmentsByInbox[inboxID])
-			}
-			return assignmentsByInbox, nil
+		if isPostgresUndefinedTable(err, "resource_gvic_assignments") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
+			return nil, ErrRaciStorageUnavailable
 		}
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
+	defer genericRows.Close()
+	for genericRows.Next() {
 		var item domain.SharedInboxRaciAssignment
+		var subjectName sql.NullString
 		var displayName sql.NullString
 		var email sql.NullString
-		if err := rows.Scan(
+		if err := genericRows.Scan(
 			&item.CompanyID,
 			&item.FolderID,
 			&item.Role,
+			&item.SubjectType,
+			&item.SubjectID,
+			&subjectName,
 			&item.UserID,
 			&displayName,
 			&email,
@@ -230,76 +151,29 @@ order by assignment.shared_inbox_id::text asc,
 		); err != nil {
 			return nil, err
 		}
+		if subjectName.Valid {
+			item.SubjectName = subjectName.String
+		}
 		if displayName.Valid {
 			item.UserDisplayName = displayName.String
 		}
 		if email.Valid {
 			item.UserEmail = email.String
 		}
-		item.SubjectType = EntityPermissionSubjectUser
-		item.SubjectID = item.UserID
-		item.SubjectName = item.UserDisplayName
-		if item.SubjectName == "" {
-			item.SubjectName = item.UserEmail
-		}
-		appendSharedInboxRaciAssignment(assignmentsByInbox, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	groupRows, err := r.db.QueryContext(ctx, `
-select
-  assignment.company_id::text,
-  assignment.shared_inbox_id::text,
-  assignment.role,
-  assignment.group_id::text,
-  user_group.name,
-  assignment.created_timestamp
-from shared_inbox_raci_group_assignments assignment
-join company_user_groups user_group
-  on user_group.company_id = assignment.company_id
- and user_group.group_id = assignment.group_id
-where assignment.company_id = $1::uuid
-  and assignment.shared_inbox_id = any(string_to_array($2, ',')::uuid[])
-order by assignment.shared_inbox_id::text asc,
-  case assignment.role
-    when 'responsible' then 1
-    when 'accountable' then 2
-    when 'consulted' then 3
-    when 'informed' then 4
-    else 5
-  end,
-  lower(user_group.name) asc,
-  assignment.group_id::text asc`,
-		companyID, idList,
-	)
-	if err != nil {
-		if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") || isPostgresInvalidTextRepresentation(err) {
-			for inboxID := range assignmentsByInbox {
-				sortSharedInboxRaciAssignments(assignmentsByInbox[inboxID])
+		if item.SubjectType == EntityPermissionSubjectUser {
+			if item.UserID == "" {
+				item.UserID = item.SubjectID
 			}
-			return assignmentsByInbox, nil
+			if item.SubjectName == "" {
+				item.SubjectName = item.UserDisplayName
+			}
+			if item.SubjectName == "" {
+				item.SubjectName = item.UserEmail
+			}
 		}
-		return nil, err
-	}
-	defer groupRows.Close()
-	for groupRows.Next() {
-		var item domain.SharedInboxRaciAssignment
-		err := groupRows.Scan(
-			&item.CompanyID,
-			&item.FolderID,
-			&item.Role,
-			&item.SubjectID,
-			&item.SubjectName,
-			&item.CreatedTimestamp,
-		)
-		if err != nil {
-			return nil, err
-		}
-		item.SubjectType = EntityPermissionSubjectGroup
 		appendSharedInboxRaciAssignment(assignmentsByInbox, item)
 	}
-	if err := groupRows.Err(); err != nil {
+	if err := genericRows.Err(); err != nil {
 		return nil, err
 	}
 	for inboxID := range assignmentsByInbox {
@@ -402,7 +276,7 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedI
 	normalized := make([]normalizedAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
-		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		role, ok := NormalizeGVICRole(assignment.Role)
 		subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
 		subjectID := strings.TrimSpace(assignment.SubjectID)
 		userID := strings.TrimSpace(assignment.UserID)
@@ -456,96 +330,31 @@ select exists(
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-delete from resource_raci_assignments
+delete from resource_gvic_assignments
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
 		companyID, EntityTypeSharedInbox, sharedInboxID,
 	); err != nil {
-		if isPostgresUndefinedTable(err, "resource_raci_assignments") {
+		if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 			return nil, ErrRaciStorageUnavailable
 		}
 		return nil, err
 	}
 	for _, assignment := range normalized {
 		if _, err := tx.ExecContext(ctx, `
-insert into resource_raci_assignments (
+insert into resource_gvic_assignments (
   company_id,
   resource_type,
   resource_id,
   role,
-  subject_type,
-  subject_id,
-  created_timestamp
-) values ($1::uuid, $2, $3::uuid, $4, $5, $6::uuid, now())
-on conflict (company_id, resource_type, resource_id, role, subject_type, subject_id) do nothing`,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, $2, $3::uuid, $4, $5, $6::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`,
 			companyID, EntityTypeSharedInbox, sharedInboxID, assignment.role, assignment.subjectType, assignment.subjectID,
 		); err != nil {
-			if isPostgresUndefinedTable(err, "resource_raci_assignments") {
-				return nil, ErrRaciStorageUnavailable
-			}
-			return nil, err
-		}
-	}
-
-	legacyUserAssignmentsAvailable := true
-	if _, err := tx.ExecContext(ctx,
-		`delete from shared_inbox_raci_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`,
-		companyID, sharedInboxID,
-	); err != nil {
-		if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
-			legacyUserAssignmentsAvailable = false
-		} else {
-			return nil, err
-		}
-	}
-	legacyGroupAssignmentsAvailable := true
-	if _, err := tx.ExecContext(ctx,
-		`delete from shared_inbox_raci_group_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`,
-		companyID, sharedInboxID,
-	); err != nil {
-		if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
-			legacyGroupAssignmentsAvailable = false
-		} else {
-			return nil, err
-		}
-	}
-	for _, assignment := range normalized {
-		if assignment.subjectType == EntityPermissionSubjectGroup {
-			if !legacyGroupAssignmentsAvailable {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `
-insert into shared_inbox_raci_group_assignments (
-  company_id,
-  shared_inbox_id,
-  role,
-  group_id,
-  created_timestamp
-) values ($1::uuid, $2::uuid, $3, $4::uuid, now())
-on conflict (company_id, shared_inbox_id, role, group_id) do nothing`,
-				companyID, sharedInboxID, assignment.role, assignment.subjectID,
-			); err != nil {
-				if isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
-					return nil, ErrRaciStorageUnavailable
-				}
-				return nil, err
-			}
-			continue
-		}
-		if !legacyUserAssignmentsAvailable {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `
-insert into shared_inbox_raci_assignments (
-  company_id,
-  shared_inbox_id,
-  role,
-  user_id,
-  created_timestamp
-) values ($1::uuid, $2::uuid, $3, $4::uuid, now())
-on conflict (company_id, shared_inbox_id, role, user_id) do nothing`,
-			companyID, sharedInboxID, assignment.role, assignment.subjectID,
-		); err != nil {
-			if isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
+			if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 				return nil, ErrRaciStorageUnavailable
 			}
 			return nil, err

@@ -184,7 +184,7 @@ func requestPathProjectionDeltas(deltas []store.ProjectionDelta) []store.Project
 	out := deltas[:0]
 	for _, delta := range deltas {
 		switch strings.TrimSpace(delta.Projection) {
-		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix, store.ProjectionNameGVICEffectiveAssignments, store.ProjectionNameProjectManagementTimeline, store.ProjectionNameProjectRelationship:
+		case store.ProjectionNameKanbanBoard, store.ProjectionNameGVICMatrix, store.ProjectionNameGVICEffectiveAssignments, store.ProjectionNameProjectManagementTimeline, store.ProjectionNameProjectRelationship:
 			continue
 		}
 		out = append(out, delta)
@@ -241,7 +241,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: projectionScope, sequenceScope: projectionScope}
 				grouped[key] = append(grouped[key], filtered)
 			}
-		case store.ProjectionNameRacioMatrix:
+		case store.ProjectionNameGVICMatrix:
 			userID := projectionDeltaUserID(delta)
 			projectionScope := projectionUserScope(userID)
 			realtimeScope := realtimeRacioScope(userID)
@@ -251,7 +251,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
 			hasRealtimeSubscribers := len(realtimeConnections) > 0
 			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
-			log.Printf("racio_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
+			log.Printf("gvic_matrix_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
 			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
 				continue
 			}
@@ -441,7 +441,7 @@ func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, u
 	switch strings.TrimSpace(delta.Projection) {
 	case store.ProjectionNameGVICEffectiveAssignments:
 		return s.authorizedGVICProjectionDeltaForUser(delta, userID)
-	case store.ProjectionNameRacioMatrix:
+	case store.ProjectionNameGVICMatrix:
 		return s.authorizedRacioProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameKanbanBoard:
 		return s.authorizedKanbanProjectionDeltaForUser(delta, userID)
@@ -686,7 +686,7 @@ func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityTy
 		copied := row
 		deltas = append(deltas, store.ProjectionDelta{
 			CompanyID:  companyID,
-			Projection: store.ProjectionNameRacioMatrix,
+			Projection: store.ProjectionNameGVICMatrix,
 			Operation:  store.ProjectionDeltaOperationUpsert,
 			RowKey: store.ProjectionRowKey{
 				UserID:       copied.UserID,
@@ -857,12 +857,8 @@ func cloneProjectionDelta(delta store.ProjectionDelta) store.ProjectionDelta {
 		row := *delta.Row
 		row.LogicGateID = cloneProjectionStringPointer(row.LogicGateID)
 		row.Status = cloneProjectionStringPointer(row.Status)
-		row.StatusColor = cloneProjectionStringPointer(row.StatusColor)
 		row.DueDate = cloneProjectionStringPointer(row.DueDate)
 		row.Priority = cloneProjectionIntPointer(row.Priority)
-		row.AssigneeUserID = cloneProjectionStringPointer(row.AssigneeUserID)
-		row.AssigneeDisplayName = cloneProjectionStringPointer(row.AssigneeDisplayName)
-		row.AssigneeEmail = cloneProjectionStringPointer(row.AssigneeEmail)
 		out.Row = &row
 	}
 	if delta.Patch != nil {

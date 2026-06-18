@@ -93,8 +93,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 	switch strings.TrimSpace(row.EventType) {
 	case store.EventTypeKanbanProjectionDelta:
 		return s.processKanbanProjectionDeltaEvent(row)
-	case store.EventTypeRacioProjectionDelta:
-		return s.processRacioProjectionDeltaEvent(row)
+	case store.EventTypeGVICMatrixProjectionDelta:
+		return s.processGVICMatrixProjectionDeltaEvent(row)
 	case store.EventTypeGVICProjectionDelta:
 		return s.processGVICProjectionDeltaEvent(row)
 	case store.EventTypeProjectManagementProjectionDelta:
@@ -125,12 +125,12 @@ func (s *Server) processKanbanProjectionDeltaEvent(row store.EventRow) error {
 	return nil
 }
 
-func (s *Server) processRacioProjectionDeltaEvent(row store.EventRow) error {
-	payload, err := store.DecodeRacioProjectionDeltaEventPayload(row)
+func (s *Server) processGVICMatrixProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
 		return err
 	}
-	if payload.Projection != store.ProjectionNameRacioMatrix {
+	if payload.Projection != store.ProjectionNameGVICMatrix {
 		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
 	}
 	if len(payload.Deltas) == 0 {

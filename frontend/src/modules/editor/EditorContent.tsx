@@ -205,19 +205,11 @@ type EditorCollaboratorPresence = {
   lastSeen: number;
 };
 
-const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EDITOR_COLLABORATOR_TTL_MS = 30_000;
 const EDITOR_COLLABORATION_SEND_DELAY_MS = 140;
 const EDITOR_REMOTE_APPLY_IDLE_MS = 900;
 const EDITOR_RELATIONSHIP_WORLD_W = 12800;
 const EDITOR_RELATIONSHIP_WORLD_H = 8800;
-
-function companyUserOptionLabel(user: CompanyUser): string {
-  const name = (user.display_name ?? "").trim();
-  const email = (user.email ?? "").trim();
-  if (name && email) return `${name} <${email}>`;
-  return name || email || user.user_id;
-}
 
 function logicGateRaciAssignmentSubjectType(assignment: LogicGateRaciAssignment): LogicGateRaciSubjectType {
   return (assignment.principal_type?.trim() || assignment.subject_type?.trim() || "user") as LogicGateRaciSubjectType;
@@ -228,20 +220,6 @@ function logicGateRaciAssignmentSubjectID(assignment: LogicGateRaciAssignment): 
   const subjectID = assignment.principal_id?.trim() || assignment.subject_id?.trim() || "";
   if (subjectType === "user") return subjectID || assignment.user_id.trim();
   return subjectID;
-}
-
-function findCompanyUserByAssigneeDraft(users: CompanyUser[], draft: string): CompanyUser | null {
-  const value = draft.trim().toLowerCase();
-  if (!value) return null;
-  return users.find((user) => {
-    const labels = [
-      companyUserOptionLabel(user),
-      user.display_name ?? "",
-      user.email ?? "",
-      user.user_id,
-    ];
-    return labels.some((label) => label.trim().toLowerCase() === value);
-  }) ?? null;
 }
 
 function mergeAccountLists(primary: Account[], secondary: Account[]): Account[] {
@@ -383,13 +361,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeContentChangesLoadedNodeID, setNodeContentChangesLoadedNodeID] = useState("");
   const [editorSnapshotLoadedScope, setEditorSnapshotLoadedScope] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
-  const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
   const [nodePriorityRequirementError, setNodePriorityRequirementError] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
-  const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
-  const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
   const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
+  const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateRaciAssignment[]>([]);
   const [logicGateRaciAssignments, setLogicGateRaciAssignments] = useState<LogicGateRaciAssignment[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
@@ -574,29 +550,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     })();
     return () => { cancelled = true; };
   }, [companyID]);
-
-  const companyUserByID = useMemo(() => {
-    const items = new Map<string, CompanyUser>();
-    for (const user of companyUsers) items.set(user.user_id, user);
-    return items;
-  }, [companyUsers]);
-
-  const assigneeDraftForUserID = useCallback((userID: string): string => {
-    const user = companyUserByID.get(userID);
-    return user ? companyUserOptionLabel(user) : userID;
-  }, [companyUserByID]);
-
-  const syncNodeAssignee = useCallback((assigneeUserID?: string | null) => {
-    const nextUserID = assigneeUserID ?? "";
-    setNodeAssigneeUserID(nextUserID);
-    setNodeAssigneeDraft(nextUserID ? assigneeDraftForUserID(nextUserID) : "");
-  }, [assigneeDraftForUserID]);
-
-  useEffect(() => {
-    if (!nodeAssigneeUserID) return;
-    const nextDraft = assigneeDraftForUserID(nodeAssigneeUserID);
-    setNodeAssigneeDraft((current) => (current === "" || current === nodeAssigneeUserID ? nextDraft : current));
-  }, [assigneeDraftForUserID, nodeAssigneeUserID]);
 
   const invalidateDocumentTargetCaches = useCallback((target: DocumentSaveTarget) => {
     if (target.entityKind === "logic_gate") invalidateLogicGateRecordStoreCaches(apiBase, companyID, target.entityID);
@@ -925,10 +878,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLogicGateWorkspaceProjections([]);
     setEditorSnapshotLoadedScope("");
     setNodeStatus("");
-    setNodeStatusColor("");
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
-    syncNodeAssignee("");
+    setNodeGVICAssignments([]);
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentInformationIDRef.current = "";
@@ -946,7 +898,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setDocumentScrollTop(0);
     scheduleIndentGuideUpdate("");
-  }, [scheduleIndentGuideUpdate, syncNodeAssignee]);
+  }, [scheduleIndentGuideUpdate]);
 
   const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
@@ -1178,15 +1130,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     });
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     setNodeStatus(result.node.status ?? "");
-    setNodeStatusColor(result.node.status_color ?? "");
     setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
     setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
     setNodeLogicGateIDs(result.node.logic_gate_ids ?? []);
     setNodeAccounts(result.node.accounts ?? nodeAccounts);
-    syncNodeAssignee(result.node.assignee_user_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodePriorityDraft, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodePriorityDraft]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedEntityCanEdit) return;
@@ -1198,18 +1148,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         body: JSON.stringify({ company_id: companyID, ...patch }),
       });
       setNodeStatus(updated.status ?? "");
-      setNodeStatusColor(updated.status_color ?? "");
       setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
       setNodeAccounts(updated.accounts ?? nodeAccounts);
-      syncNodeAssignee(updated.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, requestJSON, syncNodeAssignee]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, requestJSON]);
 
   const commitNodePriorityDraft = useCallback((draft: string) => {
     const raw = draft.trim();
@@ -1234,24 +1182,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     void updateNodePresetPatch({ due_date: normalized });
   }, [updateNodePresetPatch]);
-
-  const commitNodeAssigneeDraft = useCallback((draft: string) => {
-    const value = draft.trim();
-    if (!value) {
-      syncNodeAssignee("");
-      return;
-    }
-    const selectedUser = findCompanyUserByAssigneeDraft(companyUsers, value);
-    if (selectedUser) {
-      syncNodeAssignee(selectedUser.user_id);
-      return;
-    }
-    if (!USER_ID_PATTERN.test(value)) {
-      setError("Select a person from the company user list");
-      return;
-    }
-    syncNodeAssignee(value);
-  }, [companyUsers, syncNodeAssignee]);
 
   const commitNodeAccountIDs = useCallback((accountIDs: string[]) => {
     if (!linkedEntityCanEdit) return;
@@ -1286,12 +1216,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     });
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccountOptions, nodeAccounts]);
 
-  const commitNodeStatus = useCallback((statusKey: string, statusLabel: string, statusColor: string) => {
+  const commitNodeStatus = useCallback((statusKey: string, statusLabel: string, _statusColor: string) => {
     if (!linkedEntityCanEdit) return;
     if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
     const cleanStatusKey = statusKey.trim();
     const cleanStatusLabel = statusLabel.trim() || cleanStatusKey;
-    const cleanStatusColor = statusColor.trim();
     if (!cleanStatusKey) return;
     const logicGateID = nodeLogicGateIDs.map((id) => id.trim()).find(Boolean) ?? "";
     if (!logicGateID) {
@@ -1311,42 +1240,121 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       priority,
     }).then((result) => {
       setNodeStatus(result.node.status ?? cleanStatusLabel);
-      setNodeStatusColor(result.node.status_color ?? cleanStatusColor);
       setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
       setNodeLogicGateIDs(result.node.logic_gate_ids ?? nodeLogicGateIDs);
       setNodeAccounts(result.node.accounts ?? nodeAccounts);
-      syncNodeAssignee(result.node.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_update_node_status");
     });
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, syncNodeAssignee, updateNodePresetPatch]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, updateNodePresetPatch]);
+
+  const saveResourceGVICAssignments = useCallback(async (resourceType: "node" | "logic_gate", resourceID: string, nextAssignments: LogicGateRaciAssignment[]) => {
+    const cleanResourceID = resourceID.trim();
+    if (!cleanResourceID) return [];
+    const payload = await requestJSON<{ gvic_assignments?: LogicGateRaciAssignment[]; assignments?: LogicGateRaciAssignment[] }>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
+      method: "PUT",
+      body: JSON.stringify({
+        company_id: companyID,
+        gvic_assignments: nextAssignments.map((assignment) => ({
+          role: assignment.role,
+          principal_type: logicGateRaciAssignmentSubjectType(assignment),
+          principal_id: logicGateRaciAssignmentSubjectID(assignment),
+        })),
+      }),
+    });
+    return payload.gvic_assignments ?? payload.assignments ?? [];
+  }, [companyID, requestJSON]);
+
+  const saveNodeGVICAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
+    if (!linkedNodeID || linkedEntityKind !== "node") return;
+    setError("");
+    try {
+      const assignments = await saveResourceGVICAssignments("node", linkedNodeID, nextAssignments);
+      setNodeGVICAssignments(assignments);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_node_gvic");
+    }
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
 
   const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     setError("");
     try {
-      const payload = await requestJSON<{ gvic_assignments?: LogicGateRaciAssignment[]; assignments?: LogicGateRaciAssignment[] }>(`/v1/resources/logic_gate/${linkedNodeID}/gvic`, {
-        method: "PUT",
-        body: JSON.stringify({
-          company_id: companyID,
-          gvic_assignments: nextAssignments.map((assignment) => ({
-            role: assignment.role,
-            principal_type: logicGateRaciAssignmentSubjectType(assignment),
-            principal_id: logicGateRaciAssignmentSubjectID(assignment),
-          })),
-        }),
-      });
-      setLogicGateRaciAssignments(payload.gvic_assignments ?? payload.assignments ?? []);
+      const assignments = await saveResourceGVICAssignments("logic_gate", linkedNodeID, nextAssignments);
+      setLogicGateRaciAssignments(assignments);
       invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_raci");
+      setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_gvic");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
+
+  const addNodeGVICSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
+    const cleanSubjectID = subjectID.trim();
+    if (!cleanSubjectID) return;
+    const existingSubjectIDsForRole = new Set(nodeGVICAssignments
+      .filter((assignment) => assignment.role === role && logicGateRaciAssignmentSubjectType(assignment) === subjectType)
+      .map((assignment) => logicGateRaciAssignmentSubjectID(assignment))
+      .filter(Boolean));
+    if (existingSubjectIDsForRole.has(cleanSubjectID)) return;
+    if (subjectType === "group") {
+      const group = companyUserGroups.find((candidate) => candidate.group_id === cleanSubjectID);
+      void saveNodeGVICAssignments([
+        ...nodeGVICAssignments,
+        {
+          company_id: companyID,
+          resource_id: linkedNodeID,
+          role,
+          subject_type: "group",
+          subject_id: cleanSubjectID,
+          subject_name: group?.name ?? cleanSubjectID,
+          principal_type: "group",
+          principal_id: cleanSubjectID,
+          principal_name: group?.name ?? cleanSubjectID,
+          user_id: "",
+          created_timestamp: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+    const user = companyUsers.find((candidate) => candidate.user_id === cleanSubjectID);
+    void saveNodeGVICAssignments([
+      ...nodeGVICAssignments,
+      {
+        company_id: companyID,
+        resource_id: linkedNodeID,
+        role,
+        subject_type: "user",
+        subject_id: cleanSubjectID,
+        subject_name: user?.display_name ?? user?.email,
+        principal_type: "user",
+        principal_id: cleanSubjectID,
+        principal_name: user?.display_name ?? user?.email,
+        user_id: cleanSubjectID,
+        user_display_name: user?.display_name,
+        user_email: user?.email,
+        created_timestamp: new Date().toISOString(),
+      },
+    ]);
+  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, nodeGVICAssignments, saveNodeGVICAssignments]);
+
+  const removeNodeGVICSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
+    const cleanSubjectID = subjectID.trim();
+    if (!cleanSubjectID) return;
+    const next = nodeGVICAssignments.filter((assignment) => !(
+      assignment.role === role
+      && logicGateRaciAssignmentSubjectType(assignment) === subjectType
+      && logicGateRaciAssignmentSubjectID(assignment) === cleanSubjectID
+    ));
+    if (next.length === nodeGVICAssignments.length) return;
+    void saveNodeGVICAssignments(next);
+  }, [nodeGVICAssignments, saveNodeGVICAssignments]);
 
   const addLogicGateRaciSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
     const cleanSubjectID = subjectID.trim();
@@ -1848,15 +1856,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         return nextTitle;
       });
       setNodeStatus(node.status ?? "");
-      setNodeStatusColor(node.status_color ?? "");
       setNodePriorityDraft(node.priority == null ? "" : String(node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(node.due_date));
       setNodeAccounts(node.accounts ?? []);
-      syncNodeAssignee(node.assignee_user_id);
     };
     syncTitleFromGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID, syncNodeAssignee]);
+  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     if (forcedEntityKind) return;
@@ -1899,11 +1905,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeContentChanges([]);
       setNodeContentChangesLoadedNodeID("");
       setNodeStatus("");
-      setNodeStatusColor("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
       setNodeAccounts([]);
-      syncNodeAssignee("");
+      setNodeGVICAssignments([]);
       setLogicGateRaciAssignments([]);
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
@@ -1945,13 +1950,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setLinkedEntityCanAdmin(canAdminResourceAccess(details));
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           setNodeStatus("");
-          setNodeStatusColor("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
           setNodeLogicGateIDs([]);
           setNodeAccounts([]);
-          syncNodeAssignee("");
-          setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
+          setNodeGVICAssignments([]);
+          setLogicGateRaciAssignments(details.logic_gate.gvic_assignments ?? details.logic_gate.gvic_assignments ?? []);
           setNodeWorkspaceProjections([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
@@ -1983,11 +1987,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
           return;
         }
-        const [details, projections, contentChanges, editorSequence] = await Promise.all([
+        const [details, projections, contentChanges, editorSequence, gvicPayload] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
+          requestJSON<{ gvic_assignments?: LogicGateRaciAssignment[]; assignments?: LogicGateRaciAssignment[] }>(`/v1/resources/node/${encodeURIComponent(linkedNodeID)}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         const realtimeScope = editorRealtimeScope("node", linkedNodeID);
         if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
@@ -1995,12 +2000,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         setLinkedNodeTitle(getNodeTitle(details.node));
         setNodeStatus(details.node.status ?? "");
-        setNodeStatusColor(details.node.status_color ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
-        syncNodeAssignee(details.node.assignee_user_id);
+        setNodeGVICAssignments(gvicPayload.gvic_assignments ?? gvicPayload.assignments ?? []);
         setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
@@ -2039,7 +2043,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, scheduleIndentGuideUpdate, syncNodeAssignee]);
+  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2190,18 +2194,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
             canEdit={linkedEntityCanEdit}
-            canEditRaci={linkedEntityKind === "logic_gate" && Boolean(linkedNodeID)}
+            canEditGVIC={Boolean(linkedNodeID) && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate")}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
-              statusColor: nodeStatusColor || "",
               priorityDraft: nodePriorityDraft,
               priorityRequirementError: nodePriorityRequirementError,
-              assigneeDraft: nodeAssigneeDraft,
               accounts: nodeAccounts,
               accountOptions: nodeAccountOptions,
               dueDateDraft: nodeDueDateDraft,
             } : null}
-            logicGateRaciFields={linkedEntityKind === "logic_gate" ? {
+            gvicFields={linkedEntityKind === "node" ? {
+              assignments: nodeGVICAssignments,
+            } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateRaciAssignments,
             } : null}
             companyUsers={companyUsers}
@@ -2219,13 +2223,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeStatus={commitNodeStatus}
             onSetNodePriorityDraft={setNodePriorityDraft}
             onCommitNodePriorityDraft={commitNodePriorityDraft}
-            onSetNodeAssigneeDraft={setNodeAssigneeDraft}
-            onCommitNodeAssigneeDraft={commitNodeAssigneeDraft}
             onCommitNodeAccountIDs={commitNodeAccountIDs}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
-            onAddLogicGateRaciSubject={addLogicGateRaciSubject}
-            onRemoveLogicGateRaciSubject={removeLogicGateRaciSubject}
+            onAddGVICSubject={linkedEntityKind === "node" ? addNodeGVICSubject : addLogicGateRaciSubject}
+            onRemoveGVICSubject={linkedEntityKind === "node" ? removeNodeGVICSubject : removeLogicGateRaciSubject}
           />
 
           </div>

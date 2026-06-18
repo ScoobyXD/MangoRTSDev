@@ -525,10 +525,10 @@ func realtimeGVICUserIDFromScope(scope string) string {
 
 func realtimeRacioUserIDFromScope(scope string) string {
 	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "racio:user:") {
+	if !strings.HasPrefix(scope, "gvic_matrix:user:") {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "racio:user:"))
+	return strings.TrimSpace(strings.TrimPrefix(scope, "gvic_matrix:user:"))
 }
 
 func realtimeProjectManagementScope(userID string) string {
@@ -614,7 +614,7 @@ func realtimeScopeType(scope string) string {
 	case realtimeWorkspaceDomainEventScopeType(scope) != "":
 		return realtimeWorkspaceDomainEventScopeType(scope)
 	case realtimeRacioUserIDFromScope(scope) != "":
-		return "racio"
+		return "gvic_matrix"
 	case realtimeProjectManagementUserIDFromScope(scope) != "":
 		return "project_management"
 	default:
@@ -642,11 +642,11 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"board", "communications", "notifications", "racio", "project_management", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
+	for _, scopeType := range []string{"board", "communications", "notifications", "gvic_matrix", "project_management", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 	for scopeType, count := range counts {
-		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "racio" || scopeType == "project_management" ||
+		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "gvic_matrix" || scopeType == "project_management" ||
 			scopeType == "workspace" || scopeType == "company_explorer" || scopeType == "node_graph" || scopeType == "logic_gate_graph" {
 			continue
 		}
@@ -750,8 +750,8 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 		projectionName = store.ProjectionNameGVICEffectiveAssignments
 		projectionScope = projectionUserScope(userID)
 	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
-		projectionName = store.ProjectionNameRacioMatrix
-		projectionScope = store.RacioProjectionUserScope(userID)
+		projectionName = store.ProjectionNameGVICMatrix
+		projectionScope = store.GVICMatrixProjectionUserScope(userID)
 	} else if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameProjectManagementTimeline
 		projectionScope = store.ProjectManagementProjectionUserScope(userID)

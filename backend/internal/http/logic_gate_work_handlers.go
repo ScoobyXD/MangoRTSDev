@@ -295,15 +295,17 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	fallbackStatus := r.URL.Query().Get("fallback_status")
-	fallbackStatusColor := r.URL.Query().Get("fallback_status_color")
+	if _, present := r.URL.Query()["fallback_status_color"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_fallback_status_color")
+		return
+	}
 	result, err := s.repo.RemoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentRemoveInput{
-		CompanyID:           companyID,
-		LogicGateID:         logicGateID,
-		NodeID:              nodeID,
-		FallbackStatus:      optionalStringPointer(&fallbackStatus),
-		FallbackStatusColor: optionalStringPointer(&fallbackStatusColor),
-		ActorUserID:         actorUserID,
-		IdempotencyKey:      idempotencyKey,
+		CompanyID:      companyID,
+		LogicGateID:    logicGateID,
+		NodeID:         nodeID,
+		FallbackStatus: optionalStringPointer(&fallbackStatus),
+		ActorUserID:    actorUserID,
+		IdempotencyKey: idempotencyKey,
 	})
 	if !writeLogicGateWorkRemoveError(w, err) {
 		return
@@ -541,10 +543,10 @@ func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentRe
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
 	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
-		"assignment":            assignment,
-		"node":                  result.Node,
-		"card":                  card,
-		"racio_projection_rows": result.RacioProjectionRows,
+		"assignment":           assignment,
+		"node":                 result.Node,
+		"card":                 card,
+		"gvic_projection_rows": result.RacioProjectionRows,
 	}
 }
 
@@ -552,10 +554,10 @@ func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssign
 	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
 	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
 	return map[string]any{
-		"assignment":            assignment,
-		"node":                  result.Node,
-		"card":                  card,
-		"racio_projection_rows": result.RacioProjectionRows,
+		"assignment":           assignment,
+		"node":                 result.Node,
+		"card":                 card,
+		"gvic_projection_rows": result.RacioProjectionRows,
 	}
 }
 

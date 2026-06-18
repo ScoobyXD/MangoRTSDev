@@ -148,7 +148,7 @@ test("Home node drop uses one work-item assignment command for status and priori
     calls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
     const updatedNode = { ...sourceNode, status: "In Progress", priority: input.priority } as NodeRecord;
-    return { card: card({ nodeID: input.nodeID }), node: updatedNode, racio_projection_rows: [projectionRow(input.nodeID)] } satisfies LogicGateAssignmentCommandResult;
+    return { card: card({ nodeID: input.nodeID }), node: updatedNode, gvic_projection_rows: [projectionRow(input.nodeID)] } satisfies LogicGateAssignmentCommandResult;
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -175,7 +175,7 @@ test("Home node drop uses one work-item assignment command for status and priori
     position: 0,
   });
   assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority]), [["node-1", "In Progress", 2]]);
-  assert.deepEqual(updated.racio_projection_rows.map((row) => row.resource_id), ["node-1"]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.resource_id), ["node-1"]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:gate-1"]);
 });
 
@@ -192,7 +192,7 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-done" }),
       node: { ...sourceNode, status: "Done", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
-      racio_projection_rows: [projectionRow(input.nodeID)],
+      gvic_projection_rows: [projectionRow(input.nodeID)],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
@@ -201,7 +201,7 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-done" }),
       node: { ...sourceNode, status: "Done", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
-      racio_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
+      gvic_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
     } satisfies LogicGateAssignmentCommandResult;
   };
 
@@ -232,7 +232,7 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
     position: 0,
   });
   assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
-  assert.deepEqual(updated.racio_projection_rows.map((row) => [row.resource_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => [row.resource_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:target-gate", "logic-gate:source-gate"]);
 });
 
@@ -248,13 +248,13 @@ test("Home matrix node drop from the no-Logic-Gate group assigns instead of movi
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:target-gate", columnID: "column-pending" }),
       node: { ...sourceNode, status: "Pending", priority: input.priority, logic_gate_ids: [input.logicGateID] } as NodeRecord,
-      racio_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
+      gvic_projection_rows: [projectionRow(input.nodeID, { logic_gate_id: input.logicGateID })],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const moveLogicGateAssignment: HomeBulkMoveLogicGateAssignment = async (input) => {
     moveCalls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: sourceNode, racio_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode, gvic_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -288,13 +288,13 @@ test("Home matrix node drop keeps same Logic Gate status moves on the move endpo
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "column-review" }),
       node: { ...sourceNode, status: "Review", priority: input.priority } as NodeRecord,
-      racio_projection_rows: [projectionRow(input.nodeID)],
+      gvic_projection_rows: [projectionRow(input.nodeID)],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const assignNodeToLogicGateStatus: HomeDropAssignNodeToLogicGateStatus = async (input) => {
     assignCalls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: sourceNode, racio_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
+    return { card: card({ nodeID: input.nodeID }), node: sourceNode, gvic_projection_rows: [] } satisfies LogicGateAssignmentCommandResult;
   };
 
   await dropNodesIntoInboxLogicGateCommand({
@@ -335,7 +335,7 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
     statuses.push(input.status ?? "");
     priorities.push(input.priority);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return { card: card({ nodeID: input.nodeID }), node: { ...sourceNode, status: input.status } as NodeRecord, racio_projection_rows: [projectionRow(input.nodeID)] };
+    return { card: card({ nodeID: input.nodeID }), node: { ...sourceNode, status: input.status } as NodeRecord, gvic_projection_rows: [projectionRow(input.nodeID)] };
   };
 
   const updated = await dropNodesIntoInboxLogicGateCommand({
@@ -349,7 +349,7 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   });
 
   assert.deepEqual(updated.nodes.map((item) => item.node_id), ["node-1", "node-2"]);
-  assert.deepEqual(updated.racio_projection_rows.map((row) => row.resource_id), ["node-1", "node-2"]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.resource_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
 });
@@ -385,12 +385,12 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
   assert.equal(result.logicGate.gvic_assignments?.[0]?.role, "generated");
 });
 
-test("Home RACIO matrix node create preserves projection rows", async () => {
+test("Home GVIC matrix node create preserves projection rows", async () => {
   const rows = [projectionRow("node-1", { logic_gate_id: "gate-1" })];
   const createRacioMatrixNode: HomeCreateRacioMatrixNode = async () => ({
     node: node("node-1", { logic_gate_ids: ["gate-1"] }),
     folder_items: [explorerFolderItem("folder-1", "node-1", "node")],
-    racio_projection_rows: rows,
+    gvic_projection_rows: rows,
   });
 
   const result = await createHomeRacioMatrixNodeCommand({
@@ -401,7 +401,7 @@ test("Home RACIO matrix node create preserves projection rows", async () => {
     createRacioMatrixNode,
   });
 
-  assert.deepEqual(result.racio_projection_rows, rows);
+  assert.deepEqual(result.gvic_projection_rows, rows);
   assert.deepEqual(result.folderItems.map((item) => item.item_id), ["node-1"]);
 });
 
@@ -418,7 +418,7 @@ test("Home bulk node priority placement uses the work-item move command", async 
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "pending-column" }),
       node: { ...sourceNode, priority: input.priority ?? null } as NodeRecord,
-      racio_projection_rows: [],
+      gvic_projection_rows: [],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const updateNode: HomeBulkUpdateNode = async (companyID, nodeID, patch) => {
@@ -464,7 +464,7 @@ test("Home bulk node patch keeps non-placement fields on the node update endpoin
     return {
       card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "done-column" }),
       node: { ...sourceNode, status: "Done", priority: input.priority ?? sourceNode.priority } as NodeRecord,
-      racio_projection_rows: [],
+      gvic_projection_rows: [],
     } satisfies LogicGateAssignmentCommandResult;
   };
   const updateNode: HomeBulkUpdateNode = async (companyID, nodeID, patch) => {
@@ -749,7 +749,7 @@ test("Home shared inbox commands normalize folder operations", async () => {
   assert.deepEqual(deleted?.deletedFolderIDs.sort(), ["child-1", "parent-1"]);
 });
 
-test("Home shared inbox RACI commands build direct replacement payloads", async () => {
+test("Home shared inbox GVIC commands build direct replacement payloads", async () => {
   type SharedInboxRaciUpdatePayload = Parameters<HomeUpdateSharedInboxRaciAssignments>[2][number];
   const updateCalls: Array<{ companyID: string; folderID: string; assignments: SharedInboxRaciUpdatePayload[] }> = [];
   const updateSharedInboxRaciAssignments: HomeUpdateSharedInboxRaciAssignments = async (companyID, folderID, assignments) => {
@@ -761,7 +761,7 @@ test("Home shared inbox RACI commands build direct replacement payloads", async 
     }));
   };
   const existing = sharedRaci("inbox-1", "generated", "user-1");
-  const inboxes = [sharedInbox("inbox-1", { raci_assignments: [existing] })];
+  const inboxes = [sharedInbox("inbox-1", { gvic_assignments: [existing] })];
 
   const added = await addSharedInboxRaciSubjectCommand({
     companyID: "company-1",

@@ -41,11 +41,11 @@ function envelope(overrides: Partial<RacioProjectionDeltaEnvelope> = {}): RacioP
   };
 }
 
-test("builds the RACIO realtime user scope", () => {
+test("builds the GVIC realtime user scope", () => {
   assert.equal(racioRealtimeScope(" user-1 "), "racio:user:user-1");
 });
 
-test("applies RACIO upsert and delete projection deltas locally", () => {
+test("applies GVIC upsert and delete projection deltas locally", () => {
   const upserted = applyRacioProjectionEnvelope({
     envelope: envelope({
       deltas: [{
@@ -86,7 +86,7 @@ test("applies RACIO upsert and delete projection deltas locally", () => {
   assert.equal(deleted.lastSequence, 2);
 });
 
-test("applies RACIO patch deltas to an existing row", () => {
+test("applies GVIC patch deltas to an existing row", () => {
   const patched = applyRacioProjectionEnvelope({
     envelope: envelope({
       deltas: [{
@@ -107,7 +107,7 @@ test("applies RACIO patch deltas to an existing row", () => {
   assert.deepEqual(patched.upsertedRows.map((item) => item.resource_id), ["node-1"]);
 });
 
-test("requests fallback for RACIO projection sequence gaps", () => {
+test("requests fallback for GVIC projection sequence gaps", () => {
   const result = applyRacioProjectionEnvelope({
     envelope: envelope({ projection_sequence: 7, deltas: [] }),
     companyID: "company-1",
@@ -121,7 +121,7 @@ test("requests fallback for RACIO projection sequence gaps", () => {
   assert.equal(result.lastSequence, 3);
 });
 
-test("rejects RACIO deltas for the wrong user", () => {
+test("rejects GVIC deltas for the wrong user", () => {
   const result = applyRacioProjectionEnvelope({
     envelope: envelope({
       deltas: [{

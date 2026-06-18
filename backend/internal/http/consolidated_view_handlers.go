@@ -132,12 +132,12 @@ type logicGateViewHTTPResponse struct {
 	LogicGate           domain.LogicGate                 `json:"logic_gate"`
 	Information         []domain.LogicGateInformation    `json:"information"`
 	Projections         []domain.LogicGateProjection     `json:"projections"`
-	RaciAssignments     []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+	RaciAssignments     []domain.LogicGateRaciAssignment `json:"gvic_assignments"`
 	Relationships       []domain.LogicGateRelationship   `json:"relationships"`
 	Work                *domain.LogicGateWorkView        `json:"work,omitempty"`
 	InformationCount    int                              `json:"information_count"`
 	ProjectionCount     int                              `json:"projection_count"`
-	RaciAssignmentCount int                              `json:"raci_assignment_count"`
+	RaciAssignmentCount int                              `json:"gvic_assignment_count"`
 	RelationshipsCount  int                              `json:"relationships_count"`
 	AssignmentCount     int                              `json:"assignment_count,omitempty"`
 	NodeCount           int                              `json:"node_count,omitempty"`

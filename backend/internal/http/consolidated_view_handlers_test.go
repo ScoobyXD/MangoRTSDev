@@ -374,7 +374,7 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.RaciAssignmentCount != 1 {
-		t.Fatalf("logic gate view = %+v, want details, projection, and RACI", view)
+		t.Fatalf("logic gate view = %+v, want details, projection, and GVIC", view)
 	}
 	if strings.Contains(viewBody, `"work"`) || view.NodeCount != 0 || view.AssignmentCount != 0 {
 		t.Fatalf("default logic gate view included work payload: %s", viewBody)

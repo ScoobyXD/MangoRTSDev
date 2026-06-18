@@ -139,6 +139,14 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 
 	affected := r.affectedGVICResourceKeysLocked(keyValue)
 	deltas := r.syncResourceGVICEffectiveAssignmentsLocked(affected)
+	for _, affectedKey := range affected {
+		switch affectedKey.resourceType {
+		case EntityTypeNode:
+			deltas = append(deltas, r.syncRacioProjectionForNodeDeltasLocked(affectedKey.companyID, affectedKey.resourceID)...)
+		case EntityTypeLogicGate:
+			deltas = append(deltas, r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(affectedKey.companyID, affectedKey.resourceID, nil, nil)...)
+		}
+	}
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(keyValue.companyID, input.ActorUserID, input.IdempotencyKey, deltas)); err != nil {
 		restore()
 		return ResourceGVICAssignmentMutationResult{}, err

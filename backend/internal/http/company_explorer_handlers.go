@@ -362,7 +362,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"company_id":       companyID,
 			"folder_id":        folderID,
-			"raci_assignments": folder.RaciAssignments,
+			"gvic_assignments": folder.RaciAssignments,
 		})
 		return
 	}
@@ -410,7 +410,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		Assignments: req.Assignments,
 	})
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_raci_assignments")
+		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_gvic_assignments")
 		return
 	}
 	if errors.Is(err, store.ErrAssigneeNotInCompany) {
@@ -438,14 +438,14 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 			actorLabel = strings.TrimSpace(actor.User.Email)
 		}
 	}
-	event, projected := s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "shared_inbox_id": folder.SharedInboxID, "folder_kind": "communications", "resource_type": store.EntityTypeSharedInbox, "raci_assignments": assignments, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
+	event, projected := s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_gvic_updated", map[string]any{"folder_id": folderID, "shared_inbox_id": folder.SharedInboxID, "folder_kind": "communications", "resource_type": store.EntityTypeSharedInbox, "gvic_assignments": assignments, "actor_user_id": actorUserID, "actor_display_name": actorLabel})
 	if projected {
 		s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"company_id":       req.CompanyID,
 		"folder_id":        folderID,
-		"raci_assignments": assignments,
+		"gvic_assignments": assignments,
 	})
 }
 

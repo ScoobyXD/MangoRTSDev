@@ -26,12 +26,11 @@ func TestWorkItemLogicGateAssignmentAPIUsesKanbanBackedCommand(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"company_id":      companyID,
-		"logic_gate_id":   logicGate.LogicGateID,
-		"node_id":         node.NodeID,
-		"status":          "done",
-		"priority":        3,
-		"assignee_policy": "first_responsible",
+		"company_id":    companyID,
+		"logic_gate_id": logicGate.LogicGateID,
+		"node_id":       node.NodeID,
+		"status":        "done",
+		"priority":      3,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/work-items/logic-gate-assignments", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -179,11 +178,10 @@ func TestWorkItemLogicGateAssignmentParityEndpoints(t *testing.T) {
 	}
 
 	removeRec := postWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments/remove", map[string]any{
-		"company_id":            companyID,
-		"logic_gate_id":         logicGate.LogicGateID,
-		"node_id":               node.NodeID,
-		"fallback_status":       "Backlog",
-		"fallback_status_color": "#654321",
+		"company_id":      companyID,
+		"logic_gate_id":   logicGate.LogicGateID,
+		"node_id":         node.NodeID,
+		"fallback_status": "Backlog",
 	})
 	if removeRec.Code != http.StatusOK {
 		t.Fatalf("remove status = %d, want %d body=%s", removeRec.Code, http.StatusOK, removeRec.Body.String())

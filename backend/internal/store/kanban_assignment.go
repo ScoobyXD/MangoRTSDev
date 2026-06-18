@@ -160,8 +160,8 @@ func normalizeOptionalStringPointer(value *string) *string {
 
 func NormalizeLogicGateAssignmentAssigneePolicy(policy string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case "", LogicGateAssignmentAssigneePolicyFirstResponsible:
-		return LogicGateAssignmentAssigneePolicyFirstResponsible, true
+	case "":
+		return "", true
 	default:
 		return "", false
 	}

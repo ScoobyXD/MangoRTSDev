@@ -70,7 +70,7 @@ func logicGateArenaDefaultColumnsMissing(columns []domain.KanbanColumn) bool {
 	required := map[string]bool{
 		"pending":     false,
 		"in progress": false,
-		"verify":      false,
+		"review":      false,
 		"done":        false,
 	}
 	for _, column := range columns {

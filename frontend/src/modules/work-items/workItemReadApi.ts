@@ -46,17 +46,17 @@ export type RacioMatrixProjectionResponse = {
   company_id: string;
   user_id: string;
   limit: number;
-  projection?: "racio_matrix";
+  projection?: "gvic_matrix";
   projection_sequence?: number | string;
   rows: RacioMatrixProjectionRow[];
 };
 
 export async function listResponsibleInboxNodes(params: WorkItemInboxReadParams): Promise<ResponsibleInboxNodesResponse> {
-  return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/responsible-inbox");
+  return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
 }
 
 export async function listACIInboxLogicGates(params: WorkItemInboxReadParams): Promise<ACIInboxLogicGatesResponse> {
-  return fetchWorkItemInboxRead<ACIInboxLogicGatesResponse>(params, "/v1/work-items/aci-inbox");
+  return fetchWorkItemInboxRead<ACIInboxLogicGatesResponse>(params, "/v1/work-items/gvic-inbox");
 }
 
 export async function listMyNodes(params: WorkItemInboxReadParams): Promise<MyNodesResponse> {
@@ -68,7 +68,7 @@ export async function listMyLogicGates(params: WorkItemInboxReadParams): Promise
 }
 
 export async function listRacioMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<RacioMatrixProjectionResponse> {
-  return fetchWorkItemInboxRead<RacioMatrixProjectionResponse>(params, "/v1/work-items/racio-matrix-projection");
+  return fetchWorkItemInboxRead<RacioMatrixProjectionResponse>(params, "/v1/work-items/gvic-matrix-projection");
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

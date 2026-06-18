@@ -33,7 +33,7 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 
 	assignments, ok := parseLogicGateRaciCommandAssignments(fields)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_raci_assignments")
+		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
 
@@ -57,7 +57,7 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_raci_assignments")
+		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
 	if errors.Is(err, store.ErrAssigneeNotInCompany) {

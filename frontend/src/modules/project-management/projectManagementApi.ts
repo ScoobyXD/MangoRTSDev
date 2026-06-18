@@ -13,12 +13,8 @@ export type ProjectManagementTimelineRow = {
   node_id?: string;
   display_title: string;
   status?: string | null;
-  status_color?: string | null;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
-  assignee_display_name?: string | null;
-  assignee_email?: string | null;
   accounts?: Account[];
   start_date: string;
   end_date: string;
@@ -100,7 +96,6 @@ export type ProjectRelationshipProjection = {
   node_id?: string | null;
   display_title: string;
   status?: string | null;
-  status_color?: string | null;
   position: number;
   resource_created_timestamp: string;
   relationship_created_timestamp: string;

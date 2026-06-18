@@ -45,12 +45,11 @@ func TestHomeDropAssignmentCommandKeepsSourceProjectionNodeAndEventsConsistent(t
 	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	rec := postHomeDropWorkItemJSON(t, handler, "/v1/work-items/logic-gate-assignments", map[string]any{
-		"company_id":      companyID,
-		"logic_gate_id":   logicGate.LogicGateID,
-		"node_id":         node.NodeID,
-		"status":          "in_progress",
-		"priority":        1,
-		"assignee_policy": "first_responsible",
+		"company_id":    companyID,
+		"logic_gate_id": logicGate.LogicGateID,
+		"node_id":       node.NodeID,
+		"status":        "in_progress",
+		"priority":      1,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("home drop assignment status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())

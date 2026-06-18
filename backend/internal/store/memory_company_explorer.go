@@ -1238,12 +1238,8 @@ func companyExplorerNodeSummary(node domain.Node) domain.Node {
 		NodeID:           node.NodeID,
 		Title:            node.Title,
 		Status:           node.Status,
-		StatusColor:      node.StatusColor,
 		DueDate:          node.DueDate,
 		Priority:         node.Priority,
-		AssigneeUserID:   node.AssigneeUserID,
-		AssigneeName:     node.AssigneeName,
-		AssigneeEmail:    node.AssigneeEmail,
 		LogicGateIDs:     append([]string{}, node.LogicGateIDs...),
 		CreatedTimestamp: node.CreatedTimestamp,
 	}

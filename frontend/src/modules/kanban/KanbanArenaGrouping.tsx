@@ -8,7 +8,7 @@ import {
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_REQUESTED_COLOR,
-  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+  KANBAN_LOGIC_GATE_REVIEW_COLOR,
   KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
   hexToRgba,
   parseKanbanCardDragPayload,
@@ -294,7 +294,7 @@ function arenaGroupAccent(field: KanbanGroupField, groupKey: string): string {
     if (status === "backlog") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
     if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
     if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
-    if (status === "review") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+    if (status === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
     if (status === "done") return KANBAN_LOGIC_GATE_DONE_COLOR;
     return "";
   }

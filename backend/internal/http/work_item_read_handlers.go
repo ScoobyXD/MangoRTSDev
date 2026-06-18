@@ -119,7 +119,7 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 	}
 	items, err := s.repo.ListResponsibleInboxNodesContext(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_responsible_inbox")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_generated_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -141,7 +141,7 @@ func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) 
 	}
 	items, err := s.repo.ListACIInboxLogicGatesContext(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_aci_inbox")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -207,19 +207,19 @@ func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *h
 	}
 	rows, err := s.repo.ListRacioMatrixProjectionRowsForUser(query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_racio_matrix_projection")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_matrix_projection")
 		return
 	}
-	sequence, err := s.repo.CurrentProjectionSequence(query.CompanyID, store.ProjectionNameRacioMatrix, projectionUserScope(query.UserID))
+	sequence, err := s.repo.CurrentProjectionSequence(query.CompanyID, store.ProjectionNameGVICMatrix, projectionUserScope(query.UserID))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_racio_matrix_projection_sequence")
+		writeError(w, http.StatusInternalServerError, "failed_to_read_gvic_matrix_projection_sequence")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"company_id":          query.CompanyID,
 		"user_id":             query.UserID,
 		"limit":               query.Limit,
-		"projection":          store.ProjectionNameRacioMatrix,
+		"projection":          "gvic_matrix",
 		"projection_sequence": sequence,
 		"rows":                rows,
 	})

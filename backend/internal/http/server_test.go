@@ -770,21 +770,15 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
 	}
-	if len(configured) != 1 ||
-		configured[0].Role != domain.GVICRoleGenerated ||
-		configured[0].PrincipalType != store.EntityPermissionSubjectUser ||
-		configured[0].PrincipalID != creator.UserID {
-		t.Fatalf("configured node GVIC = %+v, want creator generated source row", configured)
+	if len(configured) != 0 {
+		t.Fatalf("configured node GVIC = %+v, want no implicit creator source rows", configured)
 	}
 	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
 		t.Fatalf("ListResourceGVICEffectiveAssignments() error = %v", err)
 	}
-	if len(effective) != 1 ||
-		effective[0].Role != domain.GVICRoleGenerated ||
-		effective[0].UserID != creator.UserID ||
-		effective[0].InheritanceType != store.GVICInheritanceDirect {
-		t.Fatalf("effective node GVIC = %+v, want creator generated direct row", effective)
+	if len(effective) != 0 {
+		t.Fatalf("effective node GVIC = %+v, want no implicit creator rows", effective)
 	}
 }
 

@@ -660,9 +660,6 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 	if status.Valid {
 		item.Status = &status.String
 	}
-	if statusColor.Valid {
-		item.StatusColor = &statusColor.String
-	}
 	if dueDate.Valid {
 		item.DueDate = &dueDate.String
 	}
@@ -670,16 +667,11 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 		value := int(priority.Int64)
 		item.Priority = &value
 	}
-	if assigneeUserID.Valid {
-		item.AssigneeUserID = &assigneeUserID.String
-	}
-	if assigneeDisplayName.Valid {
-		item.AssigneeDisplayName = &assigneeDisplayName.String
-	}
-	if assigneeEmail.Valid {
-		item.AssigneeEmail = &assigneeEmail.String
-	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
+	_ = statusColor
+	_ = assigneeUserID
+	_ = assigneeDisplayName
+	_ = assigneeEmail
 	return item, err
 }
 

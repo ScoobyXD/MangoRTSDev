@@ -21,7 +21,7 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	handler := server.Routes()
 
 	createRec := httptest.NewRecorder()
-	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes", map[string]any{
+	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/gvic-matrix/nodes", map[string]any{
 		"company_id":                   companyID,
 		"name":                         "Matrix-created node",
 		"create_logic_gate_header":     "Matrix-created gate",
@@ -73,7 +73,7 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	}
 
 	moveRec := httptest.NewRecorder()
-	moveReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes/"+createPayload.Node.NodeID+"/move", map[string]any{
+	moveReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/gvic-matrix/nodes/"+createPayload.Node.NodeID+"/move", map[string]any{
 		"company_id":         companyID,
 		"from_logic_gate_id": createPayload.LogicGate.LogicGateID,
 		"to_logic_gate_id":   targetGate.LogicGate.LogicGateID,
@@ -136,7 +136,7 @@ func TestRacioMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
 	handler := server.Routes()
 
 	createRec := httptest.NewRecorder()
-	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes", map[string]any{
+	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/gvic-matrix/nodes", map[string]any{
 		"company_id":    companyID,
 		"name":          "Creator-owned node",
 		"logic_gate_id": logicGate.LogicGateID,
@@ -177,7 +177,7 @@ type racioMatrixNodeCreatePayloadForTest struct {
 	Assignment          *domain.NodeLogicGateAssignment    `json:"assignment"`
 	Card                *domain.KanbanCard                 `json:"card"`
 	FolderItems         []domain.CompanyExplorerFolderItem `json:"folder_items"`
-	RacioProjectionRows []store.RacioMatrixProjectionRow   `json:"racio_projection_rows"`
+	RacioProjectionRows []store.RacioMatrixProjectionRow   `json:"gvic_projection_rows"`
 }
 
 func decodeRacioMatrixNodeCreatePayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) racioMatrixNodeCreatePayloadForTest {
@@ -191,7 +191,7 @@ func decodeRacioMatrixNodeCreatePayloadForTest(t *testing.T, rr *httptest.Respon
 
 func getRacioMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, companyID string, actor domain.User) []store.RacioMatrixProjectionRow {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/racio-matrix-projection?company_id="+companyID+"&limit=500", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/gvic-matrix-projection?company_id="+companyID+"&limit=500", nil)
 	req = requestWithLogicGateWorkActorForTest(req, actor, companyID)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -206,8 +206,8 @@ func getRacioMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, com
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode RACI projection response: %v body=%s", err, rr.Body.String())
 	}
-	if payload.Projection != store.ProjectionNameRacioMatrix {
-		t.Fatalf("projection = %q, want %q", payload.Projection, store.ProjectionNameRacioMatrix)
+	if payload.Projection != store.ProjectionNameGVICMatrix {
+		t.Fatalf("projection = %q, want %q", payload.Projection, store.ProjectionNameGVICMatrix)
 	}
 	if payload.ProjectionSequence == nil {
 		t.Fatalf("projection_sequence missing from RACI projection response")

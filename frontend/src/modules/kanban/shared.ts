@@ -22,7 +22,7 @@ export const KANBAN_LOGIC_GATE_REQUESTED_COLOR = "#facc15";
 export const KANBAN_LOGIC_GATE_BACKLOG_COLOR = "#8b5cf6";
 export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#6f7b8a";
 export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#f08a24";
-export const KANBAN_LOGIC_GATE_VERIFY_COLOR = "#19a8ff";
+export const KANBAN_LOGIC_GATE_REVIEW_COLOR = "#19a8ff";
 export const KANBAN_LOGIC_GATE_DONE_COLOR = "#19c879";
 export const KANBAN_ISSUE_CARD_COLOR = "#7c6ee6";
 
@@ -87,7 +87,7 @@ const KANBAN_COLUMN_ITEM_COLOR_SET = new Set([
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
-  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+  KANBAN_LOGIC_GATE_REVIEW_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
   KANBAN_ISSUE_CARD_COLOR,
 ].map((color) => color.toLowerCase()));
@@ -159,9 +159,6 @@ export type KanbanCard = {
   position: number;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
-  assignee_name?: string | null;
-  assignee_email?: string | null;
   accounts?: Account[];
   projection_updated_timestamp?: string;
   created_timestamp: string;
@@ -172,9 +169,6 @@ export type KanbanCardNodeMetadata = {
   node_id: string;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
-  assignee_name?: string | null;
-  assignee_email?: string | null;
   accounts?: Account[];
 };
 
@@ -205,9 +199,6 @@ export function hydrateKanbanCardsFromNodes(cards: KanbanCard[], nodes: KanbanCa
       ...card,
       due_date: card.due_date ?? node.due_date ?? null,
       priority: card.priority ?? node.priority ?? null,
-      assignee_user_id: card.assignee_user_id ?? node.assignee_user_id ?? null,
-      assignee_name: card.assignee_name ?? node.assignee_name ?? null,
-      assignee_email: card.assignee_email ?? node.assignee_email ?? null,
       accounts: card.accounts ?? node.accounts ?? [],
     };
   });
@@ -248,7 +239,6 @@ export type KanbanGroupNode = {
   node_id: string;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
   accounts?: Account[];
 };
 
@@ -261,7 +251,6 @@ export type KanbanGroupUser = {
 export type KanbanStatusNode = {
   node_id: string;
   status?: string | null;
-  status_color?: string | null;
 };
 
 export type KanbanGroupedBoardRow = {
@@ -290,7 +279,6 @@ export type KanbanGroupedBoardLayout = {
 export type KanbanGroupDropAssignment = {
   columnID?: string;
   isIssue?: boolean;
-  assigneeUserID?: string | null;
   priority?: number | null;
   dueDate?: string | null;
 };
@@ -333,7 +321,7 @@ export function getKanbanStatusColumnColor(title: string): string | null {
   if (normalized === "backlog" || normalized === "backlogs") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
   if (normalized === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (normalized === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
-  if (normalized === "review") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+  if (normalized === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
   if (normalized === "done" || normalized === "complete" || normalized === "completed") return KANBAN_LOGIC_GATE_DONE_COLOR;
   return null;
 }
@@ -846,7 +834,7 @@ export function getKanbanGroupValues(
   field: KanbanGroupField,
   columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
   nodeByID: ReadonlyMap<string, KanbanGroupNode>,
-  userByID: ReadonlyMap<string, KanbanGroupUser>,
+  _userByID: ReadonlyMap<string, KanbanGroupUser>,
 ): KanbanGroupedBoardRow[] {
   const node = nodeByID.get(card.node_id);
   if (field === "status") {
@@ -855,13 +843,7 @@ export function getKanbanGroupValues(
     return [column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status", sortValue: Number.MAX_SAFE_INTEGER - 1 }];
   }
   if (field === "person") {
-    const assignee = (card.assignee_user_id ?? node?.assignee_user_id ?? "").trim();
-    if (!assignee) return [{ key: "person:unassigned", label: "Unassigned", sortValue: "" }];
-    const user = userByID.get(assignee);
-    const name = user?.display_name?.trim() || card.assignee_name?.trim();
-    const email = user?.email?.trim() || card.assignee_email?.trim();
-    const label = name || email || assignee;
-    return [{ key: `person:${assignee}`, label, sortValue: label.toLowerCase() }];
+    return [{ key: "person:unassigned", label: "Unassigned", sortValue: "" }];
   }
   if (field === "priority") {
     const priority = card.priority ?? node?.priority ?? 0;
@@ -886,16 +868,7 @@ function applyKanbanGroupDropField(target: KanbanGroupDropAssignment, field: Kan
     target.isIssue = false;
     return;
   }
-  if (field === "person") {
-    if (groupKey === "person:unassigned") {
-      target.assigneeUserID = null;
-      return;
-    }
-    if (!groupKey.startsWith("person:")) return;
-    const assigneeUserID = groupKey.slice("person:".length).trim();
-    if (assigneeUserID) target.assigneeUserID = assigneeUserID;
-    return;
-  }
+  if (field === "person") return;
   if (field === "priority") {
     if (!groupKey.startsWith("priority:")) return;
     const priority = Number(groupKey.slice("priority:".length));
@@ -1061,7 +1034,7 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
-  const palette = [KANBAN_LOGIC_GATE_REQUESTED_COLOR, KANBAN_LOGIC_GATE_BACKLOG_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_VERIFY_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
+  const palette = [KANBAN_LOGIC_GATE_REQUESTED_COLOR, KANBAN_LOGIC_GATE_BACKLOG_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
   const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {

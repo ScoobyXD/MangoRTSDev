@@ -80,7 +80,6 @@ export type HomeViewID =
   | "primary"
   | "my-triage"
   | "shared-root"
-  | "aci-inbox"
   | "r-inbox"
   | "a-inbox"
   | "c-inbox"

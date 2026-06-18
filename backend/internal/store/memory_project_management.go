@@ -237,12 +237,8 @@ func (r *MemoryRepo) syncProjectManagementTimelineProjectionForItemLocked(compan
 		row.NodeTitle = node.Title
 		row.DisplayTitle = node.Title
 		row.Status = cloneStringPointer(node.Status)
-		row.StatusColor = cloneStringPointer(node.StatusColor)
 		row.DueDate = cloneStringPointer(node.DueDate)
 		row.Priority = cloneIntPointer(node.Priority)
-		row.AssigneeUserID = cloneStringPointer(node.AssigneeUserID)
-		row.AssigneeDisplayName = cloneStringPointer(node.AssigneeName)
-		row.AssigneeEmail = cloneStringPointer(node.AssigneeEmail)
 		row.Accounts = cloneAccountSnapshots(node.Accounts)
 		row.ResourceCreatedTimestamp = node.CreatedTimestamp
 	case EntityTypeLogicGate:
@@ -255,9 +251,7 @@ func (r *MemoryRepo) syncProjectManagementTimelineProjectionForItemLocked(compan
 		row.LogicGateID = &logicGateID
 		row.DisplayTitle = logicGate.Header
 		status := "Logic Gate"
-		color := "#8b5cf6"
 		row.Status = &status
-		row.StatusColor = &color
 		row.ResourceCreatedTimestamp = logicGate.CreatedTimestamp
 	default:
 		delete(r.projectTimelineProjection, itemKey)

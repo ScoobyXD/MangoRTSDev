@@ -36,14 +36,6 @@ func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, afte
 		payload["actor_display_name"] = actorLabel
 	}
 
-	newGeneratedUserIDs := nodeNotificationNewUserIDs(beforeGeneratedUserIDs, afterGeneratedUserIDs)
-	if input.AssigneeUserIDSet && len(newGeneratedUserIDs) > 0 {
-		payload["notification_event_type"] = domain.NotificationEventNodeAssigned
-		payload["recipient_user_ids"] = newGeneratedUserIDs
-		payload["gvic_generated_changed"] = true
-		return event
-	}
-
 	changedFields := nodeNotificationChangedFields(input, before, after)
 	if len(afterGeneratedUserIDs) > 0 && len(changedFields) > 0 {
 		payload["notification_event_type"] = domain.NotificationEventNodeFieldsChanged
@@ -75,13 +67,6 @@ func nodeNotificationNewUserIDs(before, after []string) []string {
 		out = append(out, userID)
 	}
 	return out
-}
-
-func nodeAssigneeUserID(node domain.Node) string {
-	if node.AssigneeUserID == nil {
-		return ""
-	}
-	return strings.TrimSpace(*node.AssigneeUserID)
 }
 
 func nodeNotificationChangedFields(input UpdateNodeInput, before, after domain.Node) []string {

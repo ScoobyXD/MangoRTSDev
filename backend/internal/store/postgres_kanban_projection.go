@@ -39,7 +39,7 @@ case
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then '` + KanbanDefaultRequestedColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then '` + KanbanDefaultBacklogColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then '` + KanbanDefaultInProgressColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) = 'review' then '` + KanbanDefaultVerifyColor + `'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) = 'review' then '` + KanbanDefaultReviewColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then '` + KanbanDefaultDoneColor + `'
   else '` + KanbanDefaultPendingColor + `'
 end`
@@ -377,16 +377,10 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		value := int(priority.Int64)
 		item.Priority = &value
 	}
-	if assigneeUserID.Valid {
-		item.AssigneeUserID = &assigneeUserID.String
-	}
-	if assigneeDisplayName.Valid {
-		item.AssigneeDisplayName = &assigneeDisplayName.String
-	}
-	if assigneeEmail.Valid {
-		item.AssigneeEmail = &assigneeEmail.String
-	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
+	_ = assigneeUserID
+	_ = assigneeDisplayName
+	_ = assigneeEmail
 	return item, nil
 }
 

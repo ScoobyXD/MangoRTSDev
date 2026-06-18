@@ -29,7 +29,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 	assertWorkItemAssignmentSemanticEvent(t, assigned.Events, WorkItemLogicGateAssignmentSavedEventType, companyID, logicGate.LogicGateID, node.NodeID, assigned.Assignment.AssignmentID)
 	assertKanbanEventCardColumn(t, assigned.Events[1], LogicGateWorkStatusInProgress)
 	payload := assigned.Events[0].Payload
-	if payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || payload["assignee_user_id"] != nil {
+	if _, hasAssignee := payload["assignee_user_id"]; payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || hasAssignee {
 		t.Fatalf("saved payload = %+v, want status/priority source state and no assignee", payload)
 	}
 	if assigned.Events[0].ActorUserID == nil || *assigned.Events[0].ActorUserID != actorUserID || payload["actor_user_id"] != actorUserID || payload["idempotency_key"] != "assign-key" {

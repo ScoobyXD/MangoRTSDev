@@ -281,7 +281,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:     now,
 		})
 		r.syncNodeStatusFromKanbanCardLocked(card)
-		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID)
 		r.syncRacioProjectionForNodeLocked(input.CompanyID, nodeID)
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,

@@ -529,7 +529,7 @@ type WorkItemLogicGateInboxItem struct {
 	LogicGateID      string                           `json:"logic_gate_id"`
 	Header           string                           `json:"header"`
 	Roles            []string                         `json:"roles"`
-	RaciAssignments  []domain.LogicGateRaciAssignment `json:"raci_assignments,omitempty"`
+	RaciAssignments  []domain.LogicGateRaciAssignment `json:"gvic_assignments,omitempty"`
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
@@ -596,7 +596,7 @@ type ProjectRelationshipProjectionRow = ProjectionRow
 
 const (
 	ProjectionNameGVICEffectiveAssignments  = "gvic_effective_assignments"
-	ProjectionNameRacioMatrix               = "racio_matrix"
+	ProjectionNameGVICMatrix                = "gvic_matrix"
 	ProjectionNameKanbanBoard               = "kanban_board"
 	ProjectionNameProjectManagementTimeline = "project_management_timeline"
 	ProjectionNameProjectRelationship       = "project_relationship"
@@ -1071,7 +1071,7 @@ type RacioMatrixNodeCreateResult struct {
 	Assignment          *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
 	Card                *domain.KanbanCard                 `json:"card,omitempty"`
 	FolderItems         []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
-	RacioProjectionRows []RacioMatrixProjectionRow         `json:"racio_projection_rows,omitempty"`
+	RacioProjectionRows []RacioMatrixProjectionRow         `json:"gvic_projection_rows,omitempty"`
 	ProjectionDeltas    []ProjectionDelta                  `json:"-"`
 	Events              []domain.DomainEvent               `json:"-"`
 }
@@ -1327,7 +1327,7 @@ const KanbanDefaultRequestedColor = "#facc15"
 const KanbanDefaultBacklogColor = "#8b5cf6"
 const KanbanDefaultPendingColor = "#808080"
 const KanbanDefaultInProgressColor = "#ff9500"
-const KanbanDefaultVerifyColor = "#00aaff"
+const KanbanDefaultReviewColor = "#00aaff"
 const KanbanDefaultDoneColor = "#39ff14"
 
 type KanbanBoardQuery struct {
@@ -1363,8 +1363,6 @@ type KanbanCardMoveInput struct {
 	Position  int
 	IsIssue   *bool
 }
-
-const LogicGateAssignmentAssigneePolicyFirstResponsible = "first_responsible"
 
 type LogicGateNodeAssignmentInput struct {
 	CompanyID           string
@@ -1428,7 +1426,7 @@ type LogicGateNodeAssignmentResult struct {
 	Card                domain.KanbanCard              `json:"card"`
 	Node                domain.Node                    `json:"node"`
 	Assignment          domain.NodeLogicGateAssignment `json:"-"`
-	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	RacioProjectionRows []RacioMatrixProjectionRow     `json:"gvic_projection_rows,omitempty"`
 	ProjectionDeltas    []ProjectionDelta              `json:"-"`
 	Events              []domain.DomainEvent           `json:"-"`
 }
@@ -1437,7 +1435,7 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	Card                domain.KanbanCard              `json:"card"`
 	Node                domain.Node                    `json:"node"`
 	Assignment          domain.NodeLogicGateAssignment `json:"-"`
-	RacioProjectionRows []RacioMatrixProjectionRow     `json:"racio_projection_rows,omitempty"`
+	RacioProjectionRows []RacioMatrixProjectionRow     `json:"gvic_projection_rows,omitempty"`
 	ProjectionDeltas    []ProjectionDelta              `json:"-"`
 	Events              []domain.DomainEvent           `json:"-"`
 }
@@ -1644,7 +1642,7 @@ type LogicGateRaciAssignmentCommandResult struct {
 	LogicGateID       string                           `json:"logic_gate_id"`
 	Operation         string                           `json:"operation"`
 	Changed           bool                             `json:"changed"`
-	RaciAssignments   []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+	RaciAssignments   []domain.LogicGateRaciAssignment `json:"gvic_assignments"`
 	BeforeAssignments []domain.LogicGateRaciAssignment `json:"-"`
 	ProjectionDeltas  []ProjectionDelta                `json:"-"`
 	Events            []domain.DomainEvent             `json:"-"`
@@ -1702,10 +1700,6 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 		query.Limit = 100
 	}
 	return query
-}
-
-func NormalizeLogicGateRaciRole(role string) (string, bool) {
-	return NormalizeGVICRole(role)
 }
 
 func NormalizeGVICRole(role string) (string, bool) {

@@ -79,7 +79,7 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	assignments := make([]domain.SharedInboxRaciAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
-		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		role, ok := NormalizeGVICRole(assignment.Role)
 		subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
 		subjectID := strings.TrimSpace(assignment.SubjectID)
 		userID := strings.TrimSpace(assignment.UserID)

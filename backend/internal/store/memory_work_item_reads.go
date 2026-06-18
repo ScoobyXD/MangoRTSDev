@@ -481,12 +481,8 @@ func memoryRacioProjectionRowToDTO(row memoryRacioProjectionRow) RacioMatrixProj
 		return item
 	}
 	item.Status = cloneStringPointer(row.Node.Status)
-	item.StatusColor = cloneStringPointer(row.Node.StatusColor)
 	item.DueDate = cloneStringPointer(row.Node.DueDate)
 	item.Priority = cloneIntPointer(row.Node.Priority)
-	item.AssigneeUserID = cloneStringPointer(row.Node.AssigneeUserID)
-	item.AssigneeDisplayName = cloneStringPointer(row.Node.AssigneeName)
-	item.AssigneeEmail = cloneStringPointer(row.Node.AssigneeEmail)
 	item.Accounts = cloneAccountSnapshots(row.Node.Accounts)
 	return item
 }

@@ -79,7 +79,7 @@ const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS = ["logic gates by function", "logic gates by person"] as const;
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS);
 type CompanyExplorerScopeView = "mine" | "team" | "company";
-type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "raci_assignments">>;
+type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "gvic_assignments">>;
 type CompanyExplorerRaciFolderRole = LogicGateRaciRole | "other";
 type RaciProjectionCacheEntry = { rows: RacioMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
@@ -102,7 +102,7 @@ const RACI_FOLDER_ROWS = [
 
 const LOGIC_GATE_RACI_ROLES: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
 const RACI_PROJECTION_LIMIT = 500;
-const RACI_VISUAL_ROOT_FOLDER_PREFIX = "Mango RACI ";
+const RACI_VISUAL_ROOT_FOLDER_PREFIX = "Mango GVIC ";
 const DEFAULT_FOLDERS_LABEL = "Default Folders";
 const USE_SYNTHETIC_COMPANY_EXPLORER_SCOPE_ROWS = false;
 
@@ -165,7 +165,7 @@ function hideMainExplorerRootFolders(rows: ExplorerTreeNode[]): ExplorerTreeNode
 
 function shouldRefreshRaciExplorerProjectionForGap(gap: WorkspaceStreamGapSignal, companyID: string): boolean {
   if (gap.companyID !== companyID) return false;
-  return gap.scopes.some((scope) => scope.kind === "racio_matrix" || scope.kind === "workspace");
+  return gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
 }
 
 function shouldRefreshRaciExplorerProjectionForEnvelope(companyID: string, envelope: CompanyExplorerWorkspaceStreamEnvelope): boolean {
@@ -178,7 +178,7 @@ function shouldRefreshRaciExplorerProjectionForEnvelope(companyID: string, envel
     || type === "logic_gate_created"
     || type === "logic_gate_updated"
     || type === "logic_gate_deleted"
-    || type === "logic_gate_raci_updated"
+    || type === "logic_gate_gvic_updated"
     || type === "logic_gate_permissions_updated"
     || type.startsWith("work_item.");
 }
@@ -225,7 +225,7 @@ function sortExplorerUsers(users: ExplorerUserSummary[]): ExplorerUserSummary[] 
 function projectedLogicGateRecordForUser(logicGate: WorkItemLogicGateInboxItem, userID: string, companyID: string): ExplorerLogicGateRecord {
   const cleanUserID = cleanExplorerID(userID);
   const record = toLogicGateCanvasRecord(logicGate) as ExplorerLogicGateRecord;
-  record.raci_assignments = (logicGate.roles ?? []).filter(isLogicGateRaciRole).map((role) => ({
+  record.gvic_assignments = (logicGate.roles ?? []).filter(isLogicGateRaciRole).map((role) => ({
     company_id: companyID,
     logic_gate_id: logicGate.logic_gate_id,
     role,
@@ -237,7 +237,7 @@ function projectedLogicGateRecordForUser(logicGate: WorkItemLogicGateInboxItem, 
 
 function logicGateOwnedByAnyUser(logicGate: ExplorerLogicGateRecord, userIDs: Set<string>): boolean {
   if (userIDs.size === 0) return false;
-  return (logicGate.raci_assignments ?? []).some((assignment) => userIDs.has(cleanExplorerID(assignment.user_id)));
+  return (logicGate.gvic_assignments ?? []).some((assignment) => userIDs.has(cleanExplorerID(assignment.user_id)));
 }
 
 function companyUserGroupDescendantIDs(groups: CompanyUserGroup[], rootGroupIDs: Set<string>): Set<string> {
@@ -328,23 +328,8 @@ function filterCompanyExplorerDataForScope(input: {
       .filter((logicGate) => logicGateOwnedByAnyUser(logicGate, ownerUserIDs))
       .map((logicGate) => logicGate.logic_gate_id),
   );
-  for (const node of input.nodes) {
-    const assigneeID = cleanExplorerID(node.assignee_user_id);
-    if (assigneeID && ownerUserIDs.has(assigneeID)) {
-      for (const logicGateID of node.logic_gate_ids ?? []) {
-        const cleanLogicGateID = cleanExplorerID(logicGateID);
-        if (cleanLogicGateID) visibleLogicGateIDs.add(cleanLogicGateID);
-      }
-    }
-  }
-
   const visibleNodeIDs = new Set<string>();
   for (const node of input.nodes) {
-    const assigneeID = cleanExplorerID(node.assignee_user_id);
-    if (assigneeID && ownerUserIDs.has(assigneeID)) {
-      visibleNodeIDs.add(node.node_id);
-      continue;
-    }
     if ((node.logic_gate_ids ?? []).some((logicGateID) => visibleLogicGateIDs.has(cleanExplorerID(logicGateID)))) {
       visibleNodeIDs.add(node.node_id);
     }
@@ -426,7 +411,7 @@ function logicGateRaciRolesForUser(logicGate: ExplorerLogicGateRecord, userID: s
   const cleanUserID = cleanExplorerID(userID);
   if (!cleanUserID) return ["other"];
   const roles = LOGIC_GATE_RACI_ROLES.filter((role) => (
-    (logicGate.raci_assignments ?? []).some((assignment) => assignment.role === role && cleanExplorerID(assignment.user_id) === cleanUserID)
+    (logicGate.gvic_assignments ?? []).some((assignment) => assignment.role === role && cleanExplorerID(assignment.user_id) === cleanUserID)
   ));
   return roles.length > 0 ? roles : ["other"];
 }
@@ -448,12 +433,8 @@ function materializeProjectionNode(row: RacioMatrixProjectionRow, previous: Node
     name: row.display_title || previous?.name || previous?.title || "Untitled node",
     title: row.display_title || previous?.title || "Untitled node",
     status: row.status ?? null,
-    status_color: row.status_color ?? null,
     due_date: row.due_date ?? null,
     priority: row.priority ?? null,
-    assignee_user_id: row.assignee_user_id ?? null,
-    assignee_name: row.assignee_display_name ?? null,
-    assignee_email: row.assignee_email ?? null,
     accounts: (row.accounts ?? previous?.accounts ?? []).map((account) => ({ ...account })),
     logic_gate_ids: logicGateID ? [logicGateID] : [],
     created_timestamp: row.resource_created_timestamp || previous?.created_timestamp || "",
@@ -481,7 +462,7 @@ function materializeProjectionLogicGate(
     title: header,
     header,
     created_timestamp: row.resource_created_timestamp || projected?.created_timestamp || previous?.created_timestamp || "",
-    raci_assignments: projected?.raci_assignments ?? previous?.raci_assignments ?? [],
+    gvic_assignments: projected?.gvic_assignments ?? previous?.gvic_assignments ?? [],
     effective_access_level: projected?.effective_access_level ?? previous?.effective_access_level ?? "edit",
     can_view: projected?.can_view ?? previous?.can_view ?? true,
     can_edit: projected?.can_edit ?? previous?.can_edit ?? true,
@@ -545,10 +526,6 @@ function fallbackRaciExplorerDataForUser(userID: string, nodes: NodeRecord[], lo
   );
   const visibleNodeIDs = new Set<string>();
   for (const node of nodes) {
-    if (ownerUserIDs.has(cleanExplorerID(node.assignee_user_id))) {
-      visibleNodeIDs.add(node.node_id);
-      continue;
-    }
     if ((node.logic_gate_ids ?? []).some((logicGateID) => visibleLogicGateIDs.has(cleanExplorerID(logicGateID)))) {
       visibleNodeIDs.add(node.node_id);
     }
@@ -694,7 +671,7 @@ function buildRaciCompanyExplorerRows(input: {
   };
   const logicGateOwnerUserIDs = (logicGate: ExplorerLogicGateRecord | undefined): Set<string> => {
     const ownerIDs = new Set<string>();
-    for (const assignment of logicGate?.raci_assignments ?? []) {
+    for (const assignment of logicGate?.gvic_assignments ?? []) {
       const userID = cleanExplorerID(assignment.user_id);
       if (userID) ownerIDs.add(userID);
     }
@@ -705,8 +682,6 @@ function buildRaciCompanyExplorerRows(input: {
     if (item.item_type === "node") {
       const ownerIDs = new Set<string>();
       const node = customNodeByID.get(item.item_id);
-      const assigneeID = cleanExplorerID(node?.assignee_user_id);
-      if (assigneeID) ownerIDs.add(assigneeID);
       for (const logicGateID of node?.logic_gate_ids ?? []) {
         for (const userID of logicGateOwnerUserIDs(customLogicGateByID.get(cleanExplorerID(logicGateID)))) {
           ownerIDs.add(userID);
@@ -2553,7 +2528,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const created = response.logic_gates?.[0];
       if (!created) throw new Error("logic_gate_batch_create_missing_gate");
       const logicGate = toLogicGateCanvasRecord(created) as ExplorerLogicGateRecord;
-      logicGate.raci_assignments = created.gvic_assignments ?? created.raci_assignments ?? [];
+      logicGate.gvic_assignments = created.gvic_assignments ?? [];
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       let createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
       if (companyExplorerV2Rows.length > 0) {

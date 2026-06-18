@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 import {
   buildLogicGateRoute,
   buildNodeRoute,
-  buildRacioRoute,
+  buildGvicRoute,
   parseDeepLinkRoute,
-  racioRoleForViewID,
-  racioViewIDForRole,
+  gvicRoleForViewID,
+  gvicViewIDForRole,
 } from "../../../frontend/src/app/deepLinkRoutes.js";
 
 describe("deepLinkRoutes", () => {
@@ -38,23 +38,23 @@ describe("deepLinkRoutes", () => {
     });
   });
 
-  it("round-trips RACIO node routes with existing role and view IDs", () => {
-    assert.equal(racioViewIDForRole("generated"), "r-inbox");
-    assert.equal(racioRoleForViewID("r-inbox"), "generated");
+  it("round-trips GVIC node routes with existing role and view IDs", () => {
+    assert.equal(gvicViewIDForRole("generated"), "r-inbox");
+    assert.equal(gvicRoleForViewID("r-inbox"), "generated");
 
-    const path = buildRacioRoute("generated", "node-1");
-    assert.equal(path, "/racio/generated/nodes/node-1");
+    const path = buildGvicRoute("generated", "node-1");
+    assert.equal(path, "/gvic/generated/nodes/node-1");
     assert.deepEqual(parseDeepLinkRoute(path), {
-      kind: "racio",
+      kind: "gvic",
       role: "generated",
       viewID: "r-inbox",
       nodeID: "node-1",
     });
   });
 
-  it("accepts RACIO view IDs as aliases for existing role IDs", () => {
-    assert.deepEqual(parseDeepLinkRoute("/racio/a-inbox/nodes/node-2"), {
-      kind: "racio",
+  it("accepts GVIC view IDs as aliases for existing role IDs", () => {
+    assert.deepEqual(parseDeepLinkRoute("/gvic/a-inbox/nodes/node-2"), {
+      kind: "gvic",
       role: "verified",
       viewID: "a-inbox",
       nodeID: "node-2",
@@ -64,6 +64,6 @@ describe("deepLinkRoutes", () => {
   it("rejects incomplete or unknown dynamic routes", () => {
     assert.equal(parseDeepLinkRoute("/logic-gates/lg-1/nodes"), null);
     assert.equal(parseDeepLinkRoute("/nodes/"), null);
-    assert.equal(parseDeepLinkRoute("/racio/unknown/nodes/node-1"), null);
+    assert.equal(parseDeepLinkRoute("/gvic/unknown/nodes/node-1"), null);
   });
 });

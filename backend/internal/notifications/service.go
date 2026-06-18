@@ -343,9 +343,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			return nil, err
 		}
 		recipientUserIDs := payloadStringSlice(payload, "recipient_user_ids")
-		if len(recipientUserIDs) == 0 && node.AssigneeUserID != nil {
-			recipientUserIDs = []string{*node.AssigneeUserID}
-		}
 		if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, recipientUserIDs, func(string) notificationRecipientMeta {
 			return notificationMetaForNode(node)
 		}); err != nil {
@@ -363,9 +360,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			return nil, err
 		}
 		recipientUserIDs := payloadStringSlice(payload, "recipient_user_ids")
-		if len(recipientUserIDs) == 0 && node.AssigneeUserID != nil {
-			recipientUserIDs = []string{*node.AssigneeUserID}
-		}
 		if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, recipientUserIDs, func(string) notificationRecipientMeta {
 			return notificationMetaForNode(node)
 		}); err != nil {
@@ -398,14 +392,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
 			return nil, err
-		}
-		firstLogicGateID := firstCleanString(node.LogicGateIDs)
-		if node.AssigneeUserID != nil {
-			if err := addEffectiveRecipientSubset(store.EntityTypeNode, node.NodeID, []string{*node.AssigneeUserID}, func(string) notificationRecipientMeta {
-				return notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther, LogicGateID: firstLogicGateID, NodeID: node.NodeID}
-			}); err != nil {
-				return nil, err
-			}
 		}
 		for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
 			if err := addLogicGateRecipients(logicGateID, node.NodeID); err != nil {
@@ -507,7 +493,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		if err := addSharedTriageFolderRecipients(folderID); err != nil {
 			return nil, err
 		}
-		title = "Shared inbox RACI updated"
+		title = "Shared inbox GVIC updated"
 		body = "Shared inbox routing roles changed."
 	default:
 		return nil, nil
@@ -578,7 +564,7 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		default:
 			return notificationProjectionEvent{}, false
 		}
-	case "communications_shared_inbox_raci_updated":
+	case "communications_shared_inbox_gvic_updated":
 		notificationType = domain.NotificationEventACIInboxRaciUpdated
 		entityType = store.EntityTypeSharedInbox
 		entityID = payloadString(payload, "shared_inbox_id")
@@ -1000,9 +986,6 @@ func notificationMetaForMentionedNodeUser(node domain.Node, userID string, logic
 	nodeID := strings.TrimSpace(node.NodeID)
 	firstLogicGateID := firstCleanString(node.LogicGateIDs)
 	meta := notificationRecipientMeta{}
-	if node.AssigneeUserID != nil && strings.TrimSpace(*node.AssigneeUserID) == userID {
-		meta = mergeNotificationRecipientMeta(meta, notificationMetaForLogicGateRole(domain.GVICRoleGenerated, firstLogicGateID, nodeID))
-	}
 	for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
 		role := ""
 		if roles := logicGateRolesByID[logicGateID]; roles != nil {

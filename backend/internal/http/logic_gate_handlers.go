@@ -221,20 +221,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if len(parts) == 2 && parts[1] == "raci" {
-		writeError(w, http.StatusGone, "gvic_required")
-		return
-	}
-
 	if len(parts) == 2 && parts[1] == "permissions" {
 		s.handleEntityPermissions(w, r, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found", "logic_gate_permissions_updated")
 		return
 	}
 
-	if len(parts) == 3 && parts[1] == "raci" && (parts[2] == store.LogicGateRaciCommandAdd || parts[2] == store.LogicGateRaciCommandRemove) {
-		writeError(w, http.StatusGone, "gvic_required")
-		return
-	}
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

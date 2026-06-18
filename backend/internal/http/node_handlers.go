@@ -44,15 +44,24 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodPost {
-		var req struct {
-			CompanyID string `json:"company_id"`
-			Name      string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Name) == "" {
+		for _, unsupported := range []string{"title", "assignee_user_id", "status_color"} {
+			if _, exists := fields[unsupported]; exists {
+				writeError(w, http.StatusBadRequest, "unsupported_node_field")
+				return
+			}
+		}
+		companyID, companyIDSet, ok := parseOptionalStringField(fields, "company_id")
+		if !ok || !companyIDSet || companyID == nil || strings.TrimSpace(*companyID) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_name_required")
+			return
+		}
+		name, nameSet, ok := parseOptionalStringField(fields, "name")
+		if !ok || !nameSet || name == nil || strings.TrimSpace(*name) == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_name_required")
 			return
 		}
@@ -61,7 +70,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		if actor, ok := authenticatedActor(r); ok && strings.TrimSpace(actor.User.UserID) != "" {
 			generatedUserID = strings.TrimSpace(actor.User.UserID)
 		}
-		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(req.CompanyID, strings.TrimSpace(req.Name), generatedUserID)
+		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(strings.TrimSpace(*companyID), strings.TrimSpace(*name), generatedUserID)
 		if errors.Is(err, store.ErrAssigneeNotInCompany) {
 			writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 			return
@@ -169,6 +178,12 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if !ok || !companyIDSet || companyIDField == nil || strings.TrimSpace(*companyIDField) == "" {
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
+			}
+			for _, unsupported := range []string{"title", "assignee_user_id", "status_color", "fallback_status_color"} {
+				if _, exists := fields[unsupported]; exists {
+					writeError(w, http.StatusBadRequest, "unsupported_node_field")
+					return
+				}
 			}
 			input := store.UpdateNodeInput{CompanyID: strings.TrimSpace(*companyIDField), NodeID: nodeID}
 			if name, set, ok := parseOptionalStringField(fields, "name"); !ok {

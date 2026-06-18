@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const LogicGateRaciUpdatedEventType = "logic_gate_raci_updated"
+const LogicGateRaciUpdatedEventType = "logic_gate_gvic_updated"
 
 type normalizedLogicGateRaciCommandAssignment struct {
 	role        string
@@ -15,7 +15,7 @@ type normalizedLogicGateRaciCommandAssignment struct {
 }
 
 func normalizeLogicGateRaciAssignmentInput(assignment LogicGateRaciAssignmentInput) (normalizedLogicGateRaciCommandAssignment, error) {
-	role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+	role, ok := NormalizeGVICRole(assignment.Role)
 	subjectType := strings.ToLower(strings.TrimSpace(assignment.SubjectType))
 	subjectID := strings.TrimSpace(assignment.SubjectID)
 	userID := strings.TrimSpace(assignment.UserID)
@@ -119,7 +119,7 @@ func highestLogicGateRaciRolesByUser(assignments []domain.LogicGateRaciAssignmen
 	out := map[string]string{}
 	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
-		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		role, ok := NormalizeGVICRole(assignment.Role)
 		if !ok || userID == "" {
 			continue
 		}
@@ -148,7 +148,7 @@ func logicGateRaciRoleRank(role string) int {
 func logicGateRaciUpdatedWorkspaceEventInput(result LogicGateRaciAssignmentCommandResult, commandAssignments []normalizedLogicGateRaciCommandAssignment, input LogicGateRaciAssignmentCommandInput) DomainEventInput {
 	payload := map[string]any{
 		"logic_gate_id":       result.LogicGateID,
-		"raci_assignments":    result.RaciAssignments,
+		"gvic_assignments":    result.RaciAssignments,
 		"operation":           result.Operation,
 		"command_assignments": logicGateRaciCommandAssignmentPayload(commandAssignments),
 		"assignment_user_ids": logicGateRaciChangedUserIDs(result.BeforeAssignments, result.RaciAssignments),

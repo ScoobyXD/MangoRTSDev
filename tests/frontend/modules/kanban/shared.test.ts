@@ -118,7 +118,7 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
 });
 
-test("hydrates missing card priority from arena node metadata", () => {
+test("hydrates missing card metadata from arena node metadata", () => {
   const hydrated = hydrateKanbanCardsFromNodes([
     card({ card_id: "task", node_id: "node-task", priority: null }),
   ], [
@@ -126,17 +126,11 @@ test("hydrates missing card priority from arena node metadata", () => {
       node_id: "node-task",
       priority: 2,
       due_date: "2026-06-07",
-      assignee_user_id: "user-1",
-      assignee_name: "Alex",
-      assignee_email: "alex@example.com",
     },
   ]);
 
   assert.equal(hydrated[0].priority, 2);
   assert.equal(hydrated[0].due_date, "2026-06-07");
-  assert.equal(hydrated[0].assignee_user_id, "user-1");
-  assert.equal(hydrated[0].assignee_name, "Alex");
-  assert.equal(hydrated[0].assignee_email, "alex@example.com");
 });
 
 test("node status reconciliation detects when a visible card missed its move event", () => {
@@ -181,7 +175,7 @@ test("node status reconciliation handles Issue status without guessing columns",
   }), false);
 });
 
-test("grouped board layout uses one global Y-axis row order across X-axis columns", () => {
+test("grouped board layout keeps person grouping unassigned without node assignees", () => {
   const columns = [
     column({ column_id: "todo", title: "Todo", position: 1000 }),
     column({ column_id: "done", title: "Done", position: 2000 }),
@@ -198,22 +192,18 @@ test("grouped board layout uses one global Y-axis row order across X-axis column
     xGroupBy: "status",
     yGroupBy: "person",
     nodeByID: new Map([
-      ["node-jonathan", { node_id: "node-jonathan", assignee_user_id: "user-jonathan" }],
-      ["node-joe", { node_id: "node-joe", assignee_user_id: "user-joe" }],
-      ["node-pam", { node_id: "node-pam", assignee_user_id: "user-pam" }],
+      ["node-jonathan", { node_id: "node-jonathan" }],
+      ["node-joe", { node_id: "node-joe" }],
+      ["node-pam", { node_id: "node-pam" }],
     ]),
-    userByID: new Map([
-      ["user-jonathan", { user_id: "user-jonathan", display_name: "Jonathan" }],
-      ["user-joe", { user_id: "user-joe", display_name: "Joe" }],
-      ["user-pam", { user_id: "user-pam", display_name: "Pam" }],
-    ]),
+    userByID: new Map(),
   });
 
-  assert.deepEqual(layout.rows.map((row) => row.label), ["Joe", "Jonathan", "Pam"]);
+  assert.deepEqual(layout.rows.map((row) => row.label), ["Unassigned"]);
   assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Todo", "Done", "Empty"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-joe"], ["todo-jonathan"], []]);
-  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], ["done-pam"]]);
-  assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], []]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-jonathan", "todo-joe"]]);
+  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["done-pam"]]);
+  assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[]]);
 });
 
 test("grouped board layout sorts group axes and uses deadline priority labels", () => {
@@ -304,7 +294,7 @@ test("grouped board layout duplicates cards across account buckets", () => {
   assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["shared"], ["shared"], ["none"]]);
 });
 
-test("grouped board drop assignment resolves status and person cell properties", () => {
+test("grouped board drop assignment resolves status without assigning people", () => {
   const columns = [
     column({ column_id: "todo", title: "Todo", position: 1000 }),
     column({ column_id: "done", title: "Done", position: 2000 }),
@@ -319,7 +309,6 @@ test("grouped board drop assignment resolves status and person cell properties",
   }), {
     columnID: "done",
     isIssue: false,
-    assigneeUserID: "user-jonathan",
   });
 
   assert.deepEqual(resolveKanbanGroupDropAssignment({
@@ -330,7 +319,6 @@ test("grouped board drop assignment resolves status and person cell properties",
     yGroupKey: "person:unassigned",
   }), {
     isIssue: true,
-    assigneeUserID: null,
   });
 });
 

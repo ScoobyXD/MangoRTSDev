@@ -1213,7 +1213,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         >
                           <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                           <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
-                          {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
+                          {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                         </button>
                       ))}
                     </div>
@@ -1237,7 +1237,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   >
                     <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                     <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
-                    {node.status ? <span style={nodeStatusDotStyle(node.status_color)} /> : null}
+                    {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                   </button>
                 ))}
               </div>
@@ -2341,12 +2341,26 @@ const relationshipNodeTitleStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const nodeStatusDotStyle = (color?: string | null): React.CSSProperties => ({
-  width: 8,
-  height: 8,
-  borderRadius: 999,
-  background: color || "#22c55e",
-});
+const nodeStatusDotStyle = (status?: string | null): React.CSSProperties => {
+  const normalized = status?.trim().toLowerCase() ?? "";
+  const background = normalized.includes("done") || normalized.includes("complete")
+    ? "#22c55e"
+    : normalized.includes("progress")
+      ? "#3b82f6"
+      : normalized.includes("review")
+        ? "#a855f7"
+        : normalized.includes("blocked")
+          ? "#ef4444"
+          : normalized.includes("pending") || normalized.includes("backlog")
+            ? "#d97706"
+            : "#64748b";
+  return {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    background,
+  };
+};
 
 const ungroupedHeaderStyle: React.CSSProperties = {
   color: "#64748b",

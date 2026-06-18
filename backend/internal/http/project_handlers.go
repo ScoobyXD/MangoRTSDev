@@ -41,7 +41,6 @@ type projectScopedNodeCreateRequest struct {
 	CompanyID          string                            `json:"company_id"`
 	NodeID             string                            `json:"node_id"`
 	Title              string                            `json:"title"`
-	AssigneeUserID     string                            `json:"assignee_user_id"`
 	Position           int                               `json:"position"`
 	InitialInformation *projectInitialInformationRequest `json:"initial_information"`
 	InitialAssignment  *projectInitialAssignmentRequest  `json:"initial_assignment"`
@@ -461,8 +460,22 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
+	var fields map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if _, present := fields["assignee_user_id"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_user_id")
+		return
+	}
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
 	var req projectScopedNodeCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
@@ -482,13 +495,12 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	}
 	actor, _ := authenticatedActor(r)
 	input := store.ProjectScopedNodeCreateInput{
-		CompanyID:      companyID,
-		ProjectID:      projectID,
-		NodeID:         req.NodeID,
-		Title:          req.Title,
-		AssigneeUserID: req.AssigneeUserID,
-		Position:       req.Position,
-		ActorUserID:    actor.User.UserID,
+		CompanyID:   companyID,
+		ProjectID:   projectID,
+		NodeID:      req.NodeID,
+		Title:       req.Title,
+		Position:    req.Position,
+		ActorUserID: actor.User.UserID,
 	}
 	if req.InitialInformation != nil {
 		input.InitialInformation = &store.ProjectScopedInitialInformationInput{

@@ -60,10 +60,10 @@ export type RacioProjectionApplyInput = {
   lastSequence?: number;
 };
 
-export const RACIO_PROJECTION_NAME = "racio_matrix";
+export const RACIO_PROJECTION_NAME = "gvic_matrix";
 
 export function racioRealtimeScope(userID: string): string {
-  return `racio:user:${userID.trim()}`;
+  return `gvic_matrix:user:${userID.trim()}`;
 }
 
 export function parseRacioProjectionSequence(value: unknown): number {
@@ -113,12 +113,8 @@ function applyPatchToRow(row: RacioMatrixProjectionRow, patch: Partial<RacioMatr
     display_title: typeof patch.display_title === "string" ? patch.display_title : row.display_title,
     logic_gate_id: Object.prototype.hasOwnProperty.call(patch, "logic_gate_id") ? patch.logic_gate_id : row.logic_gate_id,
     status: Object.prototype.hasOwnProperty.call(patch, "status") ? patch.status : row.status,
-    status_color: Object.prototype.hasOwnProperty.call(patch, "status_color") ? patch.status_color : row.status_color,
     due_date: Object.prototype.hasOwnProperty.call(patch, "due_date") ? patch.due_date : row.due_date,
     priority: Object.prototype.hasOwnProperty.call(patch, "priority") ? patch.priority : row.priority,
-    assignee_user_id: Object.prototype.hasOwnProperty.call(patch, "assignee_user_id") ? patch.assignee_user_id : row.assignee_user_id,
-    assignee_display_name: Object.prototype.hasOwnProperty.call(patch, "assignee_display_name") ? patch.assignee_display_name : row.assignee_display_name,
-    assignee_email: Object.prototype.hasOwnProperty.call(patch, "assignee_email") ? patch.assignee_email : row.assignee_email,
     resource_created_timestamp: typeof patch.resource_created_timestamp === "string" ? patch.resource_created_timestamp : row.resource_created_timestamp,
     updated_timestamp: typeof patch.updated_timestamp === "string" ? patch.updated_timestamp : row.updated_timestamp,
   };

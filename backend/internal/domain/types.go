@@ -459,12 +459,12 @@ type LogicGateView struct {
 	LogicGate           LogicGate                 `json:"logic_gate"`
 	Information         []LogicGateInformation    `json:"information"`
 	Projections         []LogicGateProjection     `json:"projections"`
-	RaciAssignments     []LogicGateRaciAssignment `json:"raci_assignments"`
+	RaciAssignments     []LogicGateRaciAssignment `json:"gvic_assignments"`
 	Relationships       []LogicGateRelationship   `json:"relationships"`
 	Work                LogicGateWorkView         `json:"work"`
 	InformationCount    int                       `json:"information_count"`
 	ProjectionCount     int                       `json:"projection_count"`
-	RaciAssignmentCount int                       `json:"raci_assignment_count"`
+	RaciAssignmentCount int                       `json:"gvic_assignment_count"`
 	RelationshipsCount  int                       `json:"relationships_count"`
 	AssignmentCount     int                       `json:"assignment_count"`
 	NodeCount           int                       `json:"node_count"`
@@ -738,7 +738,7 @@ type NodeAccountAssignment struct {
 }
 
 const (
-	NotificationEventLogicGateRaciUpdated = "logic_gate.raci_updated"
+	NotificationEventLogicGateRaciUpdated = "logic_gate.gvic_updated"
 	NotificationEventNodeAssigned         = "node.assigned"
 	NotificationEventNodeFieldsChanged    = "node.fields_changed"
 	NotificationEventNodeCommentCreated   = "node.comment_created"

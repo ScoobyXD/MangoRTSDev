@@ -253,9 +253,6 @@ func (r *MemoryRepo) companyExplorerLazyNodeMatchesScopeLocked(query CompanyExpl
 	case CompanyExplorerLazyScopeAll:
 		return true
 	case CompanyExplorerLazyScopeMe:
-		if node.AssigneeUserID != nil && *node.AssigneeUserID == query.ScopeUserID {
-			return true
-		}
 		for _, assignment := range r.nodeLogicGateAssignments {
 			if assignment.CompanyID == query.CompanyID && assignment.NodeID == node.NodeID && r.companyExplorerLazyLogicGateMatchesScopeLocked(query, assignment.LogicGateID) {
 				return true
@@ -263,10 +260,6 @@ func (r *MemoryRepo) companyExplorerLazyNodeMatchesScopeLocked(query CompanyExpl
 		}
 		return false
 	case CompanyExplorerLazyScopeTeam:
-		teamUsers, _ := r.companyExplorerLazyTeamScopeLocked(query.CompanyID, query.ScopeUserID)
-		if node.AssigneeUserID != nil && teamUsers[*node.AssigneeUserID] {
-			return true
-		}
 		for _, assignment := range r.nodeLogicGateAssignments {
 			if assignment.CompanyID == query.CompanyID && assignment.NodeID == node.NodeID && r.companyExplorerLazyLogicGateMatchesScopeLocked(query, assignment.LogicGateID) {
 				return true

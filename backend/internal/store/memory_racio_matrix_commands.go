@@ -91,7 +91,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
-	node, err := r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.Title, input.ActorUserID)
+	node, err := r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.Title, "")
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return RacioMatrixNodeCreateResult{}, err

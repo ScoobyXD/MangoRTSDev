@@ -657,11 +657,9 @@ func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relation
 		}
 		logicGateID := gate.LogicGateID
 		status := "Logic Gate"
-		statusColor := "#8b5cf6"
 		row.LogicGateID = &logicGateID
 		row.DisplayTitle = gate.Header
 		row.Status = &status
-		row.StatusColor = &statusColor
 		row.ResourceCreatedTimestamp = gate.CreatedTimestamp
 	case EntityTypeNode:
 		node, ok := r.nodes[key(relationship.CompanyID, relationship.ResourceID)]
@@ -680,7 +678,6 @@ func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relation
 		}
 		row.DisplayTitle = node.Title
 		row.Status = cloneStringPointer(node.Status)
-		row.StatusColor = cloneStringPointer(node.StatusColor)
 		row.ResourceCreatedTimestamp = node.CreatedTimestamp
 	default:
 		delete(r.projectRelationshipProjection, relationshipKey)

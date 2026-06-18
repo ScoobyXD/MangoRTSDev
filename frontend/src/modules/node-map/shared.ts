@@ -21,12 +21,8 @@ export type NodeRecord = ResourceAccessFields & {
   name?: string;
   title?: string;
   status?: string | null;
-  status_color?: string | null;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
-  assignee_name?: string | null;
-  assignee_email?: string | null;
   logic_gate_ids?: string[];
   accounts?: Account[];
   created_timestamp: string;
