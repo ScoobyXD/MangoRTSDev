@@ -215,33 +215,55 @@ where role in ('responsible', 'accountable', 'consulted', 'informed')
 on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
 do update set updated_timestamp = excluded.updated_timestamp;
 
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-)
-select
-  company_id,
-  'node',
-  node_id,
-  'generated',
-  'user',
-  assignee_user_id,
-  created_timestamp,
-  created_timestamp
-from nodes
-where assignee_user_id is not null
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp = excluded.updated_timestamp;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'nodes'
+      and column_name = 'assignee_user_id'
+  ) then
+    execute $sql$
+      insert into resource_gvic_assignments (
+        company_id,
+        resource_type,
+        resource_id,
+        role,
+        principal_type,
+        principal_id,
+        created_timestamp,
+        updated_timestamp
+      )
+      select
+        company_id,
+        'node',
+        node_id,
+        'generated',
+        'user',
+        assignee_user_id,
+        created_timestamp,
+        created_timestamp
+      from nodes
+      where assignee_user_id is not null
+      on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+      do update set updated_timestamp = excluded.updated_timestamp
+    $sql$;
+  end if;
+end
+$$;
 
-update kanban_columns
-set title = 'Review'
-where lower(replace(replace(trim(title), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v');
+do $$
+begin
+  if to_regclass('public.kanban_columns') is not null then
+    execute $sql$
+      update kanban_columns
+      set title = 'Review'
+      where lower(replace(replace(trim(title), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v')
+    $sql$;
+  end if;
+end
+$$;
 
 update node_logic_gate_assignments
 set status_key = 'review'
