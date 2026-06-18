@@ -58,7 +58,7 @@ func (r *MemoryRepo) listRacioProjectedNodes(ctx context.Context, query WorkItem
 			continue
 		}
 		if responsibleOnly {
-			if row.LogicGateID == "" || !r.logicGateUserHasRoleLocked(query.CompanyID, row.LogicGateID, query.UserID, domain.LogicGateRaciRoleResponsible) {
+			if row.LogicGateID == "" || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, row.ResourceID, query.UserID, domain.GVICRoleGenerated) {
 				continue
 			}
 		} else if row.LogicGateID != "" {
@@ -87,9 +87,9 @@ func (r *MemoryRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkIte
 
 func (r *MemoryRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
 	return r.listRacioProjectedLogicGates(ctx, query, map[string]bool{
-		domain.LogicGateRaciRoleAccountable: true,
-		domain.LogicGateRaciRoleConsulted:   true,
-		domain.LogicGateRaciRoleInformed:    true,
+		domain.GVICRoleVerified:  true,
+		domain.GVICRoleConsulted: true,
+		domain.GVICRoleInformed:  true,
 	})
 }
 
@@ -118,7 +118,7 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != racioProjectionResourceLogicGate {
 			continue
 		}
-		roles := r.logicGateRaciRolesForUserLocked(query.CompanyID, assignmentsByGate[row.ResourceID], query.UserID, allowedRoles)
+		roles := r.gvicEffectiveRolesForUserLocked(query.CompanyID, EntityTypeLogicGate, row.ResourceID, query.UserID, allowedRoles)
 		if len(roles) == 0 {
 			continue
 		}
@@ -158,30 +158,21 @@ func (r *MemoryRepo) syncRacioProjectionForNodeLocked(companyID, nodeID string) 
 	if companyID == "" || nodeID == "" {
 		return
 	}
+	r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}})
 	desired := map[string]bool{}
 	node, ok := r.nodes[key(companyID, nodeID)]
 	if ok {
 		node = r.withNodeReadModelLocked(node)
+		logicGateID := ""
 		assignment, assigned := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
 		if assigned && strings.TrimSpace(assignment.LogicGateID) != "" {
-			logicGateID := strings.TrimSpace(assignment.LogicGateID)
-			for _, userID := range r.logicGateRaciUserIDsLocked(companyID, logicGateID) {
-				userID = strings.TrimSpace(userID)
-				if userID == "" {
-					continue
-				}
+			logicGateID = strings.TrimSpace(assignment.LogicGateID)
+		}
+		for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, node.NodeID, nil) {
+			if userID != "" {
 				rowKey := racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)
 				desired[rowKey] = true
 				r.upsertRacioProjectionNodeRowLocked(companyID, node, logicGateID, userID)
-			}
-		} else if node.AssigneeUserID != nil {
-			userID := strings.TrimSpace(*node.AssigneeUserID)
-			if userID != "" {
-				if _, ok := r.memberships[membershipKey(companyID, userID)]; ok {
-					rowKey := racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)
-					desired[rowKey] = true
-					r.upsertRacioProjectionNodeRowLocked(companyID, node, "", userID)
-				}
 			}
 		}
 	}
@@ -196,16 +187,16 @@ func (r *MemoryRepo) syncRacioProjectionForNodeDeltasLocked(companyID, nodeID st
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateID string) {
+	r.syncResourceGVICEffectiveAssignmentsLocked(r.affectedGVICResourceKeysLocked(resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}))
 	users := r.racioProjectionUsersForLogicGateLocked(companyID, logicGateID)
-	for _, userID := range r.logicGateRaciUserIDsLocked(companyID, logicGateID) {
+	for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil) {
 		users[userID] = true
 	}
 	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) {
-	users := r.racioAssignmentChangedUserSetLocked(companyID, before, after)
-	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
+	r.syncRacioProjectionForLogicGateLocked(companyID, logicGateID)
 }
 
 func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) []ProjectionDelta {
@@ -235,6 +226,9 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logic
 		desired[racioProjectionKey(companyID, userID, racioProjectionResourceLogicGate, logicGateID)] = true
 		r.upsertRacioProjectionLogicGateRowLocked(companyID, logicGateID, userID)
 		for _, nodeID := range r.nodeIDsAssignedToLogicGateLocked(companyID, logicGateID) {
+			if !r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, nodeID, nil)[userID] {
+				continue
+			}
 			node, ok := r.nodes[key(companyID, nodeID)]
 			if !ok {
 				continue
@@ -519,31 +513,30 @@ func cloneIntPointer(value *int) *int {
 
 func (r *MemoryRepo) logicGateRaciAssignmentsByGateLocked(companyID string) map[string][]domain.LogicGateRaciAssignment {
 	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
-	for keyValue, assignments := range r.logicGateRaci {
-		if !strings.HasPrefix(keyValue, companyID+":") {
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID {
 			continue
 		}
-		copied := cloneLogicGateRaciAssignments(assignments)
+		copied := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, gate.LogicGateID)
 		sortLogicGateRaciAssignments(copied)
 		if len(copied) == 0 {
 			continue
 		}
-		assignmentsByGate[copied[0].LogicGateID] = copied
+		assignmentsByGate[gate.LogicGateID] = copied
 	}
 	return assignmentsByGate
 }
 
 func (r *MemoryRepo) logicGateRaciUserIDsLocked(companyID, logicGateID string) []string {
-	return mapKeys(r.logicGateRaciAssignmentUserSetLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)]))
+	return mapKeys(r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil))
 }
 
 func (r *MemoryRepo) logicGateUserHasRoleLocked(companyID, logicGateID, userID, role string) bool {
-	roles := r.logicGateRaciRolesForUserLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)], userID, map[string]bool{role: true})
-	return len(roles) > 0
+	return r.gvicEffectiveUserHasRoleLocked(companyID, EntityTypeLogicGate, logicGateID, userID, role)
 }
 
 func (r *MemoryRepo) logicGateUserHasAnyRaciLocked(companyID, logicGateID, userID string) bool {
-	return r.logicGateRaciAssignmentUserSetLocked(companyID, r.logicGateRaci[key(companyID, logicGateID)])[strings.TrimSpace(userID)]
+	return r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil)[strings.TrimSpace(userID)]
 }
 
 func (r *MemoryRepo) nodeIDsAssignedToLogicGateLocked(companyID, logicGateID string) []string {
@@ -653,6 +646,62 @@ func (r *MemoryRepo) logicGateRaciRolesForUserLocked(companyID string, assignmen
 			continue
 		}
 		if !r.logicGateRaciAssignmentUserSetLocked(companyID, []domain.LogicGateRaciAssignment{assignment})[userID] {
+			continue
+		}
+		if allowedRoles != nil && !allowedRoles[role] {
+			continue
+		}
+		seen[role] = true
+	}
+	roles := mapKeys(seen)
+	sort.Slice(roles, func(i, j int) bool {
+		if raciRoleSortValue(roles[i]) != raciRoleSortValue(roles[j]) {
+			return raciRoleSortValue(roles[i]) < raciRoleSortValue(roles[j])
+		}
+		return roles[i] < roles[j]
+	})
+	return roles
+}
+
+func (r *MemoryRepo) gvicEffectiveUsersForResourceLocked(companyID, resourceType, resourceID string, allowedRoles map[string]bool) map[string]bool {
+	users := map[string]bool{}
+	for _, assignment := range r.gvicEffectiveAssignments {
+		if assignment.CompanyID != companyID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID {
+			continue
+		}
+		role := strings.TrimSpace(assignment.Role)
+		if allowedRoles != nil && !allowedRoles[role] {
+			continue
+		}
+		userID := strings.TrimSpace(assignment.UserID)
+		if userID != "" {
+			users[userID] = true
+		}
+	}
+	return users
+}
+
+func (r *MemoryRepo) gvicEffectiveUserHasRoleLocked(companyID, resourceType, resourceID, userID, role string) bool {
+	userID = strings.TrimSpace(userID)
+	role, ok := NormalizeGVICRole(role)
+	if userID == "" || !ok {
+		return false
+	}
+	return r.gvicEffectiveUsersForResourceLocked(companyID, resourceType, resourceID, map[string]bool{role: true})[userID]
+}
+
+func (r *MemoryRepo) gvicEffectiveRolesForUserLocked(companyID, resourceType, resourceID, userID string, allowedRoles map[string]bool) []string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, assignment := range r.gvicEffectiveAssignments {
+		if assignment.CompanyID != companyID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID || assignment.UserID != userID {
+			continue
+		}
+		role := strings.TrimSpace(assignment.Role)
+		if role == "" || seen[role] {
 			continue
 		}
 		if allowedRoles != nil && !allowedRoles[role] {

@@ -72,6 +72,7 @@ export type NodeRecord = ResourceAccessFields & {
   header: string;
   created_timestamp: string;
   node_id: string;
+  name?: string;
   title: string;
 };
 
@@ -80,19 +81,24 @@ export type LogicGateRecord = ResourceAccessFields & {
   logic_gate_id: string;
   header: string;
   raci_assignments?: LogicGateRaciAssignment[];
+  gvic_assignments?: LogicGateRaciAssignment[];
   created_timestamp: string;
 };
 
-export type LogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+export type LogicGateRaciRole = "generated" | "verified" | "consulted" | "informed";
 export type LogicGateRaciSubjectType = "user" | "group";
 
 export type LogicGateRaciAssignment = {
   company_id: string;
-  logic_gate_id: string;
+  logic_gate_id?: string;
+  resource_id?: string;
   role: LogicGateRaciRole;
   subject_type?: LogicGateRaciSubjectType;
   subject_id?: string;
   subject_name?: string;
+  principal_type?: LogicGateRaciSubjectType;
+  principal_id?: string;
+  principal_name?: string;
   user_id: string;
   user_display_name?: string;
   user_email?: string;

@@ -87,7 +87,7 @@ func companyExplorerV2NameExpr(alias string) string {
       when 'user' then nullif(coalesce(nullif(app_user.display_name, ''), app_user.email), '')
       when 'project' then nullif(project.name, '')
       when 'logic_gate' then nullif(logic_gate.header, '')
-      when 'node' then nullif(node.title, '')
+      when 'node' then nullif(node.name, '')
       else nullif(` + alias + `.name, '')
     end,
     nullif(` + alias + `.name, ''),
@@ -276,7 +276,7 @@ func (r *PostgresRepo) ensureCompanyExplorerV2NativeEntities(ctx context.Context
 		 on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set
 		   name=excluded.name`,
 		`insert into company_explorer_entities (company_id, entity_id, entity_type, resource_id, name, default_access, created_timestamp, updated_timestamp)
-		 select node.company_id, mangorts_company_explorer_v2_entity_id(node.company_id, 'node', node.node_id), 'node', node.node_id, node.title, null, node.created_timestamp, node.created_timestamp
+		 select node.company_id, mangorts_company_explorer_v2_entity_id(node.company_id, 'node', node.node_id), 'node', node.node_id, node.name, null, node.created_timestamp, node.created_timestamp
 		 from nodes node
 		 where node.company_id=$1::uuid
 		 on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set

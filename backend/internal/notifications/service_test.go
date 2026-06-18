@@ -59,7 +59,7 @@ func TestPhase6NotificationRecipientsUseRACIRouting(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -98,7 +98,7 @@ func TestPhase6NotificationRecipientsUseRACIRouting(t *testing.T) {
 			t.Fatalf("non-RACI user %s received notification: %+v", user.UserID, byUser[user.UserID])
 		}
 	}
-	if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.LogicGateRaciRoleResponsible {
+	if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.GVICRoleGenerated {
 		t.Fatalf("responsible metadata = %+v, want R inbox responsible", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -184,7 +184,7 @@ func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 				t.Fatalf("%s unexpected notification for user %s: %+v", label, user.UserID, byUser[user.UserID])
 			}
 		}
-		if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.LogicGateRaciRoleResponsible {
+		if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.GVICRoleGenerated {
 			t.Fatalf("%s responsible metadata = %+v, want responsible R inbox", label, got)
 		}
 		return items
@@ -281,10 +281,10 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{
-			{Role: domain.LogicGateRaciRoleResponsible, UserID: responsible.UserID},
-			{Role: domain.LogicGateRaciRoleAccountable, UserID: accountable.UserID},
-			{Role: domain.LogicGateRaciRoleConsulted, UserID: consulted.UserID},
-			{Role: domain.LogicGateRaciRoleInformed, UserID: informed.UserID},
+			{Role: domain.GVICRoleGenerated, UserID: responsible.UserID},
+			{Role: domain.GVICRoleVerified, UserID: accountable.UserID},
+			{Role: domain.GVICRoleConsulted, UserID: consulted.UserID},
+			{Role: domain.GVICRoleInformed, UserID: informed.UserID},
 		},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
@@ -319,14 +319,14 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
-		Status:      "verify",
+		Status:      "review",
 		ActorUserID: actor.UserID,
 	})
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
-	if moved.Assignment.StatusKey != store.LogicGateWorkStatusVerify || moved.Node.Status == nil || *moved.Node.Status != "Verify" {
-		t.Fatalf("moved status assignment=%q node=%+v, want Verify", moved.Assignment.StatusKey, moved.Node.Status)
+	if moved.Assignment.StatusKey != store.LogicGateWorkStatusVerify || moved.Node.Status == nil || *moved.Node.Status != "Review" {
+		t.Fatalf("moved status assignment=%q node=%+v, want Review", moved.Assignment.StatusKey, moved.Node.Status)
 	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), moved.Events[0])
@@ -335,8 +335,8 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 	}
 	byUser := map[string]domain.Notification{}
 	for _, item := range items {
-		if item.Type != store.WorkItemLogicGateAssignmentMovedEventType || !strings.Contains(item.Title, "Verify") {
-			t.Fatalf("verify notification = %+v, want moved Verify notification", item)
+		if item.Type != store.WorkItemLogicGateAssignmentMovedEventType || !strings.Contains(item.Title, "Review") {
+			t.Fatalf("review notification = %+v, want moved Review notification", item)
 		}
 		if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
 			t.Fatalf("verify notification target = %+v", item)
@@ -347,10 +347,10 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 		surface string
 		role    string
 	}{
-		responsible.UserID: {surface: domain.NotificationSurfaceRInbox, role: domain.LogicGateRaciRoleResponsible},
-		accountable.UserID: {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleAccountable},
-		consulted.UserID:   {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleConsulted},
-		informed.UserID:    {surface: domain.NotificationSurfaceACIInbox, role: domain.LogicGateRaciRoleInformed},
+		responsible.UserID: {surface: domain.NotificationSurfaceRInbox, role: domain.GVICRoleGenerated},
+		accountable.UserID: {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleVerified},
+		consulted.UserID:   {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleConsulted},
+		informed.UserID:    {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleInformed},
 	}
 	if len(byUser) != len(want) {
 		t.Fatalf("verify notification recipients = %+v, want %d RACI users", byUser, len(want))
@@ -577,7 +577,7 @@ func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t 
 	}
 }
 
-func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
+func TestProcessDomainEventSharedInboxGVICUsesNotificationRoles(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666651"
@@ -629,17 +629,18 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
-		CompanyID: companyID,
-		FolderID:  folder.FolderID,
-		Assignments: []store.SharedInboxRaciAssignmentInput{
-			{Role: domain.LogicGateRaciRoleResponsible, SubjectType: store.EntityPermissionSubjectUser, SubjectID: responsible.UserID},
-			{Role: domain.LogicGateRaciRoleAccountable, SubjectType: store.EntityPermissionSubjectUser, SubjectID: accountable.UserID},
-			{Role: domain.LogicGateRaciRoleConsulted, SubjectType: store.EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID},
-			{Role: domain.LogicGateRaciRoleInformed, SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID},
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeSharedInbox,
+		ResourceID:   folder.FolderID,
+		Assignments: []store.ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: responsible.UserID},
+			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: accountable.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: store.EntityPermissionSubjectGroup, PrincipalID: parentGroup.GroupID},
+			{Role: domain.GVICRoleInformed, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: blocked.UserID},
 		},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments: %v", err)
+		t.Fatalf("SetResourceGVICAssignments shared inbox: %v", err)
 	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
@@ -679,31 +680,31 @@ func TestProcessDomainEventSharedInboxRACIUsesNotificationRoles(t *testing.T) {
 			t.Fatalf("unexpected shared inbox notification for %s: %+v", user.UserID, byUser[user.UserID])
 		}
 	}
-	if got := byUser[responsible.UserID]; got.Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("responsible role = %+v, want responsible", got)
+	if got := byUser[responsible.UserID]; got.Role != domain.GVICRoleGenerated {
+		t.Fatalf("generated role = %+v, want generated", got)
 	}
-	if got := byUser[accountable.UserID]; got.Role != domain.LogicGateRaciRoleAccountable {
-		t.Fatalf("accountable role = %+v, want accountable", got)
+	if got := byUser[accountable.UserID]; got.Role != domain.GVICRoleVerified {
+		t.Fatalf("verified role = %+v, want verified", got)
 	}
-	if got := byUser[groupMember.UserID]; got.Role != domain.LogicGateRaciRoleConsulted {
+	if got := byUser[groupMember.UserID]; got.Role != domain.GVICRoleConsulted {
 		t.Fatalf("group member role = %+v, want consulted", got)
 	}
-	if got := byUser[blocked.UserID]; got.Role != domain.LogicGateRaciRoleInformed {
+	if got := byUser[blocked.UserID]; got.Role != domain.GVICRoleInformed {
 		t.Fatalf("blocked role = %+v, want informed", got)
 	}
 	visible, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListNotifications responsible: %v", err)
 	}
-	if len(visible) != 1 || visible[0].Surface != domain.NotificationSurfaceSharedTriage || visible[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("responsible visible notifications = %+v, want shared triage responsible row", visible)
+	if len(visible) != 1 || visible[0].Surface != domain.NotificationSurfaceSharedTriage || visible[0].Role != domain.GVICRoleGenerated {
+		t.Fatalf("generated visible notifications = %+v, want shared triage generated row", visible)
 	}
 	summary, err := repo.GetNotificationSummary(store.NotificationSummaryInput{UserID: responsible.UserID, CompanyID: companyID})
 	if err != nil {
 		t.Fatalf("GetNotificationSummary responsible: %v", err)
 	}
-	if summary.TotalUnread != 1 || len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceSharedTriage || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
-		t.Fatalf("responsible summary = %+v, want one shared triage responsible target", summary)
+	if summary.TotalUnread != 1 || len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceSharedTriage || summary.RoleCounts[0].Role != domain.GVICRoleGenerated || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("generated summary = %+v, want one shared triage generated target", summary)
 	}
 }
 

@@ -151,11 +151,11 @@ test("shared inbox rows are stable, sorted, and nested by parent", () => {
 test("RACI inbox group builder classifies work by role, status, and priority", () => {
   const currentUserID = "user-1";
   const gates = new Map([
-    ["gate-a", logicGate("gate-a", [{ company_id: "company-1", logic_gate_id: "gate-a", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
-    ["gate-r", logicGate("gate-r", [{ company_id: "company-1", logic_gate_id: "gate-r", role: "responsible", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
+    ["gate-a", logicGate("gate-a", [{ company_id: "company-1", logic_gate_id: "gate-a", role: "verified", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
+    ["gate-r", logicGate("gate-r", [{ company_id: "company-1", logic_gate_id: "gate-r", role: "generated", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
     ["gate-all", logicGate("gate-all", [
-      { company_id: "company-1", logic_gate_id: "gate-all", role: "responsible", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
-      { company_id: "company-1", logic_gate_id: "gate-all", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "generated", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "verified", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
       { company_id: "company-1", logic_gate_id: "gate-all", role: "consulted", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
       { company_id: "company-1", logic_gate_id: "gate-all", role: "informed", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
     ])],
@@ -165,7 +165,7 @@ test("RACI inbox group builder classifies work by role, status, and priority", (
   const nodes = [
     node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], status: "pending", priority: 1 }),
     node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
-    node("node-verify", "Verify node", { logic_gate_ids: ["gate-r"], status: "verify", priority: 2, assignee_user_id: currentUserID }),
+    node("node-review", "Review node", { logic_gate_ids: ["gate-r"], status: "review", priority: 2, assignee_user_id: currentUserID }),
     node("node-all", "All roles node", { logic_gate_ids: ["gate-all"], status: "pending", priority: 1 }),
     node("node-r-unassigned", "Responsible unassigned node", { logic_gate_ids: ["gate-r"], status: "pending" }),
     node("node-assigned-without-r", "Assigned without R node", { logic_gate_ids: ["gate-no-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
@@ -177,23 +177,23 @@ test("RACI inbox group builder classifies work by role, status, and priority", (
   const nodeByID = new Map(nodes.map((item) => [item.node_id, item]));
 
   assert.deepEqual(RACI_INBOX_SECTIONS.map((section) => [section.viewID, section.role]), [
-    ["r-inbox", "responsible"],
-    ["a-inbox", "accountable"],
+    ["r-inbox", "generated"],
+    ["a-inbox", "verified"],
     ["c-inbox", "consulted"],
     ["i-inbox", "informed"],
     ["o-inbox", "other"],
   ]);
-  const responsibleStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "responsible");
-  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "in_progress", 2))?.[0]?.nodeIDs, ["node-r"]);
-  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "verify", 2))?.[0]?.nodeIDs, ["node-verify"]);
-  assert.deepEqual((responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
-  assert.deepEqual(responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 0))?.[0]?.nodeIDs, ["node-r-unassigned"]);
-  assert.equal(responsibleStatusGroups.get(raciRoleCellKey("responsible", "pending", 1))?.some((group) => group.nodeIDs.includes("node-a")), false);
-  assert.equal(responsibleStatusGroups.get(raciRoleCellKey("responsible", "in_progress", 2))?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
-  assert.equal(responsibleStatusGroups.has(raciRoleCellKey("responsible", "done", 1)), false);
-  const accountableStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "accountable");
-  assert.deepEqual((accountableStatusGroups.get(raciRoleCellKey("accountable", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
-  assert.equal(accountableStatusGroups.has(raciRoleCellKey("accountable", "in_progress", 2)), false);
+  const generatedStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "generated");
+  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "in_progress", 2))?.[0]?.nodeIDs, ["node-r"]);
+  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "review", 2))?.[0]?.nodeIDs, ["node-review"]);
+  assert.deepEqual((generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
+  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 0))?.[0]?.nodeIDs, ["node-r-unassigned"]);
+  assert.equal(generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 1))?.some((group) => group.nodeIDs.includes("node-a")), false);
+  assert.equal(generatedStatusGroups.get(raciRoleCellKey("generated", "in_progress", 2))?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
+  assert.equal(generatedStatusGroups.has(raciRoleCellKey("generated", "done", 1)), false);
+  const verifiedStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "verified");
+  assert.deepEqual((verifiedStatusGroups.get(raciRoleCellKey("verified", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
+  assert.equal(verifiedStatusGroups.has(raciRoleCellKey("verified", "in_progress", 2)), false);
   const otherGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "other");
   assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 3))?.[0]?.nodeIDs, ["node-assigned-other-raci"]);
   assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 4))?.[0], {
@@ -304,7 +304,7 @@ test("my logic gate groups merge shortcuts with RACI-assigned gates", () => {
   };
   const shortcutGate = logicGate("gate-shortcut", []);
   const assignedGate = logicGate("gate-assigned", [{ company_id: "company-1", logic_gate_id: "gate-assigned", role: "consulted", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
-  const duplicateAssignedGate = logicGate("gate-shortcut", [{ company_id: "company-1", logic_gate_id: "gate-shortcut", role: "responsible", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
+  const duplicateAssignedGate = logicGate("gate-shortcut", [{ company_id: "company-1", logic_gate_id: "gate-shortcut", role: "generated", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
   const logicGateByID = new Map([
     [shortcutGate.logic_gate_id, shortcutGate],
     [assignedGate.logic_gate_id, assignedGate],

@@ -20,7 +20,7 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	}
 
 	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible gate")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: user.UserID}})
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 	responsibleNode, err := repo.CreateNode(companyID, "Responsible node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible: %v", err)
@@ -38,7 +38,7 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	}
 
 	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "ACI gate")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleAccountable, UserID: user.UserID}})
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
 
 	assertMemoryRacioProjectionCounts(t, repo, companyID, 2, 2)
 
@@ -68,7 +68,7 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 		t.Fatalf("ListACIInboxLogicGates: %v", err)
 	}
 	aciRead := findInboxReadGate(aciGates, aciGate.LogicGateID)
-	if aciRead == nil || !inboxReadRolesContain(aciRead.Roles, domain.LogicGateRaciRoleAccountable) {
+	if aciRead == nil || !inboxReadRolesContain(aciRead.Roles, domain.GVICRoleVerified) {
 		t.Fatalf("ACI gates = %+v, want accountable gate", aciGates)
 	}
 

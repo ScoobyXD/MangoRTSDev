@@ -93,14 +93,14 @@ function companyExplorerLazyScopeForView(scopeView: CompanyExplorerScopeView, sc
 }
 
 const RACI_FOLDER_ROWS = [
-  { role: "responsible", label: "Responsible" },
-  { role: "accountable", label: "Accountable" },
+  { role: "generated", label: "Generated" },
+  { role: "verified", label: "Verified" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
   { role: "other", label: "Others" },
 ] as const satisfies ReadonlyArray<{ role: CompanyExplorerRaciFolderRole; label: string }>;
 
-const LOGIC_GATE_RACI_ROLES: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
+const LOGIC_GATE_RACI_ROLES: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
 const RACI_PROJECTION_LIMIT = 500;
 const RACI_VISUAL_ROOT_FOLDER_PREFIX = "Mango RACI ";
 const DEFAULT_FOLDERS_LABEL = "Default Folders";
@@ -445,6 +445,7 @@ function materializeProjectionNode(row: RacioMatrixProjectionRow, previous: Node
     ...previous,
     company_id: cleanExplorerID(row.company_id) || previous?.company_id || "",
     node_id: nodeID,
+    name: row.display_title || previous?.name || previous?.title || "Untitled node",
     title: row.display_title || previous?.title || "Untitled node",
     status: row.status ?? null,
     status_color: row.status_color ?? null,
@@ -2477,7 +2478,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         mutationOrigin: "company_explorer",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-node"),
-          title: "new node",
+          name: "new node",
           x: 120,
           y: 120,
           position,
@@ -2552,7 +2553,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const created = response.logic_gates?.[0];
       if (!created) throw new Error("logic_gate_batch_create_missing_gate");
       const logicGate = toLogicGateCanvasRecord(created) as ExplorerLogicGateRecord;
-      logicGate.raci_assignments = created.raci_assignments ?? [];
+      logicGate.raci_assignments = created.gvic_assignments ?? created.raci_assignments ?? [];
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       let createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
       if (companyExplorerV2Rows.length > 0) {
@@ -2867,7 +2868,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       } else if (activeRename.target.kind === "node") {
         const node = await requestJSON<NodeRecord>(`/v1/nodes/${activeRename.target.id}`, {
           method: "PUT",
-          body: JSON.stringify({ company_id: companyID, title: value }),
+          body: JSON.stringify({ company_id: companyID, name: value }),
         });
         dispatchExplorerStore({ type: "replaceNode", node });
         upsertNodeRelationshipGraphNode(apiBase, companyID, node);

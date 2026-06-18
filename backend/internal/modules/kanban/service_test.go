@@ -32,7 +32,7 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {
@@ -84,8 +84,8 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	if assigned.Node.Priority == nil || *assigned.Node.Priority != priority {
 		t.Fatalf("assigned node priority = %+v, want %d", assigned.Node.Priority, priority)
 	}
-	if assigned.Node.AssigneeUserID == nil || *assigned.Node.AssigneeUserID != responsibleUser.UserID {
-		t.Fatalf("assigned node assignee = %+v, want responsible user", assigned.Node.AssigneeUserID)
+	if assigned.Node.AssigneeUserID != nil {
+		t.Fatalf("assigned node assignee = %+v, want nil after GVIC migration", assigned.Node.AssigneeUserID)
 	}
 	if len(assigned.Node.LogicGateIDs) != 1 || assigned.Node.LogicGateIDs[0] != logicGate.LogicGateID {
 		t.Fatalf("assigned node logic_gate_ids = %+v, want assignment-derived Logic Gate", assigned.Node.LogicGateIDs)

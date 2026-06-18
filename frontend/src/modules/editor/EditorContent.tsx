@@ -219,44 +219,13 @@ function companyUserOptionLabel(user: CompanyUser): string {
   return name || email || user.user_id;
 }
 
-function companyUserGroupSubtreeIDs(groups: CompanyUserGroup[], rootGroupID: string): Set<string> {
-  const cleanRootID = rootGroupID.trim();
-  const ids = new Set<string>();
-  if (!cleanRootID || !groups.some((group) => group.group_id === cleanRootID)) return ids;
-  ids.add(cleanRootID);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const group of groups) {
-      const parentID = group.parent_group_id?.trim() ?? "";
-      if (parentID && ids.has(parentID) && !ids.has(group.group_id)) {
-        ids.add(group.group_id);
-        changed = true;
-      }
-    }
-  }
-  return ids;
-}
-
-function companyUserIDsForGroupSubtree(groups: CompanyUserGroup[], members: CompanyUserGroupMember[], rootGroupID: string): string[] {
-  const groupIDs = companyUserGroupSubtreeIDs(groups, rootGroupID);
-  if (groupIDs.size === 0) return [];
-  const userIDs = new Set<string>();
-  for (const member of members) {
-    const groupID = member.group_id.trim();
-    const userID = member.user_id.trim();
-    if (groupIDs.has(groupID) && userID) userIDs.add(userID);
-  }
-  return Array.from(userIDs).sort((left, right) => left.localeCompare(right));
-}
-
 function logicGateRaciAssignmentSubjectType(assignment: LogicGateRaciAssignment): LogicGateRaciSubjectType {
-  return (assignment.subject_type?.trim() || "user") as LogicGateRaciSubjectType;
+  return (assignment.principal_type?.trim() || assignment.subject_type?.trim() || "user") as LogicGateRaciSubjectType;
 }
 
 function logicGateRaciAssignmentSubjectID(assignment: LogicGateRaciAssignment): string {
   const subjectType = logicGateRaciAssignmentSubjectType(assignment);
-  const subjectID = assignment.subject_id?.trim() ?? "";
+  const subjectID = assignment.principal_id?.trim() || assignment.subject_id?.trim() || "";
   if (subjectType === "user") return subjectID || assignment.user_id.trim();
   return subjectID;
 }
@@ -1049,9 +1018,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       } else {
         const updated = await requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
           method: "PUT",
-          body: JSON.stringify({ company_id: companyID, title: value }),
+          body: JSON.stringify({ company_id: companyID, name: value }),
         });
-        setLinkedNodeTitle(updated.title);
+        setLinkedNodeTitle(getNodeTitle(updated));
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       }
@@ -1109,7 +1078,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         mutationOrigin: "editor",
         items: [{
           client_id: clientID,
-          title: titleByKind[kind],
+          name: titleByKind[kind],
           x: position.x,
           y: position.y,
         }],
@@ -1166,7 +1135,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       mutationOrigin: "editor",
       items: [{
         client_id: clientID,
-        title,
+        name: title,
         x: position.x,
         y: position.y,
       }],
@@ -1270,13 +1239,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const value = draft.trim();
     if (!value) {
       syncNodeAssignee("");
-      void updateNodePresetPatch({ assignee_user_id: null });
       return;
     }
     const selectedUser = findCompanyUserByAssigneeDraft(companyUsers, value);
     if (selectedUser) {
       syncNodeAssignee(selectedUser.user_id);
-      void updateNodePresetPatch({ assignee_user_id: selectedUser.user_id });
       return;
     }
     if (!USER_ID_PATTERN.test(value)) {
@@ -1284,8 +1251,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     syncNodeAssignee(value);
-    void updateNodePresetPatch({ assignee_user_id: value });
-  }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
+  }, [companyUsers, syncNodeAssignee]);
 
   const commitNodeAccountIDs = useCallback((accountIDs: string[]) => {
     if (!linkedEntityCanEdit) return;
@@ -1329,7 +1295,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!cleanStatusKey) return;
     const logicGateID = nodeLogicGateIDs.map((id) => id.trim()).find(Boolean) ?? "";
     if (!logicGateID) {
-      void updateNodePresetPatch({ status: cleanStatusLabel, status_color: cleanStatusColor || null });
+      void updateNodePresetPatch({ status: cleanStatusLabel });
       return;
     }
     const rawPriority = nodePriorityDraft.trim();
@@ -1343,7 +1309,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       nodeID: linkedNodeID,
       status: cleanStatusKey,
       priority,
-      assigneePolicy: "first_responsible",
     }).then((result) => {
       setNodeStatus(result.node.status ?? cleanStatusLabel);
       setNodeStatusColor(result.node.status_color ?? cleanStatusColor);
@@ -1364,19 +1329,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
     setError("");
     try {
-      const payload = await requestJSON<{ raci_assignments?: LogicGateRaciAssignment[] }>(`/v1/logic-gates/${linkedNodeID}/raci`, {
+      const payload = await requestJSON<{ gvic_assignments?: LogicGateRaciAssignment[]; assignments?: LogicGateRaciAssignment[] }>(`/v1/resources/logic_gate/${linkedNodeID}/gvic`, {
         method: "PUT",
         body: JSON.stringify({
           company_id: companyID,
-          assignments: nextAssignments.map((assignment) => ({
+          gvic_assignments: nextAssignments.map((assignment) => ({
             role: assignment.role,
-            subject_type: logicGateRaciAssignmentSubjectType(assignment),
-            subject_id: logicGateRaciAssignmentSubjectID(assignment),
-            user_id: logicGateRaciAssignmentSubjectType(assignment) === "user" ? logicGateRaciAssignmentSubjectID(assignment) : "",
+            principal_type: logicGateRaciAssignmentSubjectType(assignment),
+            principal_id: logicGateRaciAssignmentSubjectID(assignment),
           })),
         }),
       });
-      setLogicGateRaciAssignments(payload.raci_assignments ?? []);
+      setLogicGateRaciAssignments(payload.gvic_assignments ?? payload.assignments ?? []);
       invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
@@ -1387,38 +1351,31 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const addLogicGateRaciSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
     const cleanSubjectID = subjectID.trim();
     if (!cleanSubjectID) return;
-    const existingUserIDsForRole = new Set(logicGateRaciAssignments
-      .filter((assignment) => assignment.role === role && logicGateRaciAssignmentSubjectType(assignment) === "user")
+    const existingSubjectIDsForRole = new Set(logicGateRaciAssignments
+      .filter((assignment) => assignment.role === role && logicGateRaciAssignmentSubjectType(assignment) === subjectType)
       .map((assignment) => logicGateRaciAssignmentSubjectID(assignment))
       .filter(Boolean));
+    if (existingSubjectIDsForRole.has(cleanSubjectID)) return;
     if (subjectType === "group") {
-      const groupUserIDs = companyUserIDsForGroupSubtree(companyUserGroups, companyUserGroupMembers, cleanSubjectID);
-      const createdTimestamp = new Date().toISOString();
-      const expandedAssignments = groupUserIDs
-        .filter((userID) => !existingUserIDsForRole.has(userID))
-        .map((userID) => {
-          const user = companyUsers.find((candidate) => candidate.user_id === userID);
-          return {
-            company_id: companyID,
-            logic_gate_id: linkedNodeID,
-            role,
-            subject_type: "user" as LogicGateRaciSubjectType,
-            subject_id: userID,
-            subject_name: user?.display_name ?? user?.email,
-            user_id: userID,
-            user_display_name: user?.display_name,
-            user_email: user?.email,
-            created_timestamp: createdTimestamp,
-          };
-        });
-      if (expandedAssignments.length === 0) return;
+      const group = companyUserGroups.find((candidate) => candidate.group_id === cleanSubjectID);
       void saveLogicGateRaciAssignments([
         ...logicGateRaciAssignments,
-        ...expandedAssignments,
+        {
+          company_id: companyID,
+          logic_gate_id: linkedNodeID,
+          role,
+          subject_type: "group",
+          subject_id: cleanSubjectID,
+          subject_name: group?.name ?? cleanSubjectID,
+          principal_type: "group",
+          principal_id: cleanSubjectID,
+          principal_name: group?.name ?? cleanSubjectID,
+          user_id: "",
+          created_timestamp: new Date().toISOString(),
+        },
       ]);
       return;
     }
-    if (existingUserIDsForRole.has(cleanSubjectID)) return;
     const user = companyUsers.find((candidate) => candidate.user_id === cleanSubjectID);
     void saveLogicGateRaciAssignments([
       ...logicGateRaciAssignments,
@@ -1435,7 +1392,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         created_timestamp: new Date().toISOString(),
       },
     ]);
-  }, [companyID, companyUserGroupMembers, companyUserGroups, companyUsers, linkedNodeID, logicGateRaciAssignments, saveLogicGateRaciAssignments]);
+  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, logicGateRaciAssignments, saveLogicGateRaciAssignments]);
 
   const removeLogicGateRaciSubject = useCallback((role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => {
     const cleanSubjectID = subjectID.trim();

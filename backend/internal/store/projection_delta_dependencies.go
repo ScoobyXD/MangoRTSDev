@@ -62,6 +62,14 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 	if err != nil {
 		return nil, err
 	}
+	gvicBeforeDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
+	if err != nil {
+		return nil, err
+	}
+	gvicBefore := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicBeforeDomain))
+	for _, item := range gvicBeforeDomain {
+		gvicBefore = append(gvicBefore, gvicEffectiveProjectionRowFromDomain(item))
+	}
 	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
 	if err != nil {
 		return nil, err
@@ -78,11 +86,21 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 		if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return nil, err
 		}
+		if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_effective_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid`, companyID, nodeID); err != nil {
+			return nil, err
+		}
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return nil, err
 		}
 	} else {
 		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return nil, err
+		}
+		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return nil, err
 		}
 		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -111,6 +129,14 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 	if err != nil {
 		return nil, err
 	}
+	gvicAfterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
+	if err != nil {
+		return nil, err
+	}
+	gvicAfter := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicAfterDomain))
+	for _, item := range gvicAfterDomain {
+		gvicAfter = append(gvicAfter, gvicEffectiveProjectionRowFromDomain(item))
+	}
 	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
 	if err != nil {
 		return nil, err
@@ -118,6 +144,7 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 
 	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
 	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
 	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
 	deltas = append(deltas, projectRelationshipDeltas...)
 	return deltas, nil
@@ -152,6 +179,14 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return nil, err
 	}
+	gvicBeforeDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+	if err != nil {
+		return nil, err
+	}
+	gvicBefore := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicBeforeDomain))
+	for _, item := range gvicBeforeDomain {
+		gvicBefore = append(gvicBefore, gvicEffectiveProjectionRowFromDomain(item))
+	}
 	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
 	if err != nil {
 		return nil, err
@@ -168,10 +203,24 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 		if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
+		if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_effective_assignments
+where company_id=$1::uuid
+  and source_resource_type='logic_gate'
+  and source_resource_id=$2::uuid`, companyID, logicGateID); err != nil {
+			return nil, err
+		}
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
 	} else {
+		affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
+			return nil, err
+		}
 		if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
@@ -198,6 +247,14 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return nil, err
 	}
+	gvicAfterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+	if err != nil {
+		return nil, err
+	}
+	gvicAfter := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicAfterDomain))
+	for _, item := range gvicAfterDomain {
+		gvicAfter = append(gvicAfter, gvicEffectiveProjectionRowFromDomain(item))
+	}
 	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
 	if err != nil {
 		return nil, err
@@ -205,6 +262,7 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 
 	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
 	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
 	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
 	deltas = append(deltas, projectRelationshipDeltas...)
 	for _, nodeID := range cleanUUIDTextSlice(input.AffectedNodeIDs) {
@@ -483,9 +541,9 @@ with source as (
     end as logic_gate_id,
     case when relationship.resource_type='node' then relationship.resource_id end as node_id,
     case when relationship.resource_type='node' then node_assignment.assignment_id end as assignment_id,
-    coalesce(nullif(gate.header, ''), nullif(node_row.title, ''), relationship.resource_id::text) as display_title,
+    coalesce(nullif(gate.header, ''), nullif(node_row.name, ''), relationship.resource_id::text) as display_title,
     case when relationship.resource_type='logic_gate' then 'Logic Gate' else nullif(node_row.status, '') end as status,
-    case when relationship.resource_type='logic_gate' then '#8b5cf6' else nullif(node_row.status_color, '') end as status_color,
+    case when relationship.resource_type='logic_gate' then '#8b5cf6' else null::text end as status_color,
     relationship.position,
     coalesce(gate.created_timestamp, node_row.created_timestamp) as resource_created_timestamp,
     relationship.created_timestamp as relationship_created_timestamp,

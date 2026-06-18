@@ -14,7 +14,7 @@ import (
 const nodeSelectColumns = `
 n.company_id,
 n.node_id,
-n.title,
+n.name,
 coalesce(
   case
     when assignment.is_issue then 'Issue'
@@ -27,13 +27,13 @@ coalesce(
     when assignment.is_issue then '#ffd400'
     when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
   end,
-  nullif(n.status_color, '')
+  null
 ) as status_color,
 n.due_date::text,
 n.priority,
-n.assignee_user_id::text,
-nullif(assignee.display_name, '') as assignee_name,
-nullif(assignee.email, '') as assignee_email,
+null::text as assignee_user_id,
+null::text as assignee_name,
+null::text as assignee_email,
 n.created_timestamp,
 coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json,
 coalesce(account_snapshot.accounts_json, '[]')::text as accounts_json`
@@ -47,11 +47,6 @@ left join lateral (
   order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
   limit 1
 ) assignment on true
-left join company_memberships assignee_membership
-  on assignee_membership.company_id = n.company_id
- and assignee_membership.user_id = n.assignee_user_id
-left join users assignee
-  on assignee.user_id = assignee_membership.user_id
 left join lateral (
   select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
   from (
@@ -330,12 +325,30 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context
 	}
 	item := domain.Node{CompanyID: companyID, NodeID: nodeID, Title: title, DefaultAccess: ResourceDefaultAccessEdit}
 	if err := tx.QueryRowContext(ctx,
-		`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
-		 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
-		 returning company_id, node_id, title, created_timestamp`,
-		item.CompanyID, item.NodeID, item.Title, assigneeUserID,
+		`insert into nodes (company_id, node_id, name, created_timestamp)
+		 values ($1, $2, $3, now())
+		 returning company_id, node_id, name, created_timestamp`,
+		item.CompanyID, item.NodeID, item.Title,
 	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 		return domain.Node{}, err
+	}
+	if assigneeUserID != "" {
+		if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
+			companyID, item.NodeID, assigneeUserID); err != nil {
+			return domain.Node{}, err
+		}
 	}
 	if syncFolderItem {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
@@ -346,7 +359,6 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context
 			return domain.Node{}, err
 		}
 	}
-	applyPostgresNodeAssigneeReadModel(&item, assignee)
 	item.LogicGateIDs = []string{}
 	item.Accounts = []domain.Account{}
 	if syncProjection {
@@ -407,6 +419,11 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
+	beforeEffective, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID})
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(beforeEffective, domain.GVICRoleGenerated)
 	item, err := r.updateNodeTx(ctx, tx, input)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -418,7 +435,12 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
+	afterEffective, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID})
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(afterEffective, domain.GVICRoleGenerated)
+	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item, beforeGeneratedUserIDs, afterGeneratedUserIDs))
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -442,11 +464,6 @@ func (r *PostgresRepo) updateNodeTx(ctx context.Context, tx *sql.Tx, input Updat
 		value := strings.TrimSpace(*input.Status)
 		status = &value
 	}
-	statusColor := (*string)(nil)
-	if input.StatusColor != nil {
-		value := strings.TrimSpace(*input.StatusColor)
-		statusColor = &value
-	}
 	assigneeUserID := (*string)(nil)
 	if input.AssigneeUserID != nil {
 		value := strings.TrimSpace(*input.AssigneeUserID)
@@ -468,12 +485,10 @@ select exists(
 	}
 	_, err := tx.ExecContext(ctx, `
 update nodes
-set title = case when $4 then $3 else title end,
+set name = case when $4 then $3 else name end,
     status = case when $6 then nullif($5::text, '') else status end,
-    status_color = case when $8 then nullif($7::text, '') else status_color end,
-    due_date = case when $10 then nullif($9::text, '')::date else due_date end,
-    priority = case when $12 then $11::smallint else priority end,
-    assignee_user_id = case when $14 then nullif($13::text, '')::uuid else assignee_user_id end
+    due_date = case when $8 then nullif($7::text, '')::date else due_date end,
+    priority = case when $10 then $9::smallint else priority end
 where company_id = $1 and node_id = $2`,
 		input.CompanyID,
 		input.NodeID,
@@ -481,17 +496,42 @@ where company_id = $1 and node_id = $2`,
 		input.TitleSet,
 		status,
 		input.StatusSet,
-		statusColor,
-		input.StatusColorSet,
 		dueDate,
 		input.DueDateSet,
 		input.Priority,
 		input.PrioritySet,
-		assigneeUserID,
-		input.AssigneeUserIDSet,
 	)
 	if err != nil {
 		return domain.Node{}, err
+	}
+	if input.AssigneeUserIDSet {
+		if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid
+  and role='generated'
+  and principal_type='user'`, input.CompanyID, input.NodeID); err != nil {
+			return domain.Node{}, err
+		}
+		if assigneeUserID != nil && *assigneeUserID != "" {
+			if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
+				input.CompanyID, input.NodeID, *assigneeUserID); err != nil {
+				return domain.Node{}, err
+			}
+		}
 	}
 	item, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`

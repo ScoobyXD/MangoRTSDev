@@ -64,13 +64,17 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 		DefaultAccess:    ResourceDefaultAccessEdit,
 		CreatedTimestamp: time.Now().UTC(),
 	}
-	if assigneeUserID != "" {
-		n.AssigneeUserID = &assigneeUserID
-	}
 	r.nodes[key(companyID, n.NodeID)] = n
 	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
+	}
+	if assigneeUserID != "" {
+		keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: n.NodeID}
+		assignment := normalizedGVICAssignmentInput{role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: assigneeUserID}
+		item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, time.Now().UTC())
+		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
+		r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{keyValue})
 	}
 	r.syncRacioProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
@@ -134,24 +138,6 @@ func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 	node = r.withDerivedNodeStatusLocked(node)
 	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
 	node.Accounts = r.accountSnapshotsForNodeLocked(node.CompanyID, node.NodeID)
-	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
-		return node
-	}
-	if _, ok := r.memberships[membershipKey(node.CompanyID, *node.AssigneeUserID)]; !ok {
-		return node
-	}
-	for _, user := range r.users {
-		if user.UserID != *node.AssigneeUserID {
-			continue
-		}
-		if name := strings.TrimSpace(user.DisplayName); name != "" {
-			node.AssigneeName = &name
-		}
-		if email := strings.TrimSpace(user.Email); email != "" {
-			node.AssigneeEmail = &email
-		}
-		break
-	}
 	return node
 }
 
@@ -174,6 +160,8 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	racioProjectionBefore := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	gvicEffectiveBefore := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
+	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveBefore, domain.GVICRoleGenerated)
 	projectManagementProjectionBefore := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
@@ -182,13 +170,16 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	}
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	racioProjectionAfter := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	gvicEffectiveAfter := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
+	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveAfter, domain.GVICRoleGenerated)
 	projectManagementProjectionAfter := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
 	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
+	projectionDeltas = append(projectionDeltas, diffGVICEffectiveProjectionRows(gvicEffectiveProjectionRowsFromDomain(gvicEffectiveBefore), gvicEffectiveProjectionRowsFromDomain(gvicEffectiveAfter))...)
 	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
-		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item)
+		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item, beforeGeneratedUserIDs, afterGeneratedUserIDs)
 	}
 	event, err := r.appendDomainEventLocked(eventInput)
 	if err != nil {
@@ -227,22 +218,26 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	if input.StatusSet {
 		node.Status = input.Status
 	}
-	if input.StatusColorSet {
-		node.StatusColor = input.StatusColor
-	}
 	if input.PrioritySet {
 		node.Priority = input.Priority
 	}
 	if input.AssigneeUserIDSet {
-		if input.AssigneeUserID == nil || strings.TrimSpace(*input.AssigneeUserID) == "" {
-			node.AssigneeUserID = nil
-		} else {
+		keyValue := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}
+		for sourceKey, assignment := range r.gvicAssignments {
+			if assignment.CompanyID == input.CompanyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == input.NodeID && assignment.Role == domain.GVICRoleGenerated && assignment.PrincipalType == EntityPermissionSubjectUser {
+				delete(r.gvicAssignments, sourceKey)
+			}
+		}
+		if input.AssigneeUserID != nil && strings.TrimSpace(*input.AssigneeUserID) != "" {
 			value := strings.TrimSpace(*input.AssigneeUserID)
 			if _, ok := r.memberships[membershipKey(input.CompanyID, value)]; !ok {
 				return domain.Node{}, ErrAssigneeNotInCompany
 			}
-			node.AssigneeUserID = &value
+			assignment := normalizedGVICAssignmentInput{role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: value}
+			item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, time.Now().UTC())
+			r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
 		}
+		r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{keyValue})
 	}
 	r.nodes[k] = node
 	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)

@@ -333,7 +333,7 @@ export function getKanbanStatusColumnColor(title: string): string | null {
   if (normalized === "backlog" || normalized === "backlogs") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
   if (normalized === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (normalized === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
-  if (normalized === "verify" || normalized === "verification") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+  if (normalized === "review") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
   if (normalized === "done" || normalized === "complete" || normalized === "completed") return KANBAN_LOGIC_GATE_DONE_COLOR;
   return null;
 }

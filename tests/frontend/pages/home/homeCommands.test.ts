@@ -286,8 +286,8 @@ test("Home matrix node drop keeps same Logic Gate status moves on the move endpo
     moveCalls.push(input);
     const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
     return {
-      card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "column-verify" }),
-      node: { ...sourceNode, status: "Verify", priority: input.priority } as NodeRecord,
+      card: card({ nodeID: input.nodeID, boardID: "logic-gate:gate-1", columnID: "column-review" }),
+      node: { ...sourceNode, status: "Review", priority: input.priority } as NodeRecord,
       racio_projection_rows: [projectionRow(input.nodeID)],
     } satisfies LogicGateAssignmentCommandResult;
   };
@@ -304,7 +304,7 @@ test("Home matrix node drop keeps same Logic Gate status moves on the move endpo
     fromLogicGateID: "gate-1",
     nodeIDs: ["node-1"],
     priority: 1,
-    status: "verify",
+    status: "review",
     nodeByID: nodes,
     assignNodeToLogicGateStatus,
     moveLogicGateAssignment,
@@ -318,7 +318,7 @@ test("Home matrix node drop keeps same Logic Gate status moves on the move endpo
     logicGateID: "gate-1",
     fromLogicGateID: "gate-1",
     nodeID: "node-1",
-    status: "verify",
+    status: "review",
     priority: 1,
     position: 0,
   });
@@ -354,12 +354,12 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   assert.deepEqual(priorities, [null, null]);
 });
 
-test("Home logic gate creation sends creator RACI role through batch create", async () => {
+test("Home logic gate creation sends creator GVIC role through batch create", async () => {
   const calls: Array<{ apiBase: string; path: string; body: Record<string, unknown> }> = [];
   const result = await createHomeLogicGateCommand({
     apiBase: "https://api.example.test",
     companyID: "company-1",
-    creatorRaciRole: "responsible",
+    creatorRaciRole: "generated",
     requestJSON: async <T>(_apiBase: string, path: string, init?: RequestInit): Promise<T> => {
       calls.push({
         apiBase: _apiBase,
@@ -371,7 +371,7 @@ test("Home logic gate creation sends creator RACI role through batch create", as
           company_id: "company-1",
           logic_gate_id: "gate-1",
           header: "new logic gate",
-          raci_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "responsible", user_id: "user-1", created_timestamp: timestamp }],
+          gvic_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "generated", user_id: "user-1", created_timestamp: timestamp }],
           created_timestamp: timestamp,
         }],
         folder_items: [],
@@ -381,8 +381,8 @@ test("Home logic gate creation sends creator RACI role through batch create", as
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].path, "/v1/workspace/entity-batches");
-  assert.equal(calls[0].body.creator_logic_gate_raci_role, "responsible");
-  assert.equal(result.logicGate.raci_assignments?.[0]?.role, "responsible");
+  assert.equal(calls[0].body.creator_logic_gate_gvic_role, "generated");
+  assert.equal(result.logicGate.gvic_assignments?.[0]?.role, "generated");
 });
 
 test("Home RACIO matrix node create preserves projection rows", async () => {
@@ -760,13 +760,13 @@ test("Home shared inbox RACI commands build direct replacement payloads", async 
       subject_id: assignment.subject_id,
     }));
   };
-  const existing = sharedRaci("inbox-1", "responsible", "user-1");
+  const existing = sharedRaci("inbox-1", "generated", "user-1");
   const inboxes = [sharedInbox("inbox-1", { raci_assignments: [existing] })];
 
   const added = await addSharedInboxRaciSubjectCommand({
     companyID: "company-1",
     folderID: " inbox-1 ",
-    role: "accountable",
+    role: "verified",
     subjectType: "user",
     subjectID: " user-2 ",
     sharedInboxes: inboxes,
@@ -777,7 +777,7 @@ test("Home shared inbox RACI commands build direct replacement payloads", async 
   const removed = await removeSharedInboxRaciSubjectCommand({
     companyID: "company-1",
     folderID: "inbox-1",
-    role: "responsible",
+    role: "generated",
     subjectType: "user",
     subjectID: "user-1",
     sharedInboxes: inboxes,
@@ -789,12 +789,12 @@ test("Home shared inbox RACI commands build direct replacement payloads", async 
       companyID: "company-1",
       folderID: "inbox-1",
       assignments: [
-        { role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" },
-        { role: "accountable", subject_type: "user", subject_id: "user-2", user_id: "user-2" },
+        { role: "generated", subject_type: "user", subject_id: "user-1", user_id: "user-1" },
+        { role: "verified", subject_type: "user", subject_id: "user-2", user_id: "user-2" },
       ],
     },
     { companyID: "company-1", folderID: "inbox-1", assignments: [] },
   ]);
-  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.subject_type, assignment.subject_id, assignment.user_id]), [["responsible", "user", "user-1", "user-1"], ["accountable", "user", "user-2", "user-2"]]);
+  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.subject_type, assignment.subject_id, assignment.user_id]), [["generated", "user", "user-1", "user-1"], ["verified", "user", "user-2", "user-2"]]);
   assert.deepEqual(removed?.assignments, []);
 });

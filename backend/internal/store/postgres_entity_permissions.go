@@ -147,6 +147,9 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
+	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+		return domain.CompanyUserGroup{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
@@ -328,6 +331,13 @@ delete from resource_raci_assignments
 where company_id=$1::uuid
   and subject_type='group'
   and subject_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and principal_type='group'
+  and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx, `

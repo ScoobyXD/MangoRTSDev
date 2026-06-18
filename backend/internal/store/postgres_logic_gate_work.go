@@ -47,7 +47,7 @@ select
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 'Requested'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 'Backlogs'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then 'Review'
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
     else 'Pending'
   end as status,
@@ -56,7 +56,7 @@ select
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then $3
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then $4
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $5
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then $6
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then $6
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then $7
     else $8
   end as status_color,
@@ -94,7 +94,7 @@ order by
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 1
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 2
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 3
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 4
+    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then 4
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 5
     else 2
   end asc,

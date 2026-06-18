@@ -154,7 +154,7 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	handler.ServeHTTP(blockedRec, blockedReq)
 	assertGenericResourceDenied(t, blockedRec, visibleNode.Title)
 
-	editBody, _ := json.Marshal(map[string]string{"company_id": companyID, "title": "Blocked edit"})
+	editBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Blocked edit"})
 	editReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+visibleNode.NodeID, bytes.NewReader(editBody))
 	editReq.Header.Set("Content-Type", "application/json")
 	editReq = requestWithLogicGateWorkActorForTest(editReq, blocked, companyID)

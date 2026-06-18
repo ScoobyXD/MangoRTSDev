@@ -19,7 +19,7 @@ case
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 'requested'
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 'backlog'
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'in_progress'
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'verify'
+  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then 'review'
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 'done'
   else 'pending'
 end`
@@ -29,7 +29,7 @@ case
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 'Requested'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 'Backlogs'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 'In Progress'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 'Verify'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) = 'review' then 'Review'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
   else 'Pending'
 end`
@@ -39,7 +39,7 @@ case
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then '` + KanbanDefaultRequestedColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then '` + KanbanDefaultBacklogColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then '` + KanbanDefaultInProgressColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then '` + KanbanDefaultVerifyColor + `'
+  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) = 'review' then '` + KanbanDefaultVerifyColor + `'
   when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then '` + KanbanDefaultDoneColor + `'
   else '` + KanbanDefaultPendingColor + `'
 end`
@@ -50,7 +50,7 @@ case
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 1
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 2
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 3
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('verify', 'verification', 'v') then 4
+  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then 4
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 5
   else 2
 end`
@@ -91,8 +91,8 @@ with target_assignment as (
     assignment.status_key,
     assignment.column_id,
     assignment.position,
-    node_row.title,
-    node_row.assignee_user_id,
+    node_row.name as title,
+    null::uuid as assignee_user_id,
     node_row.priority,
     assignment.is_issue,
     node_row.due_date,
@@ -543,8 +543,8 @@ inserted as (
     assignment.status_key,
     assignment.column_id,
     assignment.position,
-    node_row.title,
-    node_row.assignee_user_id,
+    node_row.name,
+    null::uuid,
     node_row.priority,
     assignment.is_issue,
     node_row.due_date,

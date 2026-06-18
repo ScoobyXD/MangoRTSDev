@@ -32,6 +32,7 @@ type Repository interface {
 	WorkGraphRepository
 	LogicGateRepository
 	ProjectRepository
+	GVICRepository
 	EntityPermissionRepository
 	EffectiveAccessRepository
 	ConsolidatedViewRepository
@@ -183,6 +184,14 @@ type ProjectRepository interface {
 	ListProjectRelationshipProjections(companyID, projectID string) ([]domain.ProjectRelationshipProjection, error)
 	ListProjectRelationshipProjectionsForViewer(companyID, projectID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
 	ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
+}
+
+type GVICRepository interface {
+	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
+	SetResourceGVICAssignments(input ResourceGVICAssignmentUpdateInput) (ResourceGVICAssignmentMutationResult, error)
+	AddResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error)
+	RemoveResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error)
+	ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICEffectiveAssignment, error)
 }
 
 type EntityPermissionRepository interface {
@@ -533,6 +542,14 @@ type ProjectionRow struct {
 	RelationshipID               string           `json:"relationship_id,omitempty"`
 	ResourceType                 string           `json:"resource_type,omitempty"`
 	ResourceID                   string           `json:"resource_id,omitempty"`
+	Role                         string           `json:"role,omitempty"`
+	PrincipalType                string           `json:"principal_type,omitempty"`
+	PrincipalID                  string           `json:"principal_id,omitempty"`
+	SourceResourceType           string           `json:"source_resource_type,omitempty"`
+	SourceResourceID             string           `json:"source_resource_id,omitempty"`
+	SourcePrincipalType          string           `json:"source_principal_type,omitempty"`
+	SourcePrincipalID            string           `json:"source_principal_id,omitempty"`
+	InheritanceType              string           `json:"inheritance_type,omitempty"`
 	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
@@ -569,6 +586,8 @@ type ProjectionRow struct {
 
 type RacioMatrixProjectionRow = ProjectionRow
 
+type GVICEffectiveAssignmentProjectionRow = ProjectionRow
+
 type KanbanBoardProjectionRow = ProjectionRow
 
 type ProjectManagementTimelineProjectionRow = ProjectionRow
@@ -576,6 +595,7 @@ type ProjectManagementTimelineProjectionRow = ProjectionRow
 type ProjectRelationshipProjectionRow = ProjectionRow
 
 const (
+	ProjectionNameGVICEffectiveAssignments  = "gvic_effective_assignments"
 	ProjectionNameRacioMatrix               = "racio_matrix"
 	ProjectionNameKanbanBoard               = "kanban_board"
 	ProjectionNameProjectManagementTimeline = "project_management_timeline"
@@ -587,17 +607,23 @@ const (
 )
 
 type ProjectionRowKey struct {
-	ItemID         string `json:"item_id,omitempty"`
-	UserID         string `json:"user_id,omitempty"`
-	ProjectID      string `json:"project_id,omitempty"`
-	RelationshipID string `json:"relationship_id,omitempty"`
-	ResourceType   string `json:"resource_type,omitempty"`
-	ResourceID     string `json:"resource_id,omitempty"`
-	BoardID        string `json:"board_id,omitempty"`
-	LogicGateID    string `json:"logic_gate_id,omitempty"`
-	NodeID         string `json:"node_id,omitempty"`
-	AssignmentID   string `json:"assignment_id,omitempty"`
-	CardID         string `json:"card_id,omitempty"`
+	ItemID              string `json:"item_id,omitempty"`
+	UserID              string `json:"user_id,omitempty"`
+	ProjectID           string `json:"project_id,omitempty"`
+	RelationshipID      string `json:"relationship_id,omitempty"`
+	ResourceType        string `json:"resource_type,omitempty"`
+	ResourceID          string `json:"resource_id,omitempty"`
+	Role                string `json:"role,omitempty"`
+	SourceResourceType  string `json:"source_resource_type,omitempty"`
+	SourceResourceID    string `json:"source_resource_id,omitempty"`
+	SourcePrincipalType string `json:"source_principal_type,omitempty"`
+	SourcePrincipalID   string `json:"source_principal_id,omitempty"`
+	InheritanceType     string `json:"inheritance_type,omitempty"`
+	BoardID             string `json:"board_id,omitempty"`
+	LogicGateID         string `json:"logic_gate_id,omitempty"`
+	NodeID              string `json:"node_id,omitempty"`
+	AssignmentID        string `json:"assignment_id,omitempty"`
+	CardID              string `json:"card_id,omitempty"`
 }
 
 const ProjectManagementTimelineDefaultLimit = 500
@@ -658,6 +684,42 @@ type ProjectInput struct {
 	TeamIDs       []string
 	TeamIDsSet    bool
 	ActorUserID   string
+}
+
+type ResourceGVICAssignmentInput struct {
+	Role          string `json:"role"`
+	PrincipalType string `json:"principal_type"`
+	PrincipalID   string `json:"principal_id"`
+}
+
+type ResourceGVICAssignmentUpdateInput struct {
+	CompanyID      string
+	ResourceType   string
+	ResourceID     string
+	Assignments    []ResourceGVICAssignmentInput
+	ActorUserID    string
+	IdempotencyKey string
+}
+
+type ResourceGVICAssignmentCommandInput struct {
+	CompanyID      string
+	ResourceType   string
+	ResourceID     string
+	Assignments    []ResourceGVICAssignmentInput
+	ActorUserID    string
+	IdempotencyKey string
+}
+
+type ResourceGVICAssignmentMutationResult struct {
+	CompanyID            string                                   `json:"company_id"`
+	ResourceType         string                                   `json:"resource_type"`
+	ResourceID           string                                   `json:"resource_id"`
+	Operation            string                                   `json:"operation,omitempty"`
+	Changed              bool                                     `json:"changed"`
+	GVICAssignments      []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
+	EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments,omitempty"`
+	ProjectionDeltas     []ProjectionDelta                        `json:"-"`
+	Events               []domain.DomainEvent                     `json:"-"`
 }
 
 type ProjectMutationResult struct {
@@ -946,7 +1008,7 @@ type WorkspaceEntityBatchInput struct {
 	FolderID                 string
 	MutationOrigin           string
 	CreatorUserID            string
-	CreatorLogicGateRaciRole string
+	CreatorLogicGateGVICRole string
 	Items                    []WorkspaceEntityBatchItemInput
 	Relationships            []WorkspaceEntityBatchRelationshipInput
 	TimingRecorder           TimingRecorder
@@ -987,7 +1049,7 @@ type RacioMatrixNodeCreateInput struct {
 	Title                    string
 	LogicGateID              string
 	CreateLogicGateHeader    string
-	CreatorLogicGateRaciRole string
+	CreatorLogicGateGVICRole string
 	MutationOrigin           string
 	Status                   string
 	ColumnID                 string
@@ -1643,15 +1705,62 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 }
 
 func NormalizeLogicGateRaciRole(role string) (string, bool) {
+	return NormalizeGVICRole(role)
+}
+
+func NormalizeGVICRole(role string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case domain.LogicGateRaciRoleResponsible:
-		return domain.LogicGateRaciRoleResponsible, true
-	case domain.LogicGateRaciRoleAccountable:
-		return domain.LogicGateRaciRoleAccountable, true
-	case domain.LogicGateRaciRoleConsulted:
-		return domain.LogicGateRaciRoleConsulted, true
-	case domain.LogicGateRaciRoleInformed:
-		return domain.LogicGateRaciRoleInformed, true
+	case domain.GVICRoleGenerated:
+		return domain.GVICRoleGenerated, true
+	case domain.GVICRoleVerified:
+		return domain.GVICRoleVerified, true
+	case domain.GVICRoleConsulted:
+		return domain.GVICRoleConsulted, true
+	case domain.GVICRoleInformed:
+		return domain.GVICRoleInformed, true
+	default:
+		return "", false
+	}
+}
+
+func GVICRoleAccessLevel(role string) (string, bool) {
+	role, ok := NormalizeGVICRole(role)
+	if !ok {
+		return "", false
+	}
+	switch role {
+	case domain.GVICRoleGenerated, domain.GVICRoleVerified:
+		return EntityPermissionEdit, true
+	case domain.GVICRoleConsulted, domain.GVICRoleInformed:
+		return EntityPermissionView, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeGVICResourceType(resourceType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(resourceType)) {
+	case EntityTypeNode:
+		return EntityTypeNode, true
+	case EntityTypeLogicGate:
+		return EntityTypeLogicGate, true
+	case EntityTypeProject:
+		return EntityTypeProject, true
+	case EntityTypeSharedTriageFolder:
+		return EntityTypeSharedTriageFolder, true
+	case EntityTypeSharedInbox:
+		return EntityTypeSharedInbox, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeGVICPrincipalType(principalType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(principalType)) {
+	case EntityPermissionSubjectUser:
+		return EntityPermissionSubjectUser, true
+	case EntityPermissionSubjectGroup:
+		return EntityPermissionSubjectGroup, true
 	default:
 		return "", false
 	}

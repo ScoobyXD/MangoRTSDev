@@ -186,14 +186,14 @@ with source as (
     coalesce(item.node_id, item.logic_gate_id) as resource_id,
     item.node_id,
     item.logic_gate_id,
-    coalesce(nullif(node_row.title, ''), nullif(gate.header, ''), coalesce(item.node_id::text, item.logic_gate_id::text)) as display_title,
+    coalesce(nullif(node_row.name, ''), nullif(gate.header, ''), coalesce(item.node_id::text, item.logic_gate_id::text)) as display_title,
     case when item.node_id is not null then nullif(node_row.status, '') else 'Logic Gate' end as status,
-    case when item.node_id is not null then nullif(node_row.status_color, '') else '#8b5cf6' end as status_color,
+    case when item.node_id is not null then null::text else '#8b5cf6' end as status_color,
     node_row.due_date,
     node_row.priority,
-    node_row.assignee_user_id,
-    nullif(assignee.display_name, '') as assignee_display_name,
-    nullif(assignee.email, '') as assignee_email,
+    null::uuid as assignee_user_id,
+    null::text as assignee_display_name,
+    null::text as assignee_email,
     item.start_date,
     (item.start_date + (item.duration_days - 1) * interval '1 day')::date as end_date,
     item.duration_days,
@@ -209,9 +209,7 @@ with source as (
   left join logic_gates gate
     on gate.company_id=item.company_id
    and gate.logic_gate_id=item.logic_gate_id
-  left join users assignee
-    on assignee.user_id=node_row.assignee_user_id
-  ` + postgresAccountSnapshotsForNodeLateralSQL("node_row") + `
+  `+postgresAccountSnapshotsForNodeLateralSQL("node_row")+`
   where item.company_id=$1::uuid
     and item.item_id=$2::uuid
     and (

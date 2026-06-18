@@ -141,7 +141,7 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: allowed.UserID}},
+		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: allowed.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}

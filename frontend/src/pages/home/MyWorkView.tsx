@@ -809,7 +809,7 @@ function teamsForUsers(userIDs: string[], groupIDsByUserID: Map<string, string[]
 }
 
 function uniqueRaciRoles(roles: LogicGateRaciRole[]): LogicGateRaciRole[] {
-  const order: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
+  const order: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
   const seen = new Set(roles);
   return order.filter((role) => seen.has(role));
 }

@@ -38,7 +38,7 @@ const PRIORITY_GROUPS: AxisGroup[] = [
 const STATUS_GROUPS: AxisGroup[] = [
   { key: "status:pending", label: "Pending", sort: 1 },
   { key: "status:in_progress", label: "In Progress", sort: 2 },
-  { key: "status:verify", label: "Verify", sort: 3 },
+  { key: "status:review", label: "Review", sort: 3 },
   { key: "status:done", label: "Done", sort: 4 },
   { key: "status:none", label: "No status", sort: 99 },
 ];
@@ -68,7 +68,7 @@ function normalizeStatusKey(status: string | null | undefined): string {
   if (!clean) return "none";
   if (clean === "in progress" || clean === "in_progress") return "in_progress";
   if (clean === "pending") return "pending";
-  if (clean === "verify") return "verify";
+  if (clean === "review") return "review";
   if (clean === "done") return "done";
   return clean.replace(/\s+/g, "_");
 }

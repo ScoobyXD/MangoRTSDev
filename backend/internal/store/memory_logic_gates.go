@@ -9,13 +9,13 @@ import (
 
 func raciRoleSortValue(role string) int {
 	switch role {
-	case domain.LogicGateRaciRoleResponsible:
+	case domain.GVICRoleGenerated:
 		return 0
-	case domain.LogicGateRaciRoleAccountable:
+	case domain.GVICRoleVerified:
 		return 1
-	case domain.LogicGateRaciRoleConsulted:
+	case domain.GVICRoleConsulted:
 		return 2
-	case domain.LogicGateRaciRoleInformed:
+	case domain.GVICRoleInformed:
 		return 3
 	default:
 		return 4
@@ -182,10 +182,36 @@ func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
 
 func (r *MemoryRepo) withLogicGateRaciLocked(gate domain.LogicGate) domain.LogicGate {
 	gate.DefaultAccess = defaultResourceAccessOrEdit(gate.DefaultAccess)
-	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]...)
+	assignments := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(gate.CompanyID, gate.LogicGateID)
 	sortLogicGateRaciAssignments(assignments)
 	gate.RaciAssignments = assignments
+	gate.GVICAssignments = r.gvicAssignmentsForResourceLocked(gate.CompanyID, EntityTypeLogicGate, gate.LogicGateID)
 	return gate
+}
+
+func (r *MemoryRepo) logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, logicGateID string) []domain.LogicGateRaciAssignment {
+	items := r.gvicAssignmentsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
+	out := make([]domain.LogicGateRaciAssignment, 0, len(items))
+	for _, item := range items {
+		assignment := domain.LogicGateRaciAssignment{
+			CompanyID:        item.CompanyID,
+			LogicGateID:      item.ResourceID,
+			Role:             item.Role,
+			SubjectType:      item.PrincipalType,
+			SubjectID:        item.PrincipalID,
+			SubjectName:      item.PrincipalName,
+			UserID:           item.UserID,
+			UserDisplayName:  item.UserDisplayName,
+			UserEmail:        item.UserEmail,
+			CreatedTimestamp: item.CreatedTimestamp,
+		}
+		if assignment.SubjectType == EntityPermissionSubjectUser && assignment.UserID == "" {
+			assignment.UserID = assignment.SubjectID
+		}
+		out = append(out, assignment)
+	}
+	sortLogicGateRaciAssignments(out)
+	return out
 }
 
 func newestLogicGateTextProjectionKey(items map[string]domain.LogicGateProjection) string {
@@ -391,7 +417,7 @@ func (r *MemoryRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]
 		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
 			continue
 		}
-		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
+		assignments := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(gate.CompanyID, gate.LogicGateID)
 		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
@@ -422,7 +448,7 @@ func (r *MemoryRepo) QueryVisibleLogicGates(companyID, userID string, query Logi
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionView) {
 			continue
 		}
-		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
+		assignments := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(gate.CompanyID, gate.LogicGateID)
 		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
@@ -467,13 +493,12 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 		if err != nil {
 			return nil, err
 		}
+		if err := r.validateGVICPrincipalLocked(companyID, normalized.subjectType, normalized.subjectID); err != nil {
+			return nil, err
+		}
 		normalizedAssignments = append(normalizedAssignments, normalized)
 	}
-	expanded, err := r.expandedLogicGateRaciCommandAssignmentsLocked(companyID, normalizedAssignments)
-	if err != nil {
-		return nil, err
-	}
-	for _, normalized := range expanded {
+	for _, normalized := range normalizedAssignments {
 		assignmentKey := normalized.role + ":" + normalized.subjectType + ":" + normalized.subjectID
 		if seen[assignmentKey] {
 			continue
@@ -486,7 +511,21 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 		assignments = append(assignments, assignment)
 	}
 	sortLogicGateRaciAssignments(assignments)
-	before := cloneLogicGateRaciAssignments(r.logicGateRaci[key(companyID, logicGateID)])
+	before := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, logicGateID)
+	for sourceKey, assignment := range r.gvicAssignments {
+		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeLogicGate && assignment.ResourceID == logicGateID {
+			delete(r.gvicAssignments, sourceKey)
+		}
+	}
+	sourceKeyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
+	for _, normalized := range normalizedAssignments {
+		item := r.resourceGVICAssignmentForPrincipalLocked(sourceKeyValue, normalizedGVICAssignmentInput{
+			role:          normalized.role,
+			principalType: normalized.subjectType,
+			principalID:   normalized.subjectID,
+		}, now)
+		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
+	}
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
 	r.syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, assignments)
 	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil

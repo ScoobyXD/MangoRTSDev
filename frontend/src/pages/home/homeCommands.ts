@@ -83,7 +83,7 @@ export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbo
 export type HomeDeleteSharedInbox = typeof defaultDeleteCommunicationsSharedInbox;
 export type HomeUpdateSharedInboxRaciAssignments = typeof defaultUpdateCommunicationsSharedInboxRaciAssignments;
 
-export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>;
+export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>;
 export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folders?: string[] };
 
 export type HomeKanbanBoardContentsInvalidator = (apiBase: string, companyID: string, boardID: string) => void;

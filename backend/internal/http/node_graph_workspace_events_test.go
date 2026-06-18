@@ -27,7 +27,7 @@ func TestNodeCreateAtomicWorkspaceEventWritesDurableEvent(t *testing.T) {
 	handler := server.Routes()
 	companyID := "33333333-3333-3333-3333-333333333333"
 
-	body, _ := json.Marshal(map[string]any{"company_id": companyID, "title": "Replayable node"})
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "name": "Replayable node"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -56,7 +56,7 @@ func TestNodeCreateDoesNotPublishHubEventWhenAtomicMutationFails(t *testing.T) {
 	stream := server.workspaceEvents.subscribe(companyID)
 	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
-	body, _ := json.Marshal(map[string]any{"company_id": companyID, "title": "Should not publish"})
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "name": "Should not publish"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

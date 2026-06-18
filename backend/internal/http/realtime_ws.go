@@ -507,6 +507,22 @@ func realtimeRacioScope(userID string) string {
 	return store.RacioRealtimeUserScope(userID)
 }
 
+func realtimeGVICScope(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	return "gvic:user:" + userID
+}
+
+func realtimeGVICUserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(scope, "gvic:user:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(scope, "gvic:user:"))
+}
+
 func realtimeRacioUserIDFromScope(scope string) string {
 	scope = strings.TrimSpace(scope)
 	if !strings.HasPrefix(scope, "racio:user:") {
@@ -730,6 +746,9 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
 		projectionName = store.ProjectionNameKanbanBoard
 		projectionScope = scope
+	} else if userID := realtimeGVICUserIDFromScope(scope); userID != "" {
+		projectionName = store.ProjectionNameGVICEffectiveAssignments
+		projectionScope = projectionUserScope(userID)
 	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameRacioMatrix
 		projectionScope = store.RacioProjectionUserScope(userID)

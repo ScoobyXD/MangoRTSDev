@@ -123,7 +123,7 @@ export type HomeColumnResizeDrag = {
 
 export type RaciInboxRole = LogicGateRaciRole | "other";
 export type RaciInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
-export type ResponsibleInboxStatus = "pending" | "in_progress" | "verify" | "done";
+export type ResponsibleInboxStatus = "pending" | "in_progress" | "review" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 export type InboxLogicGateNodeGroup = {

@@ -17,11 +17,13 @@ const (
 	EventTypeProjectManagementProjectionDelta   = "project_management.projection_delta"
 	EventTypeProjectRelationshipProjectionDelta = "project_relationship.projection_delta"
 	EventTypeEditorProjectionDelta              = "editor.projection_delta"
+	EventTypeGVICProjectionDelta                = "gvic.projection_delta"
 	EventTypePermissionChanged                  = "permission.changed"
 )
 
 const EventResourceTypeKanbanBoard = "kanban_board"
 const EventResourceTypeRacioMatrix = "racio_matrix"
+const EventResourceTypeGVICEffectiveAssignments = "gvic_effective_assignments"
 const EventResourceTypeProjectManagementTimeline = "project_management_timeline"
 const EventResourceTypeProjectRelationship = "project_relationship"
 
@@ -71,6 +73,12 @@ type RacioProjectionDeltaEventPayload struct {
 	Scope           string            `json:"scope"`
 	ProjectionScope string            `json:"projection_scope,omitempty"`
 	Deltas          []ProjectionDelta `json:"deltas"`
+}
+
+type GVICProjectionDeltaEventPayload struct {
+	Projection string            `json:"projection"`
+	Scope      string            `json:"scope"`
+	Deltas     []ProjectionDelta `json:"deltas"`
 }
 
 type ProjectManagementProjectionDeltaEventPayload struct {
@@ -199,6 +207,7 @@ func normalizeEventScopes(scopes []string) []string {
 
 func ProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
 	inputs := KanbanProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)
+	inputs = append(inputs, GVICProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	inputs = append(inputs, RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	inputs = append(inputs, ProjectManagementProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
 	inputs = append(inputs, ProjectRelationshipProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey, deltas)...)
@@ -507,6 +516,58 @@ func RacioProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey stri
 	return inputs
 }
 
+func GVICProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
+	type group struct {
+		userID string
+		deltas []ProjectionDelta
+	}
+	groups := map[string]group{}
+	for _, delta := range deltas {
+		if strings.TrimSpace(delta.Projection) != ProjectionNameGVICEffectiveAssignments {
+			continue
+		}
+		userID := projectionDeltaUserIDForEvent(delta)
+		if userID == "" {
+			continue
+		}
+		item := groups[userID]
+		item.userID = userID
+		item.deltas = append(item.deltas, delta)
+		groups[userID] = item
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	userIDs := make([]string, 0, len(groups))
+	for userID := range groups {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	inputs := make([]EventRowInput, 0, len(userIDs))
+	for _, userID := range userIDs {
+		item := groups[userID]
+		scope := "gvic:user:" + userID
+		payloadBytes, _ := json.Marshal(GVICProjectionDeltaEventPayload{
+			Projection: ProjectionNameGVICEffectiveAssignments,
+			Scope:      scope,
+			Deltas:     item.deltas,
+		})
+		inputs = append(inputs, EventRowInput{
+			CompanyID:      companyID,
+			EventType:      EventTypeGVICProjectionDelta,
+			ResourceType:   EventResourceTypeGVICEffectiveAssignments,
+			ResourceID:     userID,
+			PrimaryScope:   scope,
+			AffectedScopes: []string{scope},
+			ActorUserID:    actorUserID,
+			IdempotencyKey: scopedEventIdempotencyKey(idempotencyKey, scope),
+			SequenceScope:  scope,
+			Payload:        NormalizeEventRowPayload(payloadBytes),
+		})
+	}
+	return inputs
+}
+
 func ProjectManagementProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey string, deltas []ProjectionDelta) []EventRowInput {
 	type group struct {
 		userID string
@@ -701,6 +762,20 @@ func DecodeRacioProjectionDeltaEventPayload(row EventRow) (RacioProjectionDeltaE
 	payload.Projection = strings.TrimSpace(payload.Projection)
 	payload.Scope = strings.TrimSpace(payload.Scope)
 	payload.ProjectionScope = strings.TrimSpace(payload.ProjectionScope)
+	return payload, nil
+}
+
+func DecodeGVICProjectionDeltaEventPayload(row EventRow) (GVICProjectionDeltaEventPayload, error) {
+	payloadBytes, err := json.Marshal(row.Payload)
+	if err != nil {
+		return GVICProjectionDeltaEventPayload{}, err
+	}
+	var payload GVICProjectionDeltaEventPayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return GVICProjectionDeltaEventPayload{}, err
+	}
+	payload.Projection = strings.TrimSpace(payload.Projection)
+	payload.Scope = strings.TrimSpace(payload.Scope)
 	return payload, nil
 }
 

@@ -787,7 +787,7 @@ func postgresRecycleTargetLabelTx(ctx context.Context, tx *sql.Tx, companyID str
 	case "folder":
 		err = tx.QueryRowContext(ctx, `select name from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid`, companyID, target.ID).Scan(&label)
 	case "node":
-		err = tx.QueryRowContext(ctx, `select title from nodes where company_id=$1::uuid and node_id=$2::uuid`, companyID, target.ID).Scan(&label)
+		err = tx.QueryRowContext(ctx, `select name from nodes where company_id=$1::uuid and node_id=$2::uuid`, companyID, target.ID).Scan(&label)
 	case "logic_gate":
 		err = tx.QueryRowContext(ctx, `select header from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, target.ID).Scan(&label)
 	case "project":

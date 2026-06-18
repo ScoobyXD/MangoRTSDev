@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
-	"strings"
 )
 
 func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateResult, error) {
@@ -90,7 +89,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
 		result.ProjectionDeltas = append(result.ProjectionDeltas, assignmentResult.ProjectionDeltas...)
-		if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
+		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
 		stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
@@ -144,7 +143,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	result.Node = node
 	result.ProjectionDeltas = append(result.ProjectionDeltas, diffRacioProjectionRows(nil, rows)...)
 	result.Events = append(result.Events, events...)
-	if _, err := r.appendEventRowsTx(ctx, tx, RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
 		return RacioMatrixNodeCreateResult{}, err
 	}
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.commit")
@@ -175,46 +174,50 @@ func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMa
 	}
 	stop()
 	projectionDeltas := []ProjectionDelta{}
-	if input.ActorUserID != "" && input.CreatorLogicGateRaciRole != "" {
+	if input.ActorUserID != "" && input.CreatorLogicGateGVICRole != "" {
 		assignee, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.ActorUserID)
 		if err != nil {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
 		}
-		assignment := domain.LogicGateRaciAssignment{
-			CompanyID:   input.CompanyID,
-			LogicGateID: created.LogicGateID,
-			Role:        input.CreatorLogicGateRaciRole,
-			UserID:      assignee.UserID,
-		}
-		stop := observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.raci_assignment_writes")
-		if err := tx.QueryRowContext(ctx, `
-insert into logic_gate_raci_assignments
-  (company_id, logic_gate_id, role, user_id, created_timestamp)
-values ($1, $2, $3, $4, now())
-on conflict (company_id, logic_gate_id, role, user_id) do update set
-  created_timestamp=logic_gate_raci_assignments.created_timestamp
-returning company_id, logic_gate_id, role::text, user_id::text, created_timestamp`,
-			input.CompanyID, created.LogicGateID, input.CreatorLogicGateRaciRole, assignee.UserID,
-		).Scan(&assignment.CompanyID, &assignment.LogicGateID, &assignment.Role, &assignment.UserID, &assignment.CreatedTimestamp); err != nil {
+		stop := observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.gvic_assignment_writes")
+		if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, 'logic_gate', $2::uuid, $3, 'user', $4::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
+			input.CompanyID, created.LogicGateID, input.CreatorLogicGateGVICRole, assignee.UserID,
+		); err != nil {
 			stop()
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
 		}
 		stop()
-		if assignee.Name != nil {
-			assignment.UserDisplayName = strings.TrimSpace(*assignee.Name)
+		stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.gvic_projection_sync")
+		gvicDeltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
+		if err != nil {
+			stop()
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
 		}
-		if assignee.Email != nil {
-			assignment.UserEmail = strings.TrimSpace(*assignee.Email)
-		}
-		created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
-		stop = observeTiming(ctx, "repo.createRacioMatrixLogicGateTx.racio_projection_sync")
-		deltas, err := syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, created.RaciAssignments)
+		deltas, err := syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, nil)
 		if err != nil {
 			stop()
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
 		}
 		stop()
+		projectionDeltas = append(projectionDeltas, gvicDeltas...)
 		projectionDeltas = append(projectionDeltas, deltas...)
+		assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
+		if err != nil {
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+		}
+		created.GVICAssignments = assignments
 		created.EffectiveAccess = EntityPermissionEdit
 	}
 	var folderItem domain.CompanyExplorerFolderItem

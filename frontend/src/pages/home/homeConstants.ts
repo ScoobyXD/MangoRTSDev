@@ -32,12 +32,12 @@ export const INBOX_NO_LOGIC_GATE_ID = "__mango_inbox_no_logic_gate__";
 export const RACI_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus; letter: string; label: string }> = [
   { status: "pending", letter: "P", label: "Pending" },
   { status: "in_progress", letter: "IP", label: "In Progress" },
-  { status: "verify", letter: "V", label: "Verify" },
+  { status: "review", letter: "R", label: "Review" },
 ];
 
 export const RACI_INBOX_SECTIONS: ReadonlyArray<{ viewID: RaciInboxViewID; role: RaciInboxRole; letter: string; label: string; title: string }> = [
-  { viewID: "r-inbox", role: "responsible", letter: "R", label: "Responsible", title: "R Nodes" },
-  { viewID: "a-inbox", role: "accountable", letter: "A", label: "Accountable", title: "A Nodes" },
+  { viewID: "r-inbox", role: "generated", letter: "R", label: "generated", title: "R Nodes" },
+  { viewID: "a-inbox", role: "verified", letter: "A", label: "verified", title: "A Nodes" },
   { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "C Nodes" },
   { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "I Nodes" },
   { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "O Nodes" },

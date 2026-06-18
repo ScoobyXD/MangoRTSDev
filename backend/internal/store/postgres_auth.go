@@ -612,27 +612,32 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, fmt.Errorf("load company user: %w", err)
 	}
 
-	assignedNodeRows, err := tx.Query(`select node_id::text from nodes where company_id = $1::uuid and assignee_user_id = $2::uuid`, companyID, userID)
+	gvicRows, err := tx.Query(`select distinct company_id::text, resource_type, resource_id::text from resource_gvic_assignments where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID)
 	if err != nil {
-		return DeleteCompanyUserResult{}, fmt.Errorf("list assigned nodes: %w", err)
+		return DeleteCompanyUserResult{}, fmt.Errorf("list user gvic assignments: %w", err)
 	}
-	assignedNodeIDs := []string{}
-	for assignedNodeRows.Next() {
-		var nodeID string
-		if scanErr := assignedNodeRows.Scan(&nodeID); scanErr != nil {
-			assignedNodeRows.Close()
-			return DeleteCompanyUserResult{}, fmt.Errorf("scan assigned node: %w", scanErr)
+	gvicKeys := []resourceGVICKey{}
+	for gvicRows.Next() {
+		var keyValue resourceGVICKey
+		if scanErr := gvicRows.Scan(&keyValue.companyID, &keyValue.resourceType, &keyValue.resourceID); scanErr != nil {
+			gvicRows.Close()
+			return DeleteCompanyUserResult{}, fmt.Errorf("scan user gvic assignment: %w", scanErr)
 		}
-		assignedNodeIDs = append(assignedNodeIDs, nodeID)
+		gvicKeys = append(gvicKeys, keyValue)
 	}
-	if err = assignedNodeRows.Err(); err != nil {
-		assignedNodeRows.Close()
-		return DeleteCompanyUserResult{}, fmt.Errorf("iterate assigned nodes: %w", err)
+	if err = gvicRows.Err(); err != nil {
+		gvicRows.Close()
+		return DeleteCompanyUserResult{}, fmt.Errorf("iterate user gvic assignments: %w", err)
 	}
-	assignedNodeRows.Close()
+	gvicRows.Close()
 
-	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1::uuid and assignee_user_id = $2::uuid`, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, fmt.Errorf("clear company node assignees: %w", err)
+	if err = optionalCleanup("delete company gvic assignments for user", "resource_gvic_assignments", `delete from resource_gvic_assignments where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if len(gvicKeys) > 0 {
+		if _, err = syncResourceGVICEffectiveAssignmentsTx(context.Background(), tx, companyID, gvicKeys); err != nil {
+			return DeleteCompanyUserResult{}, fmt.Errorf("sync company gvic assignments for user: %w", err)
+		}
 	}
 	if err = optionalCleanup("delete company resource access grants for user", "resource_access_grants", `delete from resource_access_grants where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
@@ -651,11 +656,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	}
 	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, userID); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("recompute company admin access for user: %w", err)
-	}
-	for _, nodeID := range assignedNodeIDs {
-		if err = recomputeNodeAssigneeEffectiveAccessTx(context.Background(), tx, companyID, nodeID); err != nil {
-			return DeleteCompanyUserResult{}, fmt.Errorf("recompute node assignee access for node %s: %w", nodeID, err)
-		}
 	}
 	if err = deleteEffectiveFactsForCompanyUserTx(context.Background(), tx, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("delete effective access facts for company user: %w", err)
@@ -714,8 +714,11 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete user email connections", "user_email_connections", `delete from user_email_connections where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, fmt.Errorf("clear all node assignees: %w", err)
+	if err = optionalCleanup("delete all gvic assignments for user", "resource_gvic_assignments", `delete from resource_gvic_assignments where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
+	}
+	if err = optionalCleanup("delete all effective gvic assignments for user", "resource_gvic_effective_assignments", `delete from resource_gvic_effective_assignments where user_id = $1::uuid`, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("clear kanban projection assignees for user", "kanban_board_projection", `update kanban_board_projection set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err

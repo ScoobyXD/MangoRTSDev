@@ -9,42 +9,10 @@ import (
 )
 
 const postgresLogicGateRaciUsersCTE = `
-logic_gate_raci_group_scope(company_id, logic_gate_id, role, group_id, path) as (
-  select assignment.company_id, assignment.resource_id, assignment.role, assignment.subject_id, array[assignment.subject_id]
-  from resource_raci_assignments assignment
-  where assignment.resource_type='logic_gate'
-    and assignment.subject_type='group'
-  union all
-  select scope.company_id, scope.logic_gate_id, scope.role, child.group_id, scope.path || child.group_id
-  from logic_gate_raci_group_scope scope
-  join company_user_groups child
-    on child.company_id=scope.company_id
-   and child.parent_group_id=scope.group_id
-  where not child.group_id = any(scope.path)
-),
 logic_gate_raci_users as (
-  select assignment.company_id, assignment.resource_id as logic_gate_id, assignment.role, assignment.subject_id as user_id
-  from resource_raci_assignments assignment
-  join company_memberships membership
-    on membership.company_id=assignment.company_id
-   and membership.user_id=assignment.subject_id
-  where assignment.resource_type='logic_gate'
-    and assignment.subject_type='user'
-  union
-  select scope.company_id, scope.logic_gate_id, scope.role, member.user_id
-  from logic_gate_raci_group_scope scope
-  join company_user_group_members member
-    on member.company_id=scope.company_id
-   and member.group_id=scope.group_id
-  join company_memberships membership
-    on membership.company_id=scope.company_id
-   and membership.user_id=member.user_id
-  union
-  select assignment.company_id, assignment.logic_gate_id, assignment.role, assignment.user_id
-  from logic_gate_raci_assignments assignment
-  join company_memberships membership
-    on membership.company_id=assignment.company_id
-   and membership.user_id=assignment.user_id
+  select effective.company_id, effective.resource_id as logic_gate_id, effective.role, effective.user_id
+  from resource_gvic_effective_assignments effective
+  where effective.resource_type='logic_gate'
 )`
 
 var postgresRacioNodeProjectionCTE = `
@@ -53,7 +21,7 @@ node_row as (
   select
     n.company_id,
     n.node_id,
-    n.title,
+    n.name as title,
     coalesce(
       case
         when assignment.is_issue then 'Issue'
@@ -61,18 +29,16 @@ node_row as (
       end,
       nullif(n.status, '')
     ) as status,
-    coalesce(
-      case
-        when assignment.is_issue then '#ffd400'
-        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
-      end,
-      nullif(n.status_color, '')
-    ) as status_color,
+    case
+      when assignment.is_issue then '#ffd400'
+      when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
+      else null::text
+    end as status_color,
     n.due_date,
     n.priority,
-    n.assignee_user_id,
-    nullif(assignee.display_name, '') as assignee_display_name,
-    nullif(assignee.email, '') as assignee_email,
+    null::uuid as assignee_user_id,
+    null::text as assignee_display_name,
+    null::text as assignee_email,
     n.created_timestamp as resource_created_timestamp,
     assignment.logic_gate_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
@@ -85,18 +51,13 @@ node_row as (
     order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
     limit 1
   ) assignment on true
-  left join company_memberships assignee_membership
-    on assignee_membership.company_id = n.company_id
-   and assignee_membership.user_id = n.assignee_user_id
-  left join users assignee
-    on assignee.user_id = assignee_membership.user_id
   ` + postgresAccountSnapshotsForNodeLateralSQL("n") + `
   where n.company_id=$1::uuid
     and n.node_id=$2::uuid
 ), projected as (
   select distinct
     node_row.company_id,
-    raci.user_id,
+    gvic.user_id,
     'node'::text as resource_type,
     node_row.node_id as resource_id,
     node_row.logic_gate_id,
@@ -111,10 +72,10 @@ node_row as (
     node_row.resource_created_timestamp,
     node_row.accounts
   from node_row
-  join logic_gate_raci_users raci
-    on raci.company_id=node_row.company_id
-   and raci.logic_gate_id=node_row.logic_gate_id
-  where node_row.logic_gate_id is not null
+  join resource_gvic_effective_assignments gvic
+    on gvic.company_id=node_row.company_id
+   and gvic.resource_type='node'
+   and gvic.resource_id=node_row.node_id
   union all
   select
     node_row.company_id,
@@ -158,7 +119,7 @@ user_raci as (
   select
     n.company_id,
     n.node_id,
-    n.title,
+    n.name as title,
     coalesce(
       case
         when assignment.is_issue then 'Issue'
@@ -166,18 +127,16 @@ user_raci as (
       end,
       nullif(n.status, '')
     ) as status,
-    coalesce(
-      case
-        when assignment.is_issue then '#ffd400'
-        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
-      end,
-      nullif(n.status_color, '')
-    ) as status_color,
+    case
+      when assignment.is_issue then '#ffd400'
+      when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
+      else null::text
+    end as status_color,
     n.due_date,
     n.priority,
-    n.assignee_user_id,
-    nullif(assignee.display_name, '') as assignee_display_name,
-    nullif(assignee.email, '') as assignee_email,
+    null::uuid as assignee_user_id,
+    null::text as assignee_display_name,
+    null::text as assignee_email,
     n.created_timestamp as resource_created_timestamp,
     assignment.logic_gate_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
@@ -185,11 +144,6 @@ user_raci as (
   join nodes n
     on n.company_id=assignment.company_id
    and n.node_id=assignment.node_id
-  left join company_memberships assignee_membership
-    on assignee_membership.company_id = n.company_id
-   and assignee_membership.user_id = n.assignee_user_id
-  left join users assignee
-    on assignee.user_id = assignee_membership.user_id
   ` + postgresAccountSnapshotsForNodeLateralSQL("n") + `
   where assignment.company_id=$1::uuid
     and assignment.logic_gate_id=$2::uuid

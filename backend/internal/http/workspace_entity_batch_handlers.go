@@ -11,6 +11,7 @@ import (
 
 type workspaceEntityBatchItemRequest struct {
 	ClientID string  `json:"client_id"`
+	Name     string  `json:"name"`
 	Title    string  `json:"title"`
 	Header   string  `json:"header"`
 	X        float64 `json:"x"`
@@ -55,7 +56,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		EntityKind               string                                    `json:"entity_kind"`
 		FolderID                 string                                    `json:"folder_id"`
 		MutationOrigin           string                                    `json:"mutation_origin"`
-		CreatorLogicGateRaciRole string                                    `json:"creator_logic_gate_raci_role"`
+		CreatorLogicGateGVICRole string                                    `json:"creator_logic_gate_gvic_role"`
 		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
 	}
@@ -67,7 +68,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 	}
 	stop()
 	stop = timings.observeAccounted("request.validate")
-	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.MutationOrigin, req.CreatorLogicGateRaciRole, req.Items, req.Relationships)
+	input, ok := buildWorkspaceEntityBatchInput(req.CompanyID, req.EntityKind, req.FolderID, req.MutationOrigin, req.CreatorLogicGateGVICRole, req.Items, req.Relationships)
 	if !ok {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
@@ -137,7 +138,7 @@ func buildWorkspaceEntityBatchInput(
 	entityKind string,
 	folderID string,
 	mutationOrigin string,
-	creatorLogicGateRaciRole string,
+	creatorLogicGateGVICRole string,
 	items []workspaceEntityBatchItemRequest,
 	relationships []workspaceEntityBatchRelationshipRequest,
 ) (store.WorkspaceEntityBatchInput, bool) {
@@ -146,20 +147,20 @@ func buildWorkspaceEntityBatchInput(
 		EntityKind:               strings.TrimSpace(entityKind),
 		FolderID:                 strings.TrimSpace(folderID),
 		MutationOrigin:           store.NormalizeMutationOrigin(mutationOrigin),
-		CreatorLogicGateRaciRole: strings.TrimSpace(creatorLogicGateRaciRole),
+		CreatorLogicGateGVICRole: strings.TrimSpace(creatorLogicGateGVICRole),
 	}
 	if input.CompanyID == "" || (input.EntityKind != "node" && input.EntityKind != "logic_gate") {
 		return store.WorkspaceEntityBatchInput{}, false
 	}
-	if input.CreatorLogicGateRaciRole != "" {
+	if input.CreatorLogicGateGVICRole != "" {
 		if input.EntityKind != "logic_gate" {
 			return store.WorkspaceEntityBatchInput{}, false
 		}
-		role, ok := store.NormalizeLogicGateRaciRole(input.CreatorLogicGateRaciRole)
+		role, ok := store.NormalizeGVICRole(input.CreatorLogicGateGVICRole)
 		if !ok {
 			return store.WorkspaceEntityBatchInput{}, false
 		}
-		input.CreatorLogicGateRaciRole = role
+		input.CreatorLogicGateGVICRole = role
 	}
 	if len(items) == 0 || len(items) > store.WorkspaceEntityBatchMaxItems || len(relationships) > store.WorkspaceEntityBatchMaxRelationships {
 		return store.WorkspaceEntityBatchInput{}, false
@@ -168,9 +169,14 @@ func buildWorkspaceEntityBatchInput(
 	clientIDs := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		clientID := strings.TrimSpace(item.ClientID)
-		title := strings.TrimSpace(item.Title)
-		if title == "" {
-			title = strings.TrimSpace(item.Header)
+		title := ""
+		if input.EntityKind == "node" {
+			title = strings.TrimSpace(item.Name)
+		} else {
+			title = strings.TrimSpace(item.Title)
+			if title == "" {
+				title = strings.TrimSpace(item.Header)
+			}
 		}
 		if clientID == "" || title == "" || !validMapLayoutCoordinate(item.X) || !validMapLayoutCoordinate(item.Y) {
 			return store.WorkspaceEntityBatchInput{}, false
