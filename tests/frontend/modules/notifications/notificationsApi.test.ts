@@ -96,13 +96,13 @@ test("deleteNotifications clears matching notifications with DELETE query scope"
       companyID: " company-1 ",
       type: "mention.created",
       surface: "r_inbox",
-      role: "responsible",
+      role: "generated",
       logicGateID: " logic-gate-1 ",
       nodeID: " node-1 ",
     });
     assert.equal(count, 3);
     assert.deepEqual(calls, [{
-      url: "https://app.example.test/v1/notifications?company_id=company-1&type=mention.created&surface=r_inbox&role=responsible&logic_gate_id=logic-gate-1&node_id=node-1",
+      url: "https://app.example.test/v1/notifications?company_id=company-1&type=mention.created&surface=r_inbox&role=generated&logic_gate_id=logic-gate-1&node_id=node-1",
       method: "DELETE",
     }]);
     assert.equal(events.length, 1);

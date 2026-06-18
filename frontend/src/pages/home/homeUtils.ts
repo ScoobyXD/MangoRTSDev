@@ -506,7 +506,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
   const status = typeof value === "string" ? value.trim().toLowerCase().replace(/[\s_-]+/g, " ") : "";
   if (status === "pending" || status === "p") return "pending";
   if (status === "in progress" || status === "ip") return "in_progress";
-  if (status === "verify" || status === "verification" || status === "v") return "verify";
+  if (status === "review") return "review";
   if (status === "done" || status === "d") return "done";
   return null;
 }
@@ -514,7 +514,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
 export function responsibleStatusColor(status: ResponsibleInboxStatus): string {
   if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
-  if (status === "verify") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
+  if (status === "review") return KANBAN_LOGIC_GATE_VERIFY_COLOR;
   return KANBAN_LOGIC_GATE_DONE_COLOR;
 }
 

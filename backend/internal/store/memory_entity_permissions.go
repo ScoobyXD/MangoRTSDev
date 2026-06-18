@@ -75,6 +75,7 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 
 	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
+	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
 	group, ok := r.userGroups[userGroupKey(companyID, groupID)]
 	if !ok {
 		return domain.CompanyUserGroup{}, ErrNotFound
@@ -116,6 +117,7 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 		if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
 			r.userGroups = userGroupsSnapshot
 			r.effectiveAccess = effectiveAccessSnapshot
+			r.gvicEffectiveAssignments = gvicEffectiveSnapshot
 			return domain.CompanyUserGroup{}, err
 		}
 	}
@@ -136,6 +138,8 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
 	sharedInboxRaciSnapshot := cloneMemorySliceMap(r.sharedInboxRaci)
+	gvicAssignmentsSnapshot := cloneMemoryMap(r.gvicAssignments)
+	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return ErrNotFound
@@ -208,11 +212,18 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			r.sharedInboxRaci[raciKey] = next
 		}
 	}
+	for assignmentKey, assignment := range r.gvicAssignments {
+		if assignment.CompanyID == companyID && assignment.PrincipalType == EntityPermissionSubjectGroup && groupIDs[assignment.PrincipalID] {
+			delete(r.gvicAssignments, assignmentKey)
+		}
+	}
 	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
 		r.userGroups = userGroupsSnapshot
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.entityPermissions = entityPermissionsSnapshot
 		r.sharedInboxRaci = sharedInboxRaciSnapshot
+		r.gvicAssignments = gvicAssignmentsSnapshot
+		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		return err
 	}
@@ -253,6 +264,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
+	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return nil, ErrNotFound
 	}
@@ -290,6 +302,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
+		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
 		return nil, err
 	}
 	sortCompanyUserGroupMembers(items)

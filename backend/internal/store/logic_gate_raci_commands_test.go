@@ -29,7 +29,7 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 		ActorUserID:    responsible.UserID,
@@ -52,7 +52,7 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	if err != nil {
 		t.Fatalf("ListMyLogicGates after add: %v", err)
 	}
-	if len(myGates) != 1 || myGates[0].LogicGateID != logicGate.LogicGateID || !inboxReadRolesContain(myGates[0].Roles, domain.LogicGateRaciRoleResponsible) {
+	if len(myGates) != 1 || myGates[0].LogicGateID != logicGate.LogicGateID || !inboxReadRolesContain(myGates[0].Roles, domain.GVICRoleGenerated) {
 		t.Fatalf("my gates after add = %+v, want responsible gate", myGates)
 	}
 
@@ -70,7 +70,7 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}
@@ -139,7 +139,7 @@ func TestMemoryLogicGateRaciCommandsExpandGroupAssignments(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:        domain.LogicGateRaciRoleResponsible,
+			Role:        domain.GVICRoleGenerated,
 			SubjectType: EntityPermissionSubjectGroup,
 			SubjectID:   parentGroup.GroupID,
 		}},
@@ -148,16 +148,23 @@ func TestMemoryLogicGateRaciCommandsExpandGroupAssignments(t *testing.T) {
 		t.Fatalf("AddLogicGateRaciAssignments group: %v", err)
 	}
 	if !added.Changed || len(added.RaciAssignments) != 1 ||
-		added.RaciAssignments[0].SubjectType != EntityPermissionSubjectUser ||
-		added.RaciAssignments[0].UserID != member.UserID {
-		t.Fatalf("added group result = %+v, want expanded member assignment", added)
+		added.RaciAssignments[0].SubjectType != EntityPermissionSubjectGroup ||
+		added.RaciAssignments[0].SubjectID != parentGroup.GroupID {
+		t.Fatalf("added group result = %+v, want configured group assignment", added)
+	}
+	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments after group add: %v", err)
+	}
+	if len(effective) != 1 || effective[0].UserID != member.UserID || effective[0].SourcePrincipalType != EntityPermissionSubjectGroup || effective[0].SourcePrincipalID != parentGroup.GroupID {
+		t.Fatalf("effective group result = %+v, want expanded member projection", effective)
 	}
 
 	removed, err := repo.RemoveLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:        domain.LogicGateRaciRoleResponsible,
+			Role:        domain.GVICRoleGenerated,
 			SubjectType: EntityPermissionSubjectGroup,
 			SubjectID:   parentGroup.GroupID,
 		}},
@@ -166,7 +173,7 @@ func TestMemoryLogicGateRaciCommandsExpandGroupAssignments(t *testing.T) {
 		t.Fatalf("RemoveLogicGateRaciAssignments group: %v", err)
 	}
 	if !removed.Changed || len(removed.RaciAssignments) != 0 {
-		t.Fatalf("removed group result = %+v, want expanded member removed", removed)
+		t.Fatalf("removed group result = %+v, want configured group removed", removed)
 	}
 }
 
@@ -205,15 +212,15 @@ func TestMemoryLogicGateRaciCommandsRejectInvalidRoleUserAndCompany(t *testing.T
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid remove role err = %v, want ErrInvalid", err)
 	}
-	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: outsider.UserID}}})
+	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrAssigneeNotInCompany) {
 		t.Fatalf("outsider add err = %v, want ErrAssigneeNotInCompany", err)
 	}
-	_, err = repo.RemoveLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: outsider.UserID}}})
+	_, err = repo.RemoveLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrAssigneeNotInCompany) {
 		t.Fatalf("outsider remove err = %v, want ErrAssigneeNotInCompany", err)
 	}
-	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: otherCompanyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: outsider.UserID}}})
+	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{CompanyID: otherCompanyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("wrong company add err = %v, want ErrNotFound", err)
 	}

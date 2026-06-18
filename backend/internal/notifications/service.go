@@ -814,15 +814,7 @@ func (s *Service) logicGateRaciRecipientIDs(companyID, logicGateID string) ([]st
 	if companyID == "" || logicGateID == "" {
 		return []string{}, nil
 	}
-	gate, err := s.Repo.GetLogicGate(companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(gate.RaciAssignments))
-	for _, assignment := range gate.RaciAssignments {
-		out = append(out, assignment.UserID)
-	}
-	return out, nil
+	return s.gvicRecipientIDs(companyID, store.EntityTypeLogicGate, logicGateID)
 }
 
 func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]string, error) {
@@ -831,21 +823,7 @@ func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]str
 	if companyID == "" || folderID == "" {
 		return []string{}, nil
 	}
-	folders, err := s.Repo.ListCommunicationsSharedInboxFolders(companyID)
-	if err != nil {
-		return nil, err
-	}
-	for _, folder := range folders {
-		if folder.FolderID != folderID {
-			continue
-		}
-		out := make([]string, 0, len(folder.RaciAssignments))
-		for _, assignment := range folder.RaciAssignments {
-			out = append(out, assignment.UserID)
-		}
-		return out, nil
-	}
-	return []string{}, nil
+	return s.gvicRecipientIDsWithSharedTriageFallback(companyID, folderID)
 }
 
 func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
@@ -854,12 +832,50 @@ func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (ma
 	if companyID == "" || logicGateID == "" {
 		return map[string]string{}, nil
 	}
-	gate, err := s.Repo.GetLogicGate(companyID, logicGateID)
+	return s.gvicRecipientRoles(companyID, store.EntityTypeLogicGate, logicGateID)
+}
+
+func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map[string]string, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	if companyID == "" || folderID == "" {
+		return map[string]string{}, nil
+	}
+	return s.gvicRecipientRolesWithSharedTriageFallback(companyID, folderID)
+}
+
+func (s *Service) gvicRecipientIDs(companyID, resourceType, resourceID string) ([]string, error) {
+	assignments, err := s.Repo.ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return []string{}, nil
+		}
 		return nil, err
 	}
-	out := make(map[string]string, len(gate.RaciAssignments))
-	for _, assignment := range gate.RaciAssignments {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(assignments))
+	for _, assignment := range assignments {
+		userID := strings.TrimSpace(assignment.UserID)
+		if userID == "" || seen[userID] {
+			continue
+		}
+		seen[userID] = true
+		out = append(out, userID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string) (map[string]string, error) {
+	assignments, err := s.Repo.ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	out := make(map[string]string, len(assignments))
+	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
 		if userID == "" {
 			continue
@@ -869,54 +885,26 @@ func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (ma
 	return out, nil
 }
 
-func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map[string]string, error) {
-	companyID = strings.TrimSpace(companyID)
-	folderID = strings.TrimSpace(folderID)
-	if companyID == "" || folderID == "" {
-		return map[string]string{}, nil
-	}
-	folders, err := s.Repo.ListCommunicationsSharedInboxFolders(companyID)
+func (s *Service) gvicRecipientIDsWithSharedTriageFallback(companyID, folderID string) ([]string, error) {
+	ids, err := s.gvicRecipientIDs(companyID, store.EntityTypeSharedTriageFolder, folderID)
 	if err != nil {
 		return nil, err
 	}
-	for _, folder := range folders {
-		if folder.FolderID != folderID {
-			continue
-		}
-		out := make(map[string]string, len(folder.RaciAssignments))
-		var groupMemberIDs map[string][]string
-		for _, assignment := range folder.RaciAssignments {
-			subjectType := strings.TrimSpace(assignment.SubjectType)
-			subjectID := strings.TrimSpace(assignment.SubjectID)
-			if subjectType == "" {
-				subjectType = store.EntityPermissionSubjectUser
-				subjectID = strings.TrimSpace(assignment.UserID)
-			}
-			if subjectType == store.EntityPermissionSubjectUser && subjectID == "" {
-				subjectID = strings.TrimSpace(assignment.UserID)
-			}
-			if subjectID == "" {
-				continue
-			}
-			switch subjectType {
-			case store.EntityPermissionSubjectUser:
-				out[subjectID] = mergeRaciRole(out[subjectID], assignment.Role)
-			case store.EntityPermissionSubjectGroup:
-				if groupMemberIDs == nil {
-					var err error
-					groupMemberIDs, err = s.companyGroupMemberUserIDs(companyID)
-					if err != nil {
-						return nil, err
-					}
-				}
-				for _, userID := range groupMemberIDs[subjectID] {
-					out[userID] = mergeRaciRole(out[userID], assignment.Role)
-				}
-			}
-		}
-		return out, nil
+	if len(ids) != 0 {
+		return ids, nil
 	}
-	return map[string]string{}, nil
+	return s.gvicRecipientIDs(companyID, store.EntityTypeSharedInbox, folderID)
+}
+
+func (s *Service) gvicRecipientRolesWithSharedTriageFallback(companyID, folderID string) (map[string]string, error) {
+	roles, err := s.gvicRecipientRoles(companyID, store.EntityTypeSharedTriageFolder, folderID)
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) != 0 {
+		return roles, nil
+	}
+	return s.gvicRecipientRoles(companyID, store.EntityTypeSharedInbox, folderID)
 }
 
 func (s *Service) companyGroupMemberUserIDs(companyID string) (map[string][]string, error) {
@@ -985,9 +973,9 @@ func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notifica
 		NodeID:      strings.TrimSpace(nodeID),
 	}
 	switch role {
-	case domain.LogicGateRaciRoleResponsible:
+	case domain.GVICRoleGenerated:
 		meta.Surface = domain.NotificationSurfaceRInbox
-	case domain.LogicGateRaciRoleAccountable, domain.LogicGateRaciRoleConsulted, domain.LogicGateRaciRoleInformed:
+	case domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
 		meta.Surface = domain.NotificationSurfaceACIInbox
 	case domain.NotificationRoleOther:
 		meta.Surface = domain.NotificationSurfaceACIInbox
@@ -1013,7 +1001,7 @@ func notificationMetaForMentionedNodeUser(node domain.Node, userID string, logic
 	firstLogicGateID := firstCleanString(node.LogicGateIDs)
 	meta := notificationRecipientMeta{}
 	if node.AssigneeUserID != nil && strings.TrimSpace(*node.AssigneeUserID) == userID {
-		meta = mergeNotificationRecipientMeta(meta, notificationMetaForLogicGateRole(domain.LogicGateRaciRoleResponsible, firstLogicGateID, nodeID))
+		meta = mergeNotificationRecipientMeta(meta, notificationMetaForLogicGateRole(domain.GVICRoleGenerated, firstLogicGateID, nodeID))
 	}
 	for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
 		role := ""
@@ -1103,14 +1091,14 @@ func mergeRaciRole(current, next string) string {
 
 func normalizeNotificationRole(role string) string {
 	switch strings.TrimSpace(role) {
-	case domain.LogicGateRaciRoleResponsible:
-		return domain.LogicGateRaciRoleResponsible
-	case domain.LogicGateRaciRoleAccountable:
-		return domain.LogicGateRaciRoleAccountable
-	case domain.LogicGateRaciRoleConsulted:
-		return domain.LogicGateRaciRoleConsulted
-	case domain.LogicGateRaciRoleInformed:
-		return domain.LogicGateRaciRoleInformed
+	case domain.GVICRoleGenerated:
+		return domain.GVICRoleGenerated
+	case domain.GVICRoleVerified:
+		return domain.GVICRoleVerified
+	case domain.GVICRoleConsulted:
+		return domain.GVICRoleConsulted
+	case domain.GVICRoleInformed:
+		return domain.GVICRoleInformed
 	case domain.NotificationRoleOther:
 		return domain.NotificationRoleOther
 	default:
@@ -1120,13 +1108,13 @@ func normalizeNotificationRole(role string) string {
 
 func raciRoleRank(role string) int {
 	switch normalizeNotificationRole(role) {
-	case domain.LogicGateRaciRoleResponsible:
+	case domain.GVICRoleGenerated:
 		return 5
-	case domain.LogicGateRaciRoleAccountable:
+	case domain.GVICRoleVerified:
 		return 4
-	case domain.LogicGateRaciRoleConsulted:
+	case domain.GVICRoleConsulted:
 		return 3
-	case domain.LogicGateRaciRoleInformed:
+	case domain.GVICRoleInformed:
 		return 2
 	case domain.NotificationRoleOther:
 		return 1

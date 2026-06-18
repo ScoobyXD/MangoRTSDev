@@ -78,14 +78,14 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: responsibleGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: user.UserID}},
+		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments responsible: %v", err)
 	}
 	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: aciGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleAccountable, UserID: user.UserID}},
+		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments aci: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		LogicGates []store.WorkItemLogicGateInboxItem `json:"logic_gates"`
 	}
 	decodeWorkItemInboxReadPayload(t, aciRec, &aciPayload)
-	if len(aciPayload.LogicGates) != 1 || aciPayload.LogicGates[0].LogicGateID != aciGate.LogicGateID || !inboxReadHTTPRolesContain(aciPayload.LogicGates[0].Roles, domain.LogicGateRaciRoleAccountable) {
+	if len(aciPayload.LogicGates) != 1 || aciPayload.LogicGates[0].LogicGateID != aciGate.LogicGateID || !inboxReadHTTPRolesContain(aciPayload.LogicGates[0].Roles, domain.GVICRoleVerified) {
 		t.Fatalf("ACI payload = %+v, want accountable gate only", aciPayload.LogicGates)
 	}
 
@@ -158,10 +158,10 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if len(myGatesPayload.LogicGates) != 2 {
 		t.Fatalf("my logic gates = %+v, want responsible and accountable gates", myGatesPayload.LogicGates)
 	}
-	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, responsibleGate.LogicGateID, domain.LogicGateRaciRoleResponsible) {
+	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, responsibleGate.LogicGateID, domain.GVICRoleGenerated) {
 		t.Fatalf("my logic gates missing responsible role: %+v", myGatesPayload.LogicGates)
 	}
-	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, aciGate.LogicGateID, domain.LogicGateRaciRoleAccountable) {
+	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, aciGate.LogicGateID, domain.GVICRoleVerified) {
 		t.Fatalf("my logic gates missing accountable role: %+v", myGatesPayload.LogicGates)
 	}
 }

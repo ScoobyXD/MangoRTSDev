@@ -310,7 +310,7 @@ function rowColor(row: ProjectManagementTimelineRow): string {
   const status = row.status?.trim().toLowerCase() ?? "";
   if (status.includes("done") || status.includes("complete")) return "#22c55e";
   if (status.includes("progress")) return "#3b82f6";
-  if (status.includes("verify")) return "#a855f7";
+  if (status.includes("review")) return "#a855f7";
   if (status.includes("blocked")) return "#ef4444";
   if (status.includes("pending") || status.includes("todo") || status.includes("to do") || status.includes("backlog") || status.includes("not started")) return "#d97706";
   if (row.resource_type === "logic_gate") return "#8b5cf6";

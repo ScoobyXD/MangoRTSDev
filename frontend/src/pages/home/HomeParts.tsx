@@ -130,18 +130,17 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   nodeByID: Map<string, NodeRecord>;
   busy: boolean;
   onClose: () => void;
-  onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => void;
+  onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>) => void;
   onApplyLogicGateRaci: (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => void;
   onAddNodesToLogicGate: (nodeIDs: string[], logicGateID: string) => void;
   onRequestDelete: (kind: "node" | "logic_gate", ids: string[]) => void;
 }) {
-  const [assignee, setAssignee] = useState("__no_change__");
   const [priority, setPriority] = useState("__no_change__");
   const [status, setStatus] = useState("__no_change__");
   const [dueDateMode, setDueDateMode] = useState<"no_change" | "set" | "clear">("no_change");
   const [dueDate, setDueDate] = useState("");
   const [targetLogicGateID, setTargetLogicGateID] = useState("");
-  const [raciRole, setRaciRole] = useState<CommunicationsSharedInboxRaciRole>("responsible");
+  const [raciRole, setRaciRole] = useState<CommunicationsSharedInboxRaciRole>("generated");
   const [raciUserID, setRaciUserID] = useState("");
   const [raciAction, setRaciAction] = useState<"add" | "remove">("add");
   const sortedLogicGates = useMemo(() => [...logicGates].sort((a, b) => (
@@ -151,13 +150,12 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
 
   useEffect(() => {
-    setAssignee("__no_change__");
     setPriority("__no_change__");
     setStatus("__no_change__");
     setDueDateMode("no_change");
     setDueDate("");
     setTargetLogicGateID(sortedLogicGates[0]?.logic_gate_id ?? "");
-    setRaciRole("responsible");
+    setRaciRole("generated");
     setRaciUserID(companyUsers[0]?.user_id ?? "");
     setRaciAction("add");
   }, [companyUsers, menu?.kind, menu?.ids.join("\u001f"), sortedLogicGates]);
@@ -216,8 +214,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
           event.preventDefault();
           if (busy) return;
           if (menu.kind === "node") {
-            const patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">> = {};
-            if (assignee !== "__no_change__") patch.assignee_user_id = assignee === "__clear__" ? null : assignee;
+            const patch: Partial<Pick<NodeRecord, "priority" | "status" | "due_date">> = {};
             if (priority !== "__no_change__") patch.priority = priority === "0" ? null : Number(priority);
             if (status !== "__no_change__") patch.status = status;
             if (dueDateMode === "clear") patch.due_date = null;
@@ -244,16 +241,6 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
         {menu.kind === "node" ? (
           <>
             <label style={labelStyle}>
-              Assignment
-              <select value={assignee} onChange={(event) => setAssignee(event.target.value)} style={fieldStyle}>
-                <option value="__no_change__">No change</option>
-                <option value="__clear__">Unassigned</option>
-                {companyUsers.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>{user.display_name || user.email || user.user_id}</option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
               Priority
               <select value={priority} onChange={(event) => setPriority(event.target.value)} style={fieldStyle}>
                 <option value="__no_change__">No change</option>
@@ -271,7 +258,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
                 <option value="__no_change__">No change</option>
                 <option value="Pending">Pending</option>
                 <option value="In Progress">In Progress</option>
-                <option value="Verify">Verify</option>
+                <option value="Review">Review</option>
                 <option value="Done">Done</option>
               </select>
             </label>
@@ -318,8 +305,8 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             <label style={labelStyle}>
               Role
               <select value={raciRole} onChange={(event) => setRaciRole(event.target.value as CommunicationsSharedInboxRaciRole)} style={fieldStyle}>
-                <option value="responsible">Responsible</option>
-                <option value="accountable">Accountable</option>
+                <option value="generated">Responsible</option>
+                <option value="verified">Accountable</option>
                 <option value="consulted">Consulted</option>
                 <option value="informed">Informed</option>
               </select>
@@ -978,7 +965,7 @@ export function HomeSidebar({
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
   const raciInboxNotificationCount = (role: RaciInboxRole): number => (
-    notificationCountForRole(notificationSummary, role === "responsible" ? "r_inbox" : "aci_inbox", role)
+    notificationCountForRole(notificationSummary, role === "generated" ? "r_inbox" : "aci_inbox", role)
   );
 
   useEffect(() => {
@@ -1684,8 +1671,8 @@ type CompanyUserGroupMember = {
 };
 
 const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string }> = [
-  { role: "responsible", label: "Responsible" },
-  { role: "accountable", label: "Accountable" },
+  { role: "generated", label: "generated" },
+  { role: "verified", label: "verified" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
 ];
@@ -1738,14 +1725,14 @@ export function SharedInboxRaciSettingsModal({
   onClose: () => void;
 }) {
   const [userDraftByRole, setUserDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
-    responsible: "",
-    accountable: "",
+    generated: "",
+    verified: "",
     consulted: "",
     informed: "",
   });
   const [groupDraftByRole, setGroupDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
-    responsible: "",
-    accountable: "",
+    generated: "",
+    verified: "",
     consulted: "",
     informed: "",
   });
@@ -2212,7 +2199,7 @@ export function LogicGateRail({
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section
         style={logicGateRailSectionStyle}
-        onContextMenu={(event) => openCreateLogicGateMenu(event, "responsible")}
+        onContextMenu={(event) => openCreateLogicGateMenu(event, "generated")}
         onDragOver={(event) => {
           if (!hasExplorerDrag(event.dataTransfer)) return;
           event.preventDefault();

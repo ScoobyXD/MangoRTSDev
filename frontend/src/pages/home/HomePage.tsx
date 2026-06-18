@@ -3115,7 +3115,7 @@ export function HomePage({
     setBusy("create-logic-gate");
     setError("");
     try {
-      const creatorRaciRole = options.creatorRaciRole ?? (options.assignCurrentUser ? "responsible" : undefined);
+      const creatorRaciRole = options.creatorRaciRole ?? (options.assignCurrentUser ? "generated" : undefined);
       const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole });
       const logicGate = result.logicGate;
       mergeCreatedLogicGate(logicGate, result.folderItems);
@@ -3260,7 +3260,7 @@ export function HomePage({
     try {
       const targetRole = input.creatorRaciRole;
       if (currentUserID && targetRole) {
-        const raciRoles: LogicGateRaciRole[] = ["responsible", "accountable", "consulted", "informed"];
+        const raciRoles: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
         const assignmentUpdates = await Promise.all(logicGateIDs.map(async (logicGateID) => {
           const gate = logicGateByID.get(logicGateID);
           let assignments = gate?.raci_assignments ?? [];
@@ -3458,7 +3458,7 @@ export function HomePage({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [busy, deleteConfirmation, entityDeleteConfirmation, getSelectedMessageIDsForAction, requestDeleteMessages, requestDeleteSelectedHomeEntities]);
-  const applyBulkNodePatch = useCallback(async (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => {
+  const applyBulkNodePatch = useCallback(async (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>) => {
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (ids.length === 0) return;
     setBusy("bulk-node-edit");

@@ -25,15 +25,14 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	}
 
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
-	var creatorAssignee postgresNodeAssigneeReadModel
 	if input.CreatorUserID != "" {
-		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.creator_assignee_read")
-		creatorAssignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
+		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.creator_user_read")
+		creatorUser, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
 		stop()
 		if err != nil {
 			return WorkspaceEntityBatchResult{}, err
 		}
-		input.CreatorUserID = creatorAssignee.UserID
+		input.CreatorUserID = creatorUser.UserID
 	}
 
 	syncFolderItems := MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
@@ -92,19 +91,41 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			}
 			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.node_writes")
 			if err := tx.QueryRowContext(ctx,
-				`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
-				 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
-				 returning company_id, node_id, title, created_timestamp`,
-				created.CompanyID, created.NodeID, created.Title, input.CreatorUserID,
+				`insert into nodes (company_id, node_id, name, created_timestamp)
+				 values ($1, $2, $3, now())
+				 returning company_id, node_id, name, created_timestamp`,
+				created.CompanyID, created.NodeID, created.Title,
 			).Scan(&created.CompanyID, &created.NodeID, &created.Title, &created.CreatedTimestamp); err != nil {
 				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
 			if input.CreatorUserID != "" {
-				applyPostgresNodeAssigneeReadModel(&created, creatorAssignee)
+				if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
+					input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
+					return WorkspaceEntityBatchResult{}, err
+				}
 			}
 			if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.CreatorUserID, "", deltas)); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {
@@ -152,49 +173,45 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			return WorkspaceEntityBatchResult{}, err
 		}
 		stop()
-		if input.CreatorUserID != "" && input.CreatorLogicGateRaciRole != "" {
-			assignment := domain.LogicGateRaciAssignment{
-				CompanyID:   input.CompanyID,
-				LogicGateID: created.LogicGateID,
-				Role:        input.CreatorLogicGateRaciRole,
-				UserID:      input.CreatorUserID,
-			}
-			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.raci_assignment_writes")
-			if err := tx.QueryRowContext(ctx, `
-insert into logic_gate_raci_assignments
-  (company_id, logic_gate_id, role, user_id, created_timestamp)
-values ($1, $2, $3, $4, now())
-on conflict (company_id, logic_gate_id, role, user_id) do update set
-  created_timestamp=logic_gate_raci_assignments.created_timestamp
-returning company_id, logic_gate_id, role::text, user_id::text, created_timestamp`,
+		if input.CreatorUserID != "" && input.CreatorLogicGateGVICRole != "" {
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.gvic_assignment_writes")
+			if _, err := tx.ExecContext(ctx, `
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, 'logic_gate', $2::uuid, $3, 'user', $4::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
+do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 				input.CompanyID,
 				created.LogicGateID,
-				input.CreatorLogicGateRaciRole,
+				input.CreatorLogicGateGVICRole,
 				input.CreatorUserID,
-			).Scan(
-				&assignment.CompanyID,
-				&assignment.LogicGateID,
-				&assignment.Role,
-				&assignment.UserID,
-				&assignment.CreatedTimestamp,
 			); err != nil {
 				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
-			if creatorAssignee.Name != nil {
-				assignment.UserDisplayName = strings.TrimSpace(*creatorAssignee.Name)
-			}
-			if creatorAssignee.Email != nil {
-				assignment.UserEmail = strings.TrimSpace(*creatorAssignee.Email)
-			}
-			created.RaciAssignments = []domain.LogicGateRaciAssignment{assignment}
-			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.racio_projection_sync")
-			if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, created.RaciAssignments); err != nil {
+			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.gvic_projection_sync")
+			deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
+			if err != nil {
 				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
+			if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.CreatorUserID, "", deltas)); err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			created.GVICAssignments = assignments
 		}
 		if input.CreatorUserID != "" {
 			created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)

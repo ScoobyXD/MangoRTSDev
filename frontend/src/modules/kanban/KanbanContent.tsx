@@ -1651,8 +1651,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           });
         }
 
-        const nodePatch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "due_date">> = {};
-        if (assigneeWasSet) nodePatch.assignee_user_id = assignment.assigneeUserID ?? null;
+        const nodePatch: Partial<Pick<NodeRecord, "priority" | "due_date">> = {};
         if (dueDateWasSet) nodePatch.due_date = assignment.dueDate ?? null;
         if (priorityWasSet && !logicGateID) nodePatch.priority = assignment.priority ?? null;
         if (Object.keys(nodePatch).length > 0) {
@@ -1784,7 +1783,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     try {
       const updated = await requestJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
         method: "PUT",
-        json: { company_id: companyID, title: cleanTitle },
+        json: { company_id: companyID, name: cleanTitle },
       });
       const updatedTitle = getNodeTitle(updated) || cleanTitle;
       invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);

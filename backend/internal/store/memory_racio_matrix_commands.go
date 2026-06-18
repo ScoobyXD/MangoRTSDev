@@ -14,7 +14,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 			CompanyID:                input.CompanyID,
 			EntityKind:               "logic_gate",
 			CreatorUserID:            input.ActorUserID,
-			CreatorLogicGateRaciRole: input.CreatorLogicGateRaciRole,
+			CreatorLogicGateGVICRole: input.CreatorLogicGateGVICRole,
 			Items: []WorkspaceEntityBatchItemInput{{
 				ClientID: "racio-matrix-logic-gate",
 				Title:    input.CreateLogicGateHeader,
@@ -30,11 +30,11 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
-		r.mu.RLock()
-		deltas := diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, nil, []string{logicGateID}))
+		r.mu.Lock()
+		deltas := r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(input.CompanyID, logicGateID, nil, nil)
 		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
-		r.mu.RUnlock()
+		r.mu.Unlock()
 		eventInputs := []DomainEventInput{
 			logicGateCreatedWorkspaceEventInput(logicGate, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)),
 		}
@@ -46,7 +46,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 			return RacioMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
-		if _, err := r.AppendEventRows(RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
+		if _, err := r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
 			return RacioMatrixNodeCreateResult{}, err
 		}
 	}
@@ -107,7 +107,7 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		return RacioMatrixNodeCreateResult{}, err
 	}
 	result.Events = append(result.Events, event)
-	if _, err := r.appendEventRowsLocked(RacioProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return RacioMatrixNodeCreateResult{}, err
 	}

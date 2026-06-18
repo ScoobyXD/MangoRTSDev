@@ -70,10 +70,20 @@ func recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx context.Context, 
 }
 
 func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+		return err
+	}
 	return syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
 func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+	if err != nil {
+		return err
+	}
+	if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
+		return err
+	}
 	return syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
 }
 
@@ -105,6 +115,9 @@ where company_id=$1::uuid
 		return err
 	}
 	for _, nodeID := range nodeIDs {
+		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+			return err
+		}
 		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
@@ -124,6 +137,9 @@ func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx,
 	}
 	targetNodeIDs = cleanUUIDTextSlice(append(targetNodeIDs, assignedNodeIDs...))
 	for _, nodeID := range targetNodeIDs {
+		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+			return err
+		}
 		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
@@ -135,7 +151,7 @@ func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx 
 	if ctx == nil || tx == nil || cleanUUIDText(companyID) == "" {
 		return ErrInvalid
 	}
-	return nil
+	return syncPostgresGVICForGroupAssignmentsTx(ctx, tx, companyID)
 }
 
 func nodeIDsAssignedToLogicGatesTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs []string) ([]string, error) {
@@ -266,6 +282,7 @@ select requested.resource_id::text,
        case
          when (select allowed from admin_actor) then 'admin'
          when mangorts_user_can_access_resource($1::uuid, $3::text, requested.resource_id, $2::uuid, 'edit') then 'edit'
+         when mangorts_user_can_access_resource($1::uuid, $3::text, requested.resource_id, $2::uuid, 'view') then 'view'
          else 'no_access'
        end
 from requested`,

@@ -790,17 +790,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if createdNode.CompanyID != "" {
-		node := r.nodes[nodeKey]
-		if strings.TrimSpace(input.ActorUserID) != "" {
-			assigneeUserID := strings.TrimSpace(input.ActorUserID)
-			node.AssigneeUserID = &assigneeUserID
-		} else {
-			node.AssigneeUserID = nil
-		}
-		r.nodes[nodeKey] = node
-	}
-
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
@@ -842,10 +831,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 }
 
 func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID string) string {
-	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(companyID, logicGateID)]...)
+	assignments := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, logicGateID)
 	sortLogicGateRaciAssignments(assignments)
 	for _, assignment := range assignments {
-		if assignment.Role == domain.LogicGateRaciRoleResponsible && strings.TrimSpace(assignment.UserID) != "" {
+		if assignment.Role == domain.GVICRoleGenerated && strings.TrimSpace(assignment.UserID) != "" {
 			return strings.TrimSpace(assignment.UserID)
 		}
 	}
@@ -853,21 +842,7 @@ func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID 
 }
 
 func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGateID, nodeID string) bool {
-	responsibleUserID := r.responsibleUserIDForLogicGateLocked(companyID, logicGateID)
-	if responsibleUserID == "" {
-		return false
-	}
-	nodeKey := key(companyID, nodeID)
-	node, ok := r.nodes[nodeKey]
-	if !ok {
-		return false
-	}
-	if nodeAssigneeUserID(node) == responsibleUserID {
-		return false
-	}
-	node.AssigneeUserID = &responsibleUserID
-	r.nodes[nodeKey] = node
-	return true
+	return false
 }
 
 type memoryKanbanCardLocation struct {

@@ -103,7 +103,7 @@ const APP_SIDEBAR_RACI_VIEWS = RACI_INBOX_SECTIONS.map((section) => {
     role: section.role,
     label,
     notificationTitle: `${label} notifications`,
-    surface: section.role === "responsible" ? "r_inbox" : "aci_inbox",
+    surface: section.role === "generated" ? "r_inbox" : "aci_inbox",
   };
 }) satisfies ReadonlyArray<{
   viewID: RaciHomeSidebarView;
@@ -2461,9 +2461,9 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
 
 function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
   switch (tone) {
-    case "responsible":
+    case "generated":
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
-    case "accountable":
+    case "verified":
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.38)", color: "#c2410c" };
     case "consulted":
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };

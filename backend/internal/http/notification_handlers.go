@@ -648,13 +648,13 @@ func highestLogicGateRaciRolesByUser(assignments []domain.LogicGateRaciAssignmen
 
 func raciNotificationRoleRank(role string) int {
 	switch strings.TrimSpace(role) {
-	case domain.LogicGateRaciRoleResponsible:
+	case domain.GVICRoleGenerated:
 		return 4
-	case domain.LogicGateRaciRoleAccountable:
+	case domain.GVICRoleVerified:
 		return 3
-	case domain.LogicGateRaciRoleConsulted:
+	case domain.GVICRoleConsulted:
 		return 2
-	case domain.LogicGateRaciRoleInformed:
+	case domain.GVICRoleInformed:
 		return 1
 	default:
 		return 0

@@ -262,18 +262,17 @@ type UserLogicGateShortcut struct {
 }
 
 type Node struct {
-	CompanyID string `json:"company_id"`
-	NodeID    string `json:"node_id"`
-	// Title is the canonical public API field name for node text labels.
-	Title            string    `json:"title"`
+	CompanyID        string    `json:"company_id"`
+	NodeID           string    `json:"node_id"`
+	Title            string    `json:"name"`
 	DefaultAccess    string    `json:"default_access"`
 	Status           *string   `json:"status"`
-	StatusColor      *string   `json:"status_color"`
+	StatusColor      *string   `json:"-"`
 	DueDate          *string   `json:"due_date"`
 	Priority         *int      `json:"priority"`
-	AssigneeUserID   *string   `json:"assignee_user_id"`
-	AssigneeName     *string   `json:"assignee_name,omitempty"`
-	AssigneeEmail    *string   `json:"assignee_email,omitempty"`
+	AssigneeUserID   *string   `json:"-"`
+	AssigneeName     *string   `json:"-"`
+	AssigneeEmail    *string   `json:"-"`
 	LogicGateIDs     []string  `json:"logic_gate_ids,omitempty"`
 	Accounts         []Account `json:"accounts,omitempty"`
 	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
@@ -361,17 +360,49 @@ type LogicGate struct {
 	LogicGateID      string                    `json:"logic_gate_id"`
 	Header           string                    `json:"header"`
 	DefaultAccess    string                    `json:"default_access"`
-	RaciAssignments  []LogicGateRaciAssignment `json:"raci_assignments"`
+	RaciAssignments  []LogicGateRaciAssignment `json:"-"`
+	GVICAssignments  []ResourceGVICAssignment  `json:"gvic_assignments,omitempty"`
 	EffectiveAccess  string                    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`
 }
 
 const (
-	LogicGateRaciRoleResponsible = "responsible"
-	LogicGateRaciRoleAccountable = "accountable"
-	LogicGateRaciRoleConsulted   = "consulted"
-	LogicGateRaciRoleInformed    = "informed"
+	GVICRoleGenerated = "generated"
+	GVICRoleVerified  = "verified"
+	GVICRoleConsulted = "consulted"
+	GVICRoleInformed  = "informed"
 )
+
+type ResourceGVICAssignment struct {
+	CompanyID        string    `json:"company_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	Role             string    `json:"role"`
+	PrincipalType    string    `json:"principal_type"`
+	PrincipalID      string    `json:"principal_id"`
+	PrincipalName    string    `json:"principal_name,omitempty"`
+	UserID           string    `json:"user_id,omitempty"`
+	UserDisplayName  string    `json:"user_display_name,omitempty"`
+	UserEmail        string    `json:"user_email,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type ResourceGVICEffectiveAssignment struct {
+	CompanyID           string    `json:"company_id"`
+	ResourceType        string    `json:"resource_type"`
+	ResourceID          string    `json:"resource_id"`
+	Role                string    `json:"role"`
+	UserID              string    `json:"user_id"`
+	SourceResourceType  string    `json:"source_resource_type"`
+	SourceResourceID    string    `json:"source_resource_id"`
+	SourcePrincipalType string    `json:"source_principal_type"`
+	SourcePrincipalID   string    `json:"source_principal_id"`
+	InheritanceType     string    `json:"inheritance_type"`
+	UserDisplayName     string    `json:"user_display_name,omitempty"`
+	UserEmail           string    `json:"user_email,omitempty"`
+	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
+}
 
 type LogicGateRaciAssignment struct {
 	CompanyID        string    `json:"company_id"`
@@ -567,7 +598,8 @@ type CompanyExplorerFolder struct {
 	ScopeType        string                      `json:"scope_type,omitempty"`
 	ScopeID          *string                     `json:"scope_id,omitempty"`
 	Position         int                         `json:"position"`
-	RaciAssignments  []SharedInboxRaciAssignment `json:"raci_assignments,omitempty"`
+	RaciAssignments  []SharedInboxRaciAssignment `json:"-"`
+	GVICAssignments  []ResourceGVICAssignment    `json:"gvic_assignments,omitempty"`
 	AccessGrants     []EntityPermission          `json:"access_grants,omitempty"`
 	EffectiveAccess  string                      `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                   `json:"created_timestamp"`

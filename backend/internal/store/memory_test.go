@@ -870,13 +870,13 @@ func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	backlog := mustFindKanbanColumn(t, columns, "Backlogs")
 	pending := mustFindKanbanColumn(t, columns, "Pending")
 	inProgress := mustFindKanbanColumn(t, columns, "In Progress")
-	verify := mustFindKanbanColumn(t, columns, "Verify")
+	review := mustFindKanbanColumn(t, columns, "Review")
 	done := mustFindKanbanColumn(t, columns, "Done")
-	if requested.ItemColor != KanbanDefaultRequestedColor || backlog.ItemColor != KanbanDefaultBacklogColor || pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || verify.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
-		t.Fatalf("default colors = %q/%q/%q/%q/%q/%q", requested.ItemColor, backlog.ItemColor, pending.ItemColor, inProgress.ItemColor, verify.ItemColor, done.ItemColor)
+	if requested.ItemColor != KanbanDefaultRequestedColor || backlog.ItemColor != KanbanDefaultBacklogColor || pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || review.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
+		t.Fatalf("default colors = %q/%q/%q/%q/%q/%q", requested.ItemColor, backlog.ItemColor, pending.ItemColor, inProgress.ItemColor, review.ItemColor, done.ItemColor)
 	}
-	if requested.Position >= backlog.Position || backlog.Position >= pending.Position || pending.Position >= inProgress.Position || inProgress.Position >= verify.Position || verify.Position >= done.Position {
-		t.Fatalf("default column order = %d/%d/%d/%d/%d/%d, want Requested, Backlogs, Pending, In Progress, Verify, Done", requested.Position, backlog.Position, pending.Position, inProgress.Position, verify.Position, done.Position)
+	if requested.Position >= backlog.Position || backlog.Position >= pending.Position || pending.Position >= inProgress.Position || inProgress.Position >= review.Position || review.Position >= done.Position {
+		t.Fatalf("default column order = %d/%d/%d/%d/%d/%d, want Requested, Backlogs, Pending, In Progress, Review, Done", requested.Position, backlog.Position, pending.Position, inProgress.Position, review.Position, done.Position)
 	}
 	if err := repo.DeleteKanbanBoard(companyID, boards[0].BoardID); err != ErrInvalid {
 		t.Fatalf("expected attached board delete to return ErrInvalid, got %v", err)
@@ -919,7 +919,7 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {
@@ -956,8 +956,8 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if assignment.StatusKey != "pending" {
 		t.Fatalf("assignment status_key = %q, want pending", assignment.StatusKey)
 	}
-	if loadedNode.AssigneeUserID == nil || *loadedNode.AssigneeUserID != responsibleUser.UserID {
-		t.Fatalf("assignee_user_id = %+v, want responsible user", loadedNode.AssigneeUserID)
+	if loadedNode.AssigneeUserID != nil {
+		t.Fatalf("assignee_user_id = %+v, want nil after GVIC migration", loadedNode.AssigneeUserID)
 	}
 
 	issue := true
@@ -1497,7 +1497,7 @@ func TestMemoryRepo_MoveLogicGateAssignmentReusesExistingTargetCompatibilityCard
 		LogicGateID:     targetGate.LogicGateID,
 		FromLogicGateID: sourceGate.LogicGateID,
 		NodeID:          node.NodeID,
-		Status:          "verify",
+		Status:          "review",
 	})
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
@@ -1612,7 +1612,7 @@ func TestMemoryRepo_MoveLogicGateAssignmentMovesCommunicationsEmailPlacementToFi
 		LogicGateID:     targetGate.LogicGateID,
 		FromLogicGateID: sourceGate.LogicGateID,
 		NodeID:          node.NodeID,
-		Status:          "verify",
+		Status:          "review",
 	})
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)

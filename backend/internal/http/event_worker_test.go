@@ -191,7 +191,7 @@ func TestEventWorkerPublishesRacioDeltaToUserScopeOnly(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		ActorUserID: userA.UserID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: userA.UserID,
 		}},
 	}); err != nil {
@@ -223,7 +223,7 @@ func TestEventWorkerRacioPermissionLossSendsDeleteWithoutRowPayload(t *testing.T
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {

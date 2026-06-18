@@ -87,7 +87,7 @@ func TestPostgresCompanyExplorerV2NativeNodeHydrationUsesNodeSchemaColumns(t *te
 	if strings.Contains(normalized, "node.updated_timestamp") {
 		t.Fatal("nodes table has no updated_timestamp column; V2 native hydration must use node.created_timestamp")
 	}
-	if !strings.Contains(normalized, "node.title, null, node.created_timestamp, node.created_timestamp") {
+	if !strings.Contains(normalized, "node.name, null, node.created_timestamp, node.created_timestamp") {
 		t.Fatal("V2 native node hydration should map both entity timestamps from node.created_timestamp")
 	}
 }

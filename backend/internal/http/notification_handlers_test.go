@@ -83,7 +83,7 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -107,8 +107,8 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{
-			{Role: domain.LogicGateRaciRoleResponsible, UserID: responsible.UserID},
-			{Role: domain.LogicGateRaciRoleConsulted, UserID: consultedNoAccess.UserID},
+			{Role: domain.GVICRoleGenerated, UserID: responsible.UserID},
+			{Role: domain.GVICRoleConsulted, UserID: consultedNoAccess.UserID},
 		},
 	})
 	if err != nil {
@@ -219,11 +219,10 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	}
 }
 
-func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignments(t *testing.T) {
+func TestLogicGateRaciRoutesRequireGVIC(t *testing.T) {
 	t.Parallel()
 
-	backing := store.NewMemoryRepo()
-	repo := backing
+	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "77777777-7777-4777-8777-777777777770"
@@ -235,84 +234,32 @@ func TestLogicGateRaciAssignmentNotificationsRouteToKeyViewsAndRepeatReassignmen
 	if _, err := repo.AddCompanyMembership("raci-editor-subject", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	accountable, err := repo.UpsertAuthUser("raci-accountable-subject", "raci-accountable@example.com", "RACI Accountable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership("raci-accountable-subject", companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
-	responsible, err := repo.UpsertAuthUser("raci-responsible-subject", "raci-responsible@example.com", "RACI Responsible")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership("raci-responsible-subject", companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Assignment gate")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	putRaci := func(assignments []map[string]string) {
+	assertGone := func(method, path string) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
-			"company_id":  companyID,
-			"assignments": assignments,
+			"company_id": companyID,
+			"assignments": []map[string]string{{
+				"role":    "responsible",
+				"user_id": editor.UserID,
+			}},
 		})
-		req := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(body))
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
 		req = requestWithActorForNotifications(req, editor, companyID)
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("PUT logic gate RACI status = %d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), "gvic_required") {
+			t.Fatalf("%s %s status = %d body=%s, want gvic_required", method, path, rec.Code, rec.Body.String())
 		}
 	}
-	listNotifications := func(user domain.User) []domain.Notification {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
-		req = requestWithActorForNotifications(req, user, companyID)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET notifications status = %d body=%s", rec.Code, rec.Body.String())
-		}
-		var payload struct {
-			Notifications []domain.Notification `json:"notifications"`
-		}
-		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode notifications: %v", err)
-		}
-		return payload.Notifications
-	}
 
-	putRaci([]map[string]string{
-		{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
-		{"role": domain.LogicGateRaciRoleResponsible, "user_id": responsible.UserID},
-	})
-
-	accountableNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
-		return listNotifications(accountable)
-	}, 1)
-	if accountableNotifications[0].Surface != domain.NotificationSurfaceACIInbox || accountableNotifications[0].Role != domain.LogicGateRaciRoleAccountable {
-		t.Fatalf("accountable notification metadata = %+v, want ACIO accountable", accountableNotifications[0])
-	}
-	responsibleNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
-		return listNotifications(responsible)
-	}, 1)
-	if responsibleNotifications[0].Surface != domain.NotificationSurfaceRInbox || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("responsible notification metadata = %+v, want responsible inbox", responsibleNotifications[0])
-	}
-
-	putRaci([]map[string]string{})
-	putRaci([]map[string]string{
-		{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
-	})
-
-	accountableNotifications = waitForNotificationCountForTest(t, func() []domain.Notification {
-		return listNotifications(accountable)
-	}, 2)
+	assertGone(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci")
+	assertGone(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci/add")
 }
 
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
@@ -358,7 +305,7 @@ func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 			EntityID:        logicGate.LogicGateID,
 			Title:           "Node status changed",
 			Surface:         domain.NotificationSurfaceACIInbox,
-			Role:            domain.LogicGateRaciRoleConsulted,
+			Role:            domain.GVICRoleConsulted,
 			LogicGateID:     logicGate.LogicGateID,
 			NodeID:          nodeID,
 		})
@@ -374,7 +321,7 @@ func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 	if summary.TotalUnread != 7 {
 		t.Fatalf("total unread = %d, want 7", summary.TotalUnread)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleConsulted || summary.RoleCounts[0].Count != 2 {
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.GVICRoleConsulted || summary.RoleCounts[0].Count != 2 {
 		t.Fatalf("role counts = %+v, want two changed node targets", summary.RoleCounts)
 	}
 	countsByNode := map[string]int{}
@@ -451,8 +398,8 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(notifications[0].Title, "has mentioned you in Review packet") {
 		t.Fatalf("notification title = %q, want mention target format", notifications[0].Title)
 	}
-	if notifications[0].Surface != domain.NotificationSurfaceRInbox || notifications[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("notification routing = %+v, want responsible node mention", notifications[0])
+	if notifications[0].Surface != domain.NotificationSurfaceACIInbox || notifications[0].Role != domain.NotificationRoleOther {
+		t.Fatalf("notification routing = %+v, want ACI other node mention", notifications[0])
 	}
 	if notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
 		t.Fatalf("notification information id = %q, want chat information id", notifications[0].InformationID)
@@ -472,8 +419,8 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
 		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
-		t.Fatalf("mention summary role counts = %+v, want responsible mention", summary.RoleCounts)
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("mention summary role counts = %+v, want one ACI other mention", summary.RoleCounts)
 	}
 	if len(summary.LogicGateCounts) != 0 {
 		t.Fatalf("mention summary logic gate counts = %+v, want none for node without logic gate", summary.LogicGateCounts)
@@ -562,7 +509,7 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleAccountable,
+			Role:   domain.GVICRoleVerified,
 			UserID: mentioned.UserID,
 		}},
 	}); err != nil {
@@ -592,7 +539,7 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	if item := notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
 		t.Fatalf("mention notification = %+v, want logic gate mention", item)
 	}
-	if item := notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.LogicGateRaciRoleAccountable || item.LogicGateID != logicGate.LogicGateID {
+	if item := notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.GVICRoleVerified || item.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("logic gate mention routing = %+v, want accountable logic gate", item)
 	}
 }
@@ -1030,7 +977,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			EntityID:        node.NodeID,
 			Title:           "Responsible R inbox",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            domain.LogicGateRaciRoleResponsible,
+			Role:            domain.GVICRoleGenerated,
 			NodeID:          node.NodeID,
 		},
 		{
@@ -1042,7 +989,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			EntityID:        node.NodeID,
 			Title:           "Consulted R inbox",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            domain.LogicGateRaciRoleConsulted,
+			Role:            domain.GVICRoleConsulted,
 			NodeID:          node.NodeID,
 		},
 		{
@@ -1054,14 +1001,14 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			EntityID:        node.NodeID,
 			Title:           "Responsible ACI inbox",
 			Surface:         domain.NotificationSurfaceACIInbox,
-			Role:            domain.LogicGateRaciRoleResponsible,
+			Role:            domain.GVICRoleGenerated,
 			NodeID:          node.NodeID,
 		},
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID+"&surface="+domain.NotificationSurfaceRInbox+"&role="+domain.LogicGateRaciRoleResponsible, nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID+"&surface="+domain.NotificationSurfaceRInbox+"&role="+domain.GVICRoleGenerated, nil)
 	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
@@ -1085,7 +1032,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 		t.Fatalf("remaining notifications after filtered clear = %+v, want 2", remaining)
 	}
 	for _, item := range remaining {
-		if item.Surface == domain.NotificationSurfaceRInbox && item.Role == domain.LogicGateRaciRoleResponsible {
+		if item.Surface == domain.NotificationSurfaceRInbox && item.Role == domain.GVICRoleGenerated {
 			t.Fatalf("remaining notifications include deleted filtered notification: %+v", remaining)
 		}
 	}
@@ -1158,7 +1105,7 @@ func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	}
 }
 
-func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
+func TestNodeGeneratedGVICFieldChangesNotifyGeneratedUser(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1186,17 +1133,21 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, assignee.UserID)
 
-	assignBody, _ := json.Marshal(map[string]any{
-		"company_id":       companyID,
-		"assignee_user_id": assignee.UserID,
+	gvicBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"gvic_assignments": []map[string]string{{
+			"role":           domain.GVICRoleGenerated,
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   assignee.UserID,
+		}},
 	})
-	assignReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(assignBody))
-	assignReq = requestWithActorForNotifications(assignReq, editor, companyID)
-	assignReq.Header.Set("Content-Type", "application/json")
-	assignRec := httptest.NewRecorder()
-	handler.ServeHTTP(assignRec, assignReq)
-	if assignRec.Code != http.StatusOK {
-		t.Fatalf("PUT node assignment status = %d body=%s", assignRec.Code, assignRec.Body.String())
+	gvicReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+node.NodeID+"/gvic", bytes.NewReader(gvicBody))
+	gvicReq = requestWithActorForNotifications(gvicReq, editor, companyID)
+	gvicReq.Header.Set("Content-Type", "application/json")
+	gvicRec := httptest.NewRecorder()
+	handler.ServeHTTP(gvicRec, gvicReq)
+	if gvicRec.Code != http.StatusOK {
+		t.Fatalf("PUT node GVIC status = %d body=%s", gvicRec.Code, gvicRec.Body.String())
 	}
 
 	updateBody, _ := json.Marshal(map[string]any{
@@ -1218,7 +1169,7 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
 		listReq = requestWithActorForNotifications(listReq, assignee, companyID)
 		return listNotificationsForRequestForTest(t, handler, listReq)
-	}, 2)
+	}, 1)
 	types := map[string]bool{}
 	for _, item := range notifications {
 		types[item.Type] = true
@@ -1226,8 +1177,8 @@ func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
 			t.Fatalf("notification metadata = %+v, want my triage other for node", item)
 		}
 	}
-	if !types[domain.NotificationEventNodeAssigned] || !types[domain.NotificationEventNodeFieldsChanged] {
-		t.Fatalf("notification types = %+v, want node assigned and node fields changed", types)
+	if !types[domain.NotificationEventNodeFieldsChanged] {
+		t.Fatalf("notification types = %+v, want node fields changed", types)
 	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)

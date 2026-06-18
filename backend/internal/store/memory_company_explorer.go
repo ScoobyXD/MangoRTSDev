@@ -1361,6 +1361,7 @@ func companyExplorerLogicGateSummary(gate domain.LogicGate) domain.LogicGate {
 		LogicGateID:      gate.LogicGateID,
 		Header:           gate.Header,
 		RaciAssignments:  append([]domain.LogicGateRaciAssignment{}, gate.RaciAssignments...),
+		GVICAssignments:  append([]domain.ResourceGVICAssignment{}, gate.GVICAssignments...),
 		CreatedTimestamp: gate.CreatedTimestamp,
 	}
 }

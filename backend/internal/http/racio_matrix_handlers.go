@@ -70,34 +70,16 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	if title, set, ok := parseOptionalStringField(fields, "title"); !ok {
+	if name, set, ok := parseOptionalStringField(fields, "name"); !ok {
 		stop()
-		writeError(w, http.StatusBadRequest, "invalid_title")
+		writeError(w, http.StatusBadRequest, "invalid_name")
 		return
-	} else if set && title != nil {
-		input.Title = *title
-	}
-	if input.Title == "" {
-		if title, set, ok := parseOptionalStringField(fields, "node_title"); !ok {
-			stop()
-			writeError(w, http.StatusBadRequest, "invalid_node_title")
-			return
-		} else if set && title != nil {
-			input.Title = *title
-		}
-	}
-	if input.Title == "" {
-		if title, set, ok := parseOptionalStringField(fields, "create_node_title"); !ok {
-			stop()
-			writeError(w, http.StatusBadRequest, "invalid_create_node_title")
-			return
-		} else if set && title != nil {
-			input.Title = *title
-		}
+	} else if set && name != nil {
+		input.Title = *name
 	}
 	if strings.TrimSpace(input.Title) == "" {
 		stop()
-		writeError(w, http.StatusBadRequest, "title_required")
+		writeError(w, http.StatusBadRequest, "name_required")
 		return
 	}
 	if logicGateID, set, ok := parseOptionalStringField(fields, "logic_gate_id"); !ok {
@@ -123,12 +105,12 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 			input.CreateLogicGateHeader = *header
 		}
 	}
-	if role, set, ok := parseOptionalStringField(fields, "creator_logic_gate_raci_role"); !ok {
+	if role, set, ok := parseOptionalStringField(fields, "creator_logic_gate_gvic_role"); !ok {
 		stop()
-		writeError(w, http.StatusBadRequest, "invalid_creator_logic_gate_raci_role")
+		writeError(w, http.StatusBadRequest, "invalid_creator_logic_gate_gvic_role")
 		return
 	} else if set && role != nil {
-		input.CreatorLogicGateRaciRole = *role
+		input.CreatorLogicGateGVICRole = *role
 	}
 	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
 		stop()

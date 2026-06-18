@@ -117,7 +117,7 @@ func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (Raci
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
-	input.CreatorLogicGateRaciRole = strings.TrimSpace(input.CreatorLogicGateRaciRole)
+	input.CreatorLogicGateGVICRole = strings.TrimSpace(input.CreatorLogicGateGVICRole)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.NodeID == "" {
@@ -129,12 +129,12 @@ func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (Raci
 	if input.LogicGateID != "" && input.CreateLogicGateHeader != "" {
 		return RacioMatrixNodeCreateInput{}, ErrInvalid
 	}
-	if input.CreatorLogicGateRaciRole != "" {
-		role, ok := NormalizeLogicGateRaciRole(input.CreatorLogicGateRaciRole)
+	if input.CreatorLogicGateGVICRole != "" {
+		role, ok := NormalizeGVICRole(input.CreatorLogicGateGVICRole)
 		if !ok {
 			return RacioMatrixNodeCreateInput{}, ErrInvalid
 		}
-		input.CreatorLogicGateRaciRole = role
+		input.CreatorLogicGateGVICRole = role
 	}
 	policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
 	if !ok {
@@ -179,8 +179,8 @@ func NormalizeLogicGateAssignmentStatusTitle(status string) string {
 		return "Pending"
 	case "in progress", "inprogress", "ip":
 		return "In Progress"
-	case "verify", "verification", "v":
-		return "Verify"
+	case "review":
+		return "Review"
 	case "done", "d":
 		return "Done"
 	default:

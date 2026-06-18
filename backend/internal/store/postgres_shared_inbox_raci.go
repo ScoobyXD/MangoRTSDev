@@ -320,10 +320,43 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx contex
 		return nil, err
 	}
 	for index := range folders {
-		if folders[index].FolderKind != "communications" || normalizeCommunicationsSharedInboxEntryType(folders[index].EntryType, folders[index].AccountEmail != nil || folders[index].SharedInboxID != "") != CommunicationsSharedInboxEntryTypeSharedInbox {
+		if folders[index].FolderKind != "communications" {
 			continue
 		}
-		folders[index].RaciAssignments = assignments[folders[index].FolderID]
+		if normalizeCommunicationsSharedInboxEntryType(folders[index].EntryType, folders[index].AccountEmail != nil || folders[index].SharedInboxID != "") == CommunicationsSharedInboxEntryTypeSharedInbox {
+			folders[index].RaciAssignments = assignments[folders[index].FolderID]
+		}
+		gvicResourceType := CommunicationsSharedInboxGVICResourceType(folders[index])
+		gvicAssignments, err := postgresResourceGVICAssignmentsForResource(ctx, r.db, resourceGVICKey{
+			companyID:    companyID,
+			resourceType: gvicResourceType,
+			resourceID:   folders[index].FolderID,
+		})
+		if err != nil {
+			if isPostgresUndefinedTable(err, "resource_gvic_assignments") || isPostgresUndefinedColumn(err, "") {
+				continue
+			}
+			return nil, err
+		}
+		if len(gvicAssignments) == 0 {
+			fallbackResourceType := EntityTypeSharedInbox
+			if gvicResourceType == EntityTypeSharedInbox {
+				fallbackResourceType = EntityTypeSharedTriageFolder
+			}
+			fallbackAssignments, err := postgresResourceGVICAssignmentsForResource(ctx, r.db, resourceGVICKey{
+				companyID:    companyID,
+				resourceType: fallbackResourceType,
+				resourceID:   folders[index].FolderID,
+			})
+			if err != nil {
+				if isPostgresUndefinedTable(err, "resource_gvic_assignments") || isPostgresUndefinedColumn(err, "") {
+					continue
+				}
+				return nil, err
+			}
+			gvicAssignments = fallbackAssignments
+		}
+		folders[index].GVICAssignments = gvicAssignments
 	}
 	return folders, nil
 }

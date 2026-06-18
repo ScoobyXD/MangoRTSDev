@@ -39,14 +39,14 @@ describe("deepLinkRoutes", () => {
   });
 
   it("round-trips RACIO node routes with existing role and view IDs", () => {
-    assert.equal(racioViewIDForRole("responsible"), "r-inbox");
-    assert.equal(racioRoleForViewID("r-inbox"), "responsible");
+    assert.equal(racioViewIDForRole("generated"), "r-inbox");
+    assert.equal(racioRoleForViewID("r-inbox"), "generated");
 
-    const path = buildRacioRoute("responsible", "node-1");
-    assert.equal(path, "/racio/responsible/nodes/node-1");
+    const path = buildRacioRoute("generated", "node-1");
+    assert.equal(path, "/racio/generated/nodes/node-1");
     assert.deepEqual(parseDeepLinkRoute(path), {
       kind: "racio",
-      role: "responsible",
+      role: "generated",
       viewID: "r-inbox",
       nodeID: "node-1",
     });
@@ -55,7 +55,7 @@ describe("deepLinkRoutes", () => {
   it("accepts RACIO view IDs as aliases for existing role IDs", () => {
     assert.deepEqual(parseDeepLinkRoute("/racio/a-inbox/nodes/node-2"), {
       kind: "racio",
-      role: "accountable",
+      role: "verified",
       viewID: "a-inbox",
       nodeID: "node-2",
     });

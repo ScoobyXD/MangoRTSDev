@@ -287,7 +287,7 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleConsulted,
+			Role:   domain.GVICRoleConsulted,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -304,7 +304,7 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleConsulted,
+			Role:   domain.GVICRoleConsulted,
 			UserID: responsible.UserID,
 		}},
 	})

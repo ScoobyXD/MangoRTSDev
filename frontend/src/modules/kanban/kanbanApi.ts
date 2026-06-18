@@ -239,13 +239,12 @@ export async function createRacioMatrixNode(args: {
       title: args.title,
       logic_gate_id: args.logicGateID,
       create_logic_gate_header: args.createLogicGateHeader,
-      creator_logic_gate_raci_role: args.creatorLogicGateRaciRole,
+      creator_logic_gate_gvic_role: args.creatorLogicGateRaciRole,
       mutation_origin: "matrix",
       status: args.status ?? args.columnID,
       priority: args.priority,
       position: args.position,
       is_issue: args.isIssue,
-      assignee_policy: "first_responsible",
     },
   });
   if (payload.logic_gate?.logic_gate_id) {
@@ -287,7 +286,6 @@ export async function assignNodeToLogicGateStatus(args: {
       mutation_origin: args.mutationOrigin ?? "matrix",
       position: args.position,
       is_issue: args.isIssue,
-      assignee_policy: "first_responsible",
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
@@ -317,7 +315,6 @@ export async function moveLogicGateAssignment(args: {
         mutation_origin: args.mutationOrigin ?? "matrix",
         position: args.position,
         priority: args.priority,
-        assignee_policy: args.assigneePolicy,
       },
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
@@ -335,7 +332,6 @@ export async function moveLogicGateAssignment(args: {
       mutation_origin: args.mutationOrigin ?? "matrix",
       position: args.position,
       priority: args.priority,
-      assignee_policy: args.assigneePolicy,
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
@@ -356,7 +352,6 @@ export async function removeLogicGateAssignment(args: {
     const params = query({
       company_id: args.companyID,
       fallback_status: args.fallbackStatus ?? undefined,
-      fallback_status_color: args.fallbackStatusColor ?? undefined,
     });
     const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/nodes/${encodeURIComponent(args.nodeID)}?${params}`, {
       method: "DELETE",
@@ -372,7 +367,6 @@ export async function removeLogicGateAssignment(args: {
       logic_gate_id: args.logicGateID,
       node_id: args.nodeID,
       fallback_status: args.fallbackStatus,
-      fallback_status_color: args.fallbackStatusColor,
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);

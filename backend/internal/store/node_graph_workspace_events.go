@@ -27,40 +27,54 @@ func nodeUpdatedWorkspaceEventInput(item domain.Node) DomainEventInput {
 	return workspaceDomainEventInput(item.CompanyID, "node_updated", map[string]any{"node_id": item.NodeID, "node": item})
 }
 
-func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, after domain.Node) DomainEventInput {
+func nodeUpdatedWorkspaceEventInputForUpdate(input UpdateNodeInput, before, after domain.Node, beforeGeneratedUserIDs, afterGeneratedUserIDs []string) DomainEventInput {
 	event := nodeUpdatedWorkspaceEventInput(after)
 	event.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	payload := event.Payload
-	payload["node_title"] = strings.TrimSpace(after.Title)
-	if assigneeUserID := nodeAssigneeUserID(after); assigneeUserID != "" {
-		payload["assignee_user_id"] = assigneeUserID
-	}
+	payload["node_name"] = strings.TrimSpace(after.Title)
 	if actorLabel := strings.TrimSpace(input.ActorDisplayName); actorLabel != "" {
 		payload["actor_display_name"] = actorLabel
 	}
 
-	afterAssignee := nodeAssigneeUserID(after)
-	beforeAssignee := nodeAssigneeUserID(before)
-	if input.AssigneeUserIDSet && afterAssignee != "" && afterAssignee != beforeAssignee {
+	newGeneratedUserIDs := nodeNotificationNewUserIDs(beforeGeneratedUserIDs, afterGeneratedUserIDs)
+	if input.AssigneeUserIDSet && len(newGeneratedUserIDs) > 0 {
 		payload["notification_event_type"] = domain.NotificationEventNodeAssigned
-		payload["recipient_user_ids"] = []string{afterAssignee}
-		payload["assignee_changed"] = true
-		if beforeAssignee != "" {
-			payload["previous_assignee_user_id"] = beforeAssignee
-		}
+		payload["recipient_user_ids"] = newGeneratedUserIDs
+		payload["gvic_generated_changed"] = true
 		return event
 	}
 
 	changedFields := nodeNotificationChangedFields(input, before, after)
-	if afterAssignee != "" && len(changedFields) > 0 {
+	if len(afterGeneratedUserIDs) > 0 && len(changedFields) > 0 {
 		payload["notification_event_type"] = domain.NotificationEventNodeFieldsChanged
-		payload["recipient_user_ids"] = []string{afterAssignee}
+		payload["recipient_user_ids"] = afterGeneratedUserIDs
 		payload["changed_fields"] = changedFields
 		if input.StatusSet {
 			payload["status"] = nodeOptionalString(after.Status)
 		}
 	}
 	return event
+}
+
+func nodeNotificationNewUserIDs(before, after []string) []string {
+	beforeSet := map[string]bool{}
+	for _, userID := range before {
+		userID = strings.TrimSpace(userID)
+		if userID != "" {
+			beforeSet[userID] = true
+		}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, userID := range after {
+		userID = strings.TrimSpace(userID)
+		if userID == "" || seen[userID] || beforeSet[userID] {
+			continue
+		}
+		seen[userID] = true
+		out = append(out, userID)
+	}
+	return out
 }
 
 func nodeAssigneeUserID(node domain.Node) string {

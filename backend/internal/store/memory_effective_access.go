@@ -101,6 +101,21 @@ func (r *MemoryRepo) recomputeLogicGateAssignedNodeVisibilityLocked(companyID st
 	if companyID == "" {
 		return ErrInvalid
 	}
+	keys := make([]resourceGVICKey, 0)
+	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			keys = append(keys, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
+		}
+	}
+	for _, logicGateID := range logicGateIDs {
+		logicGateID = strings.TrimSpace(logicGateID)
+		if logicGateID != "" {
+			keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
+			keys = append(keys, r.affectedGVICResourceKeysLocked(keyValue)...)
+		}
+	}
+	r.syncResourceGVICEffectiveAssignmentsLocked(keys)
 	return nil
 }
 
@@ -108,6 +123,7 @@ func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForCompanyLocked(comp
 	if strings.TrimSpace(companyID) == "" {
 		return ErrInvalid
 	}
+	r.syncGVICGroupDependentResourcesLocked(companyID)
 	return nil
 }
 
@@ -289,6 +305,21 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 			return false
 		}
 		hasOverride := r.resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID)
+		if defaultAccess == ResourceDefaultAccessEdit && hasOverride {
+			return false
+		}
+		if defaultAccess == ResourceDefaultAccessNoAccess && !hasOverride {
+			return false
+		}
+		for _, assignment := range r.gvicEffectiveAssignments {
+			if assignment.CompanyID != companyID || assignment.UserID != userID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID {
+				continue
+			}
+			gvicAccess, ok := GVICRoleAccessLevel(assignment.Role)
+			if ok && EntityPermissionSatisfies(gvicAccess, accessLevel) {
+				return true
+			}
+		}
 		return (defaultAccess == ResourceDefaultAccessEdit) != hasOverride
 	default:
 		return false

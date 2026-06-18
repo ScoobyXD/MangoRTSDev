@@ -29,8 +29,8 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 	assertWorkItemAssignmentSemanticEvent(t, assigned.Events, WorkItemLogicGateAssignmentSavedEventType, companyID, logicGate.LogicGateID, node.NodeID, assigned.Assignment.AssignmentID)
 	assertKanbanEventCardColumn(t, assigned.Events[1], LogicGateWorkStatusInProgress)
 	payload := assigned.Events[0].Payload
-	if payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || payload["assignee_user_id"] != actorUserID {
-		t.Fatalf("saved payload = %+v, want status/priority/assignee from source state", payload)
+	if payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || payload["assignee_user_id"] != nil {
+		t.Fatalf("saved payload = %+v, want status/priority source state and no assignee", payload)
 	}
 	if assigned.Events[0].ActorUserID == nil || *assigned.Events[0].ActorUserID != actorUserID || payload["actor_user_id"] != actorUserID || payload["idempotency_key"] != "assign-key" {
 		t.Fatalf("saved actor/idempotency = actor=%+v payload=%+v", assigned.Events[0].ActorUserID, payload)
@@ -185,7 +185,7 @@ func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo,
 	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: user.UserID}},
+		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}

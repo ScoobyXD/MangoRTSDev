@@ -61,15 +61,16 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     if (path.startsWith("/v1/communications/shared-inboxes?")) {
       return jsonResponse({ shared_inboxes: [sharedInbox("shared-1", { name: "Business" })] });
     }
-    if (path.endsWith("/raci")) {
+    if (path === "/v1/resources/shared_inbox/shared-1/gvic") {
       return jsonResponse({
-        raci_assignments: [
+        gvic_assignments: [
           {
             company_id: "company-1",
-            folder_id: "shared-1",
-            role: "responsible",
-            subject_type: "user",
-            subject_id: "user-1",
+            resource_type: "shared_inbox",
+            resource_id: "shared-1",
+            role: "generated",
+            principal_type: "user",
+            principal_id: "user-1",
             user_id: "user-1",
             created_timestamp: "2026-05-20T00:00:00.000Z",
           },
@@ -85,13 +86,13 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const listed = await listCommunicationsSharedInboxes(" company-1 ");
     const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
-    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" }]);
+    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "generated", subject_type: "user", subject_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
 
     assert.equal(listed[0]?.name, "Business");
     assert.equal(created.folder_id, "shared-2");
     assert.equal(updated.folder_id, "shared-1");
-    assert.deepEqual(access.map((item) => [item.role, item.subject_type, item.subject_id, item.user_id]), [["responsible", "user", "user-1", "user-1"]]);
+    assert.deepEqual(access.map((item) => [item.role, item.subject_type, item.subject_id, item.user_id]), [["generated", "user", "user-1", "user-1"]]);
     assert.deepEqual(calls, [
       {
         path: "/v1/communications/shared-inboxes?company_id=company-1",
@@ -109,9 +110,9 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
         body: { company_id: "company-1", name: "Client Facing" },
       },
       {
-        path: "/v1/communications/shared-inboxes/shared-1/raci",
+        path: "/v1/resources/shared_inbox/shared-1/gvic",
         method: "PUT",
-        body: { company_id: "company-1", assignments: [{ role: "responsible", subject_type: "user", subject_id: "user-1", user_id: "user-1" }] },
+        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
       },
       {
         path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
@@ -517,7 +518,7 @@ test("message page cache is scoped to the active auth session", async () => {
   }
 });
 
-test("logic gate RACI helpers call add and remove command endpoints", async () => {
+test("logic gate GVIC helpers call add and remove command endpoints", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
@@ -530,11 +531,14 @@ test("logic gate RACI helpers call add and remove command endpoints", async () =
     return jsonResponse({
       operation: input.toString().endsWith("/remove") ? "remove" : "add",
       changed: true,
-      raci_assignments: [
+      gvic_assignments: [
         {
           company_id: "company-1",
-          logic_gate_id: "gate 1",
-          role: "responsible",
+          resource_type: "logic_gate",
+          resource_id: "gate 1",
+          role: "generated",
+          principal_type: "user",
+          principal_id: "user-1",
           user_id: "user-1",
           created_timestamp: "2026-05-20T00:00:00.000Z",
         },
@@ -542,22 +546,22 @@ test("logic gate RACI helpers call add and remove command endpoints", async () =
     });
   };
   try {
-    const addResult = await addLogicGateRaciAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
-    const removeResult = await removeLogicGateRaciAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    const addResult = await addLogicGateRaciAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
+    const removeResult = await removeLogicGateRaciAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
     assert.deepEqual(calls, [
       {
-        path: "/v1/logic-gates/gate%201/raci/add",
+        path: "/v1/resources/logic_gate/gate%201/gvic/add",
         method: "POST",
-        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
       },
       {
-        path: "/v1/logic-gates/gate%201/raci/remove",
+        path: "/v1/resources/logic_gate/gate%201/gvic/remove",
         method: "POST",
-        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
       },
     ]);
-    assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
-    assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
+    assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);
+    assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

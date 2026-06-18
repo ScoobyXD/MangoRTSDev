@@ -173,10 +173,10 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")
 	responsibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Work item responsible node")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleResponsible, UserID: viewer.UserID}})
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: viewer.UserID}})
 	mustAssignVisibleQueryNodeToGate(t, repo, companyID, responsibleGate.LogicGateID, responsibleNode.NodeID)
 	aciGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item ACI")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.LogicGateRaciRoleAccountable, UserID: viewer.UserID}})
+	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: viewer.UserID}})
 
 	sharedFolders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {

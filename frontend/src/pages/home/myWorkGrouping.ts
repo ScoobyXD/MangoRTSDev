@@ -349,8 +349,8 @@ export function priorityLabel(priority: number): string {
 }
 
 export function raciRoleLabel(role: LogicGateRaciRole): string {
-  if (role === "responsible") return "Responsible";
-  if (role === "accountable") return "Accountable";
+  if (role === "generated") return "generated";
+  if (role === "verified") return "verified";
   if (role === "consulted") return "Consulted";
   return "Informed";
 }
@@ -363,7 +363,7 @@ function statusLabel(value: string): string {
   const normalized = normalizeStatus(value);
   if (normalized === "in_progress") return "In Progress";
   if (normalized === "pending") return "Pending";
-  if (normalized === "verify") return "Verify";
+  if (normalized === "review") return "Review";
   if (normalized === "done") return "Done";
   return value.trim().replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
@@ -372,14 +372,14 @@ function statusSortValue(value: string): number | string {
   const normalized = normalizeStatus(value);
   if (normalized === "pending") return 1;
   if (normalized === "in_progress") return 2;
-  if (normalized === "verify") return 3;
+  if (normalized === "review") return 3;
   if (normalized === "done") return 4;
   return normalized;
 }
 
 function raciRoleSort(role: LogicGateRaciRole): number {
-  if (role === "responsible") return 1;
-  if (role === "accountable") return 2;
+  if (role === "generated") return 1;
+  if (role === "verified") return 2;
   if (role === "consulted") return 3;
   return 4;
 }

@@ -285,7 +285,7 @@ func TestAuthMiddlewareAllowsCompanyUserGrantedEntityAccess(t *testing.T) {
 		t.Fatalf("unassigned status = %d, want %d, body=%s", unassignedRes.Code, http.StatusOK, strings.TrimSpace(unassignedRes.Body.String()))
 	}
 
-	writeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+assignedNode.NodeID, strings.NewReader(`{"company_id":"`+companyID+`","title":"allowed"}`))
+	writeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+assignedNode.NodeID, strings.NewReader(`{"company_id":"`+companyID+`","name":"allowed"}`))
 	writeReq.Header.Set("Authorization", token)
 	writeRes := httptest.NewRecorder()
 	handler.ServeHTTP(writeRes, writeReq)
@@ -317,7 +317,7 @@ func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/nodes?company_id="+allowedCompanyID,
-		strings.NewReader(`{"company_id":"`+deniedCompanyID+`","title":"blocked"}`),
+		strings.NewReader(`{"company_id":"`+deniedCompanyID+`","name":"blocked"}`),
 	)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "dev@example.com"))
 	res := httptest.NewRecorder()

@@ -23,9 +23,9 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 	createRec := httptest.NewRecorder()
 	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes", map[string]any{
 		"company_id":                   companyID,
-		"title":                        "Matrix-created node",
+		"name":                         "Matrix-created node",
 		"create_logic_gate_header":     "Matrix-created gate",
-		"creator_logic_gate_raci_role": domain.LogicGateRaciRoleResponsible,
+		"creator_logic_gate_gvic_role": domain.GVICRoleGenerated,
 		"priority":                     3,
 		"status":                       "pending",
 		"position":                     10,
@@ -59,7 +59,7 @@ func TestRacioMatrixNodeCreateAndMoveV2(t *testing.T) {
 		CompanyID:                companyID,
 		Title:                    "Target gate seed node",
 		CreateLogicGateHeader:    "Target gate",
-		CreatorLogicGateRaciRole: domain.LogicGateRaciRoleResponsible,
+		CreatorLogicGateGVICRole: domain.GVICRoleGenerated,
 		Priority:                 testPriority(2),
 		PrioritySet:              true,
 		Status:                   "pending",
@@ -124,7 +124,7 @@ func TestRacioMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -137,30 +137,37 @@ func TestRacioMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
 
 	createRec := httptest.NewRecorder()
 	createReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/racio-matrix/nodes", map[string]any{
-		"company_id":      companyID,
-		"title":           "Creator-owned node",
-		"logic_gate_id":   logicGate.LogicGateID,
-		"priority":        3,
-		"status":          "pending",
-		"assignee_policy": "first_responsible",
+		"company_id":    companyID,
+		"name":          "Creator-owned node",
+		"logic_gate_id": logicGate.LogicGateID,
+		"priority":      3,
+		"status":        "pending",
 	}, creator, companyID)
 	handler.ServeHTTP(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s, want 201", createRec.Code, createRec.Body.String())
 	}
 	payload := decodeRacioMatrixNodeCreatePayloadForTest(t, createRec)
-	if payload.Node.AssigneeUserID == nil || *payload.Node.AssigneeUserID != creator.UserID {
-		t.Fatalf("created node assignee = %+v, want creator %s", payload.Node.AssigneeUserID, creator.UserID)
+	if payload.Node.AssigneeUserID != nil || payload.Node.AssigneeName != nil || payload.Node.AssigneeEmail != nil {
+		t.Fatalf("created node exposes assignee fields = %+v, want hidden assignee fields", payload.Node)
 	}
 	loaded, err := repo.GetNode(companyID, payload.Node.NodeID)
 	if err != nil {
 		t.Fatalf("GetNode: %v", err)
 	}
-	if loaded.AssigneeUserID == nil || *loaded.AssigneeUserID != creator.UserID {
-		t.Fatalf("stored node assignee = %+v, want creator %s", loaded.AssigneeUserID, creator.UserID)
+	if loaded.AssigneeUserID != nil || loaded.AssigneeName != nil || loaded.AssigneeEmail != nil {
+		t.Fatalf("stored node exposes assignee fields = %+v, want hidden assignee fields", loaded)
 	}
-	if *loaded.AssigneeUserID == responsible.UserID {
-		t.Fatalf("stored node assignee = responsible user, want creator")
+	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, store.EntityTypeNode, payload.Node.NodeID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments: %v", err)
+	}
+	if len(effective) != 1 ||
+		effective[0].Role != domain.GVICRoleGenerated ||
+		effective[0].UserID != responsible.UserID ||
+		effective[0].SourceResourceType != store.EntityTypeLogicGate ||
+		effective[0].InheritanceType != store.GVICInheritanceLogicGateInherited {
+		t.Fatalf("effective node GVIC = %+v, want inherited generated assignment from logic gate", effective)
 	}
 }
 

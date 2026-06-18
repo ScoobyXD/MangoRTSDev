@@ -131,7 +131,7 @@ func TestRacioMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 		ActorUserID:    user.UserID,
 		IdempotencyKey: "racio-add-event-row",
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
@@ -188,7 +188,7 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	})
@@ -207,7 +207,7 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	})
@@ -238,7 +238,7 @@ func TestRacioMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *t
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
@@ -294,7 +294,7 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 		NodeID:                   nodeID,
 		Title:                    "RACIO matrix new gate node",
 		CreateLogicGateHeader:    "RACIO matrix new gate",
-		CreatorLogicGateRaciRole: domain.LogicGateRaciRoleResponsible,
+		CreatorLogicGateGVICRole: domain.GVICRoleGenerated,
 		Status:                   LogicGateWorkStatusPending,
 		Priority:                 &priority,
 		PrioritySet:              true,
@@ -315,7 +315,7 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 	kanbanRows := eventRowsOfTypeForTest(rows, EventTypeKanbanProjectionDelta)
 	racioRows := eventRowsOfTypeForTest(rows, EventTypeRacioProjectionDelta)
 	if len(kanbanRows) != 1 || len(racioRows) != 1 {
-		t.Fatalf("event rows = %+v, want one Kanban row and one RACIO row for the created logic-gate projection", rows)
+		t.Fatalf("event rows = %+v, want one Kanban row and one RACIO row for created logic-gate projection", rows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
 	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
@@ -344,7 +344,7 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 		LogicGateID: logicGate.LogicGateID,
 		ActorUserID: user.UserID,
 		Assignments: []LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {

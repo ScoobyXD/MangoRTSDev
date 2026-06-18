@@ -145,7 +145,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPerm
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"assignments": []map[string]string{
-			{"role": domain.LogicGateRaciRoleResponsible, "user_id": user.UserID},
+			{"role": domain.GVICRoleGenerated, "user_id": user.UserID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))

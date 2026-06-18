@@ -221,7 +221,7 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 }
 
-func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
+func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -260,52 +260,59 @@ func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
-		"assignments": []map[string]string{
-			{"role": "responsible", "user_id": responsible.UserID},
-			{"role": "accountable", "user_id": accountable.UserID},
-			{"role": "accountable", "user_id": accountable.UserID},
+		"gvic_assignments": []map[string]string{
+			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
+			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT logic gate raci status = %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("PUT logic gate GVIC status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Assignments []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+		Assignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
+		Effective   []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode raci payload: %v", err)
+		t.Fatalf("decode GVIC payload: %v", err)
 	}
 	if len(payload.Assignments) != 2 {
 		t.Fatalf("assignment count = %d, want 2", len(payload.Assignments))
 	}
-	if payload.Assignments[0].Role != domain.LogicGateRaciRoleResponsible || payload.Assignments[0].UserDisplayName != "Responsible User" {
-		t.Fatalf("responsible assignment = %+v", payload.Assignments[0])
+	if payload.Assignments[0].Role != domain.GVICRoleGenerated ||
+		payload.Assignments[0].PrincipalType != store.EntityPermissionSubjectUser ||
+		payload.Assignments[0].PrincipalID != responsible.UserID ||
+		payload.Assignments[0].UserDisplayName != "Responsible User" {
+		t.Fatalf("generated assignment = %+v", payload.Assignments[0])
+	}
+	if len(payload.Effective) != 2 {
+		t.Fatalf("effective assignment count = %d, want 2", len(payload.Effective))
 	}
 
 	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
 	if err != nil {
 		t.Fatalf("GetLogicGateDetails() error = %v", err)
 	}
-	if len(details.LogicGate.RaciAssignments) != 2 {
-		t.Fatalf("details raci assignments = %+v, want 2 assignments", details.LogicGate.RaciAssignments)
+	if len(details.LogicGate.GVICAssignments) != 2 {
+		t.Fatalf("details GVIC assignments = %+v, want 2 assignments", details.LogicGate.GVICAssignments)
 	}
 	logicGates, err := repo.ListLogicGates(companyID)
 	if err != nil {
 		t.Fatalf("ListLogicGates() error = %v", err)
 	}
-	if len(logicGates) != 1 || len(logicGates[0].RaciAssignments) != 2 {
-		t.Fatalf("listed logic gates = %+v, want raci read model", logicGates)
+	if len(logicGates) != 1 || len(logicGates[0].GVICAssignments) != 2 {
+		t.Fatalf("listed logic gates = %+v, want GVIC read model", logicGates)
 	}
 	assigned, err := repo.QueryLogicGates(companyID, store.LogicGateQuery{AssignedUserID: accountable.UserID})
 	if err != nil {
 		t.Fatalf("QueryLogicGates assigned error = %v", err)
 	}
-	if len(assigned) != 1 || assigned[0].LogicGateID != logicGate.LogicGateID || len(assigned[0].RaciAssignments) != 2 {
-		t.Fatalf("assigned logic gates = %+v, want gate with raci read model", assigned)
+	if len(assigned) != 1 || assigned[0].LogicGateID != logicGate.LogicGateID || len(assigned[0].GVICAssignments) != 2 {
+		t.Fatalf("assigned logic gates = %+v, want gate with GVIC read model", assigned)
 	}
 	searchReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates?company_id="+companyID+"&q=approval&limit=5", nil)
 	searchRec := httptest.NewRecorder()
@@ -325,16 +332,30 @@ func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
 
 	outsiderBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
-		"assignments": []map[string]string{
-			{"role": "consulted", "user_id": outsider.UserID},
+		"gvic_assignments": []map[string]string{
+			{"role": domain.GVICRoleConsulted, "principal_type": store.EntityPermissionSubjectUser, "principal_id": outsider.UserID},
 		},
 	})
-	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(outsiderBody))
+	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(outsiderBody))
 	outsiderReq.Header.Set("Content-Type", "application/json")
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
-	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "raci_user_not_in_company") {
-		t.Fatalf("PUT outsider raci status = %d body=%s, want raci_user_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "gvic_principal_not_in_company") {
+		t.Fatalf("PUT outsider GVIC status = %d body=%s, want gvic_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	}
+
+	legacyRoleBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"gvic_assignments": []map[string]string{
+			{"role": "responsible", "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+		},
+	})
+	legacyRoleReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(legacyRoleBody))
+	legacyRoleReq.Header.Set("Content-Type", "application/json")
+	legacyRoleRec := httptest.NewRecorder()
+	handler.ServeHTTP(legacyRoleRec, legacyRoleReq)
+	if legacyRoleRec.Code != http.StatusBadRequest || !strings.Contains(legacyRoleRec.Body.String(), "invalid_gvic_assignments") {
+		t.Fatalf("PUT legacy role GVIC status = %d body=%s, want invalid_gvic_assignments", legacyRoleRec.Code, legacyRoleRec.Body.String())
 	}
 }
 
@@ -690,7 +711,7 @@ func TestUpdateNodeTitleViaPut(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"company_id": companyID,
-		"title":      "new title",
+		"name":       "new title",
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -727,7 +748,7 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"company_id": companyID,
-		"title":      "Creator assigned node",
+		"name":       "Creator assigned node",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -742,19 +763,32 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created node: %v", err)
 	}
-	if created.AssigneeUserID == nil || *created.AssigneeUserID != creator.UserID || created.AssigneeName == nil || *created.AssigneeName != "Creator User" {
-		t.Fatalf("created node assignee = %+v, want creator", created)
+	if created.AssigneeUserID != nil || created.AssigneeName != nil || created.AssigneeEmail != nil {
+		t.Fatalf("created node exposes assignee fields = %+v, want hidden assignee fields", created)
 	}
-	details, err := repo.GetNodeDetails(companyID, created.NodeID)
+	configured, err := repo.ListResourceGVICAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
-		t.Fatalf("GetNodeDetails() error = %v", err)
+		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
 	}
-	if details.Node.AssigneeUserID == nil || *details.Node.AssigneeUserID != creator.UserID {
-		t.Fatalf("details node assignee = %+v, want creator", details.Node)
+	if len(configured) != 1 ||
+		configured[0].Role != domain.GVICRoleGenerated ||
+		configured[0].PrincipalType != store.EntityPermissionSubjectUser ||
+		configured[0].PrincipalID != creator.UserID {
+		t.Fatalf("configured node GVIC = %+v, want creator generated source row", configured)
+	}
+	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, store.EntityTypeNode, created.NodeID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments() error = %v", err)
+	}
+	if len(effective) != 1 ||
+		effective[0].Role != domain.GVICRoleGenerated ||
+		effective[0].UserID != creator.UserID ||
+		effective[0].InheritanceType != store.GVICInheritanceDirect {
+		t.Fatalf("effective node GVIC = %+v, want creator generated direct row", effective)
 	}
 }
 
-func TestUpdateNodeAssigneeRequiresCompanyMembership(t *testing.T) {
+func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -784,66 +818,71 @@ func TestUpdateNodeAssigneeRequiresCompanyMembership(t *testing.T) {
 	}
 
 	assignBody, _ := json.Marshal(map[string]any{
-		"company_id":       companyID,
-		"assignee_user_id": assignee.UserID,
+		"company_id": companyID,
+		"gvic_assignments": []map[string]string{{
+			"role":           domain.GVICRoleGenerated,
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   assignee.UserID,
+		}},
 	})
-	assignReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(assignBody))
+	assignReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+node.NodeID+"/gvic", bytes.NewReader(assignBody))
 	assignReq.Header.Set("Content-Type", "application/json")
 	assignRec := httptest.NewRecorder()
 	handler.ServeHTTP(assignRec, assignReq)
 	if assignRec.Code != http.StatusOK {
-		t.Fatalf("PUT node assignee status = %d body=%s", assignRec.Code, assignRec.Body.String())
+		t.Fatalf("PUT node GVIC status = %d body=%s", assignRec.Code, assignRec.Body.String())
 	}
 	var assigned struct {
-		AssigneeUserID *string `json:"assignee_user_id"`
-		AssigneeName   *string `json:"assignee_name"`
-		AssigneeEmail  *string `json:"assignee_email"`
+		GVICAssignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
+		Effective       []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(assignRec.Body).Decode(&assigned); err != nil {
-		t.Fatalf("decode assigned node: %v", err)
+		t.Fatalf("decode assigned GVIC: %v", err)
 	}
-	if assigned.AssigneeUserID == nil || *assigned.AssigneeUserID != assignee.UserID || assigned.AssigneeName == nil || *assigned.AssigneeName != "Assignee User" || assigned.AssigneeEmail == nil || *assigned.AssigneeEmail != "assignee@example.com" {
-		t.Fatalf("assigned node = %+v, want assignee read model", assigned)
-	}
-	details, err := repo.GetNodeDetails(companyID, node.NodeID)
-	if err != nil {
-		t.Fatalf("GetNodeDetails() error = %v", err)
-	}
-	if details.Node.AssigneeName == nil || *details.Node.AssigneeName != "Assignee User" {
-		t.Fatalf("details node assignee = %+v, want enriched assignee", details.Node)
+	if len(assigned.GVICAssignments) != 1 ||
+		assigned.GVICAssignments[0].Role != domain.GVICRoleGenerated ||
+		assigned.GVICAssignments[0].PrincipalID != assignee.UserID ||
+		len(assigned.Effective) != 1 ||
+		assigned.Effective[0].UserID != assignee.UserID {
+		t.Fatalf("assigned GVIC = %+v effective=%+v, want generated assignee", assigned.GVICAssignments, assigned.Effective)
 	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
-		"company_id":       companyID,
-		"assignee_user_id": outsider.UserID,
+		"company_id": companyID,
+		"gvic_assignments": []map[string]string{{
+			"role":           domain.GVICRoleGenerated,
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   outsider.UserID,
+		}},
 	})
-	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(outsiderBody))
+	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+node.NodeID+"/gvic", bytes.NewReader(outsiderBody))
 	outsiderReq.Header.Set("Content-Type", "application/json")
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
-	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "assignee_user_not_in_company") {
-		t.Fatalf("PUT outsider assignee status = %d body=%s, want assignee_user_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "gvic_principal_not_in_company") {
+		t.Fatalf("PUT outsider GVIC status = %d body=%s, want gvic_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
 	}
 
 	clearBody, _ := json.Marshal(map[string]any{
 		"company_id":       companyID,
-		"assignee_user_id": nil,
+		"gvic_assignments": []map[string]string{},
 	})
-	clearReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(clearBody))
+	clearReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+node.NodeID+"/gvic", bytes.NewReader(clearBody))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearRec := httptest.NewRecorder()
 	handler.ServeHTTP(clearRec, clearReq)
 	if clearRec.Code != http.StatusOK {
-		t.Fatalf("PUT clear assignee status = %d body=%s", clearRec.Code, clearRec.Body.String())
+		t.Fatalf("PUT clear GVIC status = %d body=%s", clearRec.Code, clearRec.Body.String())
 	}
 	var cleared struct {
-		AssigneeUserID *string `json:"assignee_user_id"`
+		GVICAssignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
+		Effective       []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(clearRec.Body).Decode(&cleared); err != nil {
-		t.Fatalf("decode cleared node: %v", err)
+		t.Fatalf("decode cleared GVIC: %v", err)
 	}
-	if cleared.AssigneeUserID != nil {
-		t.Fatalf("cleared assignee_user_id = %v, want nil", *cleared.AssigneeUserID)
+	if len(cleared.GVICAssignments) != 0 || len(cleared.Effective) != 0 {
+		t.Fatalf("cleared GVIC = %+v effective=%+v, want none", cleared.GVICAssignments, cleared.Effective)
 	}
 }
 
@@ -2355,8 +2394,8 @@ func TestWorkspaceEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T)
 		"company_id":"` + companyID + `",
 		"entity_kind":"node",
 		"items":[
-			{"client_id":"copied-a","title":"Copied A","x":120,"y":240},
-			{"client_id":"copied-b","title":"Copied B","x":320,"y":240}
+			{"client_id":"copied-a","name":"Copied A","x":120,"y":240},
+			{"client_id":"copied-b","name":"Copied B","x":320,"y":240}
 		],
 		"relationships":[
 			{"client_id_a":"copied-a","client_id_b":"copied-b","a_position":"Peer","b_position":"Peer"}
@@ -2376,7 +2415,7 @@ func TestWorkspaceEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T)
 		} `json:"entity_mappings"`
 		Nodes []struct {
 			NodeID string `json:"node_id"`
-			Title  string `json:"title"`
+			Name   string `json:"name"`
 		} `json:"nodes"`
 		Relationships []struct {
 			NodeIDA string `json:"node_id_a"`
@@ -2433,7 +2472,7 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 		"entity_kind": "node",
 		"items": []map[string]any{{
 			"client_id": "created-child",
-			"title":     "Created child",
+			"name":      "Created child",
 			"x":         120,
 			"y":         240,
 		}},
@@ -2467,18 +2506,21 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 		t.Fatalf("batch response counts: nodes=%d relationships=%d, want 1 each", len(payload.Nodes), len(payload.Relationships))
 	}
 	created := payload.Nodes[0]
-	if created.AssigneeUserID == nil || *created.AssigneeUserID != creator.UserID || created.AssigneeName == nil || *created.AssigneeName != "Batch Creator" {
-		t.Fatalf("created batch node assignee = %+v, want creator", created)
+	if created.AssigneeUserID != nil || created.AssigneeName != nil || created.AssigneeEmail != nil {
+		t.Fatalf("created batch node exposes assignee fields = %+v, want hidden assignee fields", created)
 	}
 	if payload.Relationships[0].NodeIDA != source.NodeID || payload.Relationships[0].NodeIDB != created.NodeID {
 		t.Fatalf("batch relationship = %+v, want source parent to created child %s", payload.Relationships[0], created.NodeID)
 	}
-	details, err := repo.GetNodeDetails(companyID, created.NodeID)
+	configured, err := repo.ListResourceGVICAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
-		t.Fatalf("GetNodeDetails() error = %v", err)
+		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
 	}
-	if details.Node.AssigneeUserID == nil || *details.Node.AssigneeUserID != creator.UserID {
-		t.Fatalf("details node assignee = %+v, want creator", details.Node)
+	if len(configured) != 1 ||
+		configured[0].Role != domain.GVICRoleGenerated ||
+		configured[0].PrincipalType != store.EntityPermissionSubjectUser ||
+		configured[0].PrincipalID != creator.UserID {
+		t.Fatalf("configured batch node GVIC = %+v, want creator generated source row", configured)
 	}
 }
 
@@ -2601,7 +2643,7 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) 
 	body, _ := json.Marshal(map[string]any{
 		"company_id":                   companyID,
 		"entity_kind":                  "logic_gate",
-		"creator_logic_gate_raci_role": "responsible",
+		"creator_logic_gate_gvic_role": "generated",
 		"items": []map[string]any{{
 			"client_id": "created-gate",
 			"title":     "Created gate",
@@ -2645,19 +2687,19 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) 
 	if activeFolderID == "" || payload.FolderItems[0].FolderID != activeFolderID {
 		t.Fatalf("logic gate folder item folder_id = %q, want active Logic Gates folder %q", payload.FolderItems[0].FolderID, activeFolderID)
 	}
-	assignments := payload.LogicGates[0].RaciAssignments
-	if len(assignments) != 1 || assignments[0].Role != domain.LogicGateRaciRoleResponsible || assignments[0].UserID != creator.UserID {
-		t.Fatalf("response RACI assignments = %+v, want responsible creator", assignments)
+	assignments := payload.LogicGates[0].GVICAssignments
+	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleGenerated || assignments[0].UserID != creator.UserID {
+		t.Fatalf("response GVIC assignments = %+v, want generated creator", assignments)
 	}
 	if assignments[0].UserDisplayName != "RACI Creator" || assignments[0].UserEmail != "raci-creator@example.com" {
-		t.Fatalf("response RACI user read model = %+v, want creator display fields", assignments[0])
+		t.Fatalf("response GVIC user read model = %+v, want creator display fields", assignments[0])
 	}
 	stored, err := repo.GetLogicGate(companyID, payload.LogicGates[0].LogicGateID)
 	if err != nil {
 		t.Fatalf("GetLogicGate error = %v", err)
 	}
-	if len(stored.RaciAssignments) != 1 || stored.RaciAssignments[0].Role != domain.LogicGateRaciRoleResponsible || stored.RaciAssignments[0].UserID != creator.UserID {
-		t.Fatalf("stored RACI assignments = %+v, want responsible creator only", stored.RaciAssignments)
+	if len(stored.GVICAssignments) != 1 || stored.GVICAssignments[0].Role != domain.GVICRoleGenerated || stored.GVICAssignments[0].UserID != creator.UserID {
+		t.Fatalf("stored GVIC assignments = %+v, want generated creator only", stored.GVICAssignments)
 	}
 }
 
@@ -2677,7 +2719,7 @@ func TestRequestBodyLimitRejectsOversizedPayload(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServerWithOptions(repo, ServerOptions{MaxRequestBodyBytes: 32})
-	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", strings.NewReader(`{"company_id":"company","title":"`+strings.Repeat("x", 64)+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", strings.NewReader(`{"company_id":"company","name":"`+strings.Repeat("x", 64)+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2823,7 +2865,7 @@ func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 	}
 	nodeMapETag := firstNodeRec.Header().Get("ETag")
 
-	nodeBody, _ := json.Marshal(map[string]string{"company_id": companyID, "title": "Relevant node"})
+	nodeBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Relevant node"})
 	createNodeReq := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(nodeBody))
 	createNodeReq.Header.Set("Content-Type", "application/json")
 	createNodeRec := httptest.NewRecorder()

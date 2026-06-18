@@ -43,6 +43,15 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 	sortSharedInboxRaciAssignments(assignments)
 	sortEntityPermissions(accessGrants)
 	folder.RaciAssignments = assignments
+	gvicResourceType := CommunicationsSharedInboxGVICResourceType(folder)
+	folder.GVICAssignments = r.gvicAssignmentsForResourceLocked(folder.CompanyID, gvicResourceType, folder.FolderID)
+	if len(folder.GVICAssignments) == 0 {
+		fallbackResourceType := EntityTypeSharedInbox
+		if gvicResourceType == EntityTypeSharedInbox {
+			fallbackResourceType = EntityTypeSharedTriageFolder
+		}
+		folder.GVICAssignments = r.gvicAssignmentsForResourceLocked(folder.CompanyID, fallbackResourceType, folder.FolderID)
+	}
 	folder.AccessGrants = accessGrants
 	return folder
 }

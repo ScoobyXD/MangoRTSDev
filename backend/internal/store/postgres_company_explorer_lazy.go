@@ -134,16 +134,12 @@ func companyExplorerLazyFolderScopePredicate(alias string) string {
 func companyExplorerLazyNodeScopePredicate(alias string) string {
 	return `(
     $2::text='all'
-    or ($2::text='me' and ` + alias + `.assignee_user_id=$3::uuid)
-    or ($2::text='team' and ` + alias + `.assignee_user_id in (select user_id from scope_users))
     or exists (
       select 1
-      from node_logic_gate_assignments node_gate
-      join logic_gate_raci_assignments assignment
-        on assignment.company_id=node_gate.company_id
-       and assignment.logic_gate_id=node_gate.logic_gate_id
-      where node_gate.company_id=` + alias + `.company_id
-        and node_gate.node_id=` + alias + `.node_id
+      from resource_gvic_effective_assignments assignment
+      where assignment.company_id=` + alias + `.company_id
+        and assignment.resource_type='node'
+        and assignment.resource_id=` + alias + `.node_id
         and (
           ($2::text='me' and assignment.user_id=$3::uuid)
           or ($2::text='team' and assignment.user_id in (select user_id from scope_users))
@@ -157,9 +153,10 @@ func companyExplorerLazyLogicGateScopePredicate(alias string) string {
     $2::text='all'
     or exists (
       select 1
-      from logic_gate_raci_assignments assignment
+      from resource_gvic_effective_assignments assignment
       where assignment.company_id=` + alias + `.company_id
-        and assignment.logic_gate_id=` + alias + `.logic_gate_id
+        and assignment.resource_type='logic_gate'
+        and assignment.resource_id=` + alias + `.logic_gate_id
         and (
           ($2::text='me' and assignment.user_id=$3::uuid)
           or ($2::text='team' and assignment.user_id in (select user_id from scope_users))

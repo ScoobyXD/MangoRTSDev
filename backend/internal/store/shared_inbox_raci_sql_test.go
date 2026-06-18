@@ -25,10 +25,17 @@ func TestPostgresSharedInboxRaciUsesMailboxTablesOnly(t *testing.T) {
 	for _, forbidden := range []string{
 		"with recursive",
 		"child.parent_folder_id",
-		"EntityTypeSharedTriageFolder",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("shared inbox RACI source should not use %q", forbidden)
+		}
+	}
+	for _, needle := range []string{
+		"CommunicationsSharedInboxGVICResourceType",
+		"postgresResourceGVICAssignmentsForResource",
+	} {
+		if !strings.Contains(source, needle) {
+			t.Fatalf("shared inbox GVIC attachment source missing %q", needle)
 		}
 	}
 }

@@ -103,6 +103,16 @@ create table if not exists company_user_group_members (
 create index if not exists idx_company_user_group_members_user
   on company_user_group_members(company_id, user_id, group_id);
 
+create table if not exists company_user_group_closure (
+  company_id uuid not null,
+  ancestor_group_id uuid not null,
+  descendant_group_id uuid not null,
+  depth integer not null,
+  primary key (company_id, ancestor_group_id, descendant_group_id),
+  foreign key (company_id, ancestor_group_id) references company_user_groups (company_id, group_id) on delete cascade,
+  foreign key (company_id, descendant_group_id) references company_user_groups (company_id, group_id) on delete cascade
+);
+
 create table if not exists invitations (
   invitation_id uuid not null,
   company_id uuid not null,
@@ -228,18 +238,15 @@ create index if not exists idx_communications_triage_items_user_created
 create table if not exists nodes (
   company_id uuid not null,
   node_id uuid not null,
-  title text not null,
+  name text not null,
   status text,
-  status_color text,
   due_date date,
   priority smallint,
-  assignee_user_id uuid,
   default_access text not null default 'edit',
   created_timestamp timestamptz not null,
   constraint nodes_default_access_chk check (default_access in ('edit', 'no_access')),
   constraint nodes_priority_chk check (priority is null or priority between 1 and 5),
-  primary key (company_id, node_id),
-  foreign key (assignee_user_id) references users (user_id)
+  primary key (company_id, node_id)
 );
 
 create table if not exists account_folders (
@@ -582,6 +589,70 @@ create index if not exists idx_resource_raci_assignments_subject_role_resource
 create index if not exists idx_resource_raci_assignments_resource_role_subject
   on resource_raci_assignments(company_id, resource_type, resource_id, role, subject_type, subject_id);
 
+create table if not exists resource_gvic_assignments (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  role text not null,
+  principal_type text not null,
+  principal_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint resource_gvic_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder', 'shared_inbox')),
+  constraint resource_gvic_assignments_role_chk check (role in ('generated', 'verified', 'consulted', 'informed')),
+  constraint resource_gvic_assignments_principal_type_chk check (principal_type in ('user', 'group')),
+  primary key (company_id, resource_type, resource_id, role, principal_type, principal_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create index if not exists idx_resource_gvic_assignments_principal_role_resource
+  on resource_gvic_assignments(company_id, principal_type, principal_id, role, resource_type, resource_id);
+
+create index if not exists idx_resource_gvic_assignments_resource_role_principal
+  on resource_gvic_assignments(company_id, resource_type, resource_id, role, principal_type, principal_id);
+
+create table if not exists resource_gvic_effective_assignments (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  role text not null,
+  user_id uuid not null,
+  source_resource_type text not null,
+  source_resource_id uuid not null,
+  source_principal_type text not null,
+  source_principal_id uuid not null,
+  inheritance_type text not null,
+  updated_timestamp timestamptz not null default now(),
+  constraint resource_gvic_effective_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder', 'shared_inbox')),
+  constraint resource_gvic_effective_assignments_role_chk check (role in ('generated', 'verified', 'consulted', 'informed')),
+  constraint resource_gvic_effective_assignments_source_resource_type_chk check (source_resource_type in ('node', 'logic_gate', 'project', 'shared_triage_folder', 'shared_inbox')),
+  constraint resource_gvic_effective_assignments_source_principal_type_chk check (source_principal_type in ('user', 'group')),
+  constraint resource_gvic_effective_assignments_inheritance_type_chk check (inheritance_type in ('direct', 'logic_gate_inherited')),
+  primary key (
+    company_id,
+    resource_type,
+    resource_id,
+    role,
+    user_id,
+    source_resource_type,
+    source_resource_id,
+    source_principal_type,
+    source_principal_id,
+    inheritance_type
+  ),
+  foreign key (company_id) references companies (company_id) on delete cascade,
+  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade
+);
+
+create index if not exists idx_resource_gvic_effective_user_resource
+  on resource_gvic_effective_assignments(company_id, user_id, resource_type, resource_id, role);
+
+create index if not exists idx_resource_gvic_effective_resource_role_user
+  on resource_gvic_effective_assignments(company_id, resource_type, resource_id, role, user_id);
+
+create index if not exists idx_resource_gvic_effective_source
+  on resource_gvic_effective_assignments(company_id, source_resource_type, source_resource_id);
+
 create table if not exists entity_access_permissions (
   company_id uuid not null,
   entity_type text not null,
@@ -731,11 +802,34 @@ returns boolean as $$
         and access.resource_id=p_resource_id
         and access.user_id=p_user_id
     )
+  ),
+  gvic_access(max_rank) as (
+    select coalesce(max(case gvic.role
+      when 'generated' then 2
+      when 'verified' then 2
+      when 'consulted' then 1
+      when 'informed' then 1
+      else 0
+    end), 0)
+    from resource_gvic_effective_assignments gvic
+    join normalized_resource normalized
+      on normalized.resource_type = gvic.resource_type
+      or (normalized.resource_type = 'shared_inbox_folder' and gvic.resource_type = 'shared_triage_folder')
+    where gvic.company_id=p_company_id
+      and gvic.resource_id=p_resource_id
+      and gvic.user_id=p_user_id
   )
   select case
     when requested.required_rank = 0 then false
     when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox') then false
     when (select allowed from role_admin_actor) then true
+    when exists (select 1 from normalized_resource_row)
+      and (select default_access from normalized_resource_row limit 1) = 'edit'
+      and (select exists_override from direct_override) then false
+    when exists (select 1 from normalized_resource_row)
+      and (select default_access from normalized_resource_row limit 1) = 'no_access'
+      and not (select exists_override from direct_override) then false
+    when (select max_rank from gvic_access) >= requested.required_rank then true
     when exists (
         select 1
         from company_memberships membership
@@ -1043,8 +1137,8 @@ select
   assignment.status_key,
   assignment.column_id,
   assignment.position,
-  node_row.title,
-  node_row.assignee_user_id,
+  node_row.name,
+  null::uuid,
   node_row.priority,
   assignment.is_issue,
   node_row.due_date,
@@ -1087,7 +1181,7 @@ do update set
   column_id = excluded.column_id,
   position = excluded.position,
   title = excluded.title,
-  assignee_user_id = excluded.assignee_user_id,
+  assignee_user_id = null,
   priority = excluded.priority,
   is_issue = excluded.is_issue,
   due_date = excluded.due_date,

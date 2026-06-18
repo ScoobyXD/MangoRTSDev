@@ -235,19 +235,17 @@ order by assignment.logic_gate_id::text asc,
 }
 
 func (r *PostgresRepo) attachLogicGateRaciAssignments(ctx context.Context, companyID string, gates []domain.LogicGate) ([]domain.LogicGate, error) {
-	ids := make([]string, 0, len(gates))
-	for _, gate := range gates {
-		ids = append(ids, gate.LogicGateID)
-	}
-	assignments, err := r.listLogicGateRaciAssignments(ctx, companyID, ids)
-	if err != nil {
-		return nil, err
-	}
 	for index := range gates {
-		gates[index].RaciAssignments = assignments[gates[index].LogicGateID]
-		if gates[index].RaciAssignments == nil {
-			gates[index].RaciAssignments = []domain.LogicGateRaciAssignment{}
+		gates[index].RaciAssignments = []domain.LogicGateRaciAssignment{}
+		assignments, err := postgresResourceGVICAssignmentsForResource(ctx, r.db, resourceGVICKey{
+			companyID:    companyID,
+			resourceType: EntityTypeLogicGate,
+			resourceID:   gates[index].LogicGateID,
+		})
+		if err != nil {
+			return nil, err
 		}
+		gates[index].GVICAssignments = assignments
 	}
 	return gates, nil
 }

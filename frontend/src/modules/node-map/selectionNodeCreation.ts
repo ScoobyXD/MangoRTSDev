@@ -116,7 +116,7 @@ export async function createNodeFromSelectionTitle(args: {
     mutationOrigin: "editor",
     items: [{
       client_id: clientID,
-      title,
+      name: title,
       x: position.x,
       y: position.y,
     }],

@@ -222,101 +222,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 	}
 
 	if len(parts) == 2 && parts[1] == "raci" {
-		if r.Method == http.MethodGet {
-			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-			if companyID == "" {
-				writeError(w, http.StatusBadRequest, "company_id_required")
-				return
-			}
-			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
-				return
-			}
-			logicGate, err := s.repo.GetLogicGate(companyID, logicGateID)
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "logic_gate_not_found")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_raci")
-				return
-			}
-			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-				"company_id":       companyID,
-				"logic_gate_id":    logicGateID,
-				"raci_assignments": logicGate.RaciAssignments,
-			})
-			return
-		}
-		if r.Method != http.MethodPut {
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-			return
-		}
-		var req struct {
-			CompanyID   string                               `json:"company_id"`
-			Assignments []store.LogicGateRaciAssignmentInput `json:"assignments"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_json")
-			return
-		}
-		if strings.TrimSpace(req.CompanyID) == "" {
-			writeError(w, http.StatusBadRequest, "company_id_required")
-			return
-		}
-		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
-			return
-		}
-		var beforeAssignments []domain.LogicGateRaciAssignment
-		if beforeGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
-			beforeAssignments = beforeGate.RaciAssignments
-		}
-		assignments, err := s.repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
-			CompanyID:   req.CompanyID,
-			LogicGateID: logicGateID,
-			Assignments: req.Assignments,
-		})
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_raci_assignments")
-			return
-		}
-		if errors.Is(err, store.ErrAssigneeNotInCompany) {
-			writeError(w, http.StatusBadRequest, "raci_user_not_in_company")
-			return
-		}
-		if errors.Is(err, store.ErrRaciStorageUnavailable) {
-			writeError(w, http.StatusServiceUnavailable, "logic_gate_raci_storage_unavailable")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "logic_gate_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_raci")
-			return
-		}
-		actorUserID, actorLabel := notificationActorPayload(r)
-		newlyAssignedUserIDs := newlyAssignedLogicGateRaciUserIDs(beforeAssignments, assignments)
-		logicGateTitle := ""
-		if logicGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
-			logicGateTitle = logicGate.Header
-		}
-		event, projected := s.publishWorkspaceEvent(req.CompanyID, store.LogicGateRaciUpdatedEventType, map[string]any{
-			"logic_gate_id":       logicGateID,
-			"raci_assignments":    assignments,
-			"assignment_user_ids": newlyAssignedUserIDs,
-			"actor_user_id":       actorUserID,
-			"actor_display_name":  actorLabel,
-			"logic_gate_title":    logicGateTitle,
-		})
-		if projected {
-			s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"company_id":       req.CompanyID,
-			"logic_gate_id":    logicGateID,
-			"raci_assignments": assignments,
-		})
+		writeError(w, http.StatusGone, "gvic_required")
 		return
 	}
 
@@ -326,7 +232,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 	}
 
 	if len(parts) == 3 && parts[1] == "raci" && (parts[2] == store.LogicGateRaciCommandAdd || parts[2] == store.LogicGateRaciCommandRemove) {
-		s.handleLogicGateRaciCommand(w, r, logicGateID, parts[2])
+		writeError(w, http.StatusGone, "gvic_required")
 		return
 	}
 	if len(parts) == 2 && parts[1] == "projection" {

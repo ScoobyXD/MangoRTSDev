@@ -843,7 +843,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         mutationOrigin: "node_map",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("node"),
-          title: value,
+          name: value,
           x: position.x,
           y: position.y,
         }],
@@ -899,7 +899,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
         mutationOrigin: "node_map",
         items: [{
           client_id: clientID,
-          title: "new node",
+          name: "new node",
           x: position.x,
           y: position.y,
         }],
@@ -943,7 +943,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     try {
       const updated = await requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
         method: "PUT",
-        body: JSON.stringify({ company_id: companyID, title: value }),
+        body: JSON.stringify({ company_id: companyID, name: value }),
       });
       // Latency rule: update in-memory graph cache directly so we avoid a snapshot re-fetch.
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
@@ -1017,7 +1017,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       clientIDByOldID.set(copied.oldID, clientID);
       return {
         client_id: clientID,
-        title: copied.title,
+        name: copied.title,
         x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
         y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
       };

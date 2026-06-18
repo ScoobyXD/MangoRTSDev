@@ -63,7 +63,7 @@ func (s *Server) handleCommunicationsSharedInboxByID(w http.ResponseWriter, r *h
 		return
 	}
 	if len(parts) == 2 && parts[1] == "raci" {
-		s.handleCommunicationsSharedInboxRaci(w, r, folderID)
+		writeError(w, http.StatusGone, "gvic_required")
 		return
 	}
 	if len(parts) != 1 {
@@ -334,7 +334,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			"override_user_ids":    overrideUserIDs,
 			"access_grants":        folder.AccessGrants,
 			"permissions":          folder.AccessGrants,
-			"raci_assignments":     folder.RaciAssignments,
+			"gvic_assignments":     folder.GVICAssignments,
 			"can_edit_permissions": canEditPermissions,
 		})
 	case http.MethodPut:

@@ -8,6 +8,8 @@ import (
 
 type memoryLogicGateRaciCommandSnapshot struct {
 	logicGateRaci         map[string][]domain.LogicGateRaciAssignment
+	gvicAssignments       map[string]domain.ResourceGVICAssignment
+	gvicEffective         map[string]domain.ResourceGVICEffectiveAssignment
 	entityPermissions     map[string]domain.EntityPermission
 	effectiveAccess       map[string]domain.EffectiveResourceAccess
 	racioProjectionRows   map[string]memoryRacioProjectionRow
@@ -19,6 +21,8 @@ type memoryLogicGateRaciCommandSnapshot struct {
 func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRaciCommandSnapshot {
 	return memoryLogicGateRaciCommandSnapshot{
 		logicGateRaci:         cloneMemorySliceMap(r.logicGateRaci),
+		gvicAssignments:       cloneMemoryMap(r.gvicAssignments),
+		gvicEffective:         cloneMemoryMap(r.gvicEffectiveAssignments),
 		entityPermissions:     cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:       cloneMemoryMap(r.effectiveAccess),
 		racioProjectionRows:   cloneMemoryMap(r.racioProjectionRows),
@@ -30,6 +34,8 @@ func (r *MemoryRepo) snapshotLogicGateRaciCommandStateLocked() memoryLogicGateRa
 
 func (r *MemoryRepo) restoreLogicGateRaciCommandStateLocked(snapshot memoryLogicGateRaciCommandSnapshot) {
 	r.logicGateRaci = snapshot.logicGateRaci
+	r.gvicAssignments = snapshot.gvicAssignments
+	r.gvicEffectiveAssignments = snapshot.gvicEffective
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.racioProjectionRows = snapshot.racioProjectionRows
@@ -63,13 +69,9 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return LogicGateRaciAssignmentCommandResult{}, ErrNotFound
 	}
-	effectiveCommandAssignments, err := r.expandedLogicGateRaciCommandAssignmentsLocked(companyID, commandAssignments)
-	if err != nil {
-		return LogicGateRaciAssignmentCommandResult{}, err
-	}
 	assignmentsByKey := map[string]domain.LogicGateRaciAssignment{}
 	now := time.Now().UTC()
-	for _, assignment := range effectiveCommandAssignments {
+	for _, assignment := range commandAssignments {
 		assignmentKey := assignment.role + ":" + assignment.subjectType + ":" + assignment.subjectID
 		if _, ok := assignmentsByKey[assignmentKey]; ok {
 			continue
@@ -82,7 +84,7 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	}
 
 	raciKey := key(companyID, logicGateID)
-	before := cloneLogicGateRaciAssignments(r.logicGateRaci[raciKey])
+	before := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, logicGateID)
 	sortLogicGateRaciAssignments(before)
 	assignments := cloneLogicGateRaciAssignments(before)
 	existing := map[string]bool{}
@@ -93,7 +95,7 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 	changed := false
 	switch operation {
 	case LogicGateRaciCommandAdd:
-		for _, commandAssignment := range effectiveCommandAssignments {
+		for _, commandAssignment := range commandAssignments {
 			assignmentKey := commandAssignment.role + ":" + commandAssignment.subjectType + ":" + commandAssignment.subjectID
 			if existing[assignmentKey] {
 				continue
@@ -107,9 +109,6 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		for _, commandAssignment := range commandAssignments {
 			remove[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
 		}
-		for _, commandAssignment := range effectiveCommandAssignments {
-			remove[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
-		}
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			if remove[logicGateRaciAssignmentSubjectKey(assignment)] {
@@ -121,25 +120,6 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		assignments = filtered
 	default:
 		return LogicGateRaciAssignmentCommandResult{}, ErrInvalid
-	}
-	if operation == LogicGateRaciCommandAdd {
-		staleGroupAssignments := map[string]bool{}
-		for _, commandAssignment := range commandAssignments {
-			if commandAssignment.subjectType == EntityPermissionSubjectGroup {
-				staleGroupAssignments[commandAssignment.role+":"+commandAssignment.subjectType+":"+commandAssignment.subjectID] = true
-			}
-		}
-		if len(staleGroupAssignments) > 0 {
-			filtered := assignments[:0]
-			for _, assignment := range assignments {
-				if staleGroupAssignments[logicGateRaciAssignmentSubjectKey(assignment)] {
-					changed = true
-					continue
-				}
-				filtered = append(filtered, assignment)
-			}
-			assignments = filtered
-		}
 	}
 
 	sortLogicGateRaciAssignments(assignments)
@@ -160,6 +140,21 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		return result, nil
 	}
 
+	for sourceKey, assignment := range r.gvicAssignments {
+		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeLogicGate && assignment.ResourceID == logicGateID {
+			delete(r.gvicAssignments, sourceKey)
+		}
+	}
+	sourceKeyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
+	for _, assignment := range assignments {
+		principalType, principalID := logicGateRaciAssignmentSubject(assignment)
+		item := r.resourceGVICAssignmentForPrincipalLocked(sourceKeyValue, normalizedGVICAssignmentInput{
+			role:          assignment.Role,
+			principalType: principalType,
+			principalID:   principalID,
+		}, now)
+		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
+	}
 	r.logicGateRaci[raciKey] = assignments
 	result.ProjectionDeltas = r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID, before, assignments)
 	event, err := r.appendDomainEventLocked(logicGateRaciUpdatedWorkspaceEventInput(result, commandAssignments, input))

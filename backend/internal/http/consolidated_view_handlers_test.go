@@ -142,7 +142,7 @@ func TestNodeCreateRefreshesEffectiveAccessForV2View(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	createBody := []byte(`{"company_id":"` + companyID + `","title":"Fresh V2 Node"}`)
+	createBody := []byte(`{"company_id":"` + companyID + `","name":"Fresh V2 Node"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq = requestWithLogicGateWorkActorForTest(createReq, creator, companyID)
@@ -335,7 +335,7 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{{
-			Role:   domain.LogicGateRaciRoleResponsible,
+			Role:   domain.GVICRoleGenerated,
 			UserID: editor.UserID,
 		}},
 	}); err != nil {

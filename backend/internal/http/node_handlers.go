@@ -46,22 +46,22 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
 			CompanyID string `json:"company_id"`
-			Title     string `json:"title"`
+			Name      string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Title) == "" {
-			writeError(w, http.StatusBadRequest, "company_id_and_title_required")
+		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Name) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_name_required")
 			return
 		}
 
-		assigneeUserID := ""
+		generatedUserID := ""
 		if actor, ok := authenticatedActor(r); ok && strings.TrimSpace(actor.User.UserID) != "" {
-			assigneeUserID = strings.TrimSpace(actor.User.UserID)
+			generatedUserID = strings.TrimSpace(actor.User.UserID)
 		}
-		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(req.CompanyID, strings.TrimSpace(req.Title), assigneeUserID)
+		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(req.CompanyID, strings.TrimSpace(req.Name), generatedUserID)
 		if errors.Is(err, store.ErrAssigneeNotInCompany) {
 			writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 			return
@@ -171,15 +171,15 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			input := store.UpdateNodeInput{CompanyID: strings.TrimSpace(*companyIDField), NodeID: nodeID}
-			if title, set, ok := parseOptionalStringField(fields, "title"); !ok {
-				writeError(w, http.StatusBadRequest, "invalid_title")
+			if name, set, ok := parseOptionalStringField(fields, "name"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_name")
 				return
 			} else if set {
-				if title == nil || strings.TrimSpace(*title) == "" {
-					writeError(w, http.StatusBadRequest, "title_required")
+				if name == nil || strings.TrimSpace(*name) == "" {
+					writeError(w, http.StatusBadRequest, "name_required")
 					return
 				}
-				input.Title = strings.TrimSpace(*title)
+				input.Title = strings.TrimSpace(*name)
 				input.TitleSet = true
 			}
 			if dueDate, set, ok := parseOptionalStringField(fields, "due_date"); !ok {
@@ -201,13 +201,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				input.Status = status
 				input.StatusSet = true
 			}
-			if statusColor, set, ok := parseOptionalStringField(fields, "status_color"); !ok {
-				writeError(w, http.StatusBadRequest, "invalid_status_color")
-				return
-			} else if set {
-				input.StatusColor = statusColor
-				input.StatusColorSet = true
-			}
 			if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 				writeError(w, http.StatusBadRequest, "invalid_priority")
 				return
@@ -215,14 +208,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				input.Priority = priority
 				input.PrioritySet = true
 			}
-			if assigneeUserID, set, ok := parseOptionalStringField(fields, "assignee_user_id"); !ok {
-				writeError(w, http.StatusBadRequest, "invalid_assignee_user_id")
-				return
-			} else if set {
-				input.AssigneeUserID = assigneeUserID
-				input.AssigneeUserIDSet = true
-			}
-			if !input.TitleSet && !input.StatusSet && !input.StatusColorSet && !input.DueDateSet && !input.PrioritySet && !input.AssigneeUserIDSet {
+			if !input.TitleSet && !input.StatusSet && !input.DueDateSet && !input.PrioritySet {
 				writeError(w, http.StatusBadRequest, "node_update_required")
 				return
 			}

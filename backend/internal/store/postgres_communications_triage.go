@@ -377,7 +377,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		nodeID := newUUIDv7String()
 		nodeTitle := emailNodeTitle(message)
 		if _, err := tx.ExecContext(ctx, `
-insert into nodes (company_id, node_id, title, priority, created_timestamp)
+insert into nodes (company_id, node_id, name, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}

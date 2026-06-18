@@ -74,27 +74,27 @@ type EditorLinkedDocumentPanelsProps = {
 
 const NODE_PRIORITY_OPTIONS = KANBAN_NODE_PRIORITY_STYLE_OPTIONS;
 
-type NodeStatusValue = "requested" | "backlog" | "pending" | "in_progress" | "verify" | "done";
+type NodeStatusValue = "requested" | "backlog" | "pending" | "in_progress" | "review" | "done";
 
 const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string; storageStatus: string; color: string }> = [
   { value: "requested", label: "Requested", storageStatus: "Requested", color: KANBAN_LOGIC_GATE_REQUESTED_COLOR },
   { value: "backlog", label: "Backlog", storageStatus: "Backlog", color: KANBAN_LOGIC_GATE_BACKLOG_COLOR },
   { value: "pending", label: "Pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
   { value: "in_progress", label: "In Progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
-  { value: "verify", label: "Verify", storageStatus: "Verify", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
+  { value: "review", label: "Review", storageStatus: "Review", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
   { value: "done", label: "Done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
 ];
 
 const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
-  { role: "responsible", label: "Responsible" },
-  { role: "accountable", label: "Accountable" },
+  { role: "generated", label: "Generated" },
+  { role: "verified", label: "Verified" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
 ];
 
 const RACI_ROLE_ACCENTS: Record<LogicGateRaciRole, string> = {
-  responsible: "#0891b2",
-  accountable: "#db2777",
+  generated: "#0891b2",
+  verified: "#db2777",
   consulted: "#7c3aed",
   informed: "#059669",
 };
@@ -150,12 +150,12 @@ function companyUserIDsForGroupSubtree(groups: Array<{ group_id: string; parent_
 }
 
 function logicGateRaciAssignmentSubjectType(assignment: LogicGateRaciAssignment): LogicGateRaciSubjectType {
-  return (assignment.subject_type?.trim() || "user") as LogicGateRaciSubjectType;
+  return (assignment.principal_type?.trim() || assignment.subject_type?.trim() || "user") as LogicGateRaciSubjectType;
 }
 
 function logicGateRaciAssignmentSubjectID(assignment: LogicGateRaciAssignment): string {
   const subjectType = logicGateRaciAssignmentSubjectType(assignment);
-  const subjectID = assignment.subject_id?.trim() ?? "";
+  const subjectID = assignment.principal_id?.trim() || assignment.subject_id?.trim() || "";
   if (subjectType === "user") return subjectID || assignment.user_id.trim();
   return subjectID;
 }
@@ -183,7 +183,7 @@ function normalizeNodeStatusValue(value: string): NodeStatusValue | "" {
   if (normalized === "backlog" || normalized === "backlogs" || normalized === "b") return "backlog";
   if (normalized === "pending" || normalized === "p") return "pending";
   if (normalized === "in_progress" || normalized === "ip") return "in_progress";
-  if (normalized === "verify" || normalized === "verification" || normalized === "v") return "verify";
+  if (normalized === "review") return "review";
   if (normalized === "done" || normalized === "d") return "done";
   return "";
 }

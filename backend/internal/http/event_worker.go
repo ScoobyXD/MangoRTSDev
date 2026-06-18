@@ -95,6 +95,8 @@ func (s *Server) processEventRow(row store.EventRow) error {
 		return s.processKanbanProjectionDeltaEvent(row)
 	case store.EventTypeRacioProjectionDelta:
 		return s.processRacioProjectionDeltaEvent(row)
+	case store.EventTypeGVICProjectionDelta:
+		return s.processGVICProjectionDeltaEvent(row)
 	case store.EventTypeProjectManagementProjectionDelta:
 		return s.processProjectManagementProjectionDeltaEvent(row)
 	case store.EventTypeProjectRelationshipProjectionDelta:
@@ -129,6 +131,21 @@ func (s *Server) processRacioProjectionDeltaEvent(row store.EventRow) error {
 		return err
 	}
 	if payload.Projection != store.ProjectionNameRacioMatrix {
+		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
+	}
+	if len(payload.Deltas) == 0 {
+		return nil
+	}
+	s.publishProjectionDeltasAsync(payload.Deltas)
+	return nil
+}
+
+func (s *Server) processGVICProjectionDeltaEvent(row store.EventRow) error {
+	payload, err := store.DecodeGVICProjectionDeltaEventPayload(row)
+	if err != nil {
+		return err
+	}
+	if payload.Projection != store.ProjectionNameGVICEffectiveAssignments {
 		return fmt.Errorf("unsupported_projection:%s", payload.Projection)
 	}
 	if len(payload.Deltas) == 0 {

@@ -184,7 +184,7 @@ func requestPathProjectionDeltas(deltas []store.ProjectionDelta) []store.Project
 	out := deltas[:0]
 	for _, delta := range deltas {
 		switch strings.TrimSpace(delta.Projection) {
-		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix, store.ProjectionNameProjectManagementTimeline, store.ProjectionNameProjectRelationship:
+		case store.ProjectionNameKanbanBoard, store.ProjectionNameRacioMatrix, store.ProjectionNameGVICEffectiveAssignments, store.ProjectionNameProjectManagementTimeline, store.ProjectionNameProjectRelationship:
 			continue
 		}
 		out = append(out, delta)
@@ -216,6 +216,31 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			continue
 		}
 		switch delta.Projection {
+		case store.ProjectionNameGVICEffectiveAssignments:
+			userID := projectionDeltaUserID(delta)
+			projectionScope := projectionUserScope(userID)
+			realtimeScope := realtimeGVICScope(userID)
+			if projectionScope == "" || realtimeScope == "" {
+				continue
+			}
+			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
+			hasRealtimeSubscribers := len(realtimeConnections) > 0
+			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
+			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
+				continue
+			}
+			filtered, ok := s.authorizedProjectionDeltaForUser(delta, userID)
+			if !ok {
+				continue
+			}
+			if hasRealtimeSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: realtimeScope, sequenceScope: projectionScope, realtime: true}
+				grouped[key] = append(grouped[key], filtered)
+			}
+			if hasProjectionSubscribers {
+				key := groupKey{companyID: filtered.CompanyID, projection: filtered.Projection, scope: projectionScope, sequenceScope: projectionScope}
+				grouped[key] = append(grouped[key], filtered)
+			}
 		case store.ProjectionNameRacioMatrix:
 			userID := projectionDeltaUserID(delta)
 			projectionScope := projectionUserScope(userID)
@@ -414,6 +439,8 @@ func (s *Server) currentKanbanBoardProjectionSequence(companyID, boardID string)
 
 func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
 	switch strings.TrimSpace(delta.Projection) {
+	case store.ProjectionNameGVICEffectiveAssignments:
+		return s.authorizedGVICProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameRacioMatrix:
 		return s.authorizedRacioProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameKanbanBoard:
@@ -425,6 +452,30 @@ func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, u
 	default:
 		return store.ProjectionDelta{}, false
 	}
+}
+
+func (s *Server) authorizedGVICProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return store.ProjectionDelta{}, false
+	}
+	delta = cloneProjectionDelta(delta)
+	if strings.TrimSpace(delta.RowKey.UserID) != userID {
+		return store.ProjectionDelta{}, false
+	}
+	switch delta.Operation {
+	case store.ProjectionDeltaOperationDelete:
+		delta.Row = nil
+		delta.Patch = nil
+		return delta, true
+	case store.ProjectionDeltaOperationUpsert, store.ProjectionDeltaOperationPatch:
+	default:
+		return store.ProjectionDelta{}, false
+	}
+	if delta.Row != nil {
+		delta.Row.UserID = userID
+	}
+	return delta, true
 }
 
 func (s *Server) authorizedRacioProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {

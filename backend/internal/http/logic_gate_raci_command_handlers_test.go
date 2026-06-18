@@ -12,7 +12,7 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
-func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
+func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
@@ -51,167 +51,159 @@ func TestLogicGateRaciAddRemoveCommandAPI(t *testing.T) {
 
 	addBody := map[string]any{
 		"company_id": companyID,
-		"assignments": []map[string]string{
-			{"role": domain.LogicGateRaciRoleResponsible, "user_id": responsible.UserID},
-			{"role": domain.LogicGateRaciRoleResponsible, "user_id": responsible.UserID},
+		"gvic_assignments": []map[string]string{
+			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 		},
 	}
-	add := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandAdd, addBody)
+	add := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, addBody)
 	if add.Code != http.StatusOK {
-		t.Fatalf("POST raci add status = %d body=%s", add.Code, add.Body.String())
+		t.Fatalf("POST GVIC add status = %d body=%s", add.Code, add.Body.String())
 	}
-	addPayload := decodeLogicGateRaciCommandPayloadForTest(t, add)
-	if !addPayload.Changed || addPayload.Operation != store.LogicGateRaciCommandAdd || len(addPayload.Assignments) != 1 {
+	addPayload := decodeResourceGVICCommandPayloadForTest(t, add)
+	if !addPayload.Changed || addPayload.Operation != store.GVICAssignmentCommandAdd || len(addPayload.Assignments) != 1 || len(addPayload.EffectiveAssignments) != 1 {
 		t.Fatalf("add payload = %+v, want changed single assignment", addPayload)
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 1)
-	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 1)
-	responsibleNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
-		items, err := repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
-		if err != nil {
-			t.Fatalf("ListNotifications responsible: %v", err)
-		}
-		return items
-	}, 1)
-	if len(responsibleNotifications) != 1 || responsibleNotifications[0].Type != domain.NotificationEventLogicGateRaciUpdated || responsibleNotifications[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("responsible notifications after add = %+v, want one projected RACI notification", responsibleNotifications)
-	}
+	assertHTTPGVICEventRowCount(t, repo, companyID, 1)
 
-	duplicateAdd := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandAdd, addBody)
+	duplicateAdd := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, addBody)
 	if duplicateAdd.Code != http.StatusOK {
-		t.Fatalf("duplicate POST raci add status = %d body=%s", duplicateAdd.Code, duplicateAdd.Body.String())
+		t.Fatalf("duplicate POST GVIC add status = %d body=%s", duplicateAdd.Code, duplicateAdd.Body.String())
 	}
-	duplicateAddPayload := decodeLogicGateRaciCommandPayloadForTest(t, duplicateAdd)
+	duplicateAddPayload := decodeResourceGVICCommandPayloadForTest(t, duplicateAdd)
 	if duplicateAddPayload.Changed || len(duplicateAddPayload.Assignments) != 1 {
 		t.Fatalf("duplicate add payload = %+v, want no-op with existing assignment", duplicateAddPayload)
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 1)
-	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 1)
-	responsibleNotifications, err = repo.ListNotifications(store.NotificationListInput{UserID: responsible.UserID, CompanyID: companyID, Limit: 10})
-	if err != nil {
-		t.Fatalf("ListNotifications responsible after duplicate: %v", err)
-	}
-	if len(responsibleNotifications) != 1 {
-		t.Fatalf("responsible notifications after duplicate add = %+v, want no duplicate", responsibleNotifications)
-	}
+	assertHTTPGVICEventRowCount(t, repo, companyID, 1)
 
 	removeBody := map[string]any{
 		"company_id": companyID,
-		"role":       domain.LogicGateRaciRoleResponsible,
-		"user_id":    responsible.UserID,
+		"gvic_assignments": []map[string]string{{
+			"role":           domain.GVICRoleGenerated,
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   responsible.UserID,
+		}},
 	}
-	removed := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandRemove, removeBody)
+	removed := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandRemove, removeBody)
 	if removed.Code != http.StatusOK {
-		t.Fatalf("POST raci remove status = %d body=%s", removed.Code, removed.Body.String())
+		t.Fatalf("POST GVIC remove status = %d body=%s", removed.Code, removed.Body.String())
 	}
-	removedPayload := decodeLogicGateRaciCommandPayloadForTest(t, removed)
-	if !removedPayload.Changed || removedPayload.Operation != store.LogicGateRaciCommandRemove || len(removedPayload.Assignments) != 0 {
+	removedPayload := decodeResourceGVICCommandPayloadForTest(t, removed)
+	if !removedPayload.Changed || removedPayload.Operation != store.GVICAssignmentCommandRemove || len(removedPayload.Assignments) != 0 || len(removedPayload.EffectiveAssignments) != 0 {
 		t.Fatalf("remove payload = %+v, want changed empty assignments", removedPayload)
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 2)
-	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 2)
+	assertHTTPGVICEventRowCount(t, repo, companyID, 2)
 
-	missingRemove := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandRemove, removeBody)
+	missingRemove := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandRemove, removeBody)
 	if missingRemove.Code != http.StatusOK {
-		t.Fatalf("missing POST raci remove status = %d body=%s", missingRemove.Code, missingRemove.Body.String())
+		t.Fatalf("missing POST GVIC remove status = %d body=%s", missingRemove.Code, missingRemove.Body.String())
 	}
-	missingRemovePayload := decodeLogicGateRaciCommandPayloadForTest(t, missingRemove)
+	missingRemovePayload := decodeResourceGVICCommandPayloadForTest(t, missingRemove)
 	if missingRemovePayload.Changed || len(missingRemovePayload.Assignments) != 0 {
 		t.Fatalf("missing remove payload = %+v, want intentional no-op", missingRemovePayload)
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 2)
-	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 2)
+	assertHTTPGVICEventRowCount(t, repo, companyID, 2)
 
 	fullReplaceBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
-		"assignments": []map[string]string{
-			{"role": domain.LogicGateRaciRoleAccountable, "user_id": accountable.UserID},
+		"gvic_assignments": []map[string]string{
+			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
 		},
 	})
-	fullReplaceReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(fullReplaceBody))
+	fullReplaceReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(fullReplaceBody))
 	fullReplaceReq.Header.Set("Content-Type", "application/json")
 	fullReplaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(fullReplaceRec, fullReplaceReq)
 	if fullReplaceRec.Code != http.StatusOK {
-		t.Fatalf("PUT raci full replace status = %d body=%s", fullReplaceRec.Code, fullReplaceRec.Body.String())
+		t.Fatalf("PUT GVIC full replace status = %d body=%s", fullReplaceRec.Code, fullReplaceRec.Body.String())
 	}
-	var fullReplacePayload struct {
-		Assignments []domain.LogicGateRaciAssignment `json:"raci_assignments"`
-	}
-	if err := json.NewDecoder(fullReplaceRec.Body).Decode(&fullReplacePayload); err != nil {
-		t.Fatalf("decode full replace payload: %v", err)
-	}
-	if len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.LogicGateRaciRoleAccountable {
+	fullReplacePayload := decodeResourceGVICCommandPayloadForTest(t, fullReplaceRec)
+	if len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerified {
 		t.Fatalf("full replace payload = %+v, want accountable assignment", fullReplacePayload.Assignments)
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 3)
-	assertHTTPWorkspaceReadVersion(t, repo, companyID, "logic-gates", 3)
+	assertHTTPGVICEventRowCount(t, repo, companyID, 3)
 
-	invalidRole := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandAdd, map[string]any{
+	invalidRole := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
 		"company_id": companyID,
-		"role":       "owner",
-		"user_id":    responsible.UserID,
+		"gvic_assignments": []map[string]string{{
+			"role":           "owner",
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   responsible.UserID,
+		}},
 	})
-	if invalidRole.Code != http.StatusBadRequest || !strings.Contains(invalidRole.Body.String(), "invalid_raci_assignments") {
-		t.Fatalf("invalid role status = %d body=%s, want invalid_raci_assignments", invalidRole.Code, invalidRole.Body.String())
+	if invalidRole.Code != http.StatusBadRequest || !strings.Contains(invalidRole.Body.String(), "invalid_gvic_assignments") {
+		t.Fatalf("invalid role status = %d body=%s, want invalid_gvic_assignments", invalidRole.Code, invalidRole.Body.String())
 	}
-	outsiderAdd := postLogicGateRaciCommandForTest(t, handler, logicGate.LogicGateID, store.LogicGateRaciCommandAdd, map[string]any{
+	legacyRole := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
 		"company_id": companyID,
-		"role":       domain.LogicGateRaciRoleResponsible,
-		"user_id":    outsider.UserID,
+		"gvic_assignments": []map[string]string{{
+			"role":           "responsible",
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   responsible.UserID,
+		}},
 	})
-	if outsiderAdd.Code != http.StatusBadRequest || !strings.Contains(outsiderAdd.Body.String(), "raci_user_not_in_company") {
-		t.Fatalf("outsider add status = %d body=%s, want raci_user_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
+	if legacyRole.Code != http.StatusBadRequest || !strings.Contains(legacyRole.Body.String(), "invalid_gvic_assignments") {
+		t.Fatalf("legacy role status = %d body=%s, want invalid_gvic_assignments", legacyRole.Code, legacyRole.Body.String())
 	}
-	assertHTTPRaciWorkspaceEventCount(t, repo, companyID, 3)
+	outsiderAdd := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
+		"company_id": companyID,
+		"gvic_assignments": []map[string]string{{
+			"role":           domain.GVICRoleGenerated,
+			"principal_type": store.EntityPermissionSubjectUser,
+			"principal_id":   outsider.UserID,
+		}},
+	})
+	if outsiderAdd.Code != http.StatusBadRequest || !strings.Contains(outsiderAdd.Body.String(), "gvic_principal_not_in_company") {
+		t.Fatalf("outsider add status = %d body=%s, want gvic_principal_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
+	}
+	assertHTTPGVICEventRowCount(t, repo, companyID, 3)
 }
 
-type logicGateRaciCommandPayloadForTest struct {
-	Operation   string                           `json:"operation"`
-	Changed     bool                             `json:"changed"`
-	Assignments []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+type resourceGVICCommandPayloadForTest struct {
+	Operation            string                                   `json:"operation"`
+	Changed              bool                                     `json:"changed"`
+	Assignments          []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
+	EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
 }
 
-func postLogicGateRaciCommandForTest(t *testing.T, handler http.Handler, logicGateID, operation string, payload map[string]any) *httptest.ResponseRecorder {
+func postResourceGVICCommandForTest(t *testing.T, handler http.Handler, resourceType, resourceID, operation string, payload map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest(http.MethodPost, "/v1/logic-gates/"+logicGateID+"/raci/"+operation, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/resources/"+resourceType+"/"+resourceID+"/gvic/"+operation, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
 }
 
-func decodeLogicGateRaciCommandPayloadForTest(t *testing.T, rec *httptest.ResponseRecorder) logicGateRaciCommandPayloadForTest {
+func decodeResourceGVICCommandPayloadForTest(t *testing.T, rec *httptest.ResponseRecorder) resourceGVICCommandPayloadForTest {
 	t.Helper()
-	var payload logicGateRaciCommandPayloadForTest
+	var payload resourceGVICCommandPayloadForTest
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode command payload: %v", err)
 	}
 	if payload.Assignments == nil {
-		payload.Assignments = []domain.LogicGateRaciAssignment{}
+		payload.Assignments = []domain.ResourceGVICAssignment{}
+	}
+	if payload.EffectiveAssignments == nil {
+		payload.EffectiveAssignments = []domain.ResourceGVICEffectiveAssignment{}
 	}
 	return payload
 }
 
-func assertHTTPRaciWorkspaceEventCount(t *testing.T, repo store.Repository, companyID string, want int) {
+func assertHTTPGVICEventRowCount(t *testing.T, repo store.Repository, companyID string, want int) {
 	t.Helper()
-	events, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
+	rows, err := repo.ListEventRows(companyID, 50)
 	if err != nil {
-		t.Fatalf("ListDomainEventsAfter: %v", err)
+		t.Fatalf("ListEventRows: %v", err)
 	}
-	if len(events) != want {
-		t.Fatalf("workspace events len = %d, want %d: %+v", len(events), want, events)
+	got := 0
+	for _, row := range rows {
+		if row.EventType == store.EventTypeGVICProjectionDelta {
+			got++
+		}
 	}
-}
-
-func assertHTTPWorkspaceReadVersion(t *testing.T, repo store.Repository, companyID, scope string, want int64) {
-	t.Helper()
-	version, found, err := repo.CurrentWorkspaceReadVersion(store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: scope})
-	if err != nil {
-		t.Fatalf("CurrentWorkspaceReadVersion: %v", err)
-	}
-	if !found || version != want {
-		t.Fatalf("workspace read version %s = %d found=%v, want %d found=true", scope, version, found, want)
+	if got != want {
+		t.Fatalf("GVIC event rows len = %d, want %d: %+v", got, want, rows)
 	}
 }

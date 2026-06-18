@@ -290,48 +290,23 @@ where company_id=$1::uuid
 
 func syncNodeStatusFromLogicGateAssignmentTx(ctx context.Context, tx *sql.Tx, assignment domain.NodeLogicGateAssignment) error {
 	status := LogicGateWorkStatusTitle(assignment.StatusKey)
-	statusColor := LogicGateWorkStatusColor(assignment.StatusKey)
 	if assignment.IsIssue {
 		status = "Issue"
-		statusColor = "#ffd400"
 	}
 	_, err := tx.ExecContext(ctx, `
 update nodes
-set status=$3,
-    status_color=$4
-where company_id=$1::uuid and node_id=$2::uuid`, assignment.CompanyID, assignment.NodeID, status, statusColor)
+set status=$3
+where company_id=$1::uuid and node_id=$2::uuid`, assignment.CompanyID, assignment.NodeID, status)
 	return err
 }
 
 func assignNodeToLogicGateResponsibleSQL(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) error {
-	var responsibleUserID string
-	err := tx.QueryRowContext(ctx, `
-select assignment.user_id::text
-from logic_gate_raci_assignments assignment
-join company_memberships membership
-  on membership.company_id=assignment.company_id
- and membership.user_id=assignment.user_id
-where assignment.company_id=$1::uuid
-  and assignment.logic_gate_id=$2::uuid
-  and assignment.role=$3
-order by assignment.created_timestamp asc, assignment.user_id asc
-limit 1`, companyID, logicGateID, domain.LogicGateRaciRoleResponsible).Scan(&responsibleUserID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
-			return nil
-		}
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-update nodes
-set assignee_user_id=$3::uuid
-where company_id=$1::uuid
-  and node_id=$2::uuid
-  and (assignee_user_id is null or assignee_user_id <> $3::uuid)`, companyID, nodeID, responsibleUserID)
-	return err
+	_ = ctx
+	_ = tx
+	_ = companyID
+	_ = logicGateID
+	_ = nodeID
+	return nil
 }
 
 func nodeForLogicGateAssignmentResultTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) (domain.Node, error) {
@@ -418,14 +393,13 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.Lo
 	}
 
 	var canonicalNodeTitle string
-	var previousAssignee sql.NullString
 	var nodePriority sql.NullInt64
 	var createdNode domain.Node
 	deferCreatedNodeFolderItem := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if err := tx.QueryRowContext(ctx, `
-select title, assignee_user_id::text, priority
+select name, priority
 from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &previousAssignee, &nodePriority); err != nil {
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &nodePriority); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if _, ok := logicGateAssignmentInputPriority(input); !ok {
 				return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
@@ -442,16 +416,12 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 				return LogicGateNodeAssignmentResult{}, err
 			}
 			canonicalNodeTitle = createdNode.Title
-			if createdNode.AssigneeUserID != nil {
-				previousAssignee = sql.NullString{String: *createdNode.AssigneeUserID, Valid: true}
-			}
 		} else {
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && (!nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5) {
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
-	_ = previousAssignee
 
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
@@ -725,18 +695,13 @@ where company_id=$1 and node_id=$2 and assignment_id=$3`, assignment.CompanyID, 
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	var fallbackStatus any
-	var fallbackStatusColor any
 	if input.FallbackStatus != nil {
 		fallbackStatus = *input.FallbackStatus
 	}
-	if input.FallbackStatusColor != nil {
-		fallbackStatusColor = *input.FallbackStatusColor
-	}
 	if _, err := tx.ExecContext(ctx, `
 update nodes
-set status=$3::text,
-    status_color=$4::text
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStatus, fallbackStatusColor); err != nil {
+set status=$3::text
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStatus); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{

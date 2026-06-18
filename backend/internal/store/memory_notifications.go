@@ -85,7 +85,7 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 
 func notificationLogicGateRaciRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case domain.LogicGateRaciRoleResponsible, domain.LogicGateRaciRoleAccountable, domain.LogicGateRaciRoleConsulted, domain.LogicGateRaciRoleInformed:
+	case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
 		return true
 	default:
 		return false
