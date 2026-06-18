@@ -1,5 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
-import { LogicGateDetails, LogicGateRecord, LogicGateRelationship } from "./shared";
+import type { LogicGateDetails, LogicGateRecord, LogicGateRelationship } from "./shared.js";
 
 export type LogicGateProjectionItem = {
   company_id: string;
@@ -20,6 +20,7 @@ type LogicGateViewResponse = LogicGateDetails & {
 
 const viewCache = new Map<string, LogicGateViewResponse>();
 const viewInflight = new Map<string, Promise<LogicGateViewResponse>>();
+const viewGeneration = new Map<string, number>();
 
 const detailsCache = new Map<string, LogicGateDetails>();
 
@@ -27,6 +28,14 @@ const projectionCache = new Map<string, LogicGateProjectionItem[]>();
 
 function key(apiBase: string, companyID: string, logicGateID: string): string {
   return `${apiBase}:${companyID}:${logicGateID}`;
+}
+
+function readViewGeneration(cacheKey: string): number {
+  return viewGeneration.get(cacheKey) ?? 0;
+}
+
+function bumpViewGeneration(cacheKey: string): void {
+  viewGeneration.set(cacheKey, readViewGeneration(cacheKey) + 1);
 }
 
 function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewResponse): LogicGateDetails {
@@ -53,14 +62,15 @@ async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: s
   if (cached) return cached;
   const inflight = viewInflight.get(cacheKey);
   if (inflight) return inflight;
+  const generation = readViewGeneration(cacheKey);
   const promise = requestJSON<LogicGateViewResponse>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/view?company_id=${encodeURIComponent(companyID)}`)
     .then((payload) => {
-      cacheLogicGateViewPayload(cacheKey, payload);
-      viewInflight.delete(cacheKey);
+      if (readViewGeneration(cacheKey) === generation) cacheLogicGateViewPayload(cacheKey, payload);
+      if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
       return payload;
     })
     .catch((error) => {
-      viewInflight.delete(cacheKey);
+      if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
       throw error;
     });
   viewInflight.set(cacheKey, promise);
@@ -69,6 +79,8 @@ async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: s
 
 export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID: string, logicGateID: string): void {
   const cacheKey = key(apiBase, companyID, logicGateID);
+  bumpViewGeneration(cacheKey);
+  viewInflight.delete(cacheKey);
   viewCache.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
@@ -81,6 +93,9 @@ export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: stri
 }>): void {
   for (const entry of entries) {
     const cacheKey = key(apiBase, companyID, entry.logicGate.logic_gate_id);
+    bumpViewGeneration(cacheKey);
+    viewInflight.delete(cacheKey);
+    viewCache.delete(cacheKey);
     detailsCache.set(cacheKey, {
       logic_gate: entry.logicGate,
       information: [],

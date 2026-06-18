@@ -1537,6 +1537,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     editorProjectionSequenceByScopeRef.current.set(cleanScope, Math.max(currentSequence, nextSequence));
   }, []);
 
+  const isFreshEditorSnapshot = useCallback((scope: string, value: unknown, minimumValue: unknown = 0) => {
+    const cleanScope = scope.trim();
+    if (!cleanScope) return false;
+    const nextSequence = parseEditorProjectionSequence(value);
+    const minimumSequence = parseEditorProjectionSequence(minimumValue);
+    const currentSequence = editorProjectionSequenceByScopeRef.current.get(cleanScope) ?? 0;
+    return nextSequence >= Math.max(currentSequence, minimumSequence);
+  }, []);
+
   const refreshEditorSnapshot = useCallback(async (minimumSequenceValue: unknown = 0) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
@@ -1559,12 +1568,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeContentChangesSingleFlight(apiBase, companyID, resourceID),
           getNodeEditorSequenceSingleFlight(apiBase, companyID, resourceID),
         ]);
-        if (!isCurrentTarget()) return;
+        if (!isCurrentTarget() || !isFreshEditorSnapshot(realtimeScope, editorSequence, minimumSequence)) return;
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(resourceID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(resourceID);
-        rememberEditorProjectionSequence(realtimeScope, Math.max(editorSequence, minimumSequence));
+        rememberEditorProjectionSequence(realtimeScope, editorSequence);
         setEditorSnapshotLoadedScope(realtimeScope);
         return;
       }
@@ -1574,9 +1583,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         getLogicGateInformationProjectionSingleFlight(apiBase, companyID, resourceID),
         getLogicGateEditorSequenceSingleFlight(apiBase, companyID, resourceID),
       ]);
-      if (!isCurrentTarget()) return;
+      if (!isCurrentTarget() || !isFreshEditorSnapshot(realtimeScope, editorSequence, minimumSequence)) return;
       setLogicGateWorkspaceProjections(projections);
-      rememberEditorProjectionSequence(realtimeScope, Math.max(editorSequence, minimumSequence));
+      rememberEditorProjectionSequence(realtimeScope, editorSequence);
       setEditorSnapshotLoadedScope(realtimeScope);
 
       const activeInformationID = documentInformationIDRef.current;
@@ -1593,7 +1602,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (cause) {
       if (isCurrentTarget()) setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
     }
-  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
+  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
 
   const applyRealtimeEditorProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
@@ -1915,7 +1924,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => {
     let cancelled = false;
     editorSnapshotRefreshTokenRef.current += 1;
+    const loadRefreshToken = editorSnapshotRefreshTokenRef.current;
     nodeContentChangesRefreshTokenRef.current += 1;
+    const isCurrentLinkedLoad = () => !cancelled && editorSnapshotRefreshTokenRef.current === loadRefreshToken;
     if (!linkedNodeID) {
       setLinkedEntityCanEdit(true);
       setLinkedEntityCanAdmin(true);
@@ -1971,7 +1982,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
             getLogicGateEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
           ]);
-          if (cancelled) return;
+          const realtimeScope = editorRealtimeScope("logic_gate", linkedNodeID);
+          if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
           setLinkedEntityCanEdit(canEditResourceAccess(details));
           setLinkedEntityCanAdmin(canAdminResourceAccess(details));
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
@@ -1988,7 +2000,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeWorkspaceLoadedNodeID("");
           setNodeContentChanges([]);
           setNodeContentChangesLoadedNodeID("");
-          const realtimeScope = editorRealtimeScope("logic_gate", linkedNodeID);
           rememberEditorProjectionSequence(realtimeScope, editorSequence);
           setEditorSnapshotLoadedScope(realtimeScope);
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
@@ -2021,7 +2032,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
-        if (cancelled) return;
+        const realtimeScope = editorRealtimeScope("node", linkedNodeID);
+        if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
         setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         setLinkedNodeTitle(getNodeTitle(details.node));
@@ -2037,7 +2049,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(linkedNodeID);
-        const realtimeScope = editorRealtimeScope("node", linkedNodeID);
         rememberEditorProjectionSequence(realtimeScope, editorSequence);
         setEditorSnapshotLoadedScope(realtimeScope);
         const currentInformation = details.information.length > 0
@@ -2071,7 +2082,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, scheduleIndentGuideUpdate, syncNodeAssignee]);
+  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, scheduleIndentGuideUpdate, syncNodeAssignee]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2115,8 +2126,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const { mentionMenu: documentMentionMenu, insertTable: insertDocumentTable, ...documentSurfaceEventHandlers } = documentSurfaceHandlers;
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
+    editorSnapshotRefreshTokenRef.current += 1;
+    nodeContentChangesRefreshTokenRef.current += 1;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+    void refreshEditorSnapshot();
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, refreshEditorSnapshot]);
   const markNodeContentChangeSeen = useCallback((changeID: string) => {
     if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
     const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);

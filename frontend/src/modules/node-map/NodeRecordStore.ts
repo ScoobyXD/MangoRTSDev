@@ -1,6 +1,6 @@
 import { requestJSON } from "../api/requestJSON.js";
 import type { NodeContentChange } from "../editor/nodeContentChanges.js";
-import { NodeDetails, NodeRecord, NodeRelationship } from "./shared";
+import type { NodeDetails, NodeRecord, NodeRelationship } from "./shared.js";
 
 export type NodeProjectionItem = {
   company_id: string;
@@ -22,6 +22,7 @@ type NodeViewResponse = NodeDetails & {
 
 const viewCache = new Map<string, NodeViewResponse>();
 const viewInflight = new Map<string, Promise<NodeViewResponse>>();
+const viewGeneration = new Map<string, number>();
 
 const detailsCache = new Map<string, NodeDetails>();
 
@@ -31,6 +32,14 @@ const contentChangeCache = new Map<string, NodeContentChange[]>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
   return `${apiBase}:${companyID}:${nodeID}`;
+}
+
+function readViewGeneration(cacheKey: string): number {
+  return viewGeneration.get(cacheKey) ?? 0;
+}
+
+function bumpViewGeneration(cacheKey: string): void {
+  viewGeneration.set(cacheKey, readViewGeneration(cacheKey) + 1);
 }
 
 function cacheNodeViewPayload(cacheKey: string, payload: NodeViewResponse): NodeDetails {
@@ -58,14 +67,15 @@ async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string
   if (cached) return cached;
   const inflight = viewInflight.get(cacheKey);
   if (inflight) return inflight;
+  const generation = readViewGeneration(cacheKey);
   const promise = requestJSON<NodeViewResponse>(apiBase, `/v2/nodes/${encodeURIComponent(nodeID)}/view?company_id=${encodeURIComponent(companyID)}`)
     .then((payload) => {
-      cacheNodeViewPayload(cacheKey, payload);
-      viewInflight.delete(cacheKey);
+      if (readViewGeneration(cacheKey) === generation) cacheNodeViewPayload(cacheKey, payload);
+      if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
       return payload;
     })
     .catch((error) => {
-      viewInflight.delete(cacheKey);
+      if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
       throw error;
     });
   viewInflight.set(cacheKey, promise);
@@ -74,6 +84,8 @@ async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string
 
 export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: string, nodeID: string): void {
   const cacheKey = key(apiBase, companyID, nodeID);
+  bumpViewGeneration(cacheKey);
+  viewInflight.delete(cacheKey);
   viewCache.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
@@ -87,6 +99,9 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
 }>): void {
   for (const entry of entries) {
     const cacheKey = key(apiBase, companyID, entry.node.node_id);
+    bumpViewGeneration(cacheKey);
+    viewInflight.delete(cacheKey);
+    viewCache.delete(cacheKey);
     detailsCache.set(cacheKey, {
       node: entry.node,
       information: [],

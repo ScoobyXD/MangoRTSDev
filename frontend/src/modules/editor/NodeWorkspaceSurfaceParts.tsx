@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -583,6 +583,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const selectionPointerDownRef = useRef(false);
   const lastHandledTableInsertRequestIDRef = useRef(0);
   const lastAppliedDocumentRef = useRef("");
+  const userEditedDocumentRef = useRef(false);
   const lastStoredHeightRef = useRef(0);
   const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
   const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
@@ -633,7 +634,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     setHeight(nextHeight);
   }, [heightStorageKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = editorRef.current;
     if (!element) return;
     const nextHTML = deserializeEditorDocumentHTML(documentValue);
@@ -643,6 +644,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       const currentDocument = serializeEditorDocumentHTML(element);
       if (documentValue === currentDocument) {
         lastAppliedDocumentRef.current = documentValue;
+        userEditedDocumentRef.current = false;
         return;
       }
       if (editorHasFocus(element)) return;
@@ -650,6 +652,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     element.innerHTML = nextHTML;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     lastAppliedDocumentRef.current = documentValue;
+    userEditedDocumentRef.current = false;
     loadedDocumentTargetKeyRef.current = documentTargetKey;
   }, [documentTargetKey, documentValue]);
 
@@ -726,6 +729,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     setDocumentScrollTop,
     scheduleDocumentSave: (nextDocument, immediate = false) => {
       if (!editable) return;
+      userEditedDocumentRef.current = true;
       lastAppliedDocumentRef.current = nextDocument;
       onDocumentChange(nextDocument);
       if (immediate) onDocumentFlush(nextDocument);
@@ -735,6 +739,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     flushPendingDocumentSave: (fallbackDocument) => {
       if (!editable) return;
       const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
+      if (!userEditedDocumentRef.current && nextDocument.trim().length === 0 && documentValue.trim().length > 0 && lastAppliedDocumentRef.current !== documentValue) {
+        return;
+      }
       lastAppliedDocumentRef.current = nextDocument;
       onDocumentFlush(nextDocument);
     },

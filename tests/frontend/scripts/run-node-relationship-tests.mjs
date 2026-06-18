@@ -33,6 +33,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapLayout.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapGridBackground.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeRecordStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeInlineComments.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
